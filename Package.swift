@@ -10,6 +10,7 @@ let package = Package(
         .library(name: "Signals", targets: ["Signals"]),
         .library(name: "DriverExtension", targets: ["DriverExtension"]),
         .library(name: "KeyboardLayout", targets: ["KeyboardLayout"]),
+        .library(name: "Flavors", targets: ["Flavors"]),
     ],
     targets: [
         // The vocabulary at the seam between deciding what to type and typing it: a HID
@@ -45,5 +46,10 @@ let package = Package(
         // installed US and Dvorak layouts rather than a fixture that could agree with a
         // wrong reading of them.
         .testTarget(name: "KeyboardLayoutTests", dependencies: ["KeyboardLayout", "Keystrokes"]),
+        // Which installation this is: the one name every other name is built from. It
+        // depends on nothing, so the root daemon and the client can both read it without
+        // either depending on the other. [LAW:one-way-deps]
+        .target(name: "Flavors"),
+        .testTarget(name: "FlavorsTests", dependencies: ["Flavors"]),
     ]
 )
