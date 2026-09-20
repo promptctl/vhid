@@ -11,6 +11,7 @@ let package = Package(
         .library(name: "DriverExtension", targets: ["DriverExtension"]),
         .library(name: "KeyboardLayout", targets: ["KeyboardLayout"]),
         .library(name: "Flavors", targets: ["Flavors"]),
+        .library(name: "VirtualKeyboard", targets: ["VirtualKeyboard"]),
     ],
     targets: [
         // The vocabulary at the seam between deciding what to type and typing it: a HID
@@ -51,5 +52,12 @@ let package = Package(
         // either depending on the other. [LAW:one-way-deps]
         .target(name: "Flavors"),
         .testTarget(name: "FlavorsTests", dependencies: ["Flavors"]),
+        // Everything about the two virtual devices and nothing about what is typed on
+        // them: the pqrs daemon socket, the two report layouts, and the keys and buttons
+        // each device is holding. [LAW:one-way-deps]
+        .target(name: "VirtualKeyboard", dependencies: ["DriverExtension", "Keystrokes", "Pointing"]),
+        // The wire protocol against a fake daemon on the other end of a socketpair, so
+        // the framing is proven without root and without the driver.
+        .testTarget(name: "VirtualKeyboardTests", dependencies: ["VirtualKeyboard", "DriverExtension", "Keystrokes", "Pointing"]),
     ]
 )
