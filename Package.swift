@@ -13,6 +13,7 @@ let package = Package(
         .library(name: "Flavors", targets: ["Flavors"]),
         .library(name: "VirtualKeyboard", targets: ["VirtualKeyboard"]),
         .library(name: "KeyboardService", targets: ["KeyboardService"]),
+        .executable(name: "lowtalker-keyboardd", targets: ["lowtalker-keyboardd"]),
     ],
     targets: [
         // The vocabulary at the seam between deciding what to type and typing it: a HID
@@ -66,5 +67,18 @@ let package = Package(
         // [LAW:one-way-deps]
         .target(name: "KeyboardService", dependencies: ["Flavors", "Keystrokes", "Pointing"]),
         .testTarget(name: "KeyboardServiceTests", dependencies: ["KeyboardService", "Flavors", "Keystrokes", "Pointing"]),
+        // The root daemon that owns the devices. It links DriverExtension for the identity
+        // the keyboard files its Keyboard Setup Assistant answer under, and deliberately
+        // not KeyboardLayout: text never reaches this process. [LAW:one-way-deps]
+        .executableTarget(
+            name: "lowtalker-keyboardd",
+            dependencies: ["KeyboardService", "VirtualKeyboard", "DriverExtension", "Keystrokes", "Pointing", "Signals", "Flavors"]
+        ),
+        // The authorization boundary of a root keystroke service, checked against the
+        // test process's own identity and audit token: real code signing, no root.
+        .testTarget(
+            name: "lowtalker-keyboarddTests",
+            dependencies: ["lowtalker-keyboardd", "KeyboardService", "VirtualKeyboard", "DriverExtension", "Keystrokes", "Pointing", "Signals", "Flavors"]
+        ),
     ]
 )
