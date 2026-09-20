@@ -12,6 +12,7 @@ let package = Package(
         .library(name: "KeyboardLayout", targets: ["KeyboardLayout"]),
         .library(name: "Flavors", targets: ["Flavors"]),
         .library(name: "VirtualKeyboard", targets: ["VirtualKeyboard"]),
+        .library(name: "KeyboardService", targets: ["KeyboardService"]),
     ],
     targets: [
         // The vocabulary at the seam between deciding what to type and typing it: a HID
@@ -59,5 +60,11 @@ let package = Package(
         // The wire protocol against a fake daemon on the other end of a socketpair, so
         // the framing is proven without root and without the driver.
         .testTarget(name: "VirtualKeyboardTests", dependencies: ["VirtualKeyboard", "DriverExtension", "Keystrokes", "Pointing"]),
+        // What crosses the privilege boundary, and the client's side of it. It links the
+        // two vocabularies and nothing else: not the layout, because a root daemon must
+        // never read one, and not the device, because a client must never open one.
+        // [LAW:one-way-deps]
+        .target(name: "KeyboardService", dependencies: ["Flavors", "Keystrokes", "Pointing"]),
+        .testTarget(name: "KeyboardServiceTests", dependencies: ["KeyboardService", "Flavors", "Keystrokes", "Pointing"]),
     ]
 )
