@@ -7,6 +7,7 @@ let package = Package(
     products: [
         .library(name: "Keystrokes", targets: ["Keystrokes"]),
         .library(name: "Pointing", targets: ["Pointing"]),
+        .library(name: "Signals", targets: ["Signals"]),
     ],
     targets: [
         // The vocabulary at the seam between deciding what to type and typing it: a HID
@@ -22,5 +23,10 @@ let package = Package(
         // vocabulary without sharing a dependency. [LAW:one-way-deps]
         .target(name: "Pointing"),
         .testTarget(name: "PointingTests", dependencies: ["Pointing"]),
+        // Answering a signal rather than obeying it, for the daemon that has an ending of
+        // its own to unwind through: a SIGTERM that killed it where it stood would leave a
+        // key down on a device nothing is left to release. It links nothing.
+        // [LAW:one-source-of-truth]
+        .target(name: "Signals"),
     ]
 )
