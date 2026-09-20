@@ -9,6 +9,7 @@ let package = Package(
         .library(name: "Pointing", targets: ["Pointing"]),
         .library(name: "Signals", targets: ["Signals"]),
         .library(name: "DriverExtension", targets: ["DriverExtension"]),
+        .library(name: "KeyboardLayout", targets: ["KeyboardLayout"]),
     ],
     targets: [
         // The vocabulary at the seam between deciding what to type and typing it: a HID
@@ -37,5 +38,12 @@ let package = Package(
         // The verdict table is a pure function of four readings, so every combination is
         // exercised here - including the ones this Mac cannot be put into.
         .testTarget(name: "DriverExtensionTests", dependencies: ["DriverExtension"]),
+        // Carbon lives here and not in the device layer, so the privileged side that owns
+        // the device never links a window server API. [LAW:one-way-deps]
+        .target(name: "KeyboardLayout", dependencies: ["Keystrokes"]),
+        // The reverse map is built from a real layout's own data, so these read the
+        // installed US and Dvorak layouts rather than a fixture that could agree with a
+        // wrong reading of them.
+        .testTarget(name: "KeyboardLayoutTests", dependencies: ["KeyboardLayout", "Keystrokes"]),
     ]
 )
