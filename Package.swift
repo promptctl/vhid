@@ -8,6 +8,7 @@ let package = Package(
         .library(name: "Keystrokes", targets: ["Keystrokes"]),
         .library(name: "Pointing", targets: ["Pointing"]),
         .library(name: "Signals", targets: ["Signals"]),
+        .library(name: "DriverExtension", targets: ["DriverExtension"]),
     ],
     targets: [
         // The vocabulary at the seam between deciding what to type and typing it: a HID
@@ -28,5 +29,13 @@ let package = Package(
         // key down on a device nothing is left to release. It links nothing.
         // [LAW:one-source-of-truth]
         .target(name: "Signals"),
+        // Where the Karabiner-DriverKit-VirtualHIDDevice driver extension stands on this
+        // Mac, and the four readings that answer is derived from. It links nothing, so the
+        // CLI, the daemon and scripts/virtual-hid-driver reach one vocabulary instead of
+        // three. [LAW:one-source-of-truth]
+        .target(name: "DriverExtension"),
+        // The verdict table is a pure function of four readings, so every combination is
+        // exercised here - including the ones this Mac cannot be put into.
+        .testTarget(name: "DriverExtensionTests", dependencies: ["DriverExtension"]),
     ]
 )
