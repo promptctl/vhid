@@ -6,6 +6,7 @@ let package = Package(
     platforms: [.macOS(.v15)],
     products: [
         .library(name: "Keystrokes", targets: ["Keystrokes"]),
+        .library(name: "Pointing", targets: ["Pointing"]),
     ],
     targets: [
         // The vocabulary at the seam between deciding what to type and typing it: a HID
@@ -16,5 +17,10 @@ let package = Package(
         // The vocabulary stands on its own, so its tests do too: nothing here imports a
         // layout or a device. [LAW:decomposition]
         .testTarget(name: "KeystrokesTests", dependencies: ["Keystrokes"]),
+        // The same seam for the mouse: a button, a count of motion, a move and a scroll.
+        // Like Keystrokes it links nothing, so the device and the click decision share a
+        // vocabulary without sharing a dependency. [LAW:one-way-deps]
+        .target(name: "Pointing"),
+        .testTarget(name: "PointingTests", dependencies: ["Pointing"]),
     ]
 )
