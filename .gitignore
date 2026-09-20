@@ -1,0 +1,10 @@
+.build/
+.swiftpm/
+DerivedData/
+.DS_Store
+# Session handoff notes written by the remember hook; local to each checkout.
+.remember/
+# Claude Code worktrees; local to each checkout.
+.claude/worktrees/
+# What the release scripts leave behind to hand out.
+dist/
