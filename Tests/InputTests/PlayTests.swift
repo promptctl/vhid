@@ -14,7 +14,7 @@ import Testing
             {"t_ms":8.333,"wheel":{"v":-1,"h":2}}
             {"t_ms":1000,"up":true}
             """)
-        #expect(play.start == ScreenPoint(x: 800, y: 500.5))
+        #expect(play.start == ScreenPoint(x: 800, y: 500.5)!)
         #expect(play.events == [
             Play.Timed(at: .zero, report: .down(.left)),
             Play.Timed(at: .nanoseconds(8_333_000), report: .move(Move(x: Count(clamping: 4), y: Count(clamping: -127)))),
@@ -65,7 +65,7 @@ import Testing
     /// later than that, still goes out on time.
     @Test func eachReportGoesOutAtItsOwnDeadlineAndALateOneIsSentLate() async throws {
         let clock = ManualClock()
-        let fake = FakeMouse(at: ScreenPoint(x: 10, y: 10))
+        let fake = FakeMouse(at: ScreenPoint(x: 10, y: 10)!)
         let mouse = CostlyMouse(mouse: fake, clock: clock, cost: .milliseconds(3))
         let play = try Play.parse("""
             {"to":{"x":10,"y":10}}
@@ -97,7 +97,7 @@ import Testing
     @MainActor
     @Test func aLongWaitIsCancelledWithinASlice() async throws {
         let clock = ManualClock()
-        let fake = FakeMouse(at: ScreenPoint(x: 0, y: 0))
+        let fake = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
         let play = try Play.parse("""
             {"to":{"x":0,"y":0}}
             {"t_ms":0,"down":"left"}
@@ -123,7 +123,7 @@ import Testing
     /// button, and says when that release was refused too.
     @Test func aStopSaysHowFarThePlayGotAndReleases() async throws {
         let clock = ManualClock()
-        let fake = FakeMouse(at: ScreenPoint(x: 0, y: 0))
+        let fake = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
         fake.allow = 1
         let play = try Play.parse("""
             {"to":{"x":0,"y":0}}

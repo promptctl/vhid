@@ -70,6 +70,12 @@ public struct Pointer: Sendable {
     }
 
     /// A click that landed: where, and how many motion reports it took to get there.
+    ///
+    /// `at` is where the cursor was when the button went down, read back rather than
+    /// repeated from the request. [FRAMING:representation] The move stops beside a target
+    /// the device cannot land on exactly, so the point asked for and the point pressed are
+    /// two different facts - and this is the one positional thing a caller is told, so it
+    /// has to be the one that happened.
     public struct Click: Equatable, Sendable {
         public let at: ScreenPoint
         public let reports: Int
@@ -78,8 +84,10 @@ public struct Pointer: Sendable {
     /// The cursor as the window server reports it: global coordinates, top-left origin,
     /// points. Readable without privilege.
     public static func screenCursor() throws -> ScreenPoint {
-        guard let location = CGEvent(source: nil)?.location else { throw CursorUnreadable() }
-        return ScreenPoint(x: location.x, y: location.y)
+        guard let location = CGEvent(source: nil)?.location, let cursor = ScreenPoint(x: location.x, y: location.y) else {
+            throw CursorUnreadable()
+        }
+        return cursor
     }
 
     /// The next report toward `to` from `from`, given that the OS moves the cursor `gain`
@@ -158,7 +166,13 @@ public struct Pointer: Sendable {
             let landed = try await settled(from: at)
             gain = Self.gain(after: step, from: at, to: landed, previous: gain)
             let nearer = landed.distance(to: target) < at.distance(to: target)
-            if !nearer, Self.isSmallest(step) { return reports + 1 }
+            // `landed != at` is what tells the two apart, and it is the whole difference
+            // between a device that cannot do better and a cursor that will not go. One
+            // count that moved the cursor and did not help is the end of the approach;
+            // one count that moved it nowhere is a pinned cursor, and a pinned cursor
+            // whose target is under two counts away would otherwise be reported as an
+            // arrival it never made. [LAW:no-silent-failure]
+            if !nearer, Self.isSmallest(step), landed != at { return reports + 1 }
             stalls = nearer ? 0 : stalls + 1
             guard stalls < Self.stalls else { throw WouldNotReach(target: target, cursor: landed, reports: reports + 1) }
             at = landed
@@ -181,12 +195,13 @@ public struct Pointer: Sendable {
     public func click(at point: ScreenPoint, button: Button, times: Clicks) async throws -> Click {
         do {
             let reports = try await move(to: point)
+            let pressed = try cursor()
             for _ in 0..<times.rawValue {
                 try Task.checkCancellation()
                 try await mouse.down(button)
                 try await mouse.releaseAll()
             }
-            return Click(at: point, reports: reports)
+            return Click(at: pressed, reports: reports)
         } catch {
             throw PointingStopped(cause: error, unreleased: await release())
         }

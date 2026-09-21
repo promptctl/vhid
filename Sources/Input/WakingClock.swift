@@ -39,23 +39,45 @@ public struct WakingClock: Clock {
     public var now: Instant { ContinuousClock.now }
     public var minimumResolution: Duration { ContinuousClock().minimumResolution }
 
+    /// How long one uninterruptible wait may be.
+    ///
+    /// `mach_wait_until` runs to its own deadline whatever the caller does, so a wait of
+    /// the whole remaining time is a worker thread held for that whole time even after the
+    /// caller has gone. Enough long sleeps cancelled at once would take the queue's threads
+    /// with them and leave the next sleeper waiting for one - which is the queueing that
+    /// making this queue concurrent exists to prevent, arriving by another road.
+    ///
+    /// A second is the compromise: one wait for anything a replay actually asks for, so
+    /// the common case costs nothing, and at most a second of a held thread outliving a
+    /// cancel. The last wait is always the exact remainder, so nothing about this is paid
+    /// for in precision. [LAW:no-ambient-temporal-coupling]
+    private static let patience: Duration = .seconds(1)
+
     /// Sleeps until `deadline`, returning at once if the task is cancelled before then.
     ///
-    /// A deadline already past does not block the thread, since `mach_wait_until` returns
-    /// for a time behind it, but the caller still pays the hop back to its actor.
+    /// A deadline already past does not wait at all.
     ///
-    /// **Cancellation ends the wait for the caller, not for the thread.** `mach_wait_until`
-    /// cannot be interrupted, so the thread holding it runs to the deadline either way;
-    /// what cancelling does is resume the caller immediately and leave that thread to
-    /// finish alone on a queue nothing is waiting behind. The alternative - waking every
-    /// so often to ask - would spend exactly the CPU this clock exists to save, and would
-    /// answer a cancel late rather than at once. [LAW:no-silent-failure] A sleep that
-    /// ignored cancellation would hold a replay open for the full minute of a hold the
-    /// caller had already stopped.
+    /// **Cancellation ends the wait for the caller before it ends for the thread.**
+    /// `mach_wait_until` cannot be interrupted, so the thread holding the current wait runs
+    /// to the end of it either way; what cancelling does is resume the caller immediately
+    /// and leave that thread to finish alone, within `patience`, on a queue nothing is
+    /// waiting behind. Waking periodically to ask instead would spend exactly the CPU this
+    /// clock exists to save and would answer a cancel late rather than at once.
+    /// [LAW:no-silent-failure] A sleep that ignored cancellation would hold a replay open
+    /// for the full minute of a hold the caller had already stopped.
     public func sleep(until deadline: Instant, tolerance: Duration? = nil) async throws {
-        try Task.checkCancellation()
-        let remaining = max(.zero, now.duration(to: deadline)).components
-        let nanoseconds = UInt64(remaining.seconds) * 1_000_000_000 + UInt64(remaining.attoseconds / 1_000_000_000)
+        while true {
+            try Task.checkCancellation()
+            let remaining = now.duration(to: deadline)
+            guard remaining > .zero else { return }
+            await wait(for: min(remaining, Self.patience))
+        }
+    }
+
+    /// One uninterruptible wait of `span`, which the caller may stop waiting on.
+    private func wait(for span: Duration) async {
+        let components = span.components
+        let nanoseconds = UInt64(components.seconds) * 1_000_000_000 + UInt64(components.attoseconds / 1_000_000_000)
         let wake = mach_absolute_time() + nanoseconds * UInt64(Self.timebase.denom) / UInt64(Self.timebase.numer)
         let waking = Waking()
         await withTaskCancellationHandler {
@@ -69,7 +91,6 @@ public struct WakingClock: Clock {
         } onCancel: {
             waking.wake()
         }
-        try Task.checkCancellation()
     }
 }
 

@@ -123,7 +123,7 @@ final class FakeMouse: Mouse {
         try state.withLock {
             try record(&$0, "move \(delta.x.value) \(delta.y.value)")
             let gain = Self.gain(of: delta, stuck: $0.stuck)
-            $0.position = ScreenPoint(x: $0.position.x + Double(delta.x.value) * gain, y: $0.position.y + Double(delta.y.value) * gain)
+            $0.position = ScreenPoint(x: $0.position.x + Double(delta.x.value) * gain, y: $0.position.y + Double(delta.y.value) * gain)!
         }
     }
 
@@ -193,7 +193,7 @@ final class SteadyGainMouse: Mouse {
     func move(by delta: Move) throws {
         state.withLock {
             $0.log.append("move \(delta.x.value) \(delta.y.value)")
-            $0.position = ScreenPoint(x: $0.position.x + Double(delta.x.value) * gain, y: $0.position.y + Double(delta.y.value) * gain)
+            $0.position = ScreenPoint(x: $0.position.x + Double(delta.x.value) * gain, y: $0.position.y + Double(delta.y.value) * gain)!
         }
     }
 
