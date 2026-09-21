@@ -26,3 +26,28 @@ public struct Button: RawRepresentable, Hashable, Comparable, Sendable {
 
     public static func < (a: Button, b: Button) -> Bool { a.rawValue < b.rawValue }
 }
+
+public extension Button {
+    /// The three buttons a person has a word for, and the words. The other twenty-nine are
+    /// reachable too, by their number - a device with a thumb button is a device with a
+    /// thumb button, and naming only three of thirty-two would be this module deciding
+    /// which of them a caller is allowed to press. [LAW:one-source-of-truth] Printed and
+    /// parsed from this one table, so a button that reads back as `right` is one that can
+    /// be asked for as `right`.
+    static let named: [String: Button] = ["left": .left, "right": .right, "middle": .middle]
+
+    /// The button this word names, or nil for a word that names none.
+    init?(name: String) {
+        guard let button = Self.named[name] else { return nil }
+        self = button
+    }
+
+    /// The word for this button, for the three that have one.
+    var name: String? { Self.named.first { $0.value == self }?.key }
+}
+
+extension Button: CustomStringConvertible {
+    /// The word, or the number for a button that has no word. Both spellings are ones
+    /// `init?(name:)` and `init?(rawValue:)` read back. [LAW:one-source-of-truth]
+    public var description: String { name ?? String(rawValue) }
+}

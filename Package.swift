@@ -13,6 +13,7 @@ let package = Package(
         .library(name: "Installations", targets: ["Installations"]),
         .library(name: "VirtualHID", targets: ["VirtualHID"]),
         .library(name: "Helper", targets: ["Helper"]),
+        .library(name: "Input", targets: ["Input"]),
         .executable(name: "vhidd", targets: ["vhidd"]),
     ],
     targets: [
@@ -69,6 +70,16 @@ let package = Package(
         // [LAW:one-way-deps]
         .target(name: "Helper", dependencies: ["Installations", "Keystrokes", "Pointing"]),
         .testTarget(name: "HelperTests", dependencies: ["Helper", "Installations", "Keystrokes", "Pointing"]),
+        // What a caller asks the devices for, said in a caller's terms: text lowered to
+        // keystrokes, a chord, a place on the screen to click. It links the two
+        // vocabularies and the layout, and deliberately not Helper or VirtualHID: which
+        // device answers is the caller's to pick, so this holds the protocols and the
+        // caller supplies a conformance. [LAW:one-way-deps] [LAW:effects-at-boundaries]
+        .target(name: "Input", dependencies: ["KeyboardLayout", "Keystrokes", "Pointing"]),
+        // The pointer's loop against a fake screen with an acceleration curve of its own,
+        // and the typist against a keyboard that can be made to fail at the third keystroke
+        // of four: no device, no window server, no grant.
+        .testTarget(name: "InputTests", dependencies: ["Input", "KeyboardLayout", "Keystrokes", "Pointing"]),
         // The root daemon that owns the devices. It links DriverExtension for the identity
         // the keyboard files its Keyboard Setup Assistant answer under, and deliberately
         // not KeyboardLayout: text never reaches this process. [LAW:one-way-deps]
