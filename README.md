@@ -62,10 +62,10 @@ build. vhid's own keychain has a password vhid knows. The password is in
 trusts, whose only power is to make this machine's daemon admit this machine's CLI, both
 already running as you.
 
-To undo all of it:
+To undo all of it, one command — which takes the keychain out of the search list as
+well as deleting it:
 
 ```sh
-security list-keychains -d user -s ~/Library/Keychains/login.keychain-db
 security delete-keychain vhid-dev.keychain
 ```
 

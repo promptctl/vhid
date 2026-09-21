@@ -30,13 +30,18 @@ build: signing-identity
 	swift build
 	$(MAKE) sign
 
-# Signing last is what makes a test run safe to leave behind: `swift test` relinks, and
-# every relink drops the identity again, so without this a green run leaves the next
-# invocation refused - a failure that reported success. [LAW:no-silent-failure]
+# Signing last is what makes a test run safe to leave behind: every link SwiftPM
+# performs ad hoc signs its product - measured, a relink turns `Authority=vhid Dev` back
+# into `Signature=adhoc` - so without this a run leaves the next invocation refused, a
+# failure that reported success. [LAW:no-silent-failure]
+#
+# It signs whether or not the tests passed, and hands the suite's own status back
+# afterwards. A failing run is the run whose binaries someone is about to go and try by
+# hand, so leaving those ad hoc would answer a test failure with a 4097 that has nothing
+# to do with it.
 test: signing-identity
 	swift build
-	swift test
-	$(MAKE) sign
+	swift test; status=$$?; $(MAKE) sign; exit $$status
 
 # [LAW:single-enforcer] The one place products are signed. `make sign` on its own is
 # also the fix for a tree someone has built with bare `swift build`.

@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Makes sure this Mac holds the self-signed identity that signs vhid's dev builds.
+# Makes sure this Mac holds the self-signed identity that signs vhid's dev builds, and
+# that it can be used without a human.
 #
 #   make-signing-identity <identity-name>
 #
-# The daemon admits a caller that carries the certificate the daemon itself carries, so
-# the dev loop needs one certificate that outlives every build. `swift build` ad hoc
-# signs what it links, and an ad hoc signature names a hash that changes with the
-# binary, so it can neither be required of a caller nor satisfied by one. Any long lived
+# The daemon admits a caller carrying the certificate the daemon itself carries, so the
+# dev loop needs one certificate that outlives every build. `swift build` ad hoc signs
+# what it links, and an ad hoc signature names a hash that changes with the binary, so
+# it can neither be required of a caller nor satisfied by one. Any long lived
 # certificate closes that; a self-signed one is enough, because the signature has to be
 # stable, never trusted.
 #
@@ -14,9 +15,10 @@
 # and granting them is the one step here that would raise a password dialog.
 #
 # [LAW:dataflow-not-control-flow] Running it when the identity already exists is not an
-# error and not a no-op to be guarded against by the caller - it is the ordinary case.
-# That is what lets the build depend on it every time rather than asking first, and an
-# ask the build has to remember is the step a newcomer's first build skips.
+# error and not a no-op to be guarded against by the caller - it is the ordinary case,
+# and it still ends with the identity usable. That is what lets the build depend on it
+# every time rather than asking first, and an ask the build has to remember is the step
+# a newcomer's first build skips.
 #
 # What it will not do is make a second certificate by the same name: two would make
 # every later build fail as ambiguous, and a duplicate cannot be told from the original
@@ -28,53 +30,65 @@ set -euo pipefail
 identity=${1:?usage: make-signing-identity <identity-name>}
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
-# 3 is "no such identity", which is the only reading that leads to making one; 0 is
-# "already there" and anything else is a keychain this script must not write to, and has
-# already said why. [LAW:no-silent-failure]
-set +e
-existing=$("$here/signing-identity" "$identity")
-found=$?
-set -e
-case $found in
-  0) echo "make-signing-identity: '$identity' is already here ($existing)"; exit 0 ;;
-  3) ;;
-  *) exit $found ;;
-esac
-
-work=$(mktemp -d)
-trap '/bin/rm -rf "$work"' EXIT
-
-/usr/bin/openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=$identity" \
-  -addext "keyUsage=critical,digitalSignature" \
-  -addext "extendedKeyUsage=critical,codeSigning" \
-  -addext "basicConstraints=critical,CA:FALSE" \
-  -keyout "$work/key.pem" -out "$work/cert.pem" 2>/dev/null
-
-# The PKCS#12 file lives only until the import below reads it, so its password is a
-# fixed word: `security import` refuses an empty one. The cipher flags pin the
-# pre-OpenSSL-3 algorithms, which are the only ones `security import` can read.
-/usr/bin/openssl pkcs12 -export -name "$identity" -passout pass:identity \
-  -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1 \
-  -inkey "$work/key.pem" -in "$work/cert.pem" -out "$work/identity.p12"
-
-# Into vhid's own keychain, and the partition list set straight after in the same
-# breath. -T alone is not enough: it writes the key's access control list, while the
-# dialog a build stops on is raised by the partition list, which is empty on every
-# freshly imported key and can only be written with the password of the keychain
-# holding it. That password is knowable here precisely because the keychain is ours.
-# [LAW:no-silent-failure] an identity that cannot be used without a human is not an
-# identity a build can depend on.
-# Sourced rather than run: this is the one caller that needs the keychain's password
-# as well as its path, and reading both from the file that owns them is what keeps the
+# Sourced rather than run: this is the one caller that needs the keychain's password as
+# well as its path, and reading both from the file that owns them is what keeps the
 # password this unlocks with and the password it was created with the same word.
 # shellcheck source=signing-keychain
 source "$here/signing-keychain"
 vhid_keychain_ready
 
-security import "$work/identity.p12" -k "$VHID_KEYCHAIN" -P identity -T /usr/bin/codesign
+# 3 is "no such identity", the only reading that leads to making one; 0 is "already
+# there"; anything else is a keychain this script must not write to, and the lookup has
+# already said why. [LAW:no-silent-failure]
+set +e
+"$here/signing-identity" "$identity" >/dev/null
+found=$?
+set -e
+
+case $found in
+  0) ;;
+  3)
+    work=$(mktemp -d)
+    trap '/bin/rm -rf "$work"' EXIT
+
+    # openssl writes its progress to stderr and its failures there too, so the stream is
+    # held rather than discarded: thrown away, a real failure would reach the operator
+    # only as `make: *** Error 1`. [LAW:no-silent-failure]
+    if ! noise=$(/usr/bin/openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=$identity" \
+        -addext "keyUsage=critical,digitalSignature" \
+        -addext "extendedKeyUsage=critical,codeSigning" \
+        -addext "basicConstraints=critical,CA:FALSE" \
+        -keyout "$work/key.pem" -out "$work/cert.pem" 2>&1); then
+      echo "$noise" >&2
+      echo "make-signing-identity: openssl could not make a certificate for '$identity'" >&2
+      exit 1
+    fi
+
+    # The PKCS#12 file lives only until the import below reads it, so its password is a
+    # fixed word: `security import` refuses an empty one. The cipher flags pin the
+    # pre-OpenSSL-3 algorithms, which are the only ones `security import` can read.
+    /usr/bin/openssl pkcs12 -export -name "$identity" -passout pass:identity \
+      -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1 \
+      -inkey "$work/key.pem" -in "$work/cert.pem" -out "$work/identity.p12"
+
+    security import "$work/identity.p12" -k "$VHID_KEYCHAIN" -P identity -T /usr/bin/codesign
+    ;;
+  *) exit $found ;;
+esac
+
+# Set on every run and not only after an import, because "the identity exists" and "the
+# identity can be used" are different facts and only the second one is what a build
+# needs. -T writes the key's access control list; the dialog a build stops on is raised
+# by the partition list, which is empty on every freshly imported key and can only be
+# written with the password of the keychain holding it - knowable here precisely because
+# the keychain is ours. An import interrupted between those two steps leaves a key that
+# exists and hangs, and a script that asked only whether the identity was there would
+# call that Mac finished forever. [LAW:dataflow-not-control-flow]
 security set-key-partition-list -S apple-tool:,apple:,codesign: \
   -s -k "$VHID_KEYCHAIN_PASSWORD" "$VHID_KEYCHAIN" >/dev/null
 
-# [LAW:verifiable-goals] Prove the identity is findable by the name everything else will
-# ask for it by, before any build depends on it being there.
-echo "make-signing-identity: made '$identity' ($("$here/signing-identity" "$identity"))"
+# [LAW:verifiable-goals] Read back through the same lookup everything else uses, and
+# into a variable: a proof written inside a message is a proof `set -e` cannot see fail,
+# and it would report a missing identity as `made 'vhid Dev' ()` and exit 0.
+ready=$("$here/signing-identity" "$identity")
+echo "make-signing-identity: '$identity' is ready ($ready)"

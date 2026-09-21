@@ -47,11 +47,16 @@ requirement="certificate leaf = H\"$certificate\""
 
 for binary in "$@"; do
   [ -e "$binary" ] || { echo "sign: $binary was not built" >&2; exit 1; }
-  codesign --force --sign "$certificate" --timestamp=none "$binary" 2>&1 | sed 's|^|sign: |'
-  # PIPESTATUS, because the pipe above ends in sed and sed succeeds at printing a
-  # failure. Reading the pipeline's own status would call a refused signature a
-  # signature. [LAW:no-silent-failure]
-  [ "${PIPESTATUS[0]}" -eq 0 ] || { echo "sign: could not sign $binary" >&2; exit 1; }
+  # codesign's output is captured rather than piped through sed, because a pipe hands
+  # the line sed's exit status - and under `pipefail` it aborts the script at the pipe
+  # itself, so any guard written after it is a guard that never runs and a message that
+  # is never read. [LAW:no-silent-failure]
+  if ! said=$(codesign --force --sign "$certificate" --timestamp=none "$binary" 2>&1); then
+    [ -z "$said" ] || sed 's|^|sign: |' <<<"$said" >&2
+    echo "sign: could not sign $binary with '$identity'" >&2
+    exit 1
+  fi
+  [ -z "$said" ] || sed 's|^|sign: |' <<<"$said"
   codesign --verify --strict -R="$requirement" "$binary" \
     || { echo "sign: $binary does not satisfy '$requirement' after being signed with it" >&2; exit 1; }
 done

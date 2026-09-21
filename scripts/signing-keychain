@@ -2,7 +2,12 @@
 # The keychain vhid's dev signing identity lives in, ready to use. Prints its path.
 #
 #   signing-keychain            # ensure it, print its path
-#   source signing-keychain     # just the facts: $VHID_KEYCHAIN, $VHID_KEYCHAIN_PASSWORD
+#   source signing-keychain     # just the facts, plus vhid_keychain_ready to call
+#
+# Sourcing also turns on `set -euo pipefail`, which `vhid_keychain_ready` relies on to
+# stop rather than carry on past a `security` that failed. Every caller here wants that
+# anyway; it is named because a file that changes its caller's shell options should say
+# so rather than be discovered doing it.
 #
 # A keychain of its own, rather than the login keychain, and the reason is the dialog. A
 # private key imported into the login keychain has an empty partition list, so the first
@@ -28,10 +33,14 @@
 # who can read the password can already run both programs. The certificate that ships is
 # a different thing entirely and does not live here; see vhid-dist-3bc.
 #
-# Undoing all of it is two commands:
+# Undoing all of it is one command, which also takes the keychain back out of the
+# search list:
 #
-#   security list-keychains -d user -s ~/Library/Keychains/login.keychain-db
 #   security delete-keychain vhid-dev.keychain
+#
+# Not a `list-keychains -s` naming the keychains to keep, which is how this is usually
+# written down: that form replaces the whole list, so it quietly drops every other
+# keychain the developer had.
 set -euo pipefail
 
 VHID_KEYCHAIN_NAME=vhid-dev.keychain
@@ -51,20 +60,52 @@ vhid_keychain_ready() {
 
   # Keychains lock on reboot however they were created, so this is asked every time
   # rather than at creation. It costs nothing when the keychain is already open.
-  security unlock-keychain -p "$VHID_KEYCHAIN_PASSWORD" "$VHID_KEYCHAIN_NAME" >&2
+  #
+  # The one way this realistically fails is a keychain left over from before the
+  # password above was last changed, and `security`'s own word for that is a number.
+  # Saying which keychain and how to be rid of it is the difference between a minute and
+  # an afternoon. [LAW:no-silent-failure]
+  if ! security unlock-keychain -p "$VHID_KEYCHAIN_PASSWORD" "$VHID_KEYCHAIN_NAME" >&2; then
+    echo "signing-keychain: $VHID_KEYCHAIN would not open with the password in this file." \
+         "If it predates a change to that password, delete it and let the next build" \
+         "make it again: security delete-keychain $VHID_KEYCHAIN_NAME" >&2
+    return 1
+  fi
 
   # Appended to the search list, never substituted for it: `list-keychains -s` replaces
   # the whole list, so writing only this one would take the login keychain out of every
   # search on this Mac - including the ones that find the certificate that ships.
   # [LAW:no-silent-failure]
+  #
+  # Read into a variable first, not piped straight into the loop. Inside a process
+  # substitution a failing `security` is invisible, so an unreadable search list would
+  # arrive here as an empty one - and an empty one written back is the eviction this
+  # paragraph is about, performed by the code meant to prevent it.
+  local listing
+  listing=$(security list-keychains -d user)
+
   local searched=() line
   while IFS= read -r line; do
     # Read whole rather than split on spaces: a keychain path may contain them, and a
     # split one would be handed back to `list-keychains` as two keychains that do not
     # exist, quietly emptying the list.
+    # Blank lines are dropped before counting, because a here-string built from an
+    # empty listing still yields one empty line - so an unreadable search list would
+    # otherwise arrive as an array of one empty name, pass the check below, and be
+    # written back as a search list containing a keychain called "".
+    [ -n "$line" ] || continue
     searched+=("$line")
     if [ "$line" = "$VHID_KEYCHAIN" ]; then return 0; fi
-  done < <(security list-keychains -d user | sed 's/^[[:space:]]*"//;s/"$//')
+  done < <(sed 's/^[[:space:]]*"//;s/"$//' <<<"$listing")
+
+  # A list that parsed to nothing is not a Mac with no keychains - it is a reading this
+  # script does not understand, and the only safe thing to do with a search list you
+  # cannot read is to leave it exactly as it is. [LAW:no-silent-failure]
+  if [ ${#searched[@]} -eq 0 ]; then
+    echo "signing-keychain: could not read the keychain search list, so it has been left alone." \
+         "Add $VHID_KEYCHAIN to it by hand, or sign with --keychain." >&2
+    return 1
+  fi
 
   security list-keychains -d user -s "${searched[@]}" "$VHID_KEYCHAIN" >&2
 }
