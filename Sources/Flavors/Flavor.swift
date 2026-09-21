@@ -38,11 +38,24 @@ public enum Flavor: String, CaseIterable, Sendable, CustomStringConvertible {
     /// The daemon nested under the identity it belongs to, the shape Apple's own embedded
     /// helpers take, so the parentage Background Task Management records reads in the name.
     ///
-    /// Public because it is the daemon's namespace, not only the release flavor's service:
-    /// a name that must be the same for both installations - an error domain, say - is
-    /// built from this rather than spelled a second time somewhere else.
+    /// Private, like the identity above it: for `.release` this is `machServiceName`
+    /// verbatim, so a caller holding it would dial the release helper's service from a
+    /// development build and never learn it had. Every name that varies by flavor is an
+    /// instance property for that reason, and what a caller needs that does not vary is
+    /// vended below. [LAW:types-are-the-program]
+    private static let helperIdentifier = releaseBundleIdentifier + ".vhidd"
+
+    /// The domain every refusal from the daemon crosses under.
+    ///
+    /// The one name here that is `static` rather than per-flavor, because it is the one
+    /// name that does not vary: an error's domain says what kind of thing refused, and
+    /// both installations' helpers refuse for identical reasons under identical rules. A
+    /// client matching on it is matching on the kind, not on which copy answered.
+    ///
+    /// Built from the namespace rather than spelled out, so a rename of the identity
+    /// reaches it - which it did not, before vhid-naming-dnk found it spelled twice.
     /// [LAW:one-source-of-truth]
-    public static let helperIdentifier = releaseBundleIdentifier + ".vhidd"
+    public static let refusalDomain = helperIdentifier + ".refusal"
 
     /// What the development build suffixes onto each of the release build's names. One
     /// suffix for all of them, so the two installations are told apart the same way
@@ -78,7 +91,7 @@ public enum Flavor: String, CaseIterable, Sendable, CustomStringConvertible {
     ///
     /// **The same string as the service, and that is load-bearing.** A flavor's helper can
     /// be registered two ways - `SMAppService` from inside the app, or a plist in
-    /// /Library/LaunchDaemons that `scripts/keyboard-helper` bootstraps - and exactly one
+    /// /Library/LaunchDaemons that `scripts/vhid-helper` bootstraps - and exactly one
     /// of them may hold the flavor at a time. Giving both paths this one label is what
     /// makes a second claimant fail loudly instead of quietly. Measured on this Mac:
     ///

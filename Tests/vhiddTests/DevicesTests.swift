@@ -75,7 +75,7 @@ import Testing
     @Test func aRefusalCrossesAsAnNSErrorCarryingItsDescription() throws {
         let devices = Devices(keyboard: RecordingKeyboard(), mouse: RecordingMouse())
         let error = try #require(answer { devices.buttonDown(0, reply: $0) }) as NSError
-        #expect(error.domain == refusalDomain)
+        #expect(error.domain == "ai.promptctl.vhid.vhidd.refusal")
         #expect(error.localizedDescription == "button 0 is not one of the 32 the device has a bit for")
     }
 

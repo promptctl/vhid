@@ -140,20 +140,12 @@ enum NotOnTheDevice: Error, CustomStringConvertible {
 /// on this side, where the real error still exists, and carried by a plain `NSError` - the
 /// one class the reply admits, and one every client has. A subclass of it would be
 /// archived under a name no client links, and would not decode. [LAW:no-silent-failure]
-/// The domain every refusal crosses under.
-///
-/// Not the serving flavor's Mach service name, for two reasons. An error's domain says
-/// what kind of thing refused, and both installations' helpers refuse for identical
-/// reasons under identical rules - the flavor is not part of that fact. And this file is
-/// linked into the test bundle, where reaching for the process-wide flavor would run its
-/// initializer against the test runner's own arguments, find no `--flavor`, and end the
-/// test process with the refusal it is written to make. [LAW:decomposition]
-///
-/// Built from the daemon's namespace rather than spelled out, so a rename of the identity
-/// reaches this too - it is a static, so neither reason above is given up to read it.
-/// [LAW:one-source-of-truth]
-let refusalDomain = Flavor.helperIdentifier + ".refusal"
-
+/// `Flavor.refusalDomain` and not the serving flavor's Mach service name: the domain says
+/// what kind of thing refused, which is the same fact for both installations. It being a
+/// static is also what lets this file be linked into the test bundle - reaching for the
+/// process-wide flavor there would run its initializer against the test runner's own
+/// arguments, find no `--flavor`, and end the test process with the refusal it is written
+/// to make. [LAW:decomposition]
 func refusal(_ error: any Error) -> NSError {
-    NSError(domain: refusalDomain, code: 1, userInfo: [NSLocalizedDescriptionKey: "\(error)"])
+    NSError(domain: Flavor.refusalDomain, code: 1, userInfo: [NSLocalizedDescriptionKey: "\(error)"])
 }
