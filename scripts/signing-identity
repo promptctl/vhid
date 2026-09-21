@@ -37,9 +37,19 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # SHA-1 below, so the two can coexist without either being mistaken for the other.
 keychain=$("$here/signing-keychain")
 
-# Through a variable so a failing `security` aborts with its own error rather than
-# reading as "no match", which would be an unreadable keychain reported as a missing
-# identity. [LAW:no-silent-failure]
+# `security find-identity` answers "0 identities found" and exits 0 for a keychain that
+# is not there at all, so nothing in its own output tells an empty keychain from an
+# absent one. Untold apart, an absent keychain is reported as "no such identity" - and
+# the caller that acts on that answer responds by minting a certificate. Asking whether
+# the file is there is the difference, and it is asked after `signing-keychain` has been
+# given its chance to make one. [LAW:no-silent-failure]
+[ -e "$keychain" ] || {
+  echo "signing-identity: $keychain is not there, so nothing can be said about '$identity'" >&2
+  exit 1
+}
+
+# Through a variable so a `security` that dies takes this script with it rather than
+# handing the parser an empty listing to find nothing in.
 listing=$(security find-identity -p codesigning "$keychain")
 
 # Each identity is a line `  N) <40 hex> "<name>"`, sometimes with a trust complaint

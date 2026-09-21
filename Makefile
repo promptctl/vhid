@@ -39,9 +39,14 @@ build: signing-identity
 # afterwards. A failing run is the run whose binaries someone is about to go and try by
 # hand, so leaving those ad hoc would answer a test failure with a 4097 that has nothing
 # to do with it.
+#
+# Signing's own failure is passed on before the suite's, and not folded into it: the
+# recipe is one shell, so a plain `$(MAKE) sign` followed by `exit $$status` would
+# discard a failed signing whenever the tests passed - reporting success over exactly
+# the unsigned tree this target exists to prevent.
 test: signing-identity
 	swift build
-	swift test; status=$$?; $(MAKE) sign; exit $$status
+	swift test; status=$$?; $(MAKE) sign || exit $$?; exit $$status
 
 # [LAW:single-enforcer] The one place products are signed. `make sign` on its own is
 # also the fix for a tree someone has built with bare `swift build`.

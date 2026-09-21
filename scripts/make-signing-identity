@@ -90,5 +90,19 @@ security set-key-partition-list -S apple-tool:,apple:,codesign: \
 # [LAW:verifiable-goals] Read back through the same lookup everything else uses, and
 # into a variable: a proof written inside a message is a proof `set -e` cannot see fail,
 # and it would report a missing identity as `made 'vhid Dev' ()` and exit 0.
+set +e
 ready=$("$here/signing-identity" "$identity")
+usable=$?
+set -e
+if [ $usable -ne 0 ]; then
+  # The certificate is in the keychain by now, and saying so matters: a silent death
+  # here leaves one behind, and the next run - finding the name it looked for still
+  # absent - would take the create branch and import a second. Two by one name is the
+  # ambiguity every later build fails on. [LAW:no-silent-failure]
+  echo "make-signing-identity: a certificate for '$identity' was imported into $VHID_KEYCHAIN" \
+       "but cannot be found by that name afterwards. Delete it before running this again," \
+       "or a second import will make the name ambiguous:" \
+       "security delete-keychain $VHID_KEYCHAIN_NAME" >&2
+  exit 1
+fi
 echo "make-signing-identity: '$identity' is ready ($ready)"
