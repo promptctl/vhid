@@ -1,44 +1,41 @@
 import DriverExtension
-import Flavors
+import Installations
 import Foundation
 import Helper
 import Signals
 import VirtualHID
 import os
 
-/// Which installation this helper serves, from the `--flavor` its plist passes.
+/// Which installation this daemon serves, from the `--service` its plist passes.
 ///
 /// Resolved before anything else, because every name below is read off it - the service
-/// listened on, the subsystem logged under - and a helper that does not know which copy
-/// it belongs to has nothing it can correctly do. A plist that does not say is a broken
-/// installation rather than a passing condition, so this ends the process rather than
-/// choosing for it. Exit 0 is the one code that stops launchd's KeepAlive from starting
-/// it again, which is right here: starting again will not add the argument.
+/// listened on, the subsystem logged under - and a daemon that does not know which
+/// installation it belongs to has nothing it can correctly do. A plist that does not say
+/// is a broken installation rather than a passing condition, so this ends the process
+/// rather than choosing for it. Exit 0 is the one code that stops launchd's KeepAlive
+/// from starting it again, which is right here: starting again will not add the argument.
 /// [LAW:no-silent-failure]
 ///
-/// The refusal is filed under every flavor's service name, because which one this would
-/// have been is exactly what is not known - and every reader already asks under a service
-/// name: `scripts/vhid-helper log` and the onboarding step both do. A name of its own
-/// would be one more subsystem for each of them to learn, for the one message that most
-/// needs finding. The arguments it prints say which plist it was. [LAW:no-silent-failure]
-let flavor: Flavor = {
-    guard let flavor = flavorArgument(CommandLine.arguments) else {
-        for candidate in Flavor.allCases {
-            Logger(subsystem: candidate.machServiceName, category: "helper").fault(
-                "will not start: no --flavor \(Flavor.allCases.map(\.description).joined(separator: " or "), privacy: .public) in \(CommandLine.arguments, privacy: .public)")
-        }
+/// The refusal is filed under `Installation.unnamedSubsystem`, because which installation
+/// this would have been is exactly what is not known and the set of them is open, so
+/// there is no "every one" left to file it under. The arguments it prints say which plist
+/// it was.
+let installation: Installation = {
+    guard let installation = serviceArgument(CommandLine.arguments) else {
+        Logger(subsystem: Installation.unnamedSubsystem, category: "helper").fault(
+            "will not start: no --service <name> in \(CommandLine.arguments, privacy: .public)")
         exit(0)
     }
-    return flavor
+    return installation
 }()
 
-/// Said where `log show` will find it, under this flavor's service name - which is what
+/// Said where `log show` will find it, under this installation's service name - which is what
 /// keeps the two installations' logs apart. A daemon's only voice is its log, and a
 /// daemon that fails silently at startup looks exactly like one that is working. Public
 /// on purpose: nothing here is the user's data, and a redacted reason is no reason.
 ///
 ///     log show --last 10m --predicate 'subsystem == "ai.promptctl.vhid.vhidd"'
-private let logger = Logger(subsystem: flavor.machServiceName, category: "helper")
+private let logger = Logger(subsystem: installation.service, category: "helper")
 func log(_ message: String) {
     logger.notice("\(message, privacy: .public)")
 }
@@ -111,11 +108,11 @@ do {
         leave(origin, because: "asked to stop", status: 0)
     }
 
-    let listener = NSXPCListener(machServiceName: flavor.machServiceName)
+    let listener = NSXPCListener(machServiceName: installation.service)
     let delegate = Listener(devices: devices, callers: callers)
     listener.delegate = delegate
     listener.resume()
-    log("listening on \(flavor.machServiceName) as the \(flavor) installation")
+    log("listening on \(installation.service)")
     // Held so the delegate and the watch outlive this scope; `resume` retains neither
     // the listener nor the sources the watch owns.
     withExtendedLifetime((delegate, termination)) { dispatchMain() }
