@@ -13,6 +13,10 @@ let package = Package(
     platforms: [.macOS(.v15)],
     products: [
         .library(name: "Eyes", targets: ["Eyes"]),
+        .executable(name: "eyes", targets: ["EyesCommand"]),
+    ],
+    dependencies: [
+        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
     ],
     targets: [
         // The vocabulary both readers speak and the protocol both conform to. It links
@@ -23,5 +27,16 @@ let package = Package(
         // Every type here is a value, so the whole vocabulary is exercised with no
         // display, no capture and no accessibility grant. [LAW:effects-at-boundaries]
         .testTarget(name: "EyesTests", dependencies: ["Eyes"]),
+        // The binary. Every line it prints describes the screen and the scope that was
+        // looked at, which is what lets the reading below it be narrow and still be
+        // trusted. [LAW:no-silent-failure]
+        // Named for the directory and not for the binary: the product below is what is
+        // called `eyes`, and a target of that name would collide with the `Eyes` module on
+        // a case-insensitive filesystem, which is what macOS gives you by default.
+        .executableTarget(
+            name: "EyesCommand",
+            dependencies: ["Eyes", .product(name: "ArgumentParser", package: "swift-argument-parser")],
+            path: "Sources/Command"
+        ),
     ]
 )
