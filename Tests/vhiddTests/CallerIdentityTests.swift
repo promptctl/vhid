@@ -1,5 +1,5 @@
 import Foundation
-import HelperService
+import Helper
 import Security
 import Testing
 @testable import vhidd

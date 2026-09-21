@@ -1,7 +1,7 @@
 import Foundation
 import Keystrokes
 import Testing
-@testable import HelperService
+@testable import Helper
 @testable import vhidd
 
 /// The listener as a client meets it: the real `Listener` on an anonymous listener in this

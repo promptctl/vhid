@@ -1,7 +1,7 @@
 import DriverExtension
 import Flavors
 import Foundation
-import HelperService
+import Helper
 import Signals
 import VirtualHID
 import os

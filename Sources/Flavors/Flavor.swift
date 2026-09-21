@@ -34,7 +34,7 @@ public enum Flavor: String, CaseIterable, Sendable, CustomStringConvertible {
     /// The reverse-DNS identity of the release build, which every other name here is
     /// built from. Named once so a rename reaches all of them together.
     /// [LAW:one-source-of-truth]
-    public static let releaseBundleIdentifier = "ai.promptctl.vhid"
+    private static let releaseBundleIdentifier = "ai.promptctl.vhid"
     /// The daemon nested under the identity it belongs to, the shape Apple's own embedded
     /// helpers take, so the parentage Background Task Management records reads in the name.
     ///

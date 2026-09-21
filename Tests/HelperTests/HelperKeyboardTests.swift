@@ -2,7 +2,7 @@ import Foundation
 import Keystrokes
 import Pointing
 import Testing
-@testable import HelperService
+@testable import Helper
 
 /// The client's side of the privilege seam, driven against a service of the test's own
 /// on the far end of a real XPC connection: an anonymous listener in this process, so

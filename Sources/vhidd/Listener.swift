@@ -1,5 +1,5 @@
 import Foundation
-import HelperService
+import Helper
 
 /// Accepts a connection when the caller is who the requirement says and nobody else has
 /// the devices, and refuses it otherwise, saying why.

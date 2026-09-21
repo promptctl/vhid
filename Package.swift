@@ -12,7 +12,7 @@ let package = Package(
         .library(name: "KeyboardLayout", targets: ["KeyboardLayout"]),
         .library(name: "Flavors", targets: ["Flavors"]),
         .library(name: "VirtualHID", targets: ["VirtualHID"]),
-        .library(name: "HelperService", targets: ["HelperService"]),
+        .library(name: "Helper", targets: ["Helper"]),
         .executable(name: "vhidd", targets: ["vhidd"]),
     ],
     targets: [
@@ -65,20 +65,20 @@ let package = Package(
         // two vocabularies and nothing else: not the layout, because a root daemon must
         // never read one, and not the device, because a client must never open one.
         // [LAW:one-way-deps]
-        .target(name: "HelperService", dependencies: ["Flavors", "Keystrokes", "Pointing"]),
-        .testTarget(name: "HelperServiceTests", dependencies: ["HelperService", "Flavors", "Keystrokes", "Pointing"]),
+        .target(name: "Helper", dependencies: ["Flavors", "Keystrokes", "Pointing"]),
+        .testTarget(name: "HelperTests", dependencies: ["Helper", "Flavors", "Keystrokes", "Pointing"]),
         // The root daemon that owns the devices. It links DriverExtension for the identity
         // the keyboard files its Keyboard Setup Assistant answer under, and deliberately
         // not KeyboardLayout: text never reaches this process. [LAW:one-way-deps]
         .executableTarget(
             name: "vhidd",
-            dependencies: ["HelperService", "VirtualHID", "DriverExtension", "Keystrokes", "Pointing", "Signals", "Flavors"]
+            dependencies: ["Helper", "VirtualHID", "DriverExtension", "Keystrokes", "Pointing", "Signals", "Flavors"]
         ),
         // The authorization boundary of a root keystroke service, checked against the
         // test process's own identity and audit token: real code signing, no root.
         .testTarget(
             name: "vhiddTests",
-            dependencies: ["vhidd", "HelperService", "VirtualHID", "DriverExtension", "Keystrokes", "Pointing", "Signals", "Flavors"]
+            dependencies: ["vhidd", "Helper", "VirtualHID", "DriverExtension", "Keystrokes", "Pointing", "Signals", "Flavors"]
         ),
     ]
 )

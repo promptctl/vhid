@@ -1,5 +1,5 @@
 import Foundation
-import HelperService
+import Helper
 import Keystrokes
 import Pointing
 import Synchronization
