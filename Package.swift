@@ -10,7 +10,7 @@ let package = Package(
         .library(name: "Signals", targets: ["Signals"]),
         .library(name: "DriverExtension", targets: ["DriverExtension"]),
         .library(name: "KeyboardLayout", targets: ["KeyboardLayout"]),
-        .library(name: "Flavors", targets: ["Flavors"]),
+        .library(name: "Installations", targets: ["Installations"]),
         .library(name: "VirtualHID", targets: ["VirtualHID"]),
         .library(name: "Helper", targets: ["Helper"]),
         .executable(name: "vhidd", targets: ["vhidd"]),
@@ -49,11 +49,13 @@ let package = Package(
         // installed US and Dvorak layouts rather than a fixture that could agree with a
         // wrong reading of them.
         .testTarget(name: "KeyboardLayoutTests", dependencies: ["KeyboardLayout", "Keystrokes"]),
-        // Which installation this is: the one name every other name is built from. It
-        // depends on nothing, so the root daemon and the client can both read it without
-        // either depending on the other. [LAW:one-way-deps]
-        .target(name: "Flavors"),
-        .testTarget(name: "FlavorsTests", dependencies: ["Flavors"]),
+        // Which installation this is, as the one name every other name is built from -
+        // an open set, so anything linking this package can run a daemon of its own
+        // without a case being added here. It depends on nothing, so the root daemon and
+        // the client both read it without either depending on the other.
+        // [LAW:one-way-deps]
+        .target(name: "Installations"),
+        .testTarget(name: "InstallationsTests", dependencies: ["Installations"]),
         // Everything about the two virtual devices and nothing about what is typed on
         // them: the pqrs daemon socket, the two report layouts, and the keys and buttons
         // each device is holding. [LAW:one-way-deps]
@@ -65,20 +67,20 @@ let package = Package(
         // two vocabularies and nothing else: not the layout, because a root daemon must
         // never read one, and not the device, because a client must never open one.
         // [LAW:one-way-deps]
-        .target(name: "Helper", dependencies: ["Flavors", "Keystrokes", "Pointing"]),
-        .testTarget(name: "HelperTests", dependencies: ["Helper", "Flavors", "Keystrokes", "Pointing"]),
+        .target(name: "Helper", dependencies: ["Installations", "Keystrokes", "Pointing"]),
+        .testTarget(name: "HelperTests", dependencies: ["Helper", "Installations", "Keystrokes", "Pointing"]),
         // The root daemon that owns the devices. It links DriverExtension for the identity
         // the keyboard files its Keyboard Setup Assistant answer under, and deliberately
         // not KeyboardLayout: text never reaches this process. [LAW:one-way-deps]
         .executableTarget(
             name: "vhidd",
-            dependencies: ["Helper", "VirtualHID", "DriverExtension", "Keystrokes", "Pointing", "Signals", "Flavors"]
+            dependencies: ["Helper", "VirtualHID", "DriverExtension", "Keystrokes", "Pointing", "Signals", "Installations"]
         ),
         // The authorization boundary of a root keystroke service, checked against the
         // test process's own identity and audit token: real code signing, no root.
         .testTarget(
             name: "vhiddTests",
-            dependencies: ["vhidd", "Helper", "VirtualHID", "DriverExtension", "Keystrokes", "Pointing", "Signals", "Flavors"]
+            dependencies: ["vhidd", "Helper", "VirtualHID", "DriverExtension", "Keystrokes", "Pointing", "Signals", "Installations"]
         ),
     ]
 )

@@ -1,4 +1,4 @@
-import Flavors
+import Installations
 import Foundation
 import Helper
 import Keystrokes
@@ -140,12 +140,13 @@ enum NotOnTheDevice: Error, CustomStringConvertible {
 /// on this side, where the real error still exists, and carried by a plain `NSError` - the
 /// one class the reply admits, and one every client has. A subclass of it would be
 /// archived under a name no client links, and would not decode. [LAW:no-silent-failure]
-/// `Flavor.refusalDomain` and not the serving flavor's Mach service name: the domain says
-/// what kind of thing refused, which is the same fact for both installations. It being a
-/// static is also what lets this file be linked into the test bundle - reaching for the
-/// process-wide flavor there would run its initializer against the test runner's own
-/// arguments, find no `--flavor`, and end the test process with the refusal it is written
-/// to make. [LAW:decomposition]
+/// `Installation.refusalDomain` and not the serving installation's Mach service name: the
+/// domain says what kind of thing refused, which is the same fact for every installation
+/// built from this package, including ones it has never heard of. It being a static is
+/// also what lets this file be linked into the test bundle - reaching for the
+/// process-wide installation there would run its initializer against the test runner's
+/// own arguments, find no `--service`, and end the test process with the refusal it is
+/// written to make. [LAW:decomposition]
 func refusal(_ error: any Error) -> NSError {
-    NSError(domain: Flavor.refusalDomain, code: 1, userInfo: [NSLocalizedDescriptionKey: "\(error)"])
+    NSError(domain: Installation.refusalDomain, code: 1, userInfo: [NSLocalizedDescriptionKey: "\(error)"])
 }
