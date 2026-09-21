@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import lowtalker_keyboardd
+@testable import vhidd
 
 /// One keyboard, one client at a time, and the refusal names who has it.
 /// [LAW:behavior-not-structure]

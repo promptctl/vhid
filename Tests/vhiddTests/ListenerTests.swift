@@ -1,8 +1,8 @@
 import Foundation
 import Keystrokes
 import Testing
-@testable import KeyboardService
-@testable import lowtalker_keyboardd
+@testable import HelperService
+@testable import vhidd
 
 /// The listener as a client meets it: the real `Listener` on an anonymous listener in this
 /// process, with a requirement this process satisfies, and devices of the test's own

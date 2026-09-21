@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import VirtualKeyboard
+@testable import VirtualHID
 
 /// The bytes, on their own. Byte order is what goes wrong silently here - the frame's
 /// length and id are big-endian, the usages inside a report are little-endian, and the

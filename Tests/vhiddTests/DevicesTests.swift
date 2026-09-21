@@ -1,10 +1,10 @@
 import Foundation
-import KeyboardService
+import HelperService
 import Keystrokes
 import Pointing
 import Synchronization
 import Testing
-@testable import lowtalker_keyboardd
+@testable import vhidd
 
 /// The devices as the helper serves them, over recording devices of the test's own: what
 /// the wire may carry that the device cannot, and what a client leaving lets go of.

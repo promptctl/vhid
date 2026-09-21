@@ -1,9 +1,9 @@
 import DriverExtension
 import Flavors
 import Foundation
-import KeyboardService
+import HelperService
 import Signals
-import VirtualKeyboard
+import VirtualHID
 import os
 
 /// Which installation this helper serves, from the `--flavor` its plist passes.
@@ -37,7 +37,7 @@ let flavor: Flavor = {
 /// daemon that fails silently at startup looks exactly like one that is working. Public
 /// on purpose: nothing here is the user's data, and a redacted reason is no reason.
 ///
-///     log show --last 10m --predicate 'subsystem == "ai.promptctl.low-talker.keyboardd"'
+///     log show --last 10m --predicate 'subsystem == "ai.promptctl.vhid.vhidd"'
 private let logger = Logger(subsystem: flavor.machServiceName, category: "helper")
 func log(_ message: String) {
     logger.notice("\(message, privacy: .public)")

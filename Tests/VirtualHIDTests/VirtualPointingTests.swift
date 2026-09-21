@@ -1,7 +1,7 @@
 import Foundation
 import Pointing
 import Testing
-@testable import VirtualKeyboard
+@testable import VirtualHID
 
 /// A daemon that answers every request and, once the pointing device is initialized,
 /// pushes the readiness the real one pushes.

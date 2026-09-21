@@ -83,7 +83,7 @@ import Testing
     /// ellipsis are none of them in the spike's printable-ASCII table, and each is one key
     /// held under Option rather than a dead-key pair - so a caller handing this module a
     /// sentence copied out of any document lands on them immediately.
-    @Test func theCurlyQuotesAndDashesWhisperWritesAllType() throws {
+    @Test func theCurlyQuotesAndDashesRealTextContainsAllType() throws {
         let punctuation = "\u{201c}\u{201d}\u{2018}\u{2019}\u{2014}\u{2013}\u{2026}"
         let typed = try Self.us.keystrokes(for: punctuation)
         #expect(typed.count == punctuation.count, "each of these should be one keystroke")

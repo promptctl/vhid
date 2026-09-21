@@ -1,7 +1,7 @@
 import Foundation
 import Keystrokes
 import Testing
-@testable import VirtualKeyboard
+@testable import VirtualHID
 
 /// A daemon that answers every request and, once the keyboard is initialized, pushes the
 /// three statuses the real one pushes.

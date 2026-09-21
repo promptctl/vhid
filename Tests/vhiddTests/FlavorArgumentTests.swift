@@ -1,7 +1,7 @@
 import Flavors
 import Testing
 
-@testable import lowtalker_keyboardd
+@testable import vhidd
 
 /// What the helper accepts from its plist, and everything it refuses.
 ///

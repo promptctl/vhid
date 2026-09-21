@@ -1,4 +1,4 @@
-/// Which installation of low-talker this is: the one that runs all day, or the one being
+/// Which installation of vhid this is: the one that runs all day, or the one being
 /// worked on. Two copies are meant to be installed and running at the same moment, so
 /// every name macOS keys an installation by has to differ between them.
 ///
@@ -34,10 +34,15 @@ public enum Flavor: String, CaseIterable, Sendable, CustomStringConvertible {
     /// The reverse-DNS identity of the release build, which every other name here is
     /// built from. Named once so a rename reaches all of them together.
     /// [LAW:one-source-of-truth]
-    private static let releaseBundleIdentifier = "ai.promptctl.low-talker"
-    /// The helper nested under the app it belongs to, the shape Apple's own embedded
+    public static let releaseBundleIdentifier = "ai.promptctl.vhid"
+    /// The daemon nested under the identity it belongs to, the shape Apple's own embedded
     /// helpers take, so the parentage Background Task Management records reads in the name.
-    private static let releaseMachServiceName = releaseBundleIdentifier + ".keyboardd"
+    ///
+    /// Public because it is the daemon's namespace, not only the release flavor's service:
+    /// a name that must be the same for both installations - an error domain, say - is
+    /// built from this rather than spelled a second time somewhere else.
+    /// [LAW:one-source-of-truth]
+    public static let helperIdentifier = releaseBundleIdentifier + ".vhidd"
 
     /// What the development build suffixes onto each of the release build's names. One
     /// suffix for all of them, so the two installations are told apart the same way
@@ -64,8 +69,8 @@ public enum Flavor: String, CaseIterable, Sendable, CustomStringConvertible {
     /// never got it.
     public var machServiceName: String {
         switch self {
-        case .release: Self.releaseMachServiceName
-        case .development: Self.releaseMachServiceName + Self.developmentSuffix
+        case .release: Self.helperIdentifier
+        case .development: Self.helperIdentifier + Self.developmentSuffix
         }
     }
 
@@ -94,12 +99,12 @@ public enum Flavor: String, CaseIterable, Sendable, CustomStringConvertible {
     /// person can tell the two apart at a glance.
     public var displayName: String {
         switch self {
-        case .release: "LowTalker"
-        case .development: "LowTalker Dev"
+        case .release: "vhid"
+        case .development: "vhid Dev"
         }
     }
 
-    /// The config file's name inside `~/.config/low-talker`. One directory, two files:
+    /// The config file's name inside `~/.config/vhid`. One directory, two files:
     /// the directory is the project's, and a reader editing one build's settings should
     /// find the other's beside it rather than somewhere else entirely.
     public var configFileName: String {

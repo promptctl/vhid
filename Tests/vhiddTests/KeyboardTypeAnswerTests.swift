@@ -1,7 +1,7 @@
 import DriverExtension
 import Foundation
 import Testing
-@testable import lowtalker_keyboardd
+@testable import vhidd
 
 /// Filing this keyboard's answer with Keyboard Setup Assistant, which the helper does as
 /// it starts so the assistant never takes the first line typed.
