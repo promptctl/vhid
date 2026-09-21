@@ -28,8 +28,18 @@ import Installations
 /// [LAW:effects-at-boundaries] Pure, taking the arguments rather than reading
 /// `CommandLine` itself, so every shape of a malformed plist is a test and not a daemon
 /// that has to be installed to find out.
+/// **Exactly one `--service`, or none this daemon will answer to.** Taking the first of
+/// two would have it listen under one name while launchd started it as the other - the
+/// precise failure this whole design exists to remove, arrived at through an argv nobody
+/// looked at twice; a generated plist that merged two templates is how it happens. The
+/// rule is a count and not a comparison, so two flags naming the same service are refused
+/// alongside two that disagree: a parser that resolved the agreeing case would be
+/// deciding which of two claims to believe, which is not its to decide at all, and a
+/// plist that says a thing twice was assembled by something that did not know it had.
+/// [LAW:no-silent-failure]
 func serviceArgument(_ arguments: [String]) -> Installation? {
-    guard let flag = arguments.firstIndex(of: "--service") else { return nil }
+    let flags = arguments.indices.filter { arguments[$0] == "--service" }
+    guard flags.count == 1, let flag = flags.first else { return nil }
     let name = arguments.index(after: flag)
     guard name < arguments.endIndex, !arguments[name].hasPrefix("-") else { return nil }
     return Installation(service: arguments[name])

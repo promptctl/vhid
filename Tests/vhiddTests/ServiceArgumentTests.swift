@@ -41,6 +41,8 @@ struct ServiceArgumentTests {
         ["vhidd", "--service", "--verbose"],
         ["vhidd", "--service", "-s"],
         ["vhidd", "--service", "--service"],
+        ["vhidd", "--service", "a.b.c", "--service", "d.e.f"],
+        ["vhidd", "--service", "a.b.c", "--service", "a.b.c"],
         ["vhidd", "ai.promptctl.vhid.vhidd"],
         ["vhidd", "--flavor", "release"],
         ["vhidd", "--services", "ai.promptctl.vhid.vhidd"],

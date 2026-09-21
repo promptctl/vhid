@@ -23,10 +23,15 @@ import os
 /// below is written to span both - an exact match on a service name finds a daemon that
 /// started and misses every daemon that refused to, which is the one message most worth
 /// finding.
+///
+/// "no usable" rather than "no": the flag being absent and its name being refused are one
+/// answer here, because this daemon does the same thing either way and the argv it prints
+/// is the evidence for whichever it was. A message that said the flag was missing would
+/// send an operator whose plist does carry it looking in the wrong place.
 let installation: Installation = {
     guard let installation = serviceArgument(CommandLine.arguments) else {
         Logger(subsystem: Installation.unnamedSubsystem, category: "helper").fault(
-            "will not start: no --service <name> in \(CommandLine.arguments, privacy: .public)")
+            "will not start: no usable --service <name> in \(CommandLine.arguments, privacy: .public)")
         exit(0)
     }
     return installation

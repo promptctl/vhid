@@ -105,8 +105,11 @@ public extension Installation {
     /// answered this by logging the failure under every installation there was, so a
     /// reader would find it whichever they looked at; an open set has no "every" to
     /// enumerate, and one fixed place to look is what replaces it. It is the namespace
-    /// rather than any installation's service, so this message never lands in a running
-    /// installation's log claiming to be from it. [LAW:no-silent-failure]
+    /// rather than any installation's service, which keeps it clear of vhid's own two:
+    /// both nest *under* the namespace rather than being it, so this message never lands
+    /// in either one's log claiming to be from it. A daemon that named itself the bare
+    /// namespace would share this subsystem, and that is its own choice to make - the
+    /// arguments the message prints still say which one said it. [LAW:no-silent-failure]
     static let unnamedSubsystem = namespace
 
     /// The domain every refusal from a daemon crosses under.
