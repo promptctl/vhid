@@ -29,12 +29,18 @@ import Testing
         #expect(read.provesAbsence)
     }
 
-    /// The case that reads identically to the one above unless the count is carried. A
-    /// capture that wrote no file, or a grant that was never given, leaves a reader with
-    /// nothing to match against - and "I matched nothing" is true and useless.
-    @Test func aReadThatExaminedNothingProvesNothing() {
+    /// A blank region is the most useful question anyone asks this package - *is the
+    /// dialog gone?* - and it examines nothing, because there is nothing in it to examine.
+    /// An earlier rule also required `examined > 0`, which refused exactly the reading
+    /// that most certainly proves an absence.
+    ///
+    /// Blindness is not what this number is for. `Reader.read` throws when it could not
+    /// see, so a `Reading` that exists at all came from a reader that looked, and asking
+    /// again here was a second enforcer of an invariant the boundary already holds.
+    /// [LAW:single-enforcer]
+    @Test func aWholeReadOfABlankRegionProvesTheAbsence() {
         let read = reading(outcome: .nearest([]), examined: 0, reach: .whole)
-        #expect(!read.provesAbsence)
+        #expect(read.provesAbsence)
     }
 
     /// A walk that hit its element cap has not seen the region, so its silence about a
@@ -150,6 +156,17 @@ import Testing
         #expect(Limit(1)?.count == 1)
         #expect(Limit.default.count == 50)
         #expect(Query(match: .exact("Allow"), region: .display(0)).limit == .default)
+    }
+
+    /// [LAW:types-are-the-program] A tolerance below zero cannot be satisfied by any
+    /// string, so a reader that walks a whole region with the text plainly on it matches
+    /// nothing and reports `reach == .whole` - which is `provesAbsence` answering true
+    /// for text that is on the screen. The same hole `Limit` closed, in the same file.
+    @Test func aToleranceThatNoStringCouldSatisfyCannotBeSpelled() {
+        #expect(Edits(-1) == nil)
+        #expect(Edits(0)?.count == 0)
+        #expect(Edits(2)?.count == 2)
+        #expect(Match.within(edits: Edits(1)!, of: "Allow") == .within(edits: Edits(1)!, of: "Allow"))
     }
 
     /// A display is named by the id the window server knows it by, not by a position in a

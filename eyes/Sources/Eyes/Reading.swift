@@ -60,7 +60,24 @@ public enum Match: Sendable, Hashable {
     case exact(String)
     case contains(String)
     /// Within this many single-character edits, for text a recogniser may have slipped on.
-    case within(edits: Int, of: String)
+    case within(edits: Edits, of: String)
+}
+
+/// A number of single-character edits, which is never negative.
+///
+/// [LAW:types-are-the-program] The same hole `Limit` closed, in the same file. A negative
+/// tolerance cannot be satisfied by any string, so a reader that walks a whole region
+/// with the text plainly on it matches nothing, returns `.nearest`, and reports
+/// `reach == .whole` - which is `provesAbsence` answering true for text that is on the
+/// screen. A query that cannot match is not a query a caller can mean.
+public struct Edits: Sendable, Hashable {
+    public let count: Int
+
+    /// Zero is allowed and means exactly what it says: no slip tolerated.
+    public init?(_ count: Int) {
+        guard count >= 0 else { return nil }
+        self.count = count
+    }
 }
 
 /// Where on screen to look.
@@ -159,7 +176,13 @@ public struct Scope: Sendable, Hashable {
     /// The rectangle that was searched, resolved from the query's region.
     public let region: ScreenRect
     /// How many candidates the reader examined inside it - runs recognised, or elements
-    /// walked. Zero is not an empty screen; zero is a reader that read nothing.
+    /// walked.
+    ///
+    /// Zero is a blank region, not a blind reader. Blindness never arrives as a returned
+    /// `Reading` at all: `Reader.read` throws when it could not see - no grant, no such
+    /// display, a capture that wrote nothing - so a `Reading` in hand is by contract from
+    /// a reader that looked. This number is what the caller was told about the looking,
+    /// not a second place blindness is decided. [LAW:single-enforcer]
     public let examined: Int
     /// How many were dropped before matching, and why, so a narrow answer says what it
     /// narrowed. A reading that filtered 200 table cells away and says so is trustworthy;
@@ -220,12 +243,21 @@ public enum Stop: Sendable, Hashable {
 public extension Reading {
     /// Whether "it is not there" is a fact about the screen rather than about the read.
     ///
-    /// [LAW:single-enforcer] Derived in the one place, because the three conditions are
-    /// easy to get right and easy to forget: nothing matched, the reader got through the
-    /// whole region, and it actually examined something. A caller re-deriving this will
-    /// eventually check only the first.
+    /// [LAW:single-enforcer] Derived in the one place, because the two conditions are easy
+    /// to get right and easy to forget: nothing matched, and the reader got through the
+    /// whole region. A caller re-deriving this will eventually check only the first.
+    ///
+    /// It deliberately does not also require that something was examined. That third
+    /// condition was here to catch a blind reader, and it caught the wrong thing: a
+    /// region that is genuinely blank - a dialog that has closed, which is the single
+    /// most useful question anyone asks this package - has nothing in it to examine, so
+    /// the reading that most certainly proves an absence reported zero and was refused.
+    /// Blindness has an owner already, one layer up: `Reader.read` throws when it could
+    /// not see, so a `Reading` that exists at all came from a reader that looked. Asking
+    /// again here was a second enforcer of an invariant the boundary already holds, and
+    /// the two disagreed exactly where it mattered.
     var provesAbsence: Bool {
         guard case .nearest = outcome else { return false }
-        return scope.reach == .whole && scope.examined > 0
+        return scope.reach == .whole
     }
 }

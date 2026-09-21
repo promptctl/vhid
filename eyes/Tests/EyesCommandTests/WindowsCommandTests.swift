@@ -45,14 +45,14 @@ import Testing
             excluded: [
                 WindowExclusion(reason: .arealess, count: 2),
                 WindowExclusion(reason: .invisible, count: 12),
-                WindowExclusion(reason: .unplaced, count: 1),
+                WindowExclusion(reason: .unreadable, count: 1),
             ]
         )
         let line = Windows.scope(shown: 12, listing: listing)
         #expect(line.contains("27 listed"))
         #expect(line.contains("2 arealess"))
         #expect(line.contains("12 invisible"))
-        #expect(line.contains("1 unplaced"))
+        #expect(line.contains("1 unreadable"))
     }
 
     /// Both narrowings are reported together, because either one alone would make the

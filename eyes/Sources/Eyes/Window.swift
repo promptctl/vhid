@@ -68,10 +68,18 @@ public struct WindowExclusion: Sendable, Hashable {
         case invisible
         /// Zero-sized, so there is nowhere in it to look and nothing in it to click.
         case arealess
-        /// The bounds dictionary would not read. Kept apart from the other two because
-        /// this one is an anomaly rather than an ordinary invisible surface, and a
-        /// caller seeing it climb is seeing something wrong.
-        case unplaced
+        /// The entry did not describe a window: no id, no owner, no layer, or bounds that
+        /// would not read as four finite numbers. Kept apart from the other two because
+        /// this one is an anomaly rather than an ordinary invisible surface, and a caller
+        /// seeing it climb is seeing something wrong.
+        ///
+        /// Not spelled `unplaced`, which `Exclusion.Reason` already uses for a candidate
+        /// that is zero-sized or outside the region - an ordinary, expected narrowing. A
+        /// caller reads a `WindowListing` and a `Reading` in the same breath, since
+        /// `Region.window` takes an id from the first and hands it to the second, and one
+        /// word meaning "nothing unusual" in one and "something is wrong" in the other is
+        /// the one word that would not carry across. [LAW:one-source-of-truth]
+        case unreadable
     }
 }
 
@@ -121,7 +129,7 @@ public enum Geometry {
                   let bounds = entry[kCGWindowBounds as String] as? [String: Any],
                   let rect = Self.rect(from: bounds)
             else {
-                counts[.unplaced, default: 0] += 1
+                counts[.unreadable, default: 0] += 1
                 continue
             }
             guard (entry[kCGWindowAlpha as String] as? Double ?? 1) > 0 else {
@@ -149,9 +157,19 @@ public enum Geometry {
     /// here answers in. Nothing is converted; a missing field is refused rather than
     /// defaulted to zero, because a window at 0,0 sized 0 is a lie about a window whose
     /// position was not readable. [LAW:no-silent-failure]
+    ///
+    /// [LAW:parse-dont-validate] This is the one door the window server's numbers come
+    /// through, so finiteness is established here and never asked about again. NaN
+    /// reaches it - `as? Double` bridges an `NSNumber` holding one without complaint -
+    /// and then passes every check downstream that looks like it would catch it: `NaN <=
+    /// 0` is false, so a NaN-sized window is not `isEmpty` and is kept, and the first
+    /// thing that touches it traps outright, because `Int(Double.nan)` is a fatal error
+    /// rather than a bad number. A window whose bounds are not numbers is an entry that
+    /// did not describe a window, which is what the `unreadable` count is for.
     private static func rect(from bounds: [String: Any]) -> ScreenRect? {
         guard let x = bounds["X"] as? Double, let y = bounds["Y"] as? Double,
-              let width = bounds["Width"] as? Double, let height = bounds["Height"] as? Double
+              let width = bounds["Width"] as? Double, let height = bounds["Height"] as? Double,
+              x.isFinite, y.isFinite, width.isFinite, height.isFinite
         else { return nil }
         return ScreenRect(x: x, y: y, width: width, height: height)
     }

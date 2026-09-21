@@ -82,12 +82,38 @@ import Testing
     /// was that nobody could tell. It is counted apart from the ordinary invisible
     /// surfaces because it is an anomaly, and a caller watching it climb is watching
     /// something go wrong.
-    @Test func aWindowWhosePositionWillNotReadIsCountedAsUnplacedRatherThanPlacedAtTheOrigin() {
+    @Test func aWindowWhosePositionWillNotReadIsCountedAsUnreadableRatherThanPlacedAtTheOrigin() {
         var broken = entry()
         broken[kCGWindowBounds as String] = ["X": 0.0, "Y": 0.0, "Width": 1512.0]
         let listing = Geometry.listing(from: [broken])
         #expect(listing.windows.isEmpty)
-        #expect(listing.excluded == [WindowExclusion(reason: .unplaced, count: 1)])
+        #expect(listing.excluded == [WindowExclusion(reason: .unreadable, count: 1)])
+    }
+
+    /// The bound that is a number and is not one. NaN bridges out of an `NSNumber`
+    /// through `as? Double` without complaint, and then passes every check that looks
+    /// like it would catch it: `NaN <= 0` is false, so such a window is not `isEmpty` and
+    /// was kept, and printing its row called `Int(Double.nan)` - a fatal error, not a bad
+    /// number. Measured: the binary died with "Double value cannot be converted to Int
+    /// because it is either infinite or NaN". An infinity traps in exactly the same way.
+    @Test func aBoundThatIsNotAFiniteNumberIsRefusedRatherThanCrashingTheReading() {
+        for bad in [Double.nan, .infinity, -.infinity] {
+            var broken = entry()
+            broken[kCGWindowBounds as String] = ["X": bad, "Y": 33.0, "Width": 1512.0, "Height": 949.0]
+            let listing = Geometry.listing(from: [broken])
+            #expect(listing.windows.isEmpty, "a window at \(bad) is not a window anyone can click")
+            #expect(listing.excluded == [WindowExclusion(reason: .unreadable, count: 1)])
+        }
+    }
+
+    /// A NaN *size* is the same hazard by a different door: it slips past the area guard
+    /// because no comparison with NaN is ever true.
+    @Test func aSizeThatIsNotAFiniteNumberIsRefusedToo() {
+        var broken = entry()
+        broken[kCGWindowBounds as String] = ["X": 0.0, "Y": 33.0, "Width": Double.nan, "Height": 949.0]
+        #expect(Geometry.listing(from: [broken]).windows.isEmpty)
+        // The reason the guard cannot be left to `isEmpty`, stated so it cannot return.
+        #expect(!(Double.nan <= 0))
     }
 
     /// An entry with no layer at all cannot say how high it sits, which is now one of the
@@ -95,7 +121,7 @@ import Testing
     @Test func anEntryWithNoLayerIsRefusedRatherThanAssumedToBeAnOrdinaryWindow() {
         var noLayer = entry()
         noLayer.removeValue(forKey: kCGWindowLayer as String)
-        #expect(Geometry.listing(from: [noLayer]).excluded == [WindowExclusion(reason: .unplaced, count: 1)])
+        #expect(Geometry.listing(from: [noLayer]).excluded == [WindowExclusion(reason: .unreadable, count: 1)])
     }
 
     /// A zero-sized window is a real entry that covers nothing, so there is nowhere in it
@@ -139,7 +165,7 @@ import Testing
         broken[kCGWindowBounds as String] = [:]
         let raw = [entry(id: 1, alpha: 0), entry(id: 2, width: 0), broken]
         let reasons = Geometry.listing(from: raw).excluded.map(\.reason)
-        #expect(reasons == [.arealess, .invisible, .unplaced])
+        #expect(reasons == [.arealess, .invisible, .unreadable])
         for _ in 0..<20 {
             #expect(Geometry.listing(from: raw).excluded.map(\.reason) == reasons)
         }
