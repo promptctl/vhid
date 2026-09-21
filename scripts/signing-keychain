@@ -102,12 +102,20 @@ vhid_keychain_ready() {
     if [ "$line" = "$VHID_KEYCHAIN" ]; then return 0; fi
   done < <(sed 's/^[[:space:]]*"//;s/"$//' <<<"$listing")
 
-  # A list that parsed to nothing is not a Mac with no keychains - it is a reading this
-  # script does not understand, and the only safe thing to do with a search list you
-  # cannot read is to leave it exactly as it is. [LAW:no-silent-failure]
+  # A list that read as nothing is left exactly as it is, and the build stops here.
+  #
+  # Two things produce that reading - a search list genuinely emptied on purpose, and a
+  # `security` whose output this script failed to understand - and it cannot tell them
+  # apart. Writing under either is wrong: under the first it overrides a deliberate
+  # choice and replaces the defaults macOS falls back to, and under the second it writes
+  # a list built from a reading it does not trust, which is how every other keychain on
+  # the Mac stops being searched. Stopping is the only move that is right under both.
+  # [LAW:no-silent-failure]
   if [ ${#searched[@]} -eq 0 ]; then
-    echo "signing-keychain: could not read the keychain search list, so it has been left alone." \
-         "Add $VHID_KEYCHAIN to it by hand, or sign with --keychain." >&2
+    echo "signing-keychain: the user keychain search list read as empty, so it has been left" \
+         "alone and nothing was signed. Put $VHID_KEYCHAIN on it yourself and build again;" \
+         "codesign will not find an identity in a keychain that is not searched, and" \
+         "--keychain does not stand in for that." >&2
     return 1
   fi
 

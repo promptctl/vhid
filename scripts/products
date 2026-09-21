@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# The executables this package builds, as paths. One per line.
+#
+#   products
+#
+# [LAW:one-source-of-truth] Package.swift already says which executables exist and
+# SwiftPM already says where it puts them, so neither fact is written down a second time
+# here. A hand-kept list is a copy that drifts silently in one direction only: a product
+# added to the manifest and forgotten here is a product that never gets signed, and an
+# unsigned product is refused as NSCocoaErrorDomain 4097 by a daemon that cannot say
+# why. `make test` would print `sign: 1 signed` and exit 0 the whole time.
+#
+# The bin path is asked for rather than assumed, so a release build signs what a release
+# build made rather than whatever a debug build left behind.
+set -euo pipefail
+
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$root"
+
+# Both through variables, so a manifest that will not parse stops here with SwiftPM's
+# own complaint rather than handing back an empty list that reads as "nothing to sign".
+# [LAW:no-silent-failure]
+bin=$(swift build --show-bin-path)
+names=$(swift package dump-package | jq -r '.products[] | select(.type | has("executable")) | .name')
+
+[ -n "$names" ] || { echo "products: the package declares no executable products" >&2; exit 1; }
+
+while IFS= read -r name; do
+  [ -n "$name" ] || continue
+  echo "$bin/$name"
+done <<<"$names"

@@ -45,9 +45,11 @@ set +e
 found=$?
 set -e
 
+imported=
 case $found in
   0) ;;
   3)
+    imported=yes
     work=$(mktemp -d)
     trap '/bin/rm -rf "$work"' EXIT
 
@@ -94,15 +96,19 @@ set +e
 ready=$("$here/signing-identity" "$identity")
 usable=$?
 set -e
-if [ $usable -ne 0 ]; then
-  # The certificate is in the keychain by now, and saying so matters: a silent death
-  # here leaves one behind, and the next run - finding the name it looked for still
-  # absent - would take the create branch and import a second. Two by one name is the
-  # ambiguity every later build fails on. [LAW:no-silent-failure]
-  echo "make-signing-identity: a certificate for '$identity' was imported into $VHID_KEYCHAIN" \
-       "but cannot be found by that name afterwards. Delete it before running this again," \
-       "or a second import will make the name ambiguous:" \
-       "security delete-keychain $VHID_KEYCHAIN_NAME" >&2
+# Ambiguity has already been described by the lookup itself, and what to do about it -
+# delete one of them - is the same whichever path arrived here. Only "not found" needs
+# saying, and only the branch that imported can say a certificate was left behind: on
+# the other branch nothing was created, and telling that operator to delete their
+# keychain would be advice to destroy a working one. [LAW:no-silent-failure]
+if [ $usable -eq 3 ]; then
+  echo "make-signing-identity: '$identity' is not in $VHID_KEYCHAIN after being made ready." >&2
+  if [ -n "$imported" ]; then
+    echo "make-signing-identity: a certificate for it was imported a moment ago and is still" \
+         "there under some other name. Remove it before running this again, or the next" \
+         "import makes the name ambiguous: security delete-keychain $VHID_KEYCHAIN_NAME" >&2
+  fi
   exit 1
 fi
+[ $usable -eq 0 ] || exit $usable
 echo "make-signing-identity: '$identity' is ready ($ready)"

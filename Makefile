@@ -1,4 +1,4 @@
-# The dev loop. `make` builds and signs; `make test` builds, tests and leaves the tree
+# The dev loop. `make` builds and signs; `make test` runs the suite and leaves the tree
 # signed behind it.
 #
 # Everything here exists because of one rule in the daemon: a caller is admitted if it
@@ -12,12 +12,14 @@
 # come to be signed with one certificate and checked against another.
 DEV_IDENTITY := vhid Dev
 
-# Everything a caller or the daemon runs as. One list, because the rule they have to
-# satisfy is about the pair: the daemon admits the CLI exactly when both carry this
-# certificate, so a product left off this line is a product that gets the afternoon of
-# 4097. The CLI joins it in vhid-cli-yhu.
-BUILT := .build/debug
-PRODUCTS := $(BUILT)/vhidd
+# [LAW:single-enforcer] The one definition of what signing is, used by the three targets
+# below. Written out rather than reached through a recursive `$(MAKE) sign`, because GNU
+# make runs any recipe line mentioning $(MAKE) even under -n: `make -n test` would build,
+# test and re-sign while claiming to be a dry run.
+#
+# What to sign is asked of the package rather than listed here, so an executable added
+# to Package.swift is signed by the next build and not by the next person to remember.
+SIGN := products=$$(scripts/products) && scripts/sign "$(DEV_IDENTITY)" $$products
 
 .PHONY: all build test sign signing-identity clean
 
@@ -28,8 +30,13 @@ all: build
 # vhid needs no step this file does not already take. [LAW:dataflow-not-control-flow]
 build: signing-identity
 	swift build
-	$(MAKE) sign
+	$(SIGN)
 
+# `swift build` first and on its own line, for two reasons. It builds executables no
+# test depends on, which `swift test` would leave unbuilt for `sign` to fail on; and a
+# build that fails is a failure the operator has to deal with before anything here
+# matters, so stopping on it reports the thing that actually went wrong.
+#
 # Signing last is what makes a test run safe to leave behind: every link SwiftPM
 # performs ad hoc signs its product - measured, a relink turns `Authority=vhid Dev` back
 # into `Signature=adhoc` - so without this a run leaves the next invocation refused, a
@@ -38,20 +45,17 @@ build: signing-identity
 # It signs whether or not the tests passed, and hands the suite's own status back
 # afterwards. A failing run is the run whose binaries someone is about to go and try by
 # hand, so leaving those ad hoc would answer a test failure with a 4097 that has nothing
-# to do with it.
-#
-# Signing's own failure is passed on before the suite's, and not folded into it: the
-# recipe is one shell, so a plain `$(MAKE) sign` followed by `exit $$status` would
-# discard a failed signing whenever the tests passed - reporting success over exactly
-# the unsigned tree this target exists to prevent.
+# to do with it. Signing's own failure is passed on first and not folded into the
+# suite's: `$(SIGN)` followed by a bare `exit $$status` would discard a failed signing
+# whenever the tests passed, reporting success over exactly the unsigned tree this
+# target exists to prevent.
 test: signing-identity
 	swift build
-	swift test; status=$$?; $(MAKE) sign || exit $$?; exit $$status
+	swift test; status=$$?; $(SIGN) || exit $$?; exit $$status
 
-# [LAW:single-enforcer] The one place products are signed. `make sign` on its own is
-# also the fix for a tree someone has built with bare `swift build`.
+# Also the fix for a tree someone has built with bare `swift build`.
 sign:
-	scripts/sign "$(DEV_IDENTITY)" $(PRODUCTS)
+	$(SIGN)
 
 # Idempotent, which is why the targets above can simply depend on it. Once per Mac in
 # practice; a no-op every time after that.
