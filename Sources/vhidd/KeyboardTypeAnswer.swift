@@ -184,7 +184,7 @@ enum KeyboardTypeAnswer {
     }
 
     /// What went wrong, and what it costs the reader. Never swallowed into "filed": the
-    /// consequence of believing it was is that the first dictation after an install types
+    /// consequence of believing it was is that the first text typed after an install goes
     /// into a dialog, which is the whole reason this exists. [LAW:no-silent-failure]
     ///
     /// Each case says its own consequence, because they are not the same consequence and

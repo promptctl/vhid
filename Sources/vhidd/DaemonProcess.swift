@@ -1,5 +1,5 @@
 import Foundation
-import VirtualKeyboard
+import VirtualHID
 
 /// Karabiner-VirtualHIDDevice-Daemon, the root process that holds the driver open, and
 /// the one thing that has to be running before anything can type.

@@ -1,7 +1,7 @@
 import Foundation
 import Keystrokes
 import Testing
-@testable import VirtualKeyboard
+@testable import VirtualHID
 
 /// What the connection does between requests, which is where a long-lived one spends
 /// nearly all of its life. Measured on the daemon: it hangs up on a client that has sent

@@ -1,9 +1,9 @@
 import DriverExtension
 import Flavors
 import Foundation
-import KeyboardService
+import Helper
 import Signals
-import VirtualKeyboard
+import VirtualHID
 import os
 
 /// Which installation this helper serves, from the `--flavor` its plist passes.
@@ -18,7 +18,7 @@ import os
 ///
 /// The refusal is filed under every flavor's service name, because which one this would
 /// have been is exactly what is not known - and every reader already asks under a service
-/// name: `scripts/keyboard-helper log` and the onboarding step both do. A name of its own
+/// name: `scripts/vhid-helper log` and the onboarding step both do. A name of its own
 /// would be one more subsystem for each of them to learn, for the one message that most
 /// needs finding. The arguments it prints say which plist it was. [LAW:no-silent-failure]
 let flavor: Flavor = {
@@ -37,7 +37,7 @@ let flavor: Flavor = {
 /// daemon that fails silently at startup looks exactly like one that is working. Public
 /// on purpose: nothing here is the user's data, and a redacted reason is no reason.
 ///
-///     log show --last 10m --predicate 'subsystem == "ai.promptctl.low-talker.keyboardd"'
+///     log show --last 10m --predicate 'subsystem == "ai.promptctl.vhid.vhidd"'
 private let logger = Logger(subsystem: flavor.machServiceName, category: "helper")
 func log(_ message: String) {
     logger.notice("\(message, privacy: .public)")

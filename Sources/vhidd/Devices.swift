@@ -1,6 +1,7 @@
+import Flavors
 import Foundation
+import Helper
 import Keystrokes
-import KeyboardService
 import Pointing
 
 /// The devices as the listener serves them: what a client is handed, and the release made
@@ -17,7 +18,7 @@ protocol ServedDevices: HelperService {
 /// [LAW:no-ambient-temporal-coupling] Both are brought up at startup and never re-opened
 /// per client, because readiness is not instant: pqrs's daemon asks the driver whether a
 /// device is ready on a one-second timer, so a connect-per-insert helper would put up to
-/// a full second in front of the first keystroke of every dictation, for a reason that has
+/// a full second in front of every client's first keystroke, for a reason that has
 /// nothing to do with the hardware. Paid once here, where nobody is waiting.
 final class Devices: NSObject, ServedDevices, @unchecked Sendable {
     /// The seams and not the drivers, so a test hands in devices of its own and the
@@ -139,16 +140,12 @@ enum NotOnTheDevice: Error, CustomStringConvertible {
 /// on this side, where the real error still exists, and carried by a plain `NSError` - the
 /// one class the reply admits, and one every client has. A subclass of it would be
 /// archived under a name no client links, and would not decode. [LAW:no-silent-failure]
-/// The domain every refusal crosses under.
-///
-/// Not the serving flavor's Mach service name, for two reasons. An error's domain says
-/// what kind of thing refused, and both installations' helpers refuse for identical
-/// reasons under identical rules - the flavor is not part of that fact. And this file is
-/// linked into the test bundle, where reaching for the process-wide flavor would run its
-/// initializer against the test runner's own arguments, find no `--flavor`, and end the
-/// test process with the refusal it is written to make. [LAW:decomposition]
-let refusalDomain = "ai.promptctl.low-talker.keyboardd.refusal"
-
+/// `Flavor.refusalDomain` and not the serving flavor's Mach service name: the domain says
+/// what kind of thing refused, which is the same fact for both installations. It being a
+/// static is also what lets this file be linked into the test bundle - reaching for the
+/// process-wide flavor there would run its initializer against the test runner's own
+/// arguments, find no `--flavor`, and end the test process with the refusal it is written
+/// to make. [LAW:decomposition]
 func refusal(_ error: any Error) -> NSError {
-    NSError(domain: refusalDomain, code: 1, userInfo: [NSLocalizedDescriptionKey: "\(error)"])
+    NSError(domain: Flavor.refusalDomain, code: 1, userInfo: [NSLocalizedDescriptionKey: "\(error)"])
 }

@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import VirtualKeyboard
+@testable import VirtualHID
 
 /// Karabiner-VirtualHIDDevice-Daemon, faked at the only place worth faking it: the far end
 /// of a real socket, speaking the real framing.

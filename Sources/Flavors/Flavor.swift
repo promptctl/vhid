@@ -1,4 +1,4 @@
-/// Which installation of low-talker this is: the one that runs all day, or the one being
+/// Which installation of vhid this is: the one that runs all day, or the one being
 /// worked on. Two copies are meant to be installed and running at the same moment, so
 /// every name macOS keys an installation by has to differ between them.
 ///
@@ -34,10 +34,28 @@ public enum Flavor: String, CaseIterable, Sendable, CustomStringConvertible {
     /// The reverse-DNS identity of the release build, which every other name here is
     /// built from. Named once so a rename reaches all of them together.
     /// [LAW:one-source-of-truth]
-    private static let releaseBundleIdentifier = "ai.promptctl.low-talker"
-    /// The helper nested under the app it belongs to, the shape Apple's own embedded
+    private static let releaseBundleIdentifier = "ai.promptctl.vhid"
+    /// The daemon nested under the identity it belongs to, the shape Apple's own embedded
     /// helpers take, so the parentage Background Task Management records reads in the name.
-    private static let releaseMachServiceName = releaseBundleIdentifier + ".keyboardd"
+    ///
+    /// Private, like the identity above it: for `.release` this is `machServiceName`
+    /// verbatim, so a caller holding it would dial the release helper's service from a
+    /// development build and never learn it had. Every name that varies by flavor is an
+    /// instance property for that reason, and what a caller needs that does not vary is
+    /// vended below. [LAW:types-are-the-program]
+    private static let helperIdentifier = releaseBundleIdentifier + ".vhidd"
+
+    /// The domain every refusal from the daemon crosses under.
+    ///
+    /// The one name here that is `static` rather than per-flavor, because it is the one
+    /// name that does not vary: an error's domain says what kind of thing refused, and
+    /// both installations' helpers refuse for identical reasons under identical rules. A
+    /// client matching on it is matching on the kind, not on which copy answered.
+    ///
+    /// Built from the namespace rather than spelled out, so a rename of the identity
+    /// reaches it - which it did not, before vhid-naming-dnk found it spelled twice.
+    /// [LAW:one-source-of-truth]
+    public static let refusalDomain = helperIdentifier + ".refusal"
 
     /// What the development build suffixes onto each of the release build's names. One
     /// suffix for all of them, so the two installations are told apart the same way
@@ -64,8 +82,8 @@ public enum Flavor: String, CaseIterable, Sendable, CustomStringConvertible {
     /// never got it.
     public var machServiceName: String {
         switch self {
-        case .release: Self.releaseMachServiceName
-        case .development: Self.releaseMachServiceName + Self.developmentSuffix
+        case .release: Self.helperIdentifier
+        case .development: Self.helperIdentifier + Self.developmentSuffix
         }
     }
 
@@ -73,7 +91,7 @@ public enum Flavor: String, CaseIterable, Sendable, CustomStringConvertible {
     ///
     /// **The same string as the service, and that is load-bearing.** A flavor's helper can
     /// be registered two ways - `SMAppService` from inside the app, or a plist in
-    /// /Library/LaunchDaemons that `scripts/keyboard-helper` bootstraps - and exactly one
+    /// /Library/LaunchDaemons that `scripts/vhid-helper` bootstraps - and exactly one
     /// of them may hold the flavor at a time. Giving both paths this one label is what
     /// makes a second claimant fail loudly instead of quietly. Measured on this Mac:
     ///
@@ -94,12 +112,12 @@ public enum Flavor: String, CaseIterable, Sendable, CustomStringConvertible {
     /// person can tell the two apart at a glance.
     public var displayName: String {
         switch self {
-        case .release: "LowTalker"
-        case .development: "LowTalker Dev"
+        case .release: "vhid"
+        case .development: "vhid Dev"
         }
     }
 
-    /// The config file's name inside `~/.config/low-talker`. One directory, two files:
+    /// The config file's name inside `~/.config/vhid`. One directory, two files:
     /// the directory is the project's, and a reader editing one build's settings should
     /// find the other's beside it rather than somewhere else entirely.
     public var configFileName: String {

@@ -11,9 +11,9 @@ let package = Package(
         .library(name: "DriverExtension", targets: ["DriverExtension"]),
         .library(name: "KeyboardLayout", targets: ["KeyboardLayout"]),
         .library(name: "Flavors", targets: ["Flavors"]),
-        .library(name: "VirtualKeyboard", targets: ["VirtualKeyboard"]),
-        .library(name: "KeyboardService", targets: ["KeyboardService"]),
-        .executable(name: "lowtalker-keyboardd", targets: ["lowtalker-keyboardd"]),
+        .library(name: "VirtualHID", targets: ["VirtualHID"]),
+        .library(name: "Helper", targets: ["Helper"]),
+        .executable(name: "vhidd", targets: ["vhidd"]),
     ],
     targets: [
         // The vocabulary at the seam between deciding what to type and typing it: a HID
@@ -57,28 +57,28 @@ let package = Package(
         // Everything about the two virtual devices and nothing about what is typed on
         // them: the pqrs daemon socket, the two report layouts, and the keys and buttons
         // each device is holding. [LAW:one-way-deps]
-        .target(name: "VirtualKeyboard", dependencies: ["DriverExtension", "Keystrokes", "Pointing"]),
+        .target(name: "VirtualHID", dependencies: ["DriverExtension", "Keystrokes", "Pointing"]),
         // The wire protocol against a fake daemon on the other end of a socketpair, so
         // the framing is proven without root and without the driver.
-        .testTarget(name: "VirtualKeyboardTests", dependencies: ["VirtualKeyboard", "DriverExtension", "Keystrokes", "Pointing"]),
+        .testTarget(name: "VirtualHIDTests", dependencies: ["VirtualHID", "DriverExtension", "Keystrokes", "Pointing"]),
         // What crosses the privilege boundary, and the client's side of it. It links the
         // two vocabularies and nothing else: not the layout, because a root daemon must
         // never read one, and not the device, because a client must never open one.
         // [LAW:one-way-deps]
-        .target(name: "KeyboardService", dependencies: ["Flavors", "Keystrokes", "Pointing"]),
-        .testTarget(name: "KeyboardServiceTests", dependencies: ["KeyboardService", "Flavors", "Keystrokes", "Pointing"]),
+        .target(name: "Helper", dependencies: ["Flavors", "Keystrokes", "Pointing"]),
+        .testTarget(name: "HelperTests", dependencies: ["Helper", "Flavors", "Keystrokes", "Pointing"]),
         // The root daemon that owns the devices. It links DriverExtension for the identity
         // the keyboard files its Keyboard Setup Assistant answer under, and deliberately
         // not KeyboardLayout: text never reaches this process. [LAW:one-way-deps]
         .executableTarget(
-            name: "lowtalker-keyboardd",
-            dependencies: ["KeyboardService", "VirtualKeyboard", "DriverExtension", "Keystrokes", "Pointing", "Signals", "Flavors"]
+            name: "vhidd",
+            dependencies: ["Helper", "VirtualHID", "DriverExtension", "Keystrokes", "Pointing", "Signals", "Flavors"]
         ),
         // The authorization boundary of a root keystroke service, checked against the
         // test process's own identity and audit token: real code signing, no root.
         .testTarget(
-            name: "lowtalker-keyboarddTests",
-            dependencies: ["lowtalker-keyboardd", "KeyboardService", "VirtualKeyboard", "DriverExtension", "Keystrokes", "Pointing", "Signals", "Flavors"]
+            name: "vhiddTests",
+            dependencies: ["vhidd", "Helper", "VirtualHID", "DriverExtension", "Keystrokes", "Pointing", "Signals", "Flavors"]
         ),
     ]
 )

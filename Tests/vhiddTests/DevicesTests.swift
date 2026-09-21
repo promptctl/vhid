@@ -1,10 +1,10 @@
 import Foundation
-import KeyboardService
+import Helper
 import Keystrokes
 import Pointing
 import Synchronization
 import Testing
-@testable import lowtalker_keyboardd
+@testable import vhidd
 
 /// The devices as the helper serves them, over recording devices of the test's own: what
 /// the wire may carry that the device cannot, and what a client leaving lets go of.
@@ -75,7 +75,7 @@ import Testing
     @Test func aRefusalCrossesAsAnNSErrorCarryingItsDescription() throws {
         let devices = Devices(keyboard: RecordingKeyboard(), mouse: RecordingMouse())
         let error = try #require(answer { devices.buttonDown(0, reply: $0) }) as NSError
-        #expect(error.domain == refusalDomain)
+        #expect(error.domain == "ai.promptctl.vhid.vhidd.refusal")
         #expect(error.localizedDescription == "button 0 is not one of the 32 the device has a bit for")
     }
 

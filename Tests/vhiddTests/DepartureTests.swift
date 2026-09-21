@@ -1,5 +1,5 @@
 import Testing
-@testable import lowtalker_keyboardd
+@testable import vhidd
 
 /// The first reason to leave is the one that leaves; every later one finds the process
 /// already going.

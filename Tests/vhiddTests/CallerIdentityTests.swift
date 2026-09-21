@@ -1,8 +1,8 @@
 import Foundation
-import KeyboardService
+import Helper
 import Security
 import Testing
-@testable import lowtalker_keyboardd
+@testable import vhidd
 
 /// The authorization boundary of the root keystroke service, checked against the one
 /// process whose identity and audit token this test can hold: its own.

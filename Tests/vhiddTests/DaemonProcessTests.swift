@@ -1,7 +1,7 @@
 import Foundation
 import Testing
-import VirtualKeyboard
-@testable import lowtalker_keyboardd
+import VirtualHID
+@testable import vhidd
 
 /// The daemon's lifecycle as a policy over what the world answers: reached when it runs,
 /// started when it does not, and stopped only when this helper started it and could not
