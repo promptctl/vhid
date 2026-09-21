@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Resolves the name of a signing identity to the SHA-1 of its certificate.
+#
+#   signing-identity <identity-name>
+#
+# [LAW:one-source-of-truth] The one place the keychain is searched by name. Both callers
+# want the same answer for different reasons - one to decide whether the identity needs
+# creating, one to sign with it and to say what it requires of callers - and a second
+# copy of this lookup is a second opinion about what "the identity" means.
+#
+# The SHA-1 and not the name is what callers get back, because the name is ambiguous by
+# construction: a keychain can hold two certificates called the same thing, and
+# `codesign --sign` given an ambiguous name fails the build rather than choosing. The
+# SHA-1 names exactly one certificate, and it is also the text a code signing
+# requirement is written in, so one string both signs a binary and states who may call
+# it.
+#
+# [LAW:parse-dont-validate] The keychain is read once and parsed into exactly three
+# states, reported as exit codes so no caller has to read prose to tell them apart:
+#
+#   0  exactly one - its SHA-1 is on stdout
+#   3  none - nothing by that name is in the keychain
+#   1  anything else, two of them included
+#
+# 3 says nothing on stderr, because it is a result and not a failure: one caller makes
+# the identity when it hears it and the other tells you to run `make signing-identity`,
+# and neither wants a line of alarm printed under its own. 1 does say something, because
+# no caller can act on it - two certificates by one name is a keychain a human has to
+# come and sort out.
+set -euo pipefail
+
+identity=${1:?usage: signing-identity <identity-name>}
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+# vhid's own keychain and not the whole search list, so a certificate of the same name
+# somewhere else on this Mac cannot answer for this one. What is signed with is the
+# SHA-1 below, so the two can coexist without either being mistaken for the other.
+keychain=$("$here/signing-keychain")
+
+# Through a variable so a failing `security` aborts with its own error rather than
+# reading as "no match", which would be an unreadable keychain reported as a missing
+# identity. [LAW:no-silent-failure]
+listing=$(security find-identity -p codesigning "$keychain")
+
+# Each identity is a line `  N) <40 hex> "<name>"`, sometimes with a trust complaint
+# after it. The name is compared as a string rather than matched as a pattern: a name is
+# a name, and one holding regex punctuation - every Apple identity ends in a
+# parenthesised team id - would otherwise match nothing and be reported as absent, which
+# is the one answer that makes a caller create a second copy of an identity that is
+# already there.
+#
+# The hashes are deduplicated because `security` prints the keychain twice - every
+# identity under "Matching identities", then the trusted ones again under "Valid
+# identities only" - so counting lines reports one trusted certificate as two and
+# refuses a good identity as ambiguous. A certificate is one certificate however many
+# listings mention it, and its SHA-1 is what says so.
+matches=$(awk -v want="$identity" '
+  match($0, /^ +[0-9]+\) [0-9A-F]{40} "/) {
+    rest = substr($0, RLENGTH)
+    if (match(rest, /^"[^"]*"/) && substr(rest, 2, RLENGTH - 2) == want) print $2
+  }
+' <<<"$listing" | sort -u)
+
+case $(grep -c . <<<"$matches") in
+  1) echo "$matches" ;;
+  0) exit 3 ;;
+  *) echo "signing-identity: $(grep -c . <<<"$matches") different certificates are named '$identity';" \
+          "every build would fail as ambiguous. Delete all but one in Keychain Access." >&2; exit 1 ;;
+esac

@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# Makes sure this Mac holds the self-signed identity that signs vhid's dev builds.
+#
+#   make-signing-identity <identity-name>
+#
+# The daemon admits a caller that carries the certificate the daemon itself carries, so
+# the dev loop needs one certificate that outlives every build. `swift build` ad hoc
+# signs what it links, and an ad hoc signature names a hash that changes with the
+# binary, so it can neither be required of a caller nor satisfied by one. Any long lived
+# certificate closes that; a self-signed one is enough, because the signature has to be
+# stable, never trusted.
+#
+# The certificate is given no trust settings on purpose. codesign does not need them,
+# and granting them is the one step here that would raise a password dialog.
+#
+# [LAW:dataflow-not-control-flow] Running it when the identity already exists is not an
+# error and not a no-op to be guarded against by the caller - it is the ordinary case.
+# That is what lets the build depend on it every time rather than asking first, and an
+# ask the build has to remember is the step a newcomer's first build skips.
+#
+# What it will not do is make a second certificate by the same name: two would make
+# every later build fail as ambiguous, and a duplicate cannot be told from the original
+# afterwards. Ambiguity already in the keychain is reported and left alone, because
+# deleting a certificate is not this script's call - a permission grant, or a shipped
+# signature, may hang off the one it picked.
+set -euo pipefail
+
+identity=${1:?usage: make-signing-identity <identity-name>}
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+# 3 is "no such identity", which is the only reading that leads to making one; 0 is
+# "already there" and anything else is a keychain this script must not write to, and has
+# already said why. [LAW:no-silent-failure]
+set +e
+existing=$("$here/signing-identity" "$identity")
+found=$?
+set -e
+case $found in
+  0) echo "make-signing-identity: '$identity' is already here ($existing)"; exit 0 ;;
+  3) ;;
+  *) exit $found ;;
+esac
+
+work=$(mktemp -d)
+trap '/bin/rm -rf "$work"' EXIT
+
+/usr/bin/openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=$identity" \
+  -addext "keyUsage=critical,digitalSignature" \
+  -addext "extendedKeyUsage=critical,codeSigning" \
+  -addext "basicConstraints=critical,CA:FALSE" \
+  -keyout "$work/key.pem" -out "$work/cert.pem" 2>/dev/null
+
+# The PKCS#12 file lives only until the import below reads it, so its password is a
+# fixed word: `security import` refuses an empty one. The cipher flags pin the
+# pre-OpenSSL-3 algorithms, which are the only ones `security import` can read.
+/usr/bin/openssl pkcs12 -export -name "$identity" -passout pass:identity \
+  -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1 \
+  -inkey "$work/key.pem" -in "$work/cert.pem" -out "$work/identity.p12"
+
+# Into vhid's own keychain, and the partition list set straight after in the same
+# breath. -T alone is not enough: it writes the key's access control list, while the
+# dialog a build stops on is raised by the partition list, which is empty on every
+# freshly imported key and can only be written with the password of the keychain
+# holding it. That password is knowable here precisely because the keychain is ours.
+# [LAW:no-silent-failure] an identity that cannot be used without a human is not an
+# identity a build can depend on.
+# Sourced rather than run: this is the one caller that needs the keychain's password
+# as well as its path, and reading both from the file that owns them is what keeps the
+# password this unlocks with and the password it was created with the same word.
+# shellcheck source=signing-keychain
+source "$here/signing-keychain"
+vhid_keychain_ready
+
+security import "$work/identity.p12" -k "$VHID_KEYCHAIN" -P identity -T /usr/bin/codesign
+security set-key-partition-list -S apple-tool:,apple:,codesign: \
+  -s -k "$VHID_KEYCHAIN_PASSWORD" "$VHID_KEYCHAIN" >/dev/null
+
+# [LAW:verifiable-goals] Prove the identity is findable by the name everything else will
+# ask for it by, before any build depends on it being there.
+echo "make-signing-identity: made '$identity' ($("$here/signing-identity" "$identity"))"
