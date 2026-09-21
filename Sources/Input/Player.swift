@@ -55,14 +55,31 @@ public struct Player<C: Clock> where C.Duration == Duration {
                     try Task.checkCancellation()
                     try await clock.sleep(until: min(wake, clock.now.advanced(by: Self.slice)), tolerance: .zero)
                 }
-                // The watch that follows the sleep, and it asks the same question the
-                // sleep did: `lead` is the caller's to choose and nothing caps it, so a
-                // long one would otherwise be a stretch of every gap in which a cancelled
-                // play kept spinning - the hole the slice loop above exists to close,
-                // reopened at the last moment. [LAW:single-enforcer]
+                // The watch that follows the sleep. It asks the same question the sleep
+                // did, because `lead` is the caller's to choose and nothing caps it: a long
+                // one would otherwise be a stretch of every gap in which a cancelled play
+                // kept spinning, the hole the slice loop above exists to close, reopened at
+                // the last moment. [LAW:single-enforcer]
+                //
+                // And it watches a clock that may not be moving. Yielding until the
+                // deadline is the whole point under a real clock - it is what keeps a
+                // report inside the lead rather than the hop's millisecond or two past it -
+                // but a clock that only moves when something sleeps on it never reaches the
+                // deadline, and the yield loop is then forever. So the watch measures
+                // whether the clock is moving and sleeps when it is not, which needs
+                // nothing declared about which kind was handed in.
+                // [LAW:dataflow-not-control-flow] A real clock advances between two reads
+                // separated by a yield, so this costs it nothing; if one ever did not, the
+                // report lands where it would have landed with no lead at all.
+                var watched = clock.now
                 while clock.now < deadline {
                     try Task.checkCancellation()
                     await Task.yield()
+                    guard clock.now != watched else {
+                        try await clock.sleep(until: deadline, tolerance: .zero)
+                        break
+                    }
+                    watched = clock.now
                 }
                 try Task.checkCancellation()
                 let sent = started.duration(to: clock.now)

@@ -43,6 +43,19 @@ import Testing
         (start + "\n" + #"{"t_ms":0,"move":{"dx":1}}"#, 2, "\"dy\" is missing"),
         (start + "\n" + #"{"t_ms":0,"move":{"dx":1,"dy":0,"x":3}}"#, 2, "unknown key \"x\""),
         (start + "\n" + #"{"t_ms":-1,"up":true}"#, 2, "0 through 3600000"),
+        // Numbers a script gets wrong, each named rather than handed to JSONDecoder's
+        // vocabulary: every one of these used to come back "The given data was not valid
+        // JSON", which is true of none of them.
+        (start + "\n" + #"{"t_ms":0,"down":300}"#, 2, "whole number from 1 to 32"),
+        (start + "\n" + #"{"t_ms":0,"down":256}"#, 2, "whole number from 1 to 32"),
+        (start + "\n" + #"{"t_ms":0,"down":-3}"#, 2, "whole number from 1 to 32"),
+        (start + "\n" + #"{"t_ms":0,"down":1.5}"#, 2, "whole number from 1 to 32"),
+        (start + "\n" + #"{"t_ms":0,"down":0}"#, 2, "whole number from 1 to 32"),
+        (start + "\n" + #"{"t_ms":0,"move":{"dx":1.5,"dy":0}}"#, 2, "whole counts"),
+        (start + "\n" + #"{"t_ms":0,"move":{"dx":1e300,"dy":0}}"#, 2, "whole counts"),
+        // And the start line's own keys, which the promise used to stop short of.
+        (#"{"to":{"x":1,"y":2,"dx":99}}"# + "\n" + #"{"t_ms":0,"up":true}"#, 1, "unknown key \"dx\""),
+        (#"{"to":{"x":1}}"# + "\n" + #"{"t_ms":0,"up":true}"#, 1, "y"),
         (start + "\n" + #"{"t_ms":1e13,"up":true}"#, 2, "0 through 3600000"),
         (start + "\n" + #"{"t_ms":0,"up":false}"#, 2, "\"up\":true"),
         (start + "\n" + #"{"t_ms":0,"down":"thumb"}"#, 2, "down"),
@@ -111,6 +124,29 @@ import Testing
         #expect(stopped.played.count == 1)
         #expect(stopped.causes.contains { $0 is CancellationError })
         #expect(clock.now.offset == Player<ManualClock>.slice)
+        #expect(fake.log == ["down 1", "up"])
+    }
+
+    /// A lead, watched out on a clock that only moves when something sleeps on it.
+    ///
+    /// **Every other test here passes `lead: .zero`**, which skips the watch entirely - so
+    /// the value a replay actually runs with, and the whole reason `WakingClock` exists,
+    /// had no coverage at all. The watch yields until the deadline, which is right under a
+    /// clock that advances on its own and is forever under one that does not: without the
+    /// measurement that notices the clock standing still, this spins until the time limit.
+    @Test(.timeLimit(.minutes(1)))
+    func aLeadIsWatchedOutOnAClockThatOnlyMovesWhenSleptOn() async throws {
+        let clock = ManualClock()
+        let fake = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
+        let play = try Play.parse("""
+            {"to":{"x":0,"y":0}}
+            {"t_ms":0,"down":"left"}
+            {"t_ms":10,"up":true}
+            """)
+        let played = try await Player(pointer: fake.pointer, clock: clock, wall: { Self.epoch }, lead: .milliseconds(2)).play(play)
+        #expect(played.reports.map(\.scheduled) == [Self.epoch, Self.epoch + 10_000])
+        // The watch put the clock exactly on the deadline, so nothing went out late.
+        #expect(played.lateness.max == 0)
         #expect(fake.log == ["down 1", "up"])
     }
 

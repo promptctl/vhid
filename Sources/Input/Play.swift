@@ -114,9 +114,27 @@ private func container(_ decoder: Decoder, taking allowed: Set<String>) throws -
 private struct StartLine: Decodable {
     let to: ScreenPoint
 
+    /// The start's own keys are checked the way a report's are. [LAW:single-enforcer] The
+    /// file's promise is that a key a line does not take is refused, and it used to stop
+    /// at the outer brace: `{"to":{"x":1,"y":2,"dx":99}}` parsed, while the identical
+    /// mistake one line later was refused by name. A misspelt key in a script is a report
+    /// that does not do what it says, wherever in the line it sits.
     init(from decoder: Decoder) throws {
-        to = try container(decoder, taking: ["to"]).decode(ScreenPoint.self, forKey: AnyKey("to"))
+        let line = try container(decoder, taking: ["to"])
+        let start = try container(line.superDecoder(forKey: AnyKey("to")), taking: ["x", "y"])
+        let x = try start.decode(Double.self, forKey: AnyKey("x"))
+        let y = try start.decode(Double.self, forKey: AnyKey("y"))
+        guard let point = ScreenPoint(x: x, y: y) else {
+            throw Refusal(reason: "to is (\(x.clean), \(y.clean)), which is not a place on the screen")
+        }
+        to = point
     }
+}
+
+private extension Double {
+    /// This number as a script would have written it: no trailing `.0` on a whole one, so
+    /// a refusal about `300` does not say `300.0` at somebody who never typed that.
+    var clean: String { self == rounded(.towardZero) && abs(self) < 1e15 ? String(Int(self)) : String(self) }
 }
 
 /// `t_ms` and exactly one of the four reports.
@@ -167,9 +185,14 @@ private func button(_ line: KeyedDecodingContainer<AnyKey>, _ key: AnyKey) throw
         }
         return button
     }
-    let number = try line.decode(UInt8.self, forKey: key)
-    guard let button = Button(rawValue: number) else {
-        throw Refusal(reason: "\(key.stringValue) is button \(number), which the report has no bit for; they run 1 to 32")
+    // Read as a Double and judged here, not read as the UInt8 a button is. Measured: a
+    // script saying 300, 256, -3 or 1.5 fails `decode(UInt8.self)` inside JSONDecoder,
+    // which reports "The given data was not valid JSON" - true of none of them, and no
+    // help at all to whoever wrote the line. A Double takes every one of them, so the
+    // refusal below is the one that knows what the mistake was. [LAW:no-silent-failure]
+    let number = try line.decode(Double.self, forKey: key)
+    guard number == number.rounded(.towardZero), number >= 1, number <= 32, let button = Button(rawValue: UInt8(number)) else {
+        throw Refusal(reason: "\(key.stringValue) is \(number.clean), and a button is a whole number from 1 to 32, or one of \(Button.named.keys.sorted().joined(separator: ", "))")
     }
     return button
 }
@@ -178,12 +201,15 @@ private func button(_ line: KeyedDecodingContainer<AnyKey>, _ key: AnyKey) throw
 /// a replay that quietly sent 127 for 200 would not be the script. [LAW:no-silent-failure]
 private func axes(_ line: KeyedDecodingContainer<AnyKey>, _ report: AnyKey, _ first: String, _ second: String) throws -> (Count, Count) {
     let axes = try container(line.superDecoder(forKey: report), taking: [first, second])
+    /// Read as a Double and judged here for the reason the button is: an `Int` decode
+    /// turns `1.5` and `1e300` into "The given data was not valid JSON" rather than into
+    /// the sentence that says what a report can carry.
     func count(_ axis: String) throws -> Count {
-        let value = try axes.decode(Int.self, forKey: AnyKey(axis))
-        guard (-Count.limit...Count.limit).contains(value) else {
-            throw Refusal(reason: "\(report.stringValue).\(axis) is \(value), and a report carries -\(Count.limit) through \(Count.limit)")
+        let value = try axes.decode(Double.self, forKey: AnyKey(axis))
+        guard value == value.rounded(.towardZero), abs(value) <= Double(Count.limit) else {
+            throw Refusal(reason: "\(report.stringValue).\(axis) is \(value.clean), and a report carries whole counts, -\(Count.limit) through \(Count.limit)")
         }
-        return Count(clamping: value)
+        return Count(clamping: Int(value))
     }
     return try (count(first), count(second))
 }

@@ -75,6 +75,15 @@ public struct WakingClock: Clock {
     }
 
     /// One uninterruptible wait of `span`, which the caller may stop waiting on.
+    ///
+    /// The span is measured on `ContinuousClock` and waited out on `mach_absolute_time`,
+    /// and those two disagree about one thing: the continuous clock runs while the Mac is
+    /// asleep and the mach timer does not. A lid closed inside a wait therefore leaves the
+    /// caller waiting past a deadline that has already come - by the length of the sleep,
+    /// if this were the whole wait. It is not: `patience` caps one wait, and the loop above
+    /// takes the next span from the continuous clock again, so the machine waking finds the
+    /// deadline past and returns. A second is the whole of the exposure, and a replay
+    /// interrupted by a lid closing has bigger problems than a second.
     private func wait(for span: Duration) async {
         let components = span.components
         let nanoseconds = UInt64(components.seconds) * 1_000_000_000 + UInt64(components.attoseconds / 1_000_000_000)
