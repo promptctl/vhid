@@ -1,4 +1,30 @@
+import CoreGraphics
 import Foundation
+
+/// The most findings one reading may return, which is always at least one.
+///
+/// [LAW:types-are-the-program] A bare `Int` admitted zero and negatives, which `Query`'s
+/// own documentation says cannot happen. Both are the false absence the rest of this file
+/// is built to prevent: a reader capping at zero returns nothing beside a scope reporting
+/// a whole read, which reads exactly like "the text is not on screen", and a reader
+/// implementing the cap the obvious way traps outright on a negative - `prefix` refuses a
+/// negative length. Neither is spellable now.
+public struct Limit: Sendable, Hashable {
+    public let count: Int
+
+    /// Enough for any reading a caller means to look at, and few enough that a runaway
+    /// walk is capped rather than shipped.
+    public static let `default` = Limit(unchecked: 50)
+
+    private init(unchecked count: Int) {
+        self.count = count
+    }
+
+    public init?(_ count: Int) {
+        guard count >= 1 else { return nil }
+        self.count = count
+    }
+}
 
 /// What a reader was asked for.
 ///
@@ -14,9 +40,9 @@ public struct Query: Sendable, Hashable {
     public let region: Region
     /// The most findings to return. A reading that hit this says so in its scope, so the
     /// cap can never be mistaken for the whole answer. [LAW:no-silent-failure]
-    public let limit: Int
+    public let limit: Limit
 
-    public init(match: Match?, region: Region, limit: Int = 50) {
+    public init(match: Match?, region: Region, limit: Limit = .default) {
         self.match = match
         self.region = region
         self.limit = limit
@@ -44,8 +70,15 @@ public enum Match: Sendable, Hashable {
 /// of monitors. [LAW:dataflow-not-control-flow]
 public enum Region: Sendable, Hashable {
     case rect(ScreenRect)
-    /// One display, by its index in the geometry reading.
-    case display(Int)
+    /// One display, by the id the window server knows it by.
+    ///
+    /// An id and not an index. A position in a list is a name that moves: displays
+    /// reorder when a monitor sleeps, wakes, disconnects or is rearranged, so a caller
+    /// that resolved "the second display" and read it a moment later would be reading a
+    /// different monitor and reporting a whole-region absence about it. The id survives
+    /// all of that, which is why the case below names windows the same way.
+    /// [FRAMING:representation]
+    case display(CGDirectDisplayID)
     /// One window's bounds, by the id the geometry reading gave it.
     case window(UInt32)
 }
@@ -61,6 +94,29 @@ public struct Reading: Sendable, Hashable {
     }
 }
 
+/// One or more findings, in reading order.
+///
+/// [LAW:parse-dont-validate] This exists so `Outcome.matched` cannot carry an empty list.
+/// An empty `matched` would mean "nothing matched" a second time, in the arm whose whole
+/// purpose is that the other arm means it - and the two would not agree, because
+/// `provesAbsence` reads the arm and not the count, so a whole read that matched nothing
+/// could not prove the absence it had actually established.
+public struct Matches: Sendable, Hashable {
+    public let first: Found
+    public let rest: [Found]
+
+    public init?(_ found: [Found]) {
+        guard let head = found.first else { return nil }
+        self.first = head
+        self.rest = Array(found.dropFirst())
+    }
+
+    /// All of them, derived rather than stored so it cannot disagree with the two fields
+    /// it is built from. [LAW:one-source-of-truth]
+    public var all: [Found] { [first] + rest }
+    public var count: Int { rest.count + 1 }
+}
+
 /// [LAW:types-are-the-program] Two shapes, not one list plus a flag. A reading either
 /// carries what matched or carries what was closest to matching, and the two cannot both
 /// be populated, so no caller reaches for `isEmpty` and then wonders what the other field
@@ -69,9 +125,10 @@ public struct Reading: Sendable, Hashable {
 /// computed where the data already sits rather than by shipping the data out.
 public enum Outcome: Sendable, Hashable {
     /// What matched, in reading order. Everything in the region when the query named
-    /// nothing to match.
-    case matched([Found])
-    /// Nothing matched. What was closest, nearest first.
+    /// nothing to match. Never empty - that is what `nearest` is for.
+    case matched(Matches)
+    /// Nothing matched. What was closest, nearest first, which is empty when nothing on
+    /// screen was close enough to be worth reporting.
     case nearest([Near])
 }
 
@@ -154,8 +211,10 @@ public enum Stop: Sendable, Hashable {
     case elementLimit(Int)
     /// Ran out of the time one read is given.
     case timeBudget(Duration)
-    /// More matched than the query's limit allowed back.
-    case resultLimit(Int)
+    /// More matched than the query's limit allowed back. It carries the query's own
+    /// `Limit` rather than a loose `Int`, so the cap that was hit and the cap that was
+    /// asked for are one value. [LAW:one-source-of-truth]
+    case resultLimit(Limit)
 }
 
 public extension Reading {

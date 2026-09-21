@@ -1,16 +1,19 @@
-/// A string with at least one character in it.
+/// A string with something in it other than blank space.
 ///
-/// [LAW:parse-dont-validate] A caller holding one cannot be holding `""`, so nothing
-/// downstream re-checks. The accessibility tree answers the empty string for elements
-/// that hold no text, and a reading that carried those would be mostly rows saying
-/// nothing at a coordinate.
+/// [LAW:parse-dont-validate] A caller holding one cannot be holding `""` or `"   "`, so
+/// nothing downstream re-checks. The accessibility tree answers the empty string for
+/// elements that hold no text and a single space for spacers and blank labels about as
+/// often, and a reading that carried either would be mostly rows saying nothing at a
+/// coordinate - which is the thing this type exists to make unspellable. Whitespace
+/// *around* text is kept: `" OK "` is a row that says OK, and trimming it would be this
+/// type editing the screen rather than describing it.
 public struct Text: Sendable, Hashable, CustomStringConvertible {
     public let value: String
 
-    /// Refuses the empty string. The one crossing, and its output type is the proof it
-    /// was made.
+    /// Refuses a string with nothing but blank space in it. The one crossing, and its
+    /// output type is the proof it was made.
     public init?(_ value: String) {
-        guard !value.isEmpty else { return nil }
+        guard value.contains(where: { !$0.isWhitespace }) else { return nil }
         self.value = value
     }
 
@@ -67,8 +70,17 @@ public struct Confidence: Sendable, Hashable, Comparable {
 
     /// Clamps rather than refuses: a recogniser reporting 1.0000001 is not a failure to
     /// report, and a reading thrown away over a rounding error is worse than a reading
-    /// that says 1.
-    public init(_ value: Double) {
+    /// that says 1. Infinities clamp the same way, to 1 and to 0.
+    ///
+    /// NaN is the one input refused, because it is not a number to clamp and clamping
+    /// does not touch it - `max(.nan, 0)` is `.nan`, and so is the `min` after it. A
+    /// `Confidence` holding NaN is unequal to itself, which breaks both conformances
+    /// above it: a `Found` carrying one never dedupes in a `Set` and never compares equal
+    /// to its own twin, and sorting findings by confidence returns them silently
+    /// unsorted rather than trapping. Refusing it here is the only place that can be
+    /// checked once. [LAW:parse-dont-validate]
+    public init?(_ value: Double) {
+        guard !value.isNaN else { return nil }
         self.value = min(max(value, 0), 1)
     }
 

@@ -38,5 +38,8 @@ let package = Package(
             dependencies: ["Eyes", .product(name: "ArgumentParser", package: "swift-argument-parser")],
             path: "Sources/Command"
         ),
+        // The scope line is the sentence that licenses every narrow answer under it, so it
+        // is checked here rather than read off a terminal by eye. [LAW:verifiable-goals]
+        .testTarget(name: "EyesCommandTests", dependencies: ["EyesCommand", "Eyes"]),
     ]
 )
