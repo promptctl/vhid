@@ -17,11 +17,23 @@ set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$root"
 
+# Read out of `describe`'s text rather than `dump-package`'s JSON, because JSON needs a
+# parser and neither jq nor python3 ships with macOS - only Xcode's own tools are safe
+# to assume in a file whose whole promise is that a fresh clone needs nothing installed
+# first. The text has a section per product: a Name line, then a Type block naming
+# Library or Executable.
+#
 # Both through variables, so a manifest that will not parse stops here with SwiftPM's
 # own complaint rather than handing back an empty list that reads as "nothing to sign".
 # [LAW:no-silent-failure]
 bin=$(swift build --show-bin-path)
-names=$(swift package dump-package | jq -r '.products[] | select(.type | has("executable")) | .name')
+described=$(swift package describe --type text)
+names=$(awk '
+  # Section headers sit at column 0; everything else belongs to the last one seen.
+  /^[A-Za-z]/ { products = ($0 == "Products:") }
+  products && $1 == "Name:" { name = $2 }
+  products && $1 == "Executable:" { print name }
+' <<<"$described")
 
 [ -n "$names" ] || { echo "products: the package declares no executable products" >&2; exit 1; }
 

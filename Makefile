@@ -12,6 +12,12 @@
 # come to be signed with one certificate and checked against another.
 DEV_IDENTITY := vhid Dev
 
+# Every recipe runs under pipefail, so a pipeline reports the failure of any stage and
+# not merely of its last one. The signing line below is a pipeline, and its first stage
+# is the one that knows whether there is anything to sign at all.
+SHELL := /bin/sh
+.SHELLFLAGS := -o pipefail -c
+
 # [LAW:single-enforcer] The one definition of what signing is, used by the three targets
 # below. Written out rather than reached through a recursive `$(MAKE) sign`, because GNU
 # make runs any recipe line mentioning $(MAKE) even under -n: `make -n test` would build,
@@ -19,7 +25,14 @@ DEV_IDENTITY := vhid Dev
 #
 # What to sign is asked of the package rather than listed here, so an executable added
 # to Package.swift is signed by the next build and not by the next person to remember.
-SIGN := products=$$(scripts/products) && scripts/sign "$(DEV_IDENTITY)" $$products
+#
+# Handed over NUL-separated rather than as one string the shell splits on whitespace: a
+# checkout under a path with a space in it - `~/code/my repo/vhid` - would otherwise be
+# torn into fragments and every build would die on a binary that was never named. The
+# emptiness case is covered by `scripts/products` itself failing, which pipefail then
+# reports: macOS xargs runs nothing at all on empty input and exits 0, so without that
+# this line would sign nothing and call it success. [LAW:no-silent-failure]
+SIGN := scripts/products | tr '\n' '\0' | xargs -0 scripts/sign "$(DEV_IDENTITY)"
 
 .PHONY: all build test sign signing-identity clean
 
