@@ -55,7 +55,15 @@ public struct Player<C: Clock> where C.Duration == Duration {
                     try Task.checkCancellation()
                     try await clock.sleep(until: min(wake, clock.now.advanced(by: Self.slice)), tolerance: .zero)
                 }
-                while clock.now < deadline { await Task.yield() }
+                // The watch that follows the sleep, and it asks the same question the
+                // sleep did: `lead` is the caller's to choose and nothing caps it, so a
+                // long one would otherwise be a stretch of every gap in which a cancelled
+                // play kept spinning - the hole the slice loop above exists to close,
+                // reopened at the last moment. [LAW:single-enforcer]
+                while clock.now < deadline {
+                    try Task.checkCancellation()
+                    await Task.yield()
+                }
                 try Task.checkCancellation()
                 let sent = started.duration(to: clock.now)
                 try await post(event.report)

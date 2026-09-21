@@ -82,3 +82,35 @@ import Testing
     }
 
 }
+
+/// The last step of a move, on a Mac whose pointer moves several points for one count.
+///
+/// The loop's promise is that it converges, and the one step that can break it is the
+/// floor: below a whole count's worth of distance there is nothing smaller to ask for
+/// than one count, and one count may carry the cursor further past the target than it
+/// was short of it. Asking anyway is an oscillation that ends in a `WouldNotReach` about
+/// a target the cursor was already beside. [LAW:verifiable-goals]
+@Suite struct PointerConvergenceTests {
+    /// Every step lands strictly nearer than the one before, or the move is over. Asserted
+    /// over the gains a Mac with tracking speed turned up actually shows, and over
+    /// remainders on both sides of half a count.
+    @Test(arguments: [2.0, 3.0, 5.0, 7.5])
+    func aMoveEndsBesideTheTargetRatherThanOscillatingPastIt(gain: Double) async throws {
+        for offset in [1.4, 1.6, 2.5, 3.0, 4.9, 20.0] {
+            let mouse = SteadyGainMouse(at: ScreenPoint(x: 0, y: 0), gain: gain)
+            let target = ScreenPoint(x: offset, y: 0)
+            let reports = try await mouse.pointer.move(to: target)
+            let short = abs(mouse.position.x - target.x)
+            #expect(short < gain, "gain \(gain), offset \(offset): stopped \(short) points short in \(reports) reports")
+            #expect(reports < Pointer.rounds, "gain \(gain), offset \(offset): took every round it had")
+        }
+    }
+
+    /// A cursor that will not move is still a named failure and not a loop without end:
+    /// the floor may never be the reason a move gives up, and a pinned cursor always is.
+    @Test func aPinnedCursorIsStillWouldNotReach() async throws {
+        let mouse = FakeMouse(at: ScreenPoint(x: 0, y: 0))
+        mouse.stuck = true
+        await #expect(throws: WouldNotReach.self) { try await mouse.pointer.move(to: ScreenPoint(x: 400, y: 0)) }
+    }
+}

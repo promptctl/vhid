@@ -167,3 +167,35 @@ final class CancellingKeyboard: Keyboard {
 
     func releaseAll() throws { state.withLock { $0.log.append("up") } }
 }
+
+/// A mouse whose acceleration curve is one number, whatever the report asks for.
+///
+/// `FakeMouse`'s curve is one a Mac at default settings has - a slow report moves about a
+/// point a count - which is exactly the curve under which the pointer's last step is
+/// never the awkward one. A Mac with tracking speed turned up moves several points for a
+/// single count, and that is the case this stands in for.
+final class SteadyGainMouse: Mouse {
+    private let state: Mutex<(log: [String], position: ScreenPoint)>
+    private let gain: Double
+
+    init(at position: ScreenPoint, gain: Double) {
+        state = Mutex(([], position))
+        self.gain = gain
+    }
+
+    var log: [String] { state.withLock { $0.log } }
+    var position: ScreenPoint { state.withLock { $0.position } }
+
+    func down(_ button: Button) throws { state.withLock { $0.log.append("down \(button.rawValue)") } }
+    func releaseAll() throws { state.withLock { $0.log.append("up") } }
+    func scroll(by delta: Scroll) throws { state.withLock { $0.log.append("scroll \(delta.vertical.value) \(delta.horizontal.value)") } }
+
+    func move(by delta: Move) throws {
+        state.withLock {
+            $0.log.append("move \(delta.x.value) \(delta.y.value)")
+            $0.position = ScreenPoint(x: $0.position.x + Double(delta.x.value) * gain, y: $0.position.y + Double(delta.y.value) * gain)
+        }
+    }
+
+    var pointer: Pointer { Pointer(mouse: self) { self.position } }
+}

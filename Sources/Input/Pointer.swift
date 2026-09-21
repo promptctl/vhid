@@ -85,19 +85,28 @@ public struct Pointer: Sendable {
     /// The next report toward `to` from `from`, given that the OS moves the cursor `gain`
     /// points per count: the remaining distance over the gain, rounded toward zero so a
     /// known gain undershoots, and clamped to the report's edge. Zero on an axis within
-    /// half a point, which is arrived; otherwise at least one count in the target's
-    /// direction, so a gain estimate too high to ask for a whole count still asks for
-    /// something. That floor is the one place a known gain steps past the target - a
-    /// remainder just over half a point under a large gain - and the next round's
-    /// re-estimate takes it back. Pure. [LAW:decomposition]
+    /// half a point, which is arrived. Pure. [LAW:decomposition]
     public static func step(from: ScreenPoint, to: ScreenPoint, gain: Double) -> Move {
         Move(x: step(to.x - from.x, gain), y: step(to.y - from.y, gain))
     }
 
+    /// Otherwise at least one count in the target's direction, so a gain estimate too high
+    /// to ask for a whole count still asks for something. Whether that floor got the cursor
+    /// anywhere is not a question about these numbers - it is a question about what the
+    /// report did - so it is asked in `move`, against the motion that actually happened,
+    /// and not guessed at here from an estimate. [LAW:decomposition]
     private static func step(_ distance: Double, _ gain: Double) -> Count {
         guard abs(distance) > 0.5 else { return .zero }
         let counts = min(Double(Count.limit), max(1, (abs(distance) / gain).rounded(.towardZero)))
         return Count(clamping: Int(distance < 0 ? -counts : counts))
+    }
+
+    /// Whether this report is the smallest one the device has: a single count on either
+    /// axis and nothing on the other. There is nothing to ask for below it, so a report
+    /// this size that left the cursor no nearer is the end of the approach rather than a
+    /// round to try again. [LAW:dataflow-not-control-flow]
+    private static func isSmallest(_ step: Move) -> Bool {
+        abs(Int(step.x.value)) <= 1 && abs(Int(step.y.value)) <= 1
     }
 
     /// The gain the last report showed: points moved per count asked. A report that moved
@@ -109,12 +118,33 @@ public struct Pointer: Sendable {
         return moved > 0 ? moved / asked : previous / 2
     }
 
-    /// Moves the cursor to `target`, within half a point on each axis, and answers with
-    /// how many reports it took.
+    /// Moves the cursor to `target` and answers with how many reports it took.
+    ///
+    /// Within half a point on each axis where the device can do that, and otherwise as
+    /// near as one count of its motion puts it: a mouse whose smallest report moves three
+    /// points cannot land on a point 1.4 points away, and this stops beside it rather than
+    /// stepping over it forever. `WouldNotReach` stays what it always was - a cursor that
+    /// will not go where it is sent, three reports running - and is never the last count
+    /// of an approach that had arrived.
     ///
     /// Cancellation is checked once per round, which is once per report: the rounds are
     /// the only place this loop can be left without a button held, because every other
     /// line of it is a read. [LAW:dataflow-not-control-flow]
+    ///
+    /// **The approach ends when one count of motion stops helping**, which is the
+    /// difference between a device that cannot do better and a cursor that will not go.
+    /// On a Mac whose tracking speed is turned up a single count carries the cursor
+    /// several points, so the last stretch is a remainder no report can land on: asking
+    /// again is an oscillation, and it used to run out the round cap and report
+    /// `WouldNotReach` about a target the cursor was already beside. Measured at gain 3
+    /// with 1.4 points left: 64 rounds of `move -1` and `move 1`, ending where it started.
+    ///
+    /// The test is the report and not the estimate. `gain` is learned from the last report,
+    /// which near the target was a bigger and faster one than this, and macOS moves a slow
+    /// report less per count than a fast one - so an estimate is exactly the wrong thing to
+    /// decide this with, and what happened is exactly the right thing.
+    /// `aMoveEndsBesideTheTargetRatherThanOscillatingPastIt` holds it over four gains and
+    /// six remainders. [LAW:verifiable-goals]
     @discardableResult
     public func move(to target: ScreenPoint) async throws -> Int {
         var at = try cursor()
@@ -127,7 +157,9 @@ public struct Pointer: Sendable {
             try await mouse.move(by: step)
             let landed = try await settled(from: at)
             gain = Self.gain(after: step, from: at, to: landed, previous: gain)
-            stalls = landed.distance(to: target) < at.distance(to: target) ? 0 : stalls + 1
+            let nearer = landed.distance(to: target) < at.distance(to: target)
+            if !nearer, Self.isSmallest(step) { return reports + 1 }
+            stalls = nearer ? 0 : stalls + 1
             guard stalls < Self.stalls else { throw WouldNotReach(target: target, cursor: landed, reports: reports + 1) }
             at = landed
         }
