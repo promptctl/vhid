@@ -16,12 +16,21 @@ import Installations
 /// `MachServices`; passing that same name is one fact said once rather than a word and a
 /// name that can disagree. [LAW:one-source-of-truth]
 ///
+/// **A value that is itself a flag is a missing value, not a name.** argv cannot tell
+/// `--service --verbose` from a name spelled `--verbose`, and the closed vocabulary this
+/// replaced could not be fooled by one - so opening the set reopened that shape and this
+/// closes it again. Measured on this Mac before the guard existed: the daemon took
+/// `--verbose` as its name and said so under subsystem `--verbose`, a log nobody will
+/// ever read. The rule lives here rather than in `Installation` because a leading `-` is
+/// argv's to judge and nothing else's - launchd registers such a label without complaint.
+/// [LAW:no-silent-failure]
+///
 /// [LAW:effects-at-boundaries] Pure, taking the arguments rather than reading
 /// `CommandLine` itself, so every shape of a malformed plist is a test and not a daemon
 /// that has to be installed to find out.
 func serviceArgument(_ arguments: [String]) -> Installation? {
     guard let flag = arguments.firstIndex(of: "--service") else { return nil }
     let name = arguments.index(after: flag)
-    guard name < arguments.endIndex else { return nil }
+    guard name < arguments.endIndex, !arguments[name].hasPrefix("-") else { return nil }
     return Installation(service: arguments[name])
 }

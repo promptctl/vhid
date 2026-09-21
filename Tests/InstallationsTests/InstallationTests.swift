@@ -35,9 +35,9 @@ struct InstallationTests {
     /// for a service this package has never seen as well, because the guarantee belongs to
     /// the type and not to vhid's own two.
     @Test(arguments: ["ai.promptctl.vhid.vhidd", "ai.promptctl.vhid.vhidd.dev", "com.example.anything"])
-    func theLabelIsTheService(service: String) {
-        let installation = Installation(service: service)
-        #expect(installation?.launchdLabel == installation?.service)
+    func theLabelIsTheService(service: String) throws {
+        let installation = try #require(Installation(service: service))
+        #expect(installation.launchdLabel == installation.service)
     }
 
     /// The whole point of the change: something linking this package registers a daemon

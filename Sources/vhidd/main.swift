@@ -19,7 +19,10 @@ import os
 /// The refusal is filed under `Installation.unnamedSubsystem`, because which installation
 /// this would have been is exactly what is not known and the set of them is open, so
 /// there is no "every one" left to file it under. The arguments it prints say which plist
-/// it was.
+/// it was. That subsystem is a different string from any installation's, so the predicate
+/// below is written to span both - an exact match on a service name finds a daemon that
+/// started and misses every daemon that refused to, which is the one message most worth
+/// finding.
 let installation: Installation = {
     guard let installation = serviceArgument(CommandLine.arguments) else {
         Logger(subsystem: Installation.unnamedSubsystem, category: "helper").fault(
@@ -34,7 +37,10 @@ let installation: Installation = {
 /// daemon that fails silently at startup looks exactly like one that is working. Public
 /// on purpose: nothing here is the user's data, and a redacted reason is no reason.
 ///
-///     log show --last 10m --predicate 'subsystem == "ai.promptctl.vhid.vhidd"'
+/// Both installations and the refusal above are spanned by one predicate, because all
+/// three subsystems are built from the one namespace:
+///
+///     log show --last 10m --predicate 'subsystem BEGINSWITH "ai.promptctl.vhid"'
 private let logger = Logger(subsystem: installation.service, category: "helper")
 func log(_ message: String) {
     logger.notice("\(message, privacy: .public)")
