@@ -13,12 +13,31 @@ import Testing
         Window(id: id, owner: owner, frame: ScreenRect(x: 0, y: 33, width: 1512, height: 949), layer: layer)
     }
 
-    /// Nothing filtered and nothing excluded says so by saying nothing extra: the clause
-    /// only appears when there is something to report.
+    /// Nothing filtered and nothing excluded says so by saying nothing extra: the counted
+    /// clauses only appear when there is something to count.
     @Test func awholeReadingClaimsNothingItDidNotDo() {
         let listing = WindowListing(windows: [window(id: 1), window(id: 2)], excluded: [])
         let line = Windows.scope(shown: 2, listing: listing)
-        #expect(line == "2 windows, front to back. Owner, layer and bounds; titles need Screen Recording.")
+        #expect(line == "2 windows, front to back."
+            + " On screen only: minimized, hidden and other-Space windows were never looked at."
+            + " Owner, layer and bounds; titles need Screen Recording.")
+    }
+
+    /// The narrowing no count can reach, and so the one that has to be said in words: the
+    /// window server is asked for on-screen windows only and filters the rest before this
+    /// package sees anything. Measured on one Mac: 29 on screen against 110 in all. A
+    /// caller told "no Safari window" while Safari sits minimized was told something true
+    /// about the screen and false about the question they asked.
+    @Test func everyReadingSaysItOnlyLookedAtWhatIsOnScreen() {
+        let whole = Windows.scope(shown: 2, listing: WindowListing(windows: [window()], excluded: []))
+        let narrowed = Windows.scope(
+            shown: 0,
+            listing: WindowListing(windows: [window()], excluded: [WindowExclusion(reason: .invisible, count: 1)])
+        )
+        for line in [whole, narrowed] {
+            #expect(line.contains("On screen only"))
+            #expect(line.contains("minimized"))
+        }
     }
 
     /// One window is one window, not "1 windows".
@@ -77,5 +96,40 @@ import Testing
             layer: 101
         ))
         #expect(row == "104\tSystem Settings\tL101\t160,33 723x949")
+    }
+
+    /// `kCGWindowOwnerName` is an optional key, so a window can be visible and clickable
+    /// with nothing to call it by. It is named as unnamed rather than left blank, so the
+    /// column cannot be read as an empty field.
+    @Test func aWindowWithNoOwnerNameStillGetsARow() {
+        let row = Windows.row(Window(
+            id: 7,
+            owner: nil,
+            frame: ScreenRect(x: 0, y: 0, width: 100, height: 50),
+            layer: 0
+        ))
+        #expect(row == "7\t(unnamed)\tL0\t0,0 100x50")
+    }
+
+    /// [LAW:no-silent-failure] An empty `--owner` matches nothing at all, because
+    /// `localizedCaseInsensitiveContains("")` is false. That is the one spelling a caller
+    /// never means producing the one answer they cannot argue with - zero windows on a
+    /// screen full of them - and it arrives from `--owner "$APP"` with `APP` unset.
+    @Test func anEmptyOwnerIsRefusedRatherThanFilteringEverythingOut() throws {
+        // The Foundation behaviour the refusal exists for, stated so it cannot quietly
+        // change underneath the check.
+        #expect(!"Safari".localizedCaseInsensitiveContains(""))
+
+        var empty = Windows()
+        empty.owner = ""
+        #expect(throws: (any Error).self) { try empty.validate() }
+
+        var unset = Windows()
+        unset.owner = nil
+        #expect(throws: Never.self) { try unset.validate() }
+
+        var real = Windows()
+        real.owner = "Safari"
+        #expect(throws: Never.self) { try real.validate() }
     }
 }

@@ -183,6 +183,14 @@ public struct Scope: Sendable, Hashable {
     /// display, a capture that wrote nothing - so a `Reading` in hand is by contract from
     /// a reader that looked. This number is what the caller was told about the looking,
     /// not a second place blindness is decided. [LAW:single-enforcer]
+    ///
+    /// A plain `Int` where `limit` is a `Limit`, and the difference is the point rather
+    /// than an oversight: a limit is an input that *drives* behaviour, so a bad one
+    /// changes what the reader does and is worth making unspellable. This is an
+    /// observation the reader *reports*, and a refinement type would buy only the sign -
+    /// it cannot stop a reader that examined three elements from saying five, which is
+    /// the only way this field is ever wrong in practice. Constraining it would look like
+    /// a guarantee while providing none.
     public let examined: Int
     /// How many were dropped before matching, and why, so a narrow answer says what it
     /// narrowed. A reading that filtered 200 table cells away and says so is trustworthy;
@@ -230,8 +238,9 @@ public enum Reach: Sendable, Hashable {
 }
 
 public enum Stop: Sendable, Hashable {
-    /// Hit the cap on elements one walk may read.
-    case elementLimit(Int)
+    /// Hit the cap on elements one walk may read. A `Limit` and not an `Int` for the same
+    /// reason the query's is: a cap of zero or less is not a cap anyone set.
+    case elementLimit(Limit)
     /// Ran out of the time one read is given.
     case timeBudget(Duration)
     /// More matched than the query's limit allowed back. It carries the query's own

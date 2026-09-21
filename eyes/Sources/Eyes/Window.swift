@@ -12,7 +12,14 @@ public struct Window: Sendable, Hashable {
     /// The window server's id, which `Region.window` names.
     public let id: UInt32
     /// The application that owns it, which is the only naming available without a grant.
-    public let owner: String
+    ///
+    /// Absent when the owning process has no application name. `kCGWindowOwnerName` is in
+    /// Apple's *optional* key group - unlike the id, the layer and the bounds, which are
+    /// required - so a window can be perfectly visible and perfectly clickable while
+    /// having nothing to call it by. Optional rather than dropped: a name is the one
+    /// thing here a caller does not need in order to click, and refusing the window over
+    /// it would be the layer rule's mistake again in miniature.
+    public let owner: String?
     public let frame: ScreenRect
     /// Where the window server composites it, which is `NSWindow.Level` by another name -
     /// measured, not assumed: a window set to `.modalPanel` comes back at 8, `.floating`
@@ -23,7 +30,7 @@ public struct Window: Sendable, Hashable {
     /// which of those a caller meant. [LAW:dataflow-not-control-flow]
     public let layer: Int
 
-    public init(id: UInt32, owner: String, frame: ScreenRect, layer: Int) {
+    public init(id: UInt32, owner: String?, frame: ScreenRect, layer: Int) {
         self.id = id
         self.owner = owner
         self.frame = frame
@@ -48,8 +55,14 @@ public struct WindowListing: Sendable, Hashable {
         self.excluded = excluded
     }
 
-    /// What the window server listed, derived rather than carried so it cannot disagree
-    /// with the two numbers it is the sum of. [LAW:one-source-of-truth]
+    /// What the window server listed *as on screen*, derived rather than carried so it
+    /// cannot disagree with the two numbers it is the sum of. [LAW:one-source-of-truth]
+    ///
+    /// Not every window that exists. The reading asks for on-screen windows only, and
+    /// measured on one Mac at one moment that is 29 entries where asking for all of them
+    /// returns 110 - the rest being minimized, hidden, and other spaces. That narrowing
+    /// happens before any of this and cannot be counted here, which is exactly why the
+    /// binary's scope line says it in words instead.
     public var listed: Int { windows.count + excluded.reduce(0) { $0 + $1.count } }
 }
 
@@ -92,6 +105,15 @@ public enum Geometry {
     /// The windows a person can see, in front-to-back order.
     ///
     /// Needs no grant of any kind.
+    ///
+    /// **On screen means on screen.** A minimized window, a window on another Space, and
+    /// a hidden application's windows are not in this answer and are not counted in
+    /// `listed` either - the window server filters them before this function sees
+    /// anything, so there is nothing here to count them with. Measured on one Mac at one
+    /// moment: 29 on screen against 110 in all. A caller asking "is there a Safari
+    /// window" and meaning "even a minimized one" is asking a different question than
+    /// this one answers, which is why every caller of this is expected to say so - the
+    /// binary above prints it in the scope line. [LAW:no-silent-failure]
     @MainActor
     public static func onScreen() throws -> WindowListing {
         let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
@@ -123,8 +145,11 @@ public enum Geometry {
         var counts: [WindowExclusion.Reason: Int] = [:]
 
         for entry in raw {
+            // The owner name is deliberately not in this guard: it is an optional key,
+            // so a window with no application name is an ordinary window rather than a
+            // malformed entry, and counting it as an anomaly would fire `unreadable` for
+            // a documented-normal shape while dropping something a caller can click.
             guard let id = entry[kCGWindowNumber as String] as? UInt32,
-                  let owner = entry[kCGWindowOwnerName as String] as? String,
                   let layer = entry[kCGWindowLayer as String] as? Int,
                   let bounds = entry[kCGWindowBounds as String] as? [String: Any],
                   let rect = Self.rect(from: bounds)
@@ -132,6 +157,7 @@ public enum Geometry {
                 counts[.unreadable, default: 0] += 1
                 continue
             }
+            let owner = entry[kCGWindowOwnerName as String] as? String
             guard (entry[kCGWindowAlpha as String] as? Double ?? 1) > 0 else {
                 counts[.invisible, default: 0] += 1
                 continue

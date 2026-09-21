@@ -10,8 +10,18 @@ import CoreGraphics
 /// which is often negative. A reader that misses the flip, or the scale, or the display
 /// origin produces numbers that are still four plausible Doubles in the right order of
 /// magnitude, and clicking one lands somewhere else entirely. Nothing downstream can tell
-/// the two apart, so the conversion has to be the only door into this type rather than a
-/// step a reader is trusted to have taken.
+/// the two apart, so the conversion lives in one named place - `fromImageSpace` - rather
+/// than being a step each reader is trusted to have remembered.
+///
+/// What that does and does not buy, stated plainly because the difference is where a bug
+/// would live: there is exactly one *conversion* from image space, so there is one
+/// implementation to get right and one to test. There is not a locked door. The
+/// memberwise `init` below is public and a reader that skips the conversion can hand it
+/// an unflipped Vision box and get four plausible Doubles. No type can prevent a producer
+/// from supplying wrong numbers in the right shape; what a type can do is make the right
+/// way the short way, and make the wrong way visible as a reader that names image-space
+/// values without calling the conversion. That is a review boundary rather than a
+/// compiler one, and calling it a compiler one would be the comment lying about the code.
 ///
 /// The space is not a choice made here. It is the space `vhid click` consumes and the
 /// space the accessibility tree already answers in, so the centre of one of these is a
@@ -70,10 +80,10 @@ public struct ScreenPoint: Sendable, Hashable {
 }
 
 public extension ScreenRect {
-    /// The one door from image space into screen space, and the only place the flip and
-    /// the display origin are applied. [LAW:single-enforcer] Every reader that starts
-    /// from pixels comes through here, so there is one implementation to get right and
-    /// one to test rather than one per reader.
+    /// The one conversion from image space into screen space, and the only place the flip
+    /// and the display origin are applied. [LAW:single-enforcer] One implementation to
+    /// get right and one to test, rather than one per reader - see the type's header for
+    /// what this enforces and what it only encourages.
     ///
     /// **The backing scale factor does not appear, and that is the point.** A normalized
     /// box is a fraction of the image, and the same fraction of the display's point size,

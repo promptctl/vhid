@@ -8,5 +8,3 @@ DerivedData/
 .claude/worktrees/
 # What the release scripts leave behind to hand out.
 dist/
-eyes/.build/
-eyes/.swiftpm/

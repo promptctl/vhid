@@ -46,7 +46,7 @@ import Testing
     /// A walk that hit its element cap has not seen the region, so its silence about a
     /// string says nothing about whether the string is there.
     @Test func aReadThatStoppedShortProvesNothing() {
-        for stop in [Stop.elementLimit(2000), .timeBudget(.seconds(5)), .resultLimit(.default)] {
+        for stop in [Stop.elementLimit(Limit(2000)!), .timeBudget(.seconds(5)), .resultLimit(.default)] {
             let read = reading(outcome: .nearest([]), examined: 2000, reach: .stopped(stop))
             #expect(!read.provesAbsence, "a read stopped by \(stop) cannot prove an absence")
         }
