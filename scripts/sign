@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# Signs built products with the dev identity, and proves each one carries it.
+#
+#   sign <identity-name> <binary>...
+#
+# Every link SwiftPM performs ad hoc signs its product, so this runs after every build,
+# and signs unconditionally. It cannot be made conditional: a build system cannot see
+# which products SwiftPM chose to relink, and the one it silently relinked is the one
+# that would reach a caller unsigned. [LAW:dataflow-not-control-flow]
+#
+# Unsigned is not a mild failure here. The daemon admits a caller carrying the daemon's
+# own certificate and turns away everything else as NSCocoaErrorDomain 4097 - which
+# reads like a connection that failed rather than an identity that was refused, which is
+# where the afternoon goes. A build that skipped this step reports success and leaves
+# that behind. [LAW:no-silent-failure]
+#
+# [LAW:verifiable-goals] Signing is not taken on trust from codesign's exit status. Each
+# product is checked afterwards against `certificate leaf = H"<sha1>"` - not a
+# paraphrase of what the daemon requires of its callers but the very string the daemon
+# builds at runtime, off its own leaf certificate. A product that satisfies it is a
+# product the daemon admits, so there is no third thing this check could be measuring.
+set -euo pipefail
+
+identity=${1:?usage: sign <identity-name> <binary>...}
+shift
+[ $# -gt 0 ] || { echo "sign: no binaries to sign" >&2; exit 2; }
+
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+# A missing identity means something specific to this caller - there is nothing to sign
+# with yet - and saying so here rather than in the lookup is what lets the lookup stay a
+# question anyone can ask. [LAW:composability]
+set +e
+certificate=$("$here/signing-identity" "$identity")
+found=$?
+set -e
+case $found in
+  0) ;;
+  3) echo "sign: no signing identity named '$identity'. Run: make signing-identity" >&2; exit 1 ;;
+  *) exit $found ;;
+esac
+
+# Signed by SHA-1 rather than by name, so signing and checking cannot come to mean two
+# different certificates, and so a name that turns ambiguous later fails the lookup
+# above rather than being silently resolved here. [LAW:one-source-of-truth]
+requirement="certificate leaf = H\"$certificate\""
+
+for binary in "$@"; do
+  [ -e "$binary" ] || { echo "sign: $binary was not built" >&2; exit 1; }
+  # codesign's output is captured rather than piped through sed, because a pipe hands
+  # the line sed's exit status - and under `pipefail` it aborts the script at the pipe
+  # itself, so any guard written after it is a guard that never runs and a message that
+  # is never read. [LAW:no-silent-failure]
+  if ! said=$(codesign --force --sign "$certificate" --timestamp=none "$binary" 2>&1); then
+    [ -z "$said" ] || sed 's|^|sign: |' <<<"$said" >&2
+    echo "sign: could not sign $binary with '$identity'" >&2
+    exit 1
+  fi
+  [ -z "$said" ] || sed 's|^|sign: |' <<<"$said"
+  codesign --verify --strict -R="$requirement" "$binary" \
+    || { echo "sign: $binary does not satisfy '$requirement' after being signed with it" >&2; exit 1; }
+done
+
+echo "sign: $# signed by '$identity' ($certificate)"

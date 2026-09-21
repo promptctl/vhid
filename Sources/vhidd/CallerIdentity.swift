@@ -42,7 +42,7 @@ struct CallerIdentity {
             case .unsigned(let status):
                 "this helper's own code signature could not be read (OSStatus \(status))"
             case .adHoc:
-                "this helper is signed ad hoc, with no certificate to require of its callers; sign it with an identity (make helper)"
+                "this helper is signed ad hoc, with no certificate to require of its callers; sign it with an identity (make sign)"
             case .malformedRequirement(let text, let status):
                 "the caller requirement \(text.debugDescription) is not a code signing requirement (OSStatus \(status))"
             case .noAuditToken:

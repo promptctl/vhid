@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+# The keychain vhid's dev signing identity lives in, ready to use. Prints its path.
+#
+#   signing-keychain            # ensure it, print its path
+#   source signing-keychain     # just the facts, plus vhid_keychain_ready to call
+#
+# Sourcing also turns on `set -euo pipefail`, which `vhid_keychain_ready` relies on to
+# stop rather than carry on past a `security` that failed. Every caller here wants that
+# anyway; it is named because a file that changes its caller's shell options should say
+# so rather than be discovered doing it.
+#
+# A keychain of its own, rather than the login keychain, and the reason is the dialog. A
+# private key imported into the login keychain has an empty partition list, so the first
+# `codesign` that reaches for it raises "codesign wants to sign using key ... in your
+# keychain" and waits. Clearing that permanently means `security set-key-partition-list`,
+# which needs the password of the keychain holding the key - and nobody can hand over a
+# login password from inside a build. A keychain this script creates has a password this
+# script knows, so the partition list is set at import time and no build ever stops for
+# a human.
+#
+# That is not a nicety here. vhid is built by sessions with nobody watching the screen,
+# and a step that can only be finished by clicking Always Allow is a step those sessions
+# cannot finish at all - the build does not fail, it hangs.
+#
+# [LAW:one-source-of-truth] Everything that knows where the identity lives knows it from
+# here, which is why the file is written to be sourced as well as run: the only caller
+# that needs the password reads the same word this file unlocks with, rather than a
+# second copy that could drift from it.
+#
+# The password is written down, and it is not a secret. It protects one self-signed
+# certificate that no Mac trusts, whose only power is to make this machine's daemon
+# admit this machine's CLI - both already running as the user reading this file. Anyone
+# who can read the password can already run both programs. The certificate that ships is
+# a different thing entirely and does not live here; see vhid-dist-3bc.
+#
+# Undoing all of it is one command, which also takes the keychain back out of the
+# search list:
+#
+#   security delete-keychain vhid-dev.keychain
+#
+# Not a `list-keychains -s` naming the keychains to keep, which is how this is usually
+# written down: that form replaces the whole list, so it quietly drops every other
+# keychain the developer had.
+set -euo pipefail
+
+VHID_KEYCHAIN_NAME=vhid-dev.keychain
+VHID_KEYCHAIN_PASSWORD=vhid-dev
+VHID_KEYCHAIN="$HOME/Library/Keychains/$VHID_KEYCHAIN_NAME-db"
+
+# [LAW:dataflow-not-control-flow] Every call leaves the keychain existing, unlocked and
+# searchable, whatever state it was in. Callers do not ask which of those were already
+# true, because a caller that has to ask is a caller that can get it wrong once.
+vhid_keychain_ready() {
+  if [ ! -e "$VHID_KEYCHAIN" ]; then
+    security create-keychain -p "$VHID_KEYCHAIN_PASSWORD" "$VHID_KEYCHAIN_NAME" >&2
+    # `create-keychain` leaves a keychain that locks on sleep and after five minutes, so
+    # a laptop shut overnight - or a build an hour after the last one - would sign by
+    # raising the dialog this file exists to prevent. Calling `set-keychain-settings` at
+    # all is what clears both: the sleep lock goes because -l is absent, and the timeout
+    # because no -t is given. Measured before and after: `lock-on-sleep timeout=300s`
+    # becomes `no-timeout`.
+    security set-keychain-settings "$VHID_KEYCHAIN_NAME" >&2
+  fi
+
+  # Keychains lock on reboot however they were created, so this is asked every time
+  # rather than at creation. It costs nothing when the keychain is already open.
+  #
+  # The one way this realistically fails is a keychain left over from before the
+  # password above was last changed, and `security`'s own word for that is a number.
+  # Saying which keychain and how to be rid of it is the difference between a minute and
+  # an afternoon. [LAW:no-silent-failure]
+  if ! security unlock-keychain -p "$VHID_KEYCHAIN_PASSWORD" "$VHID_KEYCHAIN_NAME" >&2; then
+    echo "signing-keychain: $VHID_KEYCHAIN would not open with the password in this file." \
+         "If it predates a change to that password, delete it and let the next build" \
+         "make it again: security delete-keychain $VHID_KEYCHAIN_NAME" >&2
+    return 1
+  fi
+
+  # Appended to the search list, never substituted for it: `list-keychains -s` replaces
+  # the whole list, so writing only this one would take the login keychain out of every
+  # search on this Mac - including the ones that find the certificate that ships.
+  # [LAW:no-silent-failure]
+  #
+  # Read into a variable first, not piped straight into the loop. Inside a process
+  # substitution a failing `security` is invisible, so an unreadable search list would
+  # arrive here as an empty one - and an empty one written back is the eviction this
+  # paragraph is about, performed by the code meant to prevent it.
+  local listing
+  listing=$(security list-keychains -d user)
+
+  local searched=() line
+  while IFS= read -r line; do
+    # Read whole rather than split on spaces: a keychain path may contain them, and a
+    # split one would be handed back to `list-keychains` as two keychains that do not
+    # exist, quietly emptying the list.
+    # Blank lines are dropped before counting, because a here-string built from an
+    # empty listing still yields one empty line - so an unreadable search list would
+    # otherwise arrive as an array of one empty name, pass the check below, and be
+    # written back as a search list containing a keychain called "".
+    [ -n "$line" ] || continue
+    searched+=("$line")
+    if [ "$line" = "$VHID_KEYCHAIN" ]; then return 0; fi
+  done < <(sed 's/^[[:space:]]*"//;s/"$//' <<<"$listing")
+
+  # A list that read as nothing is left exactly as it is, and the build stops here.
+  #
+  # Two things produce that reading - a search list genuinely emptied on purpose, and a
+  # `security` whose output this script failed to understand - and it cannot tell them
+  # apart. Writing under either is wrong: under the first it overrides a deliberate
+  # choice and replaces the defaults macOS falls back to, and under the second it writes
+  # a list built from a reading it does not trust, which is how every other keychain on
+  # the Mac stops being searched. Stopping is the only move that is right under both.
+  # [LAW:no-silent-failure]
+  if [ ${#searched[@]} -eq 0 ]; then
+    echo "signing-keychain: the user keychain search list read as empty, so it has been left" \
+         "alone and nothing was signed. Put $VHID_KEYCHAIN on it yourself and build again;" \
+         "codesign will not find an identity in a keychain that is not searched, and" \
+         "--keychain does not stand in for that." >&2
+    return 1
+  fi
+
+  security list-keychains -d user -s "${searched[@]}" "$VHID_KEYCHAIN" >&2
+}
+
+# Everything above is a definition; this is the only thing the file does, so sourcing it
+# defines the facts and runs nothing.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  vhid_keychain_ready
+  echo "$VHID_KEYCHAIN"
+fi
