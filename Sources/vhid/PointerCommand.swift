@@ -46,22 +46,61 @@ struct PlayCommand: AsyncParsableCommand {
     @OptionGroup var service: ServiceOption
 
     func run() async throws {
-        let played: Played
+        let ending: Ending
         do {
             // [LAW:parse-dont-validate] Parsed before anything is connected or moved, so a
             // script that cannot be played whole moves nothing.
             let play = try Play.parse(String(decoding: FileHandle.standardInput.readDataToEndOfFile(), as: UTF8.self))
             let pointer = Devices(of: try service.installation()).pointer
             let player = Player(pointer: pointer, clock: WakingClock(), wall: Self.epochMicroseconds, lead: Self.lead)
-            played = try await player.play(play)
+            ending = .finished(try await player.play(play))
         } catch {
             // The reports that did go out are printed even for a run that stopped, so a
             // harness can see how far it got. [LAW:no-silent-failure]
-            try Self.emit((error as? PlayStopped)?.played ?? [])
+            for line in try Self.lines(of: .stopped((error as? PlayStopped)?.played ?? [])) { print(line) }
             throw error
         }
-        try Self.emit(played.reports)
-        try Self.emit(DoneLine(done: .init(reports: played.reports.count, startReports: played.startReports, lateUs: played.lateness)))
+        for line in try Self.lines(of: ending) { print(line) }
+    }
+
+    /// What a play left behind: the reports that went out, and - only when it finished -
+    /// the run to summarise.
+    ///
+    /// [LAW:dataflow-not-control-flow] "A play that stops prints no done line, and the
+    /// missing line is what says it stopped" used to be a property of which of two catch
+    /// arms did the printing, which is why nothing could check it without a daemon and a
+    /// stoppage to provoke. Here it is a property of the value: a stopped play carries no
+    /// `Played`, so there is no done line to be made and no path that makes one.
+    enum Ending {
+        case finished(Played)
+        case stopped([Played.Report])
+
+        var reports: [Played.Report] {
+            switch self {
+            case .finished(let played): played.reports
+            case .stopped(let reports): reports
+            }
+        }
+    }
+
+    /// Every line this verb prints, as a value rather than as an effect.
+    ///
+    /// [LAW:decomposition] The other three verbs each keep what they do apart from where
+    /// their devices came from; this one did not, and the whole documented contract above
+    /// - the two envelopes, the snake_case keys, the lateness percentiles, the missing
+    /// done line - was reachable only by running a daemon. Rendering is the part with the
+    /// contract, and it needs no daemon, no clock and no mouse to answer for itself.
+    static func lines(of ending: Ending) throws -> [String] {
+        var lines = try ending.reports.enumerated().map { index, report in
+            try line(ReportLine(report: .init(index: index, scheduledUs: report.scheduled,
+                                              sentUs: report.sent, ackedUs: report.acked)))
+        }
+        if case .finished(let played) = ending {
+            lines.append(try line(DoneLine(done: .init(reports: played.reports.count,
+                                                       startReports: played.startReports,
+                                                       lateUs: played.lateness))))
+        }
+        return lines
     }
 
     /// How early each report is woken for. `Player` sleeps until this much before the
@@ -100,15 +139,8 @@ struct PlayCommand: AsyncParsableCommand {
         return encoder
     }()
 
-    private static func emit(_ line: some Encodable) throws {
-        print(String(decoding: try encoder.encode(line), as: UTF8.self))
-    }
-
-    /// A line per report, numbered by its place in the script.
-    private static func emit(_ reports: [Played.Report]) throws {
-        for (index, report) in reports.enumerated() {
-            try emit(ReportLine(report: .init(index: index, scheduledUs: report.scheduled, sentUs: report.sent, ackedUs: report.acked)))
-        }
+    private static func line(_ encodable: some Encodable) throws -> String {
+        String(decoding: try encoder.encode(encodable), as: UTF8.self)
     }
 
     private struct ReportLine: Encodable {

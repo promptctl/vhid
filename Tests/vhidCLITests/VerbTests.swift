@@ -20,6 +20,13 @@ import Testing
         #expect(keyboard.down.count >= 3)
     }
 
+    /// One of something is one of it. The rule lives in `counted`, and this is the verb
+    /// reading back what it did rather than the helper being asked directly.
+    @Test func oneCharacterIsOneCharacter() async throws {
+        let said = try await TypeCommand.type("a", on: Self.us, with: Typist(keyboard: RecordingKeyboard()))
+        #expect(said == "typed 1 character on \(Self.us.name)")
+    }
+
     /// The whole string is refused rather than typed up to the first character the layout
     /// cannot type: half a sentence in a document is worse than none, because only one of
     /// the two is obviously wrong.
@@ -47,9 +54,26 @@ import Testing
     @Test func keysPressesEveryChordAndNamesThemBack() async throws {
         let keyboard = RecordingKeyboard()
         let said = try await KeysCommand.press(["leftCommand+s", "return"], on: Self.us, with: Typist(keyboard: keyboard))
-        #expect(said.hasPrefix("pressed 2 chords on \(Self.us.name): "))
+        #expect(said.hasSuffix(" on \(Self.us.name)"))
         // Reported in the spelling that reads back, not the one that was typed.
         #expect(said.contains("leftCommand+key 0x"))
+        // The chords themselves, in order, and no count beside them to disagree with them.
+        #expect(said.hasPrefix("pressed leftCommand+key 0x"))
+        #expect(said.contains(", "))
+    }
+
+    /// A list that stops part way says how many chords had already gone down, which is the
+    /// part only this loop knows: a `leftCommand+a` that landed in front of a `delete` that
+    /// did not has left the document selected, and nothing else would say so.
+    /// [LAW:no-silent-failure]
+    @Test func aStoppedListOfChordsSaysHowManyWentDown() async throws {
+        let keyboard = RecordingKeyboard(failingAtKey: 1)
+        let stopped = await #expect(throws: ChordsStopped.self) {
+            try await KeysCommand.press(["return", "tab", "delete"], on: Self.us, with: Typist(keyboard: keyboard))
+        }
+        #expect(stopped?.pressed == 1)
+        #expect(stopped?.of == 3)
+        #expect(stopped?.description.contains("1 of 3 chords had been pressed before this") == true)
     }
 
     /// The claim the command's own comment makes: every chord is proven before the first

@@ -28,11 +28,12 @@ extension Button: ExpressibleByArgument {
 }
 
 /// How many times a button is pressed without moving between presses.
-extension Clicks: ExpressibleByArgument {
-    public init?(argument: String) {
-        guard let count = Int(argument) else { return nil }
-        self.init(rawValue: count)
-    }
-
-    public var defaultValueDescription: String { String(rawValue) }
-}
+///
+/// [LAW:polishing-by-subtraction] Empty on purpose, and measured so before it was emptied.
+/// ArgumentParser already conforms any `RawRepresentable` whose raw value is itself
+/// `ExpressibleByArgument`, so both halves - reading an `Int` and handing it to
+/// `Clicks.init?(rawValue:)`, which is what refuses `0` and `-1`, and printing the default
+/// as `1` - are what it supplies. `Button` above needs its overrides because its spellings
+/// are not its raw value. A body restating a default reads, beside that one, as though it
+/// were load-bearing too.
+extension Clicks: ExpressibleByArgument {}

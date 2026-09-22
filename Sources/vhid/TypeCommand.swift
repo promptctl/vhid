@@ -39,6 +39,6 @@ struct TypeCommand: AsyncParsableCommand {
         // none, because only one of the two is obviously wrong.
         let lowered = try typist.lower(text, on: layout)
         let typed = try await typist.type(lowered)
-        return "typed \(typed) characters on \(layout.name)"
+        return "typed \(counted(typed, "character")) on \(layout.name)"
     }
 }

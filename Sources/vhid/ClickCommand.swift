@@ -64,6 +64,6 @@ struct ClickCommand: AsyncParsableCommand {
         // Where the button went down is read back from the cursor rather than repeated
         // from the request: the two differ, and the one worth printing is the one that
         // happened. [LAW:no-silent-failure]
-        return "clicked \(button) \(times.rawValue == 1 ? "once" : "\(times.rawValue) times") at \(click.at) after \(click.reports) motion reports"
+        return "clicked \(button) \(times.rawValue == 1 ? "once" : "\(times.rawValue) times") at \(click.at) after \(counted(click.reports, "motion report"))"
     }
 }
