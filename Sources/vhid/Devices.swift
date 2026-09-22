@@ -19,11 +19,6 @@ struct Devices {
     let keyboard: any Keyboard
     let mouse: any Mouse
 
-    init(keyboard: any Keyboard, mouse: any Mouse) {
-        self.keyboard = keyboard
-        self.mouse = mouse
-    }
-
     /// The devices over a connection to this installation's daemon.
     ///
     /// The connection is lazy - launchd starts the job on the first call, not here - so a
@@ -32,9 +27,8 @@ struct Devices {
     init(of installation: Installation) {
         let helper = HelperConnection(installation: installation)
         let queue = DeviceQueue()
-        self.init(
-            keyboard: QueuedKeyboard(keyboard: helper.keyboard, queue: queue),
-            mouse: QueuedMouse(pointing: helper.mouse, queue: queue))
+        keyboard = QueuedKeyboard(keyboard: helper.keyboard, queue: queue)
+        mouse = QueuedMouse(pointing: helper.mouse, queue: queue)
     }
 
     /// The typist these keys are typed by.

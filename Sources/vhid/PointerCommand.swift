@@ -71,6 +71,16 @@ struct PlayCommand: AsyncParsableCommand {
     /// arms did the printing, which is why nothing could check it without a daemon and a
     /// stoppage to provoke. Here it is a property of the value: a stopped play carries no
     /// `Played`, so there is no done line to be made and no path that makes one.
+    ///
+    /// **`finished` holds a play that sent something, and the type system is what says
+    /// so.** `Played`'s initialiser is internal to `Input`, so the only one this target
+    /// can hold is one `Player.play` returned, and a `Play` carries at least one report by
+    /// construction - which is the precondition `Lateness` documents and relies on. There
+    /// is therefore no guard here against an empty finished play: it cannot be spelled
+    /// from outside `Input`, and a guard would have to invent a meaning for a done line
+    /// with no lateness in it. [LAW:no-defensive-null-guards] [LAW:comments-carry-meaning]
+    /// A test reaching through `@testable import Input` can of course build one, and that
+    /// is the test stepping outside the guarantee rather than the guarantee being weak.
     enum Ending {
         case finished(Played)
         case stopped([Played.Report])
