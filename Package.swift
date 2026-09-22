@@ -15,6 +15,15 @@ let package = Package(
         .library(name: "Helper", targets: ["Helper"]),
         .library(name: "Input", targets: ["Input"]),
         .executable(name: "vhidd", targets: ["vhidd"]),
+        .executable(name: "vhid", targets: ["vhid"]),
+    ],
+    // The one dependency, and it stops at the leaf. Every library target below still
+    // links nothing outside this package; what takes this is the CLI, which is the end of
+    // the graph and nothing else's dependency. A command's flags and the help that
+    // describes them are one declaration here rather than a parser and a paragraph that
+    // drift apart. [LAW:one-source-of-truth] [LAW:one-way-deps]
+    dependencies: [
+        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
     ],
     targets: [
         // The vocabulary at the seam between deciding what to type and typing it: a HID
@@ -86,6 +95,23 @@ let package = Package(
         .executableTarget(
             name: "vhidd",
             dependencies: ["Helper", "VirtualHID", "DriverExtension", "Keystrokes", "Pointing", "Signals", "Installations"]
+        ),
+        // The verbs, against the daemon over the helper connection. It links Input for
+        // what the verbs mean and Helper for how they get there, and deliberately not
+        // VirtualHID: a client never opens a device. [LAW:one-way-deps]
+        .executableTarget(
+            name: "vhid",
+            dependencies: [
+                "Input", "Helper", "Installations", "KeyboardLayout", "Keystrokes", "Pointing",
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+            ]
+        ),
+        // The edge of the CLI: what argv becomes before any of it reaches a device, and
+        // what the verbs report having done. The devices are fakes, so these run with no
+        // daemon, no driver and no root.
+        .testTarget(
+            name: "vhidCLITests",
+            dependencies: ["vhid", "Input", "Helper", "Installations", "Keystrokes", "Pointing"]
         ),
         // The authorization boundary of a root keystroke service, checked against the
         // test process's own identity and audit token: real code signing, no root.

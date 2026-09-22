@@ -32,6 +32,27 @@ boundary rather than a rule someone has to remember.
 The cost of that isolation is this paragraph: `make test` at the root does not run
 `eyes`' tests, and nothing but this table says so.
 
+## The CLI
+
+```sh
+vhid type "hello"
+vhid keys leftCommand+s
+vhid click 800 500 --button left --times 2
+vhid pointer play < script.jsonl
+```
+
+It types where the keyboard is pointed and clicks where it is told. There is no
+click-by-element and no target app, because nothing in vhid reads the screen — what is
+under a point is the caller's to know.
+
+Which keys make which characters is the console user's keyboard layout, read in the CLI
+rather than in the daemon: macOS answers that question per process, and a root daemon
+asking it is told the US layout whatever the user is typing on.
+
+`--service` says which installation to talk to, defaulting to the copy built from this
+tree. Coordinates are screen points from the top left of the main display; a display
+left of or above it has negative ones, which follow `--`.
+
 ## Building
 
 `make` builds and signs. `make test` runs the suite and leaves the tree signed behind
