@@ -7,7 +7,11 @@
 # clone of this repo to read. Two copies can drift, so this is what makes a drift a red
 # build instead of a Mac that installs one package and names another.
 #
-#   scripts/check-driver-pins            needs a built vhid; `make check-pins` builds one
+#   scripts/check-driver-pins [vhid]     needs a built vhid; `make check-pins` builds one
+#
+# The binary defaults to the working tree's debug build, the one the script runs.
+# scripts/make-pkg names the release binary it is about to pack instead, because that is
+# the copy whose pins an installed postinstall will act on.
 #
 # The script's values are read by SOURCING it rather than by grepping its assignments,
 # because two of them are built out of the others - PKG_URL from $PKG_VERSION, and
@@ -24,13 +28,14 @@
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
-# The binary is the one the script itself runs, named once, in the script, as $VHID.
+# By default the binary is the one the script itself runs, named once, in the script, as $VHID.
 # shellcheck source=virtual-hid-driver
 source "$here/virtual-hid-driver"
 
 fail() { echo "check-driver-pins: $*" >&2; exit 1; }
 
-pins=$("$VHID" driver pins) || fail "could not read '$VHID driver pins' - run 'make' first"
+vhid=${1:-$VHID}
+pins=$("$vhid" driver pins) || fail "could not read '$vhid driver pins' - run 'make' first"
 
 # One pin: the CLI's name for it, then the script's. Both sides must be non-empty, so a
 # pin renamed on either side fails as missing rather than passing as two empty strings.

@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><style>body { font: 13px -apple-system, sans-serif; } code { font: 12px ui-monospace, monospace; }</style></head>
+<body>
+<h3>One step is left, and it is yours.</h3>
+
+<p>vhid types and clicks through a driver extension, and macOS will not turn a driver
+extension on until the person at this Mac says so. No installer can do that for you.
+Until you do, vhid cannot type or click.</p>
+
+<ol>
+<li>Open <b>System Settings &gt; General &gt; Login Items &amp; Extensions</b>.</li>
+<li>Click the <b>(i)</b> beside <b>Driver Extensions</b>.</li>
+<li>Turn on <b>org.pqrs.Karabiner-DriverKit-VirtualHIDDevice</b>, and authenticate when asked.</li>
+</ol>
+
+<p>If macOS showed an alert saying a system extension was blocked, this is the same
+switch.</p>
+
+<p>To check, run <code>vhid driver state</code> in Terminal. It prints <code>running</code>
+once the driver is on. If it prints <code>installed-inactive</code>, macOS never received
+the request, which happens when nobody was logged in during the install. Run this
+installer again while you are logged in, then turn the switch on.</p>
+</body>
+</html>

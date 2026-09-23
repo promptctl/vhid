@@ -24,5 +24,6 @@ struct Vhid: AsyncParsableCommand {
         subcommands: [
             TypeCommand.self, KeysCommand.self, ClickCommand.self, MoveCommand.self, ScrollCommand.self,
             DragCommand.self, CursorCommand.self, PointerCommand.self, McpCommand.self, DriverCommand.self,
+            ServiceCommand.self,
         ])
 }

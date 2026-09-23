@@ -53,8 +53,9 @@ Which keys make which characters is the console user's keyboard layout, read in 
 rather than in the daemon: macOS answers that question per process, and a root daemon
 asking it is told the US layout whatever the user is typing on.
 
-`--service` says which installation to talk to, defaulting to the copy built from this
-tree. Coordinates are screen points from the top left of the main display; a display
+`--service` says which installation to talk to. It defaults to the one the binary was
+built for: the installed copy for the installed CLI, and the development copy for a
+build from this tree. `vhid service` prints which. Coordinates are screen points from the top left of the main display; a display
 left of or above it has negative ones, which follow `--`.
 
 ## Over MCP
@@ -70,6 +71,33 @@ Each tool call connects to the daemon and leaves when it returns, so a session h
 nothing between calls and a `vhid click` from a shell still gets through. Stdout carries
 only JSON-RPC; diagnostics go to stderr. An argument a tool will not act on comes back as
 a tool error naming it, before anything is connected.
+
+## Installing
+
+vhid ships as one signed, notarized pkg. It installs:
+
+| path | what it is |
+|---|---|
+| `/usr/local/bin/vhid` | the CLI |
+| `/usr/local/libexec/vhidd` | the root daemon that owns the devices |
+| `/Library/LaunchDaemons/ai.promptctl.vhid.vhidd.plist` | the daemon's launchd job, loaded as the install finishes |
+
+It also installs the pinned
+[Karabiner-DriverKit-VirtualHIDDevice](https://github.com/pqrs-org/Karabiner-DriverKit-VirtualHIDDevice)
+package, pqrs's own component carried inside this one, and asks macOS to activate its
+driver extension for whoever is logged in. Karabiner-Elements is not needed; on a Mac
+that has it, the installer warns that the driver's Manager app and support files it
+shares are replaced.
+
+One step is left to you, because macOS attributes a driver extension to the person at
+the Mac and no installer can approve it: open **System Settings > General > Login Items &
+Extensions**, click the (i) beside **Driver Extensions**, and turn on
+`org.pqrs.Karabiner-DriverKit-VirtualHIDDevice`. The installer's last page says the
+same. `vhid driver state` prints `running` once it is on. Until then the daemon is
+loaded but cannot bring the devices up, and launchd keeps restarting it.
+
+The installed CLI talks to the installed daemon by default. A build from this tree talks
+to the development copy, `ai.promptctl.vhid.vhidd.dev`, so the two can run side by side.
 
 ## Building
 
@@ -112,6 +140,36 @@ This certificate is for development and cannot ship: no other Mac trusts it. Wha
 a release is a Developer ID certificate, which is a separate thing kept deliberately
 apart — the day the dev certificate quietly signs something that ships is the day vhid
 ships something nobody can run, and the build stays green while it happens.
+
+## Releasing
+
+```sh
+NOTARY_PROFILE=<profile> scripts/release <version> dist    # dist/vhid-<version>.pkg
+```
+
+That runs two scripts, and each can also be run on its own:
+
+```sh
+scripts/make-pkg <version> dist                         # built and signed
+NOTARY_PROFILE=<profile> scripts/notarize dist/vhid-<version>.pkg   # notarized and stapled
+```
+
+`scripts/make-pkg` builds for arm64 and x86_64 in a scratch directory of its own. It signs
+both binaries with the team's **Developer ID Application** certificate, with Hardened
+Runtime and a secure timestamp, and signs the pkg with its **Developer ID Installer**
+certificate. It finds both by team ID and refuses to guess when there are none or
+several. The daemon admits a caller signed with its own certificate, so the installed
+CLI is let in and a dev-signed build is refused. The launchd job is named after the
+service the packed CLI dials (`vhid service`), so the job and the CLI cannot disagree.
+The driver package is fetched and checked against its pinned checksum and pqrs's
+signature by `scripts/virtual-hid-driver fetch`. That is the one check of pqrs's
+signature: productbuild carries the component's contents without it, so on an installing
+Mac the pkg's own Developer ID Installer signature is what covers the driver too.
+
+`scripts/notarize` submits the pkg, prints the notary log if the answer is anything
+but Accepted, staples the ticket, and requires Gatekeeper to assess the pkg as
+`source=Notarized Developer ID`. The notary profile is made once per Mac with
+`xcrun notarytool store-credentials <profile>`.
 
 ## Status
 

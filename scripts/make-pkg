@@ -1,0 +1,211 @@
+#!/bin/bash
+# Builds the installer: one signed distribution pkg carrying vhid, its daemon, the
+# daemon's launchd job, and the pinned Karabiner-DriverKit-VirtualHIDDevice package.
+#
+#   scripts/make-pkg <version> <output directory>    # prints <output directory>/vhid-<version>.pkg
+#
+# What installing it does:
+#
+#   /usr/local/bin/vhid                    the CLI
+#   /usr/local/libexec/vhidd               the root daemon
+#   /Library/LaunchDaemons/<service>.plist its job, loaded by postinstall
+#
+# and the driver package, installed first, whose extension postinstall asks macOS to
+# activate for the logged-in user. Approving that activation is the one step left to a
+# person, and the pkg's closing page says so.
+#
+# A plist bootstrapped from /Library/LaunchDaemons runs as root with no approval
+# anywhere. An SMAppService job would sit in .requiresApproval until someone clicked it
+# in Login Items, and an agent's tool cannot ask anyone to do that.
+#
+# The binaries are signed with the team's Developer ID Application certificate, with
+# Hardened Runtime and a secure timestamp, which is what the notary service requires;
+# the pkg with its Developer ID Installer certificate. Both are asked for before the
+# build, which takes minutes, rather than after it. The daemon admits a caller carrying
+# the certificate it carries itself, so the CLI and the daemon being signed by the one
+# certificate is what lets the installed CLI in - and what keeps the working tree's
+# dev-signed CLI out. scripts/notarize takes the result the rest of the way.
+#
+# Held to bash 3.2, like every script here.
+set -euo pipefail
+
+# [LAW:one-source-of-truth] The team whose Developer ID signs a release, and the only
+# place it is written. The certificates are found by it, so a renewed certificate - a
+# new SHA-1 under the same team - needs no edit here.
+TEAM=6R988MUU27
+# The receipt this pkg leaves, which `pkgutil --pkgs` lists and `pkgutil --forget` takes.
+IDENTIFIER=ai.promptctl.vhid
+
+version=${1:?usage: scripts/make-pkg <version> <output directory>}
+out=${2:?usage: scripts/make-pkg <version> <output directory>}
+
+fail() { echo "make-pkg: $*" >&2; exit 1; }
+
+# [LAW:parse-dont-validate] The version is written into XML, into pkgbuild's --version and
+# into a file name, so it is held to dotted numbers with an optional pre-release tag
+# before minutes of building rather than failing productbuild after them.
+[[ $version =~ ^[0-9]+(\.[0-9]+)*(-[0-9A-Za-z.]+)?$ ]] \
+  || fail "version '$version' is not dotted numbers with an optional -tag, such as 0.1.0 or 0.2.0-rc.1"
+
+mkdir -p "$out"
+out=$(cd "$out" && pwd)
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$root"
+
+# The SHA-1 of the one valid identity of this kind for the team. None and several are
+# both refusals: signing by name would have codesign pick among several on its own, and
+# the certificate a release is signed with is not a thing to leave to that.
+identity() {
+  local kind=$1 found count
+  found=$(security find-identity -v | awk -v want="\"$kind: .* \\\\($TEAM\\\\)\"" '$0 ~ want { print $2 }' | sort -u)
+  count=$(printf '%s' "$found" | awk 'END { print NR }')
+  case $count in
+    1) echo "$found" ;;
+    0) fail "no valid '$kind' identity for team $TEAM in the keychain search list. Make one in Xcode > Settings > Accounts > Manage Certificates, or at developer.apple.com" ;;
+    *) fail "$count valid '$kind' identities for team $TEAM; delete the ones that should not sign: $(tr '\n' ' ' <<<"$found")" ;;
+  esac
+}
+application=$(identity "Developer ID Application")
+installer=$(identity "Developer ID Installer")
+
+work=$(mktemp -d "${TMPDIR:-/tmp}/vhid-pkg.XXXXXX")
+trap 'rm -rf "$work"' EXIT
+
+# Both architectures, because the driver package serves both and a Mac is either.
+# A scratch path of its own, so a release never packs a product a debug build left
+# behind and a dev tree is never relinked by a release. [LAW:no-ambient-temporal-coupling]
+build() { swift build -c release --arch arm64 --arch x86_64 --scratch-path "$work/build" "$@"; }
+build >&2
+bin=$(build --show-bin-path)
+
+payload="$work/root"
+mkdir -p "$payload/usr/local/bin" "$payload/usr/local/libexec" "$payload/Library/LaunchDaemons"
+ditto "$bin/vhid" "$payload/usr/local/bin/vhid"
+ditto "$bin/vhidd" "$payload/usr/local/libexec/vhidd"
+
+# What the notary service refuses, asked of one binary after signing it: no Developer
+# ID signature from the team, no Hardened Runtime, no secure timestamp, or the
+# get-task-allow entitlement. The identifier is set rather than left to the linker's
+# name for the product, so the two binaries read as vhid's in any signature listing.
+sign() {
+  local binary=$1 identifier=$2 signature entitlements
+  codesign --force --sign "$application" --options runtime --timestamp --identifier "$identifier" "$binary" >&2
+  codesign --verify --strict "$binary" || fail "$binary does not verify after signing"
+  signature=$(codesign -dvv "$binary" 2>&1)
+  grep -qx "Authority=Developer ID Application: .* ($TEAM)" <<<"$signature" \
+    || fail "$binary is not signed by a Developer ID Application certificate of team $TEAM"
+  grep -qE '^CodeDirectory .*flags=0x[0-9a-f]+\([^)]*runtime' <<<"$signature" \
+    || fail "$binary is not signed with Hardened Runtime"
+  grep -q '^Timestamp=' <<<"$signature" || fail "$binary has no secure timestamp"
+  entitlements=$(codesign -d --entitlements - --xml "$binary" 2>&1) \
+    || fail "codesign could not read the entitlements of $binary: $entitlements"
+  ! grep -q 'com.apple.security.get-task-allow' <<<"$entitlements" \
+    || fail "$binary carries com.apple.security.get-task-allow"
+}
+sign "$payload/usr/local/bin/vhid" "$IDENTIFIER"
+sign "$payload/usr/local/libexec/vhidd" "$IDENTIFIER.vhidd"
+
+# The service the packed CLI dials when told nothing, asked of the CLI itself, and every
+# other name the install carries is written from this answer: the plist's Label, its
+# MachServices key, the daemon's --service, and the name the pkg's scripts load and stop.
+# [LAW:one-source-of-truth]
+service=$("$payload/usr/local/bin/vhid" service)
+[ -n "$service" ] || fail "the packed vhid names no service"
+
+plist="$payload/Library/LaunchDaemons/$service.plist"
+scripts/launchd-plist "$service" /usr/local/libexec/vhidd >"$plist"
+plutil -lint "$plist" >&2
+
+# The driver pins the packed CLI was compiled with, held to the ones the driver script
+# fetches by: postinstall reaches the Manager through this binary's pins, and the pkg
+# carries the package the script's pins name. [LAW:single-enforcer]
+scripts/check-driver-pins "$payload/usr/local/bin/vhid" >&2
+
+staged="$work/scripts"
+ditto pkg/scripts "$staged"
+echo "$service" >"$staged/service"
+
+components="$work/components"
+mkdir -p "$components"
+# The modes the install leaves are stated rather than inherited from whoever built it: a
+# builder's umask of 077 would otherwise ship a vhid nobody but root can run, in a
+# /usr/local/bin nobody else can list. `--ownership recommended` makes every file
+# root:wheel; the modes are this. The plist is 0644 because launchd refuses a job file
+# anyone but root can write.
+find "$payload" -type d -exec chmod 755 {} +
+chmod 755 "$payload/usr/local/bin/vhid" "$payload/usr/local/libexec/vhidd"
+chmod 644 "$plist"
+pkgbuild --root "$payload" --scripts "$staged" --identifier "$IDENTIFIER" --version "$version" \
+  --install-location / --ownership recommended "$components/vhid.pkg" >&2
+
+# Downloaded and checked against the pins by the script that owns them, and named in the
+# distribution by that script's own constants: sourcing it defines them and runs no verb.
+# [LAW:one-source-of-truth]
+# shellcheck source=virtual-hid-driver
+source scripts/virtual-hid-driver
+driver=$(scripts/virtual-hid-driver fetch "$components")
+
+# The driver's package is named first, so its payload is on disk before vhid's
+# postinstall asks its Manager to activate the extension. [LAW:no-ambient-temporal-coupling]
+#
+# enable_localSystem alone: a LaunchDaemon on any volume but the one this Mac booted from
+# is a job nothing loads.
+#
+# Karabiner-Elements ships this same driver and owns the same Manager app and support
+# directory, which the driver package's own preinstall deletes and replaces. The
+# installation check says so and lets the install go on, as `virtual-hid-driver install`
+# does: replacing those files strands nothing, and refusing would. Installer shows a
+# Warning and continues; `installer` on the command line continues and logs it.
+distribution="$work/Distribution.xml"
+cat >"$distribution" <<XML
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+    <title>vhid $version</title>
+    <conclusion file="conclusion.html" mime-type="text/html"/>
+    <options customize="never" require-scripts="true" hostArchitectures="arm64,x86_64"/>
+    <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/>
+    <allowed-os-versions><os-version min="15.0"/></allowed-os-versions>
+    <installation-check script="sharedDriverWarning()"/>
+    <script><![CDATA[
+// The receipt is read as the file macOS keeps it in: an installation check runs before a
+// target volume is chosen, so my.target is null there, and system has no receipt API -
+// both measured, each throwing and failing the whole install.
+function sharedDriverWarning() {
+    var receipt = '/var/db/receipts/$ELEMENTS_RECEIPT.plist';
+    if (!system.files.fileExistsAtPath(receipt)) { return true; }
+    my.result.type = 'Warning';
+    my.result.title = 'Karabiner-Elements is installed';
+    my.result.message = 'Karabiner-Elements ' + system.files.plistAtPath(receipt).PackageVersion
+        + ' also owns the driver this installs. Installing replaces its Manager app and support files '
+        + 'with driver package $PKG_VERSION.';
+    return false;
+}
+    ]]></script>
+    <choices-outline>
+        <line choice="default">
+            <line choice="$IDENTIFIER"/>
+        </line>
+    </choices-outline>
+    <choice id="default"/>
+    <choice id="$IDENTIFIER" visible="false">
+        <pkg-ref id="$BUNDLE_ID"/>
+        <pkg-ref id="$IDENTIFIER"/>
+    </choice>
+    <pkg-ref id="$BUNDLE_ID" version="$PKG_VERSION">$(basename "$driver")</pkg-ref>
+    <pkg-ref id="$IDENTIFIER" version="$version">vhid.pkg</pkg-ref>
+</installer-gui-script>
+XML
+
+product="$out/vhid-$version.pkg"
+rm -f "$product"
+productbuild --distribution "$distribution" --resources pkg/resources --package-path "$components" \
+  --sign "$installer" --timestamp "$product" >&2
+
+# The signature a Mac that downloads this will check, read back the way it checks it.
+# The status line catches an untrusted chain and the authority catches the wrong signer.
+signature=$(pkgutil --check-signature "$product") || fail "pkgutil refused $product: $signature"
+grep -qxF "$TRUSTED_STATUS" <<<"$signature" \
+  || fail "$product has no signature macOS trusts: $signature"
+grep -qE "Developer ID Installer: .* \\($TEAM\\)" <<<"$signature" \
+  || fail "$product is not signed by a Developer ID Installer certificate of team $TEAM: $signature"
+echo "$product"

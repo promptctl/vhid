@@ -1,0 +1,43 @@
+#!/bin/bash
+# Notarizes a signed pkg, staples the ticket to it, and asks Gatekeeper about it the way
+# a Mac that downloaded it would.
+#
+#   NOTARY_PROFILE=<profile> scripts/notarize <pkg>
+#
+# The profile is a notarytool credential in the login keychain, made once per Mac with
+# `xcrun notarytool store-credentials <profile>`, from an Apple ID and an app-specific
+# password or from an App Store Connect API key.
+#
+# Held to bash 3.2, like every script here.
+set -euo pipefail
+
+pkg=${1:?usage: NOTARY_PROFILE=<profile> scripts/notarize <pkg>}
+profile=${NOTARY_PROFILE:?NOTARY_PROFILE names the notarytool keychain profile; make one with xcrun notarytool store-credentials}
+
+fail() { echo "notarize: $*" >&2; exit 1; }
+
+[ -f "$pkg" ] || fail "there is no pkg at $pkg"
+
+# notarytool's exit status alone does not separate a refused submission from one that
+# never reached the service, and only the first has a log to fetch; the status the
+# service answered with decides. [LAW:no-silent-failure]
+result=$(xcrun notarytool submit "$pkg" --keychain-profile "$profile" --wait --output-format plist) \
+  && submitted=0 || submitted=$?
+status=$(plutil -extract status raw -o - - <<<"$result") || status=none
+if [ "$status" != Accepted ]; then
+  echo "notarize: notarytool exited $submitted with status '$status': $result" >&2
+  id=$(plutil -extract id raw -o - - <<<"$result") \
+    && xcrun notarytool log "$id" --keychain-profile "$profile" >&2
+  exit 1
+fi
+
+xcrun stapler staple "$pkg" >&2
+xcrun stapler validate "$pkg" >&2
+
+# Gatekeeper judges a pkg as something to install. Anything but a notarized Developer ID
+# verdict is a pkg a downloading Mac would warn about, whatever the steps above said.
+assessment=$(spctl --assess --type install -vv "$pkg" 2>&1) || fail "Gatekeeper refuses $pkg: $assessment"
+grep -q 'source=Notarized Developer ID' <<<"$assessment" \
+  || fail "Gatekeeper accepts $pkg, but not as notarized: $assessment"
+echo "$assessment" >&2
+echo "$pkg"

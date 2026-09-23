@@ -1,0 +1,53 @@
+#!/bin/bash
+# The launchd plist that registers one installation's daemon, written to stdout.
+#
+#   launchd-plist <service> <daemon path>
+#
+# [LAW:single-enforcer] The one place this plist's shape is written. The service name
+# arrives once and is written three times - the Label, the single MachServices key, and
+# the daemon's `--service` - because the three being equal is load-bearing and a caller
+# handing them over separately could hand over two names:
+#
+# - the Label is the service because Installation.launchdLabel is: one job per label is
+#   what launchd enforces, and it is how a second claimant is refused at bootstrap
+#   instead of run without an endpoint;
+# - the daemon listens on the name it is passed, so an argument that differs from the
+#   MachServices key is a daemon launchd never hands the endpoint it listens for.
+#
+# KeepAlive after an unsuccessful exit only. The daemon owns a device whose readiness
+# costs a second, so one that stayed down after a crash would answer nothing until
+# someone noticed; and it exits 0 on purpose when starting again would not help - a
+# malformed `--service` among them - because 0 is the one exit launchd can be told not
+# to restart.
+#
+# Held to bash 3.2, like every script a fresh Mac might run.
+set -euo pipefail
+
+service=${1:?usage: launchd-plist <service> <daemon path>}
+daemon=${2:?usage: launchd-plist <service> <daemon path>}
+
+# A path is any bytes and a plist is XML, so the characters XML reserves are escaped
+# before either value is written into one. [LAW:parse-dont-validate]
+xml() {
+  printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g'
+}
+service=$(xml "$service")
+daemon=$(xml "$daemon")
+
+cat <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>$service</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$daemon</string>
+        <string>--service</string>
+        <string>$service</string>
+    </array>
+    <key>MachServices</key><dict><key>$service</key><true/></dict>
+    <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+</dict>
+</plist>
+PLIST
