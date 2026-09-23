@@ -1,0 +1,42 @@
+# Builds and tests every package in the repository on the macOS the package targets, so
+# a branch is known to build somewhere other than the machine it was written on.
+#
+# The job names are the check names ruleset 23733334 requires before a PR can merge
+# into master. Renaming a job renames its check, and the ruleset then waits for a check
+# that will never report, which blocks every PR. Change both together or neither.
+name: test
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+# [LAW:one-source-of-truth] The one place the toolchain is chosen, for every job. The
+# runner's default Xcode lags the Swift this repository is written against, and code
+# that compiles on a newer Swift can fail to compile on an older one, so the runner's
+# default is never used.
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+
+jobs:
+  # The same command developers run locally, including the signing step, so CI checks
+  # the build that developers actually test by hand. [LAW:one-source-of-truth]
+  vhid:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift --version
+      - run: make test
+
+  # A package of its own, which a root `swift test` never builds, so a green root suite
+  # says nothing about it. It signs nothing, so it has no make target to share.
+  eyes:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: eyes
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift --version
+      - run: swift build
+      - run: swift test
