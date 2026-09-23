@@ -14,9 +14,11 @@ on:
 permissions:
   contents: read
 
-# A push to a PR makes the run still going on its last commit worth nothing.
+# A push to a PR makes the run still going on its last commit worth nothing. A commit on
+# master is never superseded that way - each one is owed its own result - so it is its
+# own group and nothing cancels it.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 # [LAW:one-source-of-truth] The one place the toolchain is chosen, for every job: the
