@@ -15,7 +15,9 @@ struct McpCommand: AsyncParsableCommand {
             diagnostic goes to stderr. The tools are type, press, click, move, scroll, drag and cursor. \
             They take what the verbs of the same name take and answer with what those verbs print.
 
-            Tool calls run one at a time, in turn, even when a client sends them together. Each \
+            Tool calls run one at a time, even when a client sends them together, but calls sent \
+            together run in no promised order: a call that must follow another, a type after the \
+            click that focuses a field, is sent once the first one's answer is back. Each call \
             connects to the daemon and disconnects when it returns. The daemon serves \
             one client at a time, so a session that held its connection open would refuse every other \
             caller for as long as it ran: a vhid click from a shell, and every other agent's session. \
@@ -64,14 +66,19 @@ struct McpCommand: AsyncParsableCommand {
     }
 }
 
-/// One tool call at a time, in the order they take their turns.
+/// One tool call at a time.
 ///
 /// **Why: the SDK runs every request in a task of its own.** Two calls sent together - a
 /// click and a type in one turn of an agent's - would reach for the daemon at once, and it
 /// admits one client: the second came back refused as busy, by this very process. Taking
-/// turns makes the session one client again, and it keeps what a caller sent in order on
-/// the screen, where two calls interleaving report by report would mean neither.
-/// [LAW:no-ambient-temporal-coupling] The order is this actor's to own.
+/// turns makes the session one client again, and no two calls interleave report by report.
+///
+/// **Not the order they were sent in.** A call's turn is taken when its handler reaches
+/// this actor, and the SDK's handlers race here from the shared pool, so two calls sent
+/// together can take their turns either way round. JSON-RPC promises no order among
+/// requests in flight together, and neither does this: a caller that needs one call after
+/// another waits for the first one's answer, which is the one order a client can see.
+/// [LAW:no-ambient-temporal-coupling] Exclusion is this actor's to own; order is the caller's.
 actor Turns {
     private var last: Task<Void, Never>?
 
