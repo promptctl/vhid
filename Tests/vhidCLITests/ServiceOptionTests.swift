@@ -4,7 +4,10 @@ import Testing
 
 /// What `--service` becomes before any verb holds it. [LAW:parse-dont-validate]
 @Suite struct ServiceOptionTests {
-    @Test func noServiceIsTheCopyBuiltFromThisTree() throws {
+    /// The suite runs a debug build, which is the copy built from a working tree. The
+    /// release half of the same switch is read by `scripts/make-pkg`, which names the job
+    /// it installs after the answer the release binary gives.
+    @Test func noServiceIsTheInstallationThisBuildBelongsTo() throws {
         #expect(try ServiceOption.parse([]).installation() == .development)
     }
 

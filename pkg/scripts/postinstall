@@ -1,0 +1,63 @@
+#!/bin/bash
+# Runs as root after the payload lands: loads the daemon's launchd job, then asks macOS
+# to activate the driver extension on behalf of whoever is logged in.
+#
+# Everything this writes goes to /var/log/install.log, which is where Installer and
+# `installer -verbose` leave a script's output. The one step no pkg can take - approving
+# the driver extension in System Settings - is said on the pkg's closing page as well,
+# because a person clicking through Installer never reads that log.
+#
+# The service name is the file beside this script, written by scripts/make-pkg from the
+# answer the packed vhid gives, so the job loaded here is named for the service the
+# installed CLI dials. [LAW:one-source-of-truth]
+set -euo pipefail
+
+here=$(cd "$(dirname "$0")" && pwd)
+service=$(cat "$here/service")
+plist="/Library/LaunchDaemons/$service.plist"
+vhid=/usr/local/bin/vhid
+
+say() { echo "vhid postinstall: $*"; }
+fail() { echo "vhid postinstall: $*" >&2; exit 1; }
+
+# preinstall stopped any job a previous install left loaded, so a refusal here is
+# another claimant on the label, and the install fails naming it rather than finishing
+# over a daemon that is not running. [LAW:no-silent-failure]
+launchctl bootstrap system "$plist" || fail "launchd would not load $plist; see: launchctl print system/$service"
+
+# The endpoint is handed out at load, so whether this job got it is known before the
+# daemon has run a line. A job loaded without it is a root process nothing can reach,
+# restarted forever, so it is taken back down: another job under some other label names
+# this service. [LAW:no-silent-failure]
+record=$(launchctl print "system/$service")
+if ! grep -q "\"$service\" = {" <<<"$record"; then
+  launchctl bootout "system/$service"
+  fail "launchd gave $service to another job, so this one was unloaded. Find the other claimant with: grep -l '>$service<' /Library/LaunchDaemons/*.plist"
+fi
+say "loaded $service from $plist"
+
+# The activation is the logged-in user's to ask for: macOS attributes the request to
+# whoever makes it, and the approval that person gives in System Settings answers it.
+# The path is the installed CLI's own pin, the same one scripts/virtual-hid-driver is
+# held to. [LAW:one-source-of-truth]
+manager=$("$vhid" driver pins | awk -F'\t' '$1 == "manager-executable" { print $2 }')
+[ -n "$manager" ] || fail "$vhid driver pins names no manager-executable"
+
+console=$(stat -f %Su /dev/console)
+case "$console" in
+  # The login window, and Setup Assistant's own user: nobody who could approve anything.
+  root|loginwindow|_mbsetupuser)
+    say "nobody is logged in, so the driver extension was not activated. Once someone is, they run: $manager activate" ;;
+  *)
+    # The Manager exits 0 whatever it made of the request, so its status is no report.
+    # The state read below is.
+    launchctl asuser "$(id -u "$console")" sudo -u "$console" "$manager" activate
+    say "asked macOS to activate the driver extension for $console" ;;
+esac
+
+# Where the driver stands now, in the words `vhid driver state` uses anywhere else. A
+# verdict of awaiting-approval is the expected answer on a Mac that never had it: the
+# daemon is loaded and keeps retrying until the switch is turned on, and nothing here
+# can turn it on. So it is reported, not failed on.
+state=$("$vhid" driver state 2>&1) && status=0 || status=$?
+say "driver (vhid driver state exited $status): $(tr '\n' ' ' <<<"$state")"

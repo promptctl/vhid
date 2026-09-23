@@ -1,0 +1,25 @@
+#!/bin/bash
+# Runs as root before the payload lands. Stops the job a previous install of this pkg
+# left loaded, so postinstall's bootstrap loads the new plist rather than being refused
+# on a label that is still held: launchd adds no second job under one label, and says so
+# as exit 5, "Bootstrap failed: Input/output error".
+#
+# The service name is the file beside this script, written by scripts/make-pkg from the
+# answer the packed vhid gives, so the job stopped here is the one postinstall starts.
+# [LAW:one-source-of-truth]
+set -euo pipefail
+
+service=$(cat "$(dirname "$0")/service")
+
+# Only launchd's own "no such job" means nothing is loaded. Anything else read nothing,
+# and a failed install is better than one that carries on as if the label were free.
+# [LAW:no-silent-failure]
+if record=$(launchctl print "system/$service" 2>&1); then
+  echo "vhid preinstall: stopping the loaded $service job"
+  launchctl bootout "system/$service"
+elif grep -q "Could not find service" <<<"$record"; then
+  echo "vhid preinstall: no $service job is loaded"
+else
+  echo "vhid preinstall: could not read whether $service is loaded: $record" >&2
+  exit 1
+fi

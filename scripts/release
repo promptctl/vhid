@@ -1,0 +1,19 @@
+#!/bin/bash
+# The whole release: the pkg built and signed, then notarized and stapled.
+#
+#   NOTARY_PROFILE=<profile> scripts/release <version> <output directory>
+#     # prints <output directory>/vhid-<version>.pkg
+#
+# [LAW:composability] Each step is its own script, runnable alone; this one orders them.
+#
+# Held to bash 3.2, like every script here.
+set -euo pipefail
+
+profile=${NOTARY_PROFILE:?NOTARY_PROFILE names the notarytool keychain profile; make one with xcrun notarytool store-credentials}
+# Asked before the build, which takes minutes, rather than after it.
+xcrun notarytool history --keychain-profile "$profile" >/dev/null \
+  || { echo "release: the notarytool profile '$profile' does not answer" >&2; exit 1; }
+
+scripts=$(dirname "$0")
+pkg=$("$scripts/make-pkg" "$@")
+"$scripts/notarize" "$pkg"

@@ -18,18 +18,32 @@ struct ServiceOption: ParsableArguments {
         name: .customLong("service"),
         help: ArgumentHelp(
             "The Mach service of the daemon to talk to.",
-            discussion: "Defaults to \(ServiceOption.byDefault), the copy built from this tree. "
-                + "vhid's installed copy is \(Installation.release)."))
+            discussion: "Defaults to \(ServiceOption.byDefault), the installation this vhid was built for. "
+                + "vhid's installed copy is \(Installation.release); "
+                + "the copy built from a working tree is \(Installation.development)."))
     var stated: String?
 
-    /// The installation a verb acts on when none is stated.
+    /// The installation a verb acts on when none is stated: the one this binary belongs to.
     ///
-    /// **The development copy, because this binary is part of it.** `.build/debug/vhid`
-    /// is built from the working tree and signed with the same dev identity as the
-    /// daemon built beside it; reaching into the installed copy by default would be the
-    /// surprising direction, and the installed copy is the one a person is least willing
-    /// to have surprised. `--service \(Installation.release)` addresses it on purpose.
+    /// **Which one that is was settled when the binary was built.** `make` builds debug,
+    /// and `.build/debug/vhid` is part of the copy built from the working tree, signed with
+    /// the dev identity beside the daemon built with it; reaching into the installed copy
+    /// from there would be the surprising direction, and the installed copy is the one a
+    /// person is least willing to have surprised. `scripts/make-pkg` builds release, and the
+    /// vhid it installs is part of the installed copy - where a default of the development
+    /// daemon would dial a service nothing on that Mac has registered, and every verb would
+    /// fail as a daemon that could not be reached.
+    ///
+    /// The build configuration decides rather than a flag passed to the release build,
+    /// because a flag is a step that can be left off, and a release binary built without it
+    /// would ship dialling the development daemon with nothing to say so.
+    /// `scripts/make-pkg` reads this value back out of the binary it packs, through
+    /// `vhid service`, and writes the launchd plist from it. [LAW:one-source-of-truth]
+    #if DEBUG
     static let byDefault = Installation.development
+    #else
+    static let byDefault = Installation.release
+    #endif
 
     /// [LAW:parse-dont-validate] The one place the flag becomes an installation. Every
     /// verb holds the value and never the string, so nothing downstream re-examines a
