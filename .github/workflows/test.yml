@@ -1,5 +1,5 @@
-# Builds and tests every package in the repository on the macOS the package targets, so
-# a branch is known to build somewhere other than the machine it was written on.
+# Builds and tests every package in the repository, so a branch is known to build
+# somewhere other than the machine it was written on.
 #
 # The job names are the check names ruleset 23733334 requires before a PR can merge
 # into master. Renaming a job renames its check, and the ruleset then waits for a check
@@ -11,18 +11,30 @@ on:
   push:
     branches: [master]
 
-# [LAW:one-source-of-truth] The one place the toolchain is chosen, for every job. The
-# runner's default Xcode lags the Swift this repository is written against, and code
-# that compiles on a newer Swift can fail to compile on an older one, so the runner's
-# default is never used.
+permissions:
+  contents: read
+
+# A push to a PR makes the run still going on its last commit worth nothing.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# [LAW:one-source-of-truth] The one place the toolchain is chosen, for every job: the
+# Xcode developers build with, named rather than left to the runner's default, which
+# moves under us. A Swift older than the one the code was written against can refuse
+# code that compiles locally, and a newer one can accept code that does not.
 env:
-  DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+  DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
 
 jobs:
   # The same command developers run locally, including the signing step, so CI checks
   # the build that developers actually test by hand. [LAW:one-source-of-truth]
+  #
+  # The timeout is there because a keychain or codesign step that stalls hangs rather
+  # than failing, and a green run takes about two minutes. [LAW:no-silent-failure]
   vhid:
-    runs-on: macos-15
+    runs-on: macos-26
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - run: swift --version
@@ -31,7 +43,8 @@ jobs:
   # A package of its own, which a root `swift test` never builds, so a green root suite
   # says nothing about it. It signs nothing, so it has no make target to share.
   eyes:
-    runs-on: macos-15
+    runs-on: macos-26
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: eyes
