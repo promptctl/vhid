@@ -17,13 +17,23 @@ let package = Package(
         .executable(name: "vhidd", targets: ["vhidd"]),
         .executable(name: "vhid", targets: ["vhid"]),
     ],
-    // The one dependency, and it stops at the leaf. Every library target below still
-    // links nothing outside this package; what takes this is the CLI, which is the end of
-    // the graph and nothing else's dependency. A command's flags and the help that
-    // describes them are one declaration here rather than a parser and a paragraph that
-    // drift apart. [LAW:one-source-of-truth] [LAW:one-way-deps]
+    // The dependencies stop at the leaf. Every library target below still links
+    // nothing outside this package; what takes these is the CLI, which is the end of the
+    // graph and nothing else's dependency. [LAW:one-way-deps]
+    //
+    // The argument parser, because a command's flags and the help that describes them
+    // are one declaration there rather than a parser and a paragraph that drift apart.
+    // [LAW:one-source-of-truth]
+    //
+    // The MCP SDK, because the protocol - its framing, its lifecycle, its method names -
+    // is a specification this package has no business restating. Held to 0.12.x, because
+    // below 1.0 a minor release is allowed to break the API.
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
+        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", .upToNextMinor(from: "0.12.1")),
+        // Named only because the SDK's `Transport` names its `Logger` type, which a
+        // transport of this package's own has to say. The SDK already brings it in.
+        .package(url: "https://github.com/apple/swift-log.git", from: "1.5.0"),
     ],
     targets: [
         // The vocabulary at the seam between deciding what to type and typing it: a HID
@@ -96,14 +106,17 @@ let package = Package(
             name: "vhidd",
             dependencies: ["Helper", "VirtualHID", "DriverExtension", "Keystrokes", "Pointing", "Signals", "Installations"]
         ),
-        // The verbs, against the daemon over the helper connection. It links Input for
-        // what the verbs mean and Helper for how they get there, and deliberately not
-        // VirtualHID: a client never opens a device. [LAW:one-way-deps]
+        // The verbs, against the daemon over the helper connection - from a command line,
+        // or as tools over MCP. It links Input for what the verbs mean and Helper for how
+        // they get there, and deliberately not VirtualHID: a client never opens a device.
+        // [LAW:one-way-deps]
         .executableTarget(
             name: "vhid",
             dependencies: [
                 "Input", "Helper", "Installations", "KeyboardLayout", "Keystrokes", "Pointing",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
+                .product(name: "MCP", package: "swift-sdk"),
+                .product(name: "Logging", package: "swift-log"),
             ]
         ),
         // The edge of the CLI: what argv becomes before any of it reaches a device, and
@@ -111,7 +124,10 @@ let package = Package(
         // daemon, no driver and no root.
         .testTarget(
             name: "vhidCLITests",
-            dependencies: ["vhid", "Input", "Helper", "Installations", "Keystrokes", "Pointing"]
+            dependencies: [
+                "vhid", "Input", "Helper", "Installations", "Keystrokes", "Pointing",
+                .product(name: "MCP", package: "swift-sdk"),
+            ]
         ),
         // The authorization boundary of a root keystroke service, checked against the
         // test process's own identity and audit token: real code signing, no root.
