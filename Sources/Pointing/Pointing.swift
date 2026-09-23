@@ -38,8 +38,9 @@ public struct Move: Hashable, Sendable {
     public static let none = Move(x: .zero, y: .zero)
 }
 
-/// One report's worth of wheel: `vertical` positive rolls the wheel away from the hand,
-/// which scrolls content up, and `horizontal` positive pans right.
+/// One report's worth of wheel: `vertical` positive rolls the wheel away from the hand, and
+/// `horizontal` positive tilts it right. Which way that moves what is on the screen is not
+/// the report's to say: macOS's Natural scrolling setting reverses both.
 public struct Scroll: Hashable, Sendable {
     public let vertical: Count
     public let horizontal: Count

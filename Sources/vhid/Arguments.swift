@@ -2,18 +2,29 @@ import ArgumentParser
 import Input
 import Pointing
 
+/// Two coordinates from a command line as a place on the screen, or the refusal that says
+/// they are not one.
+///
+/// [LAW:parse-dont-validate] `ScreenPoint` refuses what is not a place on the screen, and
+/// `inf` and `nan` are both things a shell hands over as a Double without complaint.
+/// [LAW:single-enforcer] Every verb that takes a place reads it through here, from both
+/// its `validate` and its `run`, so the refusal is worded one way everywhere.
+func place(_ x: Double, _ y: Double) throws -> ScreenPoint {
+    guard let point = ScreenPoint(x: x, y: y) else {
+        throw ValidationError("(\(x), \(y)) is not a place on the screen")
+    }
+    return point
+}
+
 /// A button as a command line writes one: the word for the three that have a word, the
 /// number for the other twenty-nine.
 ///
-/// [LAW:one-source-of-truth] The inverse of `Button.description`, which prints the same
-/// two spellings, so a button this CLI reports is a button this CLI accepts. The rules
-/// themselves stay in `Pointing` - which words name buttons, and that a button is 1
-/// through 32 - and are not restated here.
+/// [LAW:single-enforcer] Which strings are buttons is `Button.init?(_:)`'s to say, in
+/// `Pointing`, where the MCP server's crossing reads it too; argv is already a string, so
+/// this crossing is nothing but the call.
 extension Button: ExpressibleByArgument {
     public init?(argument: String) {
-        if let named = Button(name: argument) { self = named; return }
-        guard let number = UInt8(argument), let numbered = Button(rawValue: number) else { return nil }
-        self = numbered
+        self.init(argument)
     }
 
     /// Printed the way it reads back, so the default shown in `--help` is a value the

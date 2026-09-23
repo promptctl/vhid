@@ -46,8 +46,19 @@ public extension Button {
     var name: String? { Self.named.first { $0.value == self }?.key }
 }
 
-extension Button: CustomStringConvertible {
-    /// The word, or the number for a button that has no word. Both spellings are ones
-    /// `init?(name:)` and `init?(rawValue:)` read back. [LAW:one-source-of-truth]
+extension Button: LosslessStringConvertible {
+    /// The word, or the number for a button that has no word. [LAW:one-source-of-truth]
     public var description: String { name ?? String(rawValue) }
+
+    /// The button this spelling names: a word, or a number from 1 to 32 - exactly the
+    /// spellings `description` prints, so a button that is reported is a button that can
+    /// be asked for.
+    ///
+    /// Here and not in each place a spelling arrives, because the command line and a JSON
+    /// request are two crossings of one rule: each reads its own format down to a string,
+    /// and neither gets to decide which strings are buttons. [LAW:single-enforcer]
+    public init?(_ description: String) {
+        guard let button = Button(name: description) ?? UInt8(description).flatMap(Button.init(rawValue:)) else { return nil }
+        self = button
+    }
 }
