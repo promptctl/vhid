@@ -69,6 +69,7 @@ import Testing
         func releaseButtons(reply: @escaping (Error?) -> Void) { note("release", reply) }
         func move(x: Int8, y: Int8, reply: @escaping (Error?) -> Void) { note("move \(x) \(y)", reply) }
         func scroll(vertical: Int8, horizontal: Int8, reply: @escaping (Error?) -> Void) { note("scroll \(vertical) \(horizontal)", reply) }
+        func leave(reply: @escaping (Error?) -> Void) { note("leave", reply) }
 
         func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
             connection.exportedInterface = NSXPCInterface(with: HelperService.self)

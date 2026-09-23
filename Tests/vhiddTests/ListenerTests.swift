@@ -126,4 +126,33 @@ import Testing
         #expect(served.devices.asked == [Usage.leftShift.rawValue, Usage.space.rawValue])
         withExtendedLifetime((served, first)) {}
     }
+
+    /// The race `leave` exists to close. A client that leaves is answered only once the
+    /// devices are free, so the next client is admitted on the first try - no retry loop,
+    /// unlike the test above. The leaver's connection is still open: it is refused if it
+    /// calls again, and when it does end, its ending releases nothing, because the keys
+    /// down by then are the next client's. [LAW:no-ambient-temporal-coupling]
+    @Test func aClientThatLeavesFreesTheDevicesBeforeTheAnswer() async throws {
+        let served = try serve()
+        let first = client(of: served)
+        let (leaver, keyboard) = (first.helper, first.helper.keyboard)
+        try await blocking { try keyboard.down(.leftShift) }
+        try await blocking { try leaver.leave() }
+        #expect(served.devices.releasedBecause == ["a client left"])
+
+        let second = client(of: served)
+        let next = second.helper.keyboard
+        try await blocking { try next.down(.space) }
+        #expect(served.devices.asked == [Usage.leftShift.rawValue, Usage.space.rawValue])
+
+        await #expect(throws: (any Error).self) { try await blocking { try keyboard.down(.tab) } }
+        #expect(served.devices.asked == [Usage.leftShift.rawValue, Usage.space.rawValue])
+
+        first.connection.invalidate()
+        // The ending runs on the connection's own queue, so it is waited for the only way
+        // the far end shows it: the next thing the holder serves comes after it.
+        try await blocking { try next.down(.tab) }
+        #expect(served.devices.releasedBecause == ["a client left"], "the leaver's ending released the next client's keys")
+        withExtendedLifetime((served, first, second)) {}
+    }
 }

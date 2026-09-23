@@ -8,7 +8,7 @@ import Pointing
 /// on a client's behalf when it goes. [LAW:decomposition] Admitting and letting go are the
 /// listener's; what a release is belongs to the devices, and devices of a test's own stand
 /// behind the real listener through this.
-protocol ServedDevices: HelperService {
+protocol ServedDevices: DeviceService {
     func releaseEverything(because reason: String)
 }
 

@@ -25,7 +25,7 @@ struct TypeCommand: AsyncParsableCommand {
 
     func run() async throws {
         let layout = try KeyboardLayout.current()
-        print(try await Self.type(text, on: layout, with: Devices(of: try service.installation()).typist))
+        print(try await Devices.using(try service.installation()) { try await Self.type(text, on: layout, with: $0.typist) })
     }
 
     /// The verb itself, over a typist from anywhere.

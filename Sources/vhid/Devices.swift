@@ -19,16 +19,40 @@ struct Devices {
     let keyboard: any Keyboard
     let mouse: any Mouse
 
-    /// The devices over a connection to this installation's daemon.
+    /// Runs `body` with the devices over a connection to this installation's daemon, and
+    /// hands them back when it returns.
+    ///
+    /// **The one way a verb reaches the devices, and the scope is the holding.** The daemon
+    /// admits one client at a time, so a verb holds the devices for exactly as long as this
+    /// runs and then leaves, waiting for the daemon to say they are free. The next verb -
+    /// in this process or another - is admitted on that answer rather than racing the
+    /// daemon's cleanup of this one. [LAW:no-ambient-temporal-coupling]
     ///
     /// The connection is lazy - launchd starts the job on the first call, not here - so a
     /// daemon that is not installed is discovered when the first report goes out rather
     /// than at construction. Nothing is claimed about it before then. [LAW:no-silent-failure]
-    init(of installation: Installation) {
+    static func using<T>(_ installation: Installation, _ body: (Devices) async throws -> T) async throws -> T {
         let helper = HelperConnection(installation: installation)
         let queue = DeviceQueue()
-        keyboard = QueuedKeyboard(keyboard: helper.keyboard, queue: queue)
-        mouse = QueuedMouse(pointing: helper.mouse, queue: queue)
+        let devices = Devices(keyboard: QueuedKeyboard(keyboard: helper.keyboard, queue: queue),
+                              mouse: QueuedMouse(pointing: helper.mouse, queue: queue))
+        let done: T
+        do {
+            done = try await body(devices)
+        } catch {
+            // What stopped the verb is what the caller needs to hear. The leave still runs,
+            // because a connection that is working should hand the devices back rather
+            // than make the next client wait on its disconnection. When the leave fails
+            // too, it is almost always the same failure - the connection that just broke -
+            // and the disconnection that follows releases everything regardless.
+            try? await queue.run { try helper.leave() }
+            throw error
+        }
+        // On the queue, behind the last report this verb sent. [LAW:no-silent-failure] A
+        // leave that fails after the verb succeeded is thrown: what the verb did stands,
+        // and the caller hears that the devices were not handed back cleanly.
+        try await queue.run { try helper.leave() }
+        return done
     }
 
     /// The typist these keys are typed by.

@@ -51,9 +51,9 @@ struct PlayCommand: AsyncParsableCommand {
             // [LAW:parse-dont-validate] Parsed before anything is connected or moved, so a
             // script that cannot be played whole moves nothing.
             let play = try Play.parse(String(decoding: FileHandle.standardInput.readDataToEndOfFile(), as: UTF8.self))
-            let pointer = Devices(of: try service.installation()).pointer
-            let player = Player(pointer: pointer, clock: WakingClock(), wall: Self.epochMicroseconds, lead: Self.lead)
-            ending = .finished(try await player.play(play))
+            ending = .finished(try await Devices.using(try service.installation()) {
+                try await Player(pointer: $0.pointer, clock: WakingClock(), wall: Self.epochMicroseconds, lead: Self.lead).play(play)
+            })
         } catch {
             // The reports that did go out are printed even for a run that stopped, so a
             // harness can see how far it got. [LAW:no-silent-failure]

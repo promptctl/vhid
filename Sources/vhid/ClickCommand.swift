@@ -53,8 +53,9 @@ struct ClickCommand: AsyncParsableCommand {
     }
 
     func run() async throws {
-        print(try await Self.click(at: try target(), button: button, times: times,
-                                   with: Devices(of: try service.installation()).pointer))
+        print(try await Devices.using(try service.installation()) {
+            try await Self.click(at: try target(), button: button, times: times, with: $0.pointer)
+        })
     }
 
     /// The verb itself, over a pointer from anywhere - which is what lets it be run

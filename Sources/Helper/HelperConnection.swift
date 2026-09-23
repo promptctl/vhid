@@ -23,6 +23,11 @@ public final class HelperConnection: @unchecked Sendable {
     private let connection: NSXPCConnection
     private let replyTimeout: Duration
 
+    /// Whether anything has been sent over this connection. The connection is lazy, so
+    /// until something is, the daemon has never seen it and holds nothing for it.
+    private let spoken = NSLock()
+    private var hasSpoken = false
+
     /// The helper's refusal, or the connection's, as one thing a caller can catch.
     public struct Unreachable: Error, CustomStringConvertible {
         public let reason: String
@@ -52,6 +57,21 @@ public final class HelperConnection: @unchecked Sendable {
     }
 
     deinit { connection.invalidate() }
+
+    /// Hands the devices back to the daemon, and returns once they are free.
+    ///
+    /// A connection that never spoke never reached the daemon, so there is nothing to hand
+    /// back. Asking anyway would be the connection's first message: it would claim the
+    /// devices only to free them, and fail as busy while someone else holds them.
+    /// [LAW:dataflow-not-control-flow] Whether it spoke is a fact of the connection,
+    /// recorded by `call`, not a guess about which verbs send reports.
+    public func leave() throws {
+        spoken.lock()
+        let reached = hasSpoken
+        spoken.unlock()
+        guard reached else { return }
+        try call { service, reply in service.leave(reply: reply) }
+    }
 
     /// The keyboard over this connection.
     public var keyboard: HelperKeyboard { HelperKeyboard(helper: self) }
@@ -96,6 +116,9 @@ public final class HelperConnection: @unchecked Sendable {
     /// only reads the first types into a dead service forever. All three arrive here, and
     /// all three throw.
     func call(_ body: (HelperService, @escaping (Error?) -> Void) -> Void) throws {
+        spoken.lock()
+        hasSpoken = true
+        spoken.unlock()
         let outcome = Outcome()
         let proxy = connection.remoteObjectProxyWithErrorHandler { error in
             // The domain and code alongside the words: NSXPC says "couldn't communicate"

@@ -24,7 +24,7 @@ public final class DeviceQueue: Sendable {
 
     /// Runs `call` on the queue and resumes with what it threw, if anything. Handed over
     /// on the caller's actor, so calls made there run in the order they were made.
-    func run(isolation: isolated (any Actor)? = #isolation, _ call: @escaping @Sendable () throws -> Void) async throws {
+    public func run(isolation: isolated (any Actor)? = #isolation, _ call: @escaping @Sendable () throws -> Void) async throws {
         try await withCheckedThrowingContinuation { continuation in
             queue.async { continuation.resume(with: Result(catching: call)) }
         }

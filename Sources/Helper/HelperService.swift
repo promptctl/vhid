@@ -41,7 +41,7 @@ import Foundation
 /// number, a count is the signed byte the report carries. The wire admits values the
 /// device has no bit or count for - button 0 and 33 upward, and -128 - and the helper
 /// refuses those by name rather than folding them. [LAW:parse-dont-validate]
-@objc public protocol HelperService {
+@objc public protocol DeviceService {
     /// Holds `usage` down, and answers when the daemon has acknowledged the report.
     ///
     /// The reply is what makes the client's pacing possible, so it is not a fire-and-
@@ -65,3 +65,22 @@ import Foundation
     func scroll(vertical: Int8, horizontal: Int8, reply: @escaping (Error?) -> Void)
 }
 
+/// What a client is served: the device acts, and handing them back.
+///
+/// **Leaving is a call and not only a disconnection, because a disconnection is not
+/// acknowledged.** The daemon admits one client at a time and frees the devices from the
+/// departing connection's invalidation handler, on a thread of its own, after releasing
+/// every key and button. A client that invalidates and reconnects at once - the next
+/// `vhid` in a shell script, the next call of an MCP session - arrives while that is still
+/// running and is refused as busy by its own previous connection. Measured: seven of sixty
+/// back-to-back MCP tool calls, each refused as `pid N holds the keyboard` with N its own
+/// pid. `leave` answers only once the devices are free, so the next connection is admitted
+/// on the answer rather than on a race. [LAW:no-ambient-temporal-coupling]
+///
+/// Disconnecting without leaving still releases everything, because a client that
+/// crashes cannot leave; `leave` is how a client that can goes without racing.
+@objc public protocol HelperService: DeviceService {
+    /// Releases every key and button this client left held, and frees the devices for the
+    /// next client. Every call after it on this connection is refused.
+    func leave(reply: @escaping (Error?) -> Void)
+}
