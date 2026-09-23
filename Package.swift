@@ -109,11 +109,13 @@ let package = Package(
         // The verbs, against the daemon over the helper connection - from a command line,
         // or as tools over MCP. It links Input for what the verbs mean and Helper for how
         // they get there, and deliberately not VirtualHID: a client never opens a device.
+        // DriverExtension is for `vhid driver`, which reads the machine and not the
+        // daemon, so scripts/virtual-hid-driver can ask it on a Mac with no daemon yet.
         // [LAW:one-way-deps]
         .executableTarget(
             name: "vhid",
             dependencies: [
-                "Input", "Helper", "Installations", "KeyboardLayout", "Keystrokes", "Pointing",
+                "Input", "Helper", "Installations", "KeyboardLayout", "Keystrokes", "Pointing", "DriverExtension",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "MCP", package: "swift-sdk"),
                 .product(name: "Logging", package: "swift-log"),

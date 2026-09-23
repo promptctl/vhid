@@ -1,0 +1,54 @@
+#!/bin/bash
+# Fails when a driver pin in scripts/virtual-hid-driver differs from the same pin in
+# Sources/DriverExtension, naming the pin and both values.
+#
+# [LAW:one-source-of-truth] The script is the file that fetches, checksums and deletes,
+# so it holds the pins it acts on; the Swift copies exist for a vhid installed with no
+# clone of this repo to read. Two copies can drift, so this is what makes a drift a red
+# build instead of a Mac that installs one package and names another.
+#
+#   scripts/check-driver-pins            needs a built vhid; `make check-pins` builds one
+#
+# The script's values are read by SOURCING it rather than by grepping its assignments,
+# because two of them are built out of the others - PKG_URL from $PKG_VERSION, and
+# MANAGER from $MANAGER_APP - and a grep hands back the template rather than the value.
+# Expanding those here would be a second implementation of the script's own semantics,
+# which is the drift this exists to catch; sourcing makes the script resolve them. The
+# script is written to be sourced: everything it DOES is behind its `BASH_SOURCE[0] ==
+# $0` guard, so this defines its constants and runs none of its verbs.
+#
+# The Swift values come from `vhid driver pins`, which prints what the binary was
+# compiled with: the constants themselves, not a parse of their source.
+#
+# Held to bash 3.2 like the script it reads.
+set -euo pipefail
+
+here=$(cd "$(dirname "$0")" && pwd)
+# The binary is the one the script itself runs, named once, in the script, as $VHID.
+# shellcheck source=virtual-hid-driver
+source "$here/virtual-hid-driver"
+
+fail() { echo "check-driver-pins: $*" >&2; exit 1; }
+
+pins=$("$VHID" driver pins) || fail "could not read '$VHID driver pins' - run 'make' first"
+
+# One pin: the CLI's name for it, then the script's. Both sides must be non-empty, so a
+# pin renamed on either side fails as missing rather than passing as two empty strings.
+compare() {
+  local key=$1 name=$2 value copy
+  value=$(awk -F'\t' -v k="$key" '$1==k{print $2}' <<<"$pins")
+  [ -n "$value" ] || fail "'vhid driver pins' emits no $key"
+  copy=${!name:-}
+  [ -n "$copy" ] || fail "scripts/virtual-hid-driver leaves $name empty"
+  [ "$copy" = "$value" ] || fail "scripts/virtual-hid-driver resolves $name=$copy, but the CLI pins $key=$value"
+  echo "check-driver-pins: $key agrees"
+}
+
+compare bundle-id          BUNDLE_ID
+compare team-id            TEAM_ID
+compare elements-receipt   ELEMENTS_RECEIPT
+compare manager-app        MANAGER_APP
+compare manager-executable MANAGER
+compare support-dir        SUPPORT_DIR
+compare package-version    PKG_VERSION
+compare package-url        PKG_URL
