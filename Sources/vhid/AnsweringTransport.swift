@@ -157,46 +157,69 @@ enum Unreadable {
 
 /// Which requests a line asks, answers, or withdraws, by id.
 ///
-/// A line is one JSON-RPC message or a batch of them. A request carries an id and a method;
-/// an answer carries an id and no method. A cancellation withdraws the request it names,
-/// which the SDK then answers with nothing at all, as the MCP spec says it must.
+/// [LAW:one-source-of-truth] Owed means the SDK will answer it, and only the SDK knows
+/// which lines those are. So each message is read by the SDK's own decoders, through a
+/// method and a notification whose parameters are any `Value` - what its internal
+/// `AnyMethod` and `AnyNotification` are - and in the order its receive loop tries them.
+/// A reading looser than the SDK's would owe an answer it never sends, and the session
+/// would wait on it for good.
 enum Exchange {
+    /// The ids the SDK will answer for this line, read from the client.
     static func requested(in line: Data) -> [ID] {
-        messages(in: line).compactMap { $0.method == nil ? nil : $0.id }
-    }
-
-    static func answered(in data: Data) -> [ID] {
-        messages(in: data).compactMap { $0.method == nil ? $0.id : nil }
-    }
-
-    static func withdrawn(in line: Data) -> [ID] {
-        messages(in: line).compactMap { $0.method == CancelledNotification.name ? $0.params?.requestId : nil }
-    }
-
-    private static func messages(in data: Data) -> [Envelope] {
-        let decoder = JSONDecoder()
-        if let one = try? decoder.decode(Envelope.self, from: data) { return [one] }
-        return (try? decoder.decode([Envelope].self, from: data)) ?? []
-    }
-
-    /// A message read no further than what this needs. Each field is read on its own, so
-    /// one of an unexpected shape costs that field and not the message.
-    private struct Envelope: Decodable {
-        let id: ID?
-        let method: String?
-        let params: Withdrawal?
-
-        private enum CodingKeys: String, CodingKey { case id, method, params }
-
-        init(from decoder: any Decoder) throws {
-            let fields = try decoder.container(keyedBy: CodingKeys.self)
-            id = try? fields.decodeIfPresent(ID.self, forKey: .id)
-            method = try? fields.decodeIfPresent(String.self, forKey: .method)
-            params = try? fields.decodeIfPresent(Withdrawal.self, forKey: .params)
+        if let items = try? decoder.decode([Value].self, from: line) {
+            // A batch is answered only when every item in it is read; one that is not
+            // fails the whole batch, which the SDK answers under an id of its own making.
+            var ids: [ID] = []
+            for item in items {
+                guard let data = try? encoder.encode(item), let fields = item.objectValue else { return [] }
+                if fields["id"] != nil {
+                    guard let request = try? decoder.decode(Request<Asked>.self, from: data) else { return [] }
+                    ids.append(request.id)
+                } else {
+                    guard (try? decoder.decode(Message<Told>.self, from: data)) != nil else { return [] }
+                }
+            }
+            return ids
         }
+        if (try? decoder.decode(Response<Asked>.self, from: line)) != nil { return [] }
+        if let request = try? decoder.decode(Request<Asked>.self, from: line) { return [request.id] }
+        if (try? decoder.decode(Message<Told>.self, from: line)) != nil { return [] }
+        // What none of those read, the SDK answers as a parse error under the line's own
+        // id when it can find a string or a whole number there, and under a random one
+        // when it cannot.
+        guard let id = (try? decoder.decode([String: Value].self, from: line))?["id"] else { return [] }
+        if let text = id.stringValue { return [.string(text)] }
+        if let number = id.intValue { return [.number(number)] }
+        return []
     }
 
-    private struct Withdrawal: Decodable {
-        let requestId: ID?
+    /// The ids this line, written by the server, answers: one response or a batch of them.
+    static func answered(in data: Data) -> [ID] {
+        if let one = try? decoder.decode(Response<Asked>.self, from: data) { return [one.id] }
+        return ((try? decoder.decode([Response<Asked>].self, from: data)) ?? []).map(\.id)
+    }
+
+    /// The request this line, read from the client, withdraws. The SDK answers a
+    /// cancelled request with nothing, as the MCP spec says it must.
+    static func withdrawn(in line: Data) -> [ID] {
+        guard let cancel = try? decoder.decode(Message<CancelledNotification>.self, from: line),
+              cancel.method == CancelledNotification.name, let id = cancel.params.requestId else { return [] }
+        return [id]
+    }
+
+    private static let decoder = JSONDecoder()
+    private static let encoder = JSONEncoder()
+
+    /// Any request, read as the SDK reads one it has not yet matched to a handler.
+    private struct Asked: MCP.Method {
+        static let name = ""
+        typealias Parameters = Value
+        typealias Result = Value
+    }
+
+    /// Any notification, likewise.
+    private struct Told: MCP.Notification {
+        static let name = ""
+        typealias Parameters = Value
     }
 }

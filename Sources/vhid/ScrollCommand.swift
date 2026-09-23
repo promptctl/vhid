@@ -23,10 +23,12 @@ struct ScrollCommand: AsyncParsableCommand {
     @Argument(help: "Screen points from the top left of the main display.")
     var y: Double
 
-    @Option(help: "Wheel ticks: positive rolls the wheel away from the hand.")
+    // [LAW:no-silent-failure] Unconditional, because a negative count is half of what this
+    // takes and the default reads `-3` as a flag, refusing `--vertical -3` as missing.
+    @Option(parsing: .unconditional, help: "Wheel ticks: positive rolls the wheel away from the hand.")
     var vertical: Int = 0
 
-    @Option(help: "Wheel ticks: positive tilts the wheel right.")
+    @Option(parsing: .unconditional, help: "Wheel ticks: positive tilts the wheel right.")
     var horizontal: Int = 0
 
     @OptionGroup var service: ServiceOption

@@ -134,7 +134,12 @@ public final class HelperConnection: @unchecked Sendable {
         switch outcome.await(replyTimeout) {
         case .acknowledged: return
         case .failed(let error): throw error
-        case nil: throw Unreachable(reason: "the helper did not answer in \(replyTimeout)")
+        case nil:
+            // A helper silent this long is taken as gone, and the connection with it: every
+            // call after this one, the leave included, fails at once rather than waiting out
+            // a deadline of its own. The daemon releases what it held when it sees this.
+            connection.invalidate()
+            throw Unreachable(reason: "the helper did not answer in \(replyTimeout)")
         }
     }
 }

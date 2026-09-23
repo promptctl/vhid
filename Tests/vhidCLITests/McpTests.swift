@@ -129,10 +129,64 @@ import Testing
         #expect(Exchange.answered(in: Self.line(#"[{"jsonrpc":"2.0","id":1,"result":{}},{"jsonrpc":"2.0","id":"two","result":{}}]"#)) == [1, "two"])
     }
 
+    /// One item the SDK cannot read fails the whole batch, which it then answers under an
+    /// id of its own making. Owing the readable one would hold the session open for good.
+    @Test func aBatchTheSDKCannotReadIsOwedNothing() {
+        #expect(Exchange.requested(in: Self.line(#"[{"jsonrpc":"2.0","id":1,"method":"tools/list"},{"foo":1}]"#)).isEmpty)
+        #expect(Exchange.requested(in: Self.line("[]")).isEmpty)
+    }
+
+    /// A response the client sends back, and a message with no jsonrpc version, are
+    /// nothing the SDK answers.
+    @Test func whatTheSDKDoesNotAnswerIsNotOwed() {
+        #expect(Exchange.requested(in: Self.line(#"{"jsonrpc":"2.0","id":4,"result":{}}"#)).isEmpty)
+        #expect(Exchange.requested(in: Self.line(#"{"jsonrpc":"2.0","id":[4],"method":"x"}"#)).isEmpty)
+    }
+
     /// A request whose params are not an object is still owed: the SDK answers it with a
     /// parse error under the same id.
     @Test func aRequestOfAnUnexpectedShapeIsStillOwed() {
         #expect(Exchange.requested(in: Self.line(#"{"jsonrpc":"2.0","id":9,"method":"tools/call","params":"x"}"#)) == [9])
         #expect(Exchange.requested(in: Self.line("not json")).isEmpty)
+    }
+
+    // MARK: turns
+
+    /// Calls sent together run one after another, never report by report together: the
+    /// daemon admits one client, and two calls at once would be two.
+    @Test func callsTakeTurnsAndNeverOverlap() async throws {
+        actor Record { var log: [String] = []; func note(_ s: String) { log.append(s) } }
+        let turns = Turns(), record = Record()
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for name in ["a", "b", "c"] {
+                group.addTask {
+                    try await turns.take {
+                        await record.note("\(name) begins"); await Task.yield(); await record.note("\(name) ends")
+                    }
+                }
+            }
+            try await group.waitForAll()
+        }
+        let log = await record.log
+        #expect(log.count == 6)
+        for pair in stride(from: 0, to: log.count, by: 2) {
+            #expect(log[pair].dropLast(7) == log[pair + 1].dropLast(5), "\(log) interleaves")
+        }
+    }
+
+    /// A call whose caller is cancelled never runs, even behind one still running, and the
+    /// turn after it still comes.
+    @Test func aCancelledCallNeverRuns() async throws {
+        let turns = Turns()
+        let (gate, open) = AsyncStream<Void>.makeStream()
+        let running = Task { try await turns.take { for await _ in gate { break } } }
+        let cancelled = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await turns.take { "ran" }
+        }
+        open.yield()
+        try await running.value
+        await #expect(throws: CancellationError.self) { try await cancelled.value }
+        #expect(try await turns.take { "after" } == "after")
     }
 }

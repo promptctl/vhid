@@ -1,3 +1,4 @@
+import Foundation
 import Helper
 import Input
 import Installations
@@ -48,10 +49,16 @@ struct Devices {
             try? await queue.run { try helper.leave() }
             throw error
         }
-        // On the queue, behind the last report this verb sent. [LAW:no-silent-failure] A
-        // leave that fails after the verb succeeded is thrown: what the verb did stands,
-        // and the caller hears that the devices were not handed back cleanly.
-        try await queue.run { try helper.leave() }
+        // On the queue, behind the last report this verb sent. A leave that fails after the
+        // verb succeeded does not undo it, so it does not replace what the verb did: an
+        // error there would read as "nothing happened", and a caller that retried would
+        // click twice or type the text twice. [LAW:no-silent-failure] It is said on stderr,
+        // and the disconnection that follows releases the devices regardless.
+        do {
+            try await queue.run { try helper.leave() }
+        } catch {
+            FileHandle.standardError.write(Data("vhid: done, but the devices were not handed back: \(error.reported)\n".utf8))
+        }
         return done
     }
 

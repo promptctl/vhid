@@ -58,12 +58,10 @@ enum Tools {
 
     /// Two coordinates as one place. Never refused for a JSON number: every number JSON
     /// hands over is finite, and the one that is not, `1e400`, never gets this far.
-    /// `AnsweringTransport` answers for it. The rule is still `ScreenPoint`'s alone.
-    /// [LAW:single-enforcer]
+    /// `AnsweringTransport` answers for it. The refusal is still `place`'s, worded once for
+    /// the command line and here alike. [LAW:single-enforcer]
     private static func point(_ arguments: Arguments) throws -> ScreenPoint {
-        let (x, y) = (try arguments[x], try arguments[y])
-        guard let point = ScreenPoint(x: x, y: y) else { throw ArgumentRefused("(\(x), \(y)) is not a place on the screen") }
-        return point
+        try vhid.place(try arguments[x], try arguments[y])
     }
 
     static let type: VerbTool = {

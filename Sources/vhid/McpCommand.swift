@@ -15,7 +15,8 @@ struct McpCommand: AsyncParsableCommand {
             diagnostic goes to stderr. The tools are type, press, click, move, scroll, drag and cursor. \
             They take what the verbs of the same name take and answer with what those verbs print.
 
-            Each tool call connects to the daemon and disconnects when it returns. The daemon serves \
+            Tool calls run one at a time, in turn, even when a client sends them together. Each \
+            connects to the daemon and disconnects when it returns. The daemon serves \
             one client at a time, so a session that held its connection open would refuse every other \
             caller for as long as it ran: a vhid click from a shell, and every other agent's session. \
             Between calls, this session holds nothing.
@@ -39,20 +40,51 @@ struct McpCommand: AsyncParsableCommand {
         }
 
         let server = Server(name: "vhid", version: "0", capabilities: .init(tools: .init(listChanged: false)))
+        let turns = Turns()
         await server.withMethodHandler(ListTools.self) { _ in .init(tools: Tools.all.map(\.tool)) }
         await server.withMethodHandler(CallTool.self) { request in
             guard let verb = Tools.all.first(where: { $0.tool.name == request.name }) else {
                 throw MCPError.invalidParams("there is no tool called \(request.name.debugDescription)")
             }
             // A verb that could not do what it was asked is a tool error, whose words the
-            // model reads; a protocol error is for a request that named no tool at all.
+            // model reads; a protocol error is for a request that named no tool at all. A
+            // call the client withdrew is neither: it is thrown as a cancellation, which
+            // the SDK answers with nothing, as the MCP spec says a cancelled request is.
             do {
-                return .init(content: [.text(text: try await verb.call(request.arguments ?? [:], on: installation), annotations: nil, _meta: nil)], isError: false)
+                let said = try await turns.take { try await verb.call(request.arguments ?? [:], on: installation) }
+                return .init(content: [.text(text: said, annotations: nil, _meta: nil)], isError: false)
+            } catch where Task.isCancelled {
+                throw CancellationError()
             } catch {
                 return .init(content: [.text(text: error.reported, annotations: nil, _meta: nil)], isError: true)
             }
         }
         try await server.start(transport: AnsweringTransport(StdioTransport(output: protocolOut)))
         await server.waitUntilCompleted()
+    }
+}
+
+/// One tool call at a time, in the order they take their turns.
+///
+/// **Why: the SDK runs every request in a task of its own.** Two calls sent together - a
+/// click and a type in one turn of an agent's - would reach for the daemon at once, and it
+/// admits one client: the second came back refused as busy, by this very process. Taking
+/// turns makes the session one client again, and it keeps what a caller sent in order on
+/// the screen, where two calls interleaving report by report would mean neither.
+/// [LAW:no-ambient-temporal-coupling] The order is this actor's to own.
+actor Turns {
+    private var last: Task<Void, Never>?
+
+    /// Runs `call` once every call that took its turn before this one has finished. A
+    /// cancelled caller cancels its call, waiting or running.
+    func take<T: Sendable>(_ call: @escaping @Sendable () async throws -> T) async throws -> T {
+        let before = last
+        let turn = Task {
+            await before?.value
+            try Task.checkCancellation()
+            return try await call()
+        }
+        last = Task { _ = await turn.result }
+        return try await withTaskCancellationHandler { try await turn.value } onCancel: { turn.cancel() }
     }
 }
