@@ -30,11 +30,12 @@ extension DriverCommand {
         static let configuration = CommandConfiguration(
             commandName: "state",
             abstract: "Print the readings to stderr and one verdict word to stdout.",
+            // The words listed from the enum, so the help cannot name a verdict this
+            // build no longer prints. [LAW:one-source-of-truth]
             discussion: """
-                The verdicts are absent, installed-inactive, awaiting-approval, disabled, \
-                enabled, running, pending-reboot, residue, and unknown. `enabled` means \
-                macOS has the extension switched on; `running` means that and the driver \
-                has published its node in the IORegistry.
+                The verdicts are \(DriverState.allCases.map(\.rawValue).joined(separator: ", ")). \
+                `enabled` means macOS has the extension switched on; `running` means that and \
+                the driver has published its node in the IORegistry.
                 """
         )
 

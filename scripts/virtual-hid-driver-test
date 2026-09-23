@@ -108,6 +108,11 @@ check_contains "require_cli names how to fix it" "run 'make' first" \
   "$( ( VHID="$STUB_DIR/not-built"; require_cli ) 2>&1 )"
 ( require_cli ) >/dev/null 2>&1
 check "require_cli accepts a build that is there" 0 "$?"
+# The verbs that read no machine ask for no build: a release job checking the package it
+# carries has none. Refused for the package here, not for the missing CLI.
+printf 'not the pinned package\n' > "$STUB_DIR/unbuilt.pkg"
+check_contains "cmd_check needs no build of the CLI" "does not match the checksum" \
+  "$( ( VHID="$STUB_DIR/not-built"; cmd_check "$STUB_DIR/unbuilt.pkg" ) 2>&1 )"
 
 # ---------------------------------------------------------------------------
 # require_console_user - root is refused, and told why
@@ -166,6 +171,22 @@ check "cmd_state exits 0 on a reading it took" 0 "$?"
 STUB_STATE=unknown STUB_STATE_STATUS=1
 ( cmd_state ) >/dev/null 2>&1
 check "cmd_state exits non-zero on a machine it could not read" 1 "$?"
+STUB_STATE=running STUB_STATE_STATUS=0
+
+# ---------------------------------------------------------------------------
+# cmd_expect - a named state or a refusal
+# ---------------------------------------------------------------------------
+
+STUB_STATE=running STUB_STATE_STATUS=0
+( cmd_expect running ) >/dev/null 2>&1
+check "cmd_expect confirms the state it was told to expect" 0 "$?"
+( cmd_expect enabled ) >/dev/null 2>&1
+check "cmd_expect refuses a different state" 1 "$?"
+# A failed reading is folded into `unknown`, so confirming `unknown` would confirm that
+# nobody could look.
+STUB_STATE=unknown STUB_STATE_STATUS=1
+( cmd_expect unknown ) >/dev/null 2>&1
+check "cmd_expect never confirms unknown" 1 "$?"
 STUB_STATE=running STUB_STATE_STATUS=0
 
 # ---------------------------------------------------------------------------

@@ -84,9 +84,11 @@ VHID_SCRATCH="${TMPDIR:-/tmp}/vhid-virtual-hid-driver"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VHID="$ROOT/.build/debug/vhid"
 
-# Checked once, in the main shell, before any verb runs. Every reading below is taken
-# through a command substitution, where bash swallows a fatal error - so a missing build
-# discovered down there would surface as an empty string, not as a refusal.
+# Checked by each verb that reads the machine, in the main shell, before its first
+# reading. Every reading below is taken through a command substitution, where bash
+# swallows a fatal error - so a missing build discovered down there would surface as an
+# empty string, not as a refusal. `fetch` and `check` read no machine and do not ask: a
+# release job verifying the package it carries needs no debug build of the CLI.
 require_cli() {
   [ -x "$VHID" ] || die "no vhid at $VHID - run 'make' first"
 }
@@ -161,18 +163,26 @@ receipts_present() {
 
 cmd_state() {
   local result
+  require_cli
   result=$(report_state)
   echo "$result"
-  # Exit non-zero when a probe could not read the machine. `state` succeeds when it has
-  # taken a reading; claiming success for a reading it never took is the one thing it
-  # must not do, and a caller testing this command deserves to hear about it.
+  # Exit 0 only when the state has a name. `unknown` is two things - a machine nobody
+  # could read, and one read fine whose registration no one here can name - and this exits
+  # 1 for both, because no caller can act on either: claiming success for a state it
+  # cannot name is the one thing `state` must not do. The fact table on stderr says which.
   [[ $result != unknown ]]
 }
 
 cmd_expect() {
   local want=${1:?usage: virtual-hid-driver expect <verdict>}
   local got
+  require_cli
   got=$(report_state)
+  # `unknown` is refused before it is compared, so `expect unknown` never confirms: the
+  # word is also what report_state says when it could not read the machine at all, and
+  # a failed reading is not a state anything can have been waiting for.
+  # [LAW:no-silent-failure]
+  [[ $got != unknown ]] || die "could not name the driver's state, so '$want' cannot be confirmed; the readings above say why"
   [[ $got == "$want" ]] || die "expected the driver to be '$want' but it is '$got'"
   echo "virtual-hid-driver: confirmed '$want'" >&2
 }
@@ -267,6 +277,7 @@ acquire_package() {
 cmd_install() {
   local result
 
+  require_cli
   warn_shared_payload
   acquire_package "${1:-}"
 
@@ -291,7 +302,7 @@ virtual-hid-driver: the driver is installed and waiting for you.
   Turn ON  $BUNDLE_ID
   Authenticate when macOS asks
 
-Then confirm with:  scripts/virtual-hid-driver expect enabled
+Then confirm with:  scripts/virtual-hid-driver expect running
 INSTRUCTION
       exit 2 ;;
     # The package is on disk but macOS holds no registration for it, so the request
@@ -350,6 +361,7 @@ INSTRUCTION
 cmd_remove() {
   local id receipts result registered withdrawn elements
 
+  require_cli
   # A machine already at the end of removal has nothing left to withdraw, and the
   # Manager that would do the withdrawing is the thing removal deletes. Reading the
   # state first is what lets a second `remove` say where the machine actually stands,
@@ -437,14 +449,10 @@ require_console_user() {
     || die "refusing to run as root. Run it as yourself, without sudo: macOS attributes the driver extension's activation request to whoever makes it, and the approval you give in System Settings answers that request, so a request made by root is one you cannot approve and the extension never comes up. The steps that need root ask sudo for themselves."
 }
 
-# Only when run as a program. Every verb reads the machine through the CLI, so the build
-# is proven present once here rather than discovered missing inside a command substitution
-# that would swallow the refusal - and that refusal is an `exit`, which from a sourced
-# file would end the caller's shell instead of returning to it. Who is running it is
-# settled first, because no answer the build could give changes that refusal.
+# Only when run as a program: the refusal is an `exit`, which from a sourced file would
+# end the caller's shell instead of returning to it.
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
   require_console_user
-  require_cli
 
   case "${1:-}" in
     state)   cmd_state ;;

@@ -107,4 +107,14 @@ import Testing
             "enabled", "running", "pending-reboot", "residue", "unknown",
         ])
     }
+
+    /// The registration words, which `scripts/virtual-hid-driver` matches on by name when
+    /// `remove` decides whether there is an extension left to withdraw. A rename here
+    /// would send a withdrawn extension down the arm that deactivates it.
+    /// [LAW:one-source-of-truth]
+    @Test func theRegistrationWordsAreTheOnesTheScriptSpells() {
+        #expect(Set(Registration.allCases.map(\.rawValue)) == [
+            "unregistered", "enabled", "disabled", "waiting", "pending-reboot", "unknown", "ambiguous",
+        ])
+    }
 }
