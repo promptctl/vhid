@@ -38,6 +38,10 @@ The cost of that isolation is this paragraph: `make test` at the root does not r
 vhid type "hello"
 vhid keys leftCommand+s
 vhid click 800 500 --button left --times 2
+vhid move 800 500
+vhid scroll 800 500 --vertical 3
+vhid drag 100 100 400 300
+vhid cursor
 vhid pointer play < script.jsonl
 ```
 
@@ -52,6 +56,20 @@ asking it is told the US layout whatever the user is typing on.
 `--service` says which installation to talk to, defaulting to the copy built from this
 tree. Coordinates are screen points from the top left of the main display; a display
 left of or above it has negative ones, which follow `--`.
+
+## Over MCP
+
+`vhid mcp` serves the same verbs as MCP tools over stdio: `type`, `press`, `click`, `move`,
+`scroll`, `drag` and `cursor`. Point a client at the binary with the one argument:
+
+```json
+{ "command": "/path/to/vhid", "args": ["mcp"] }
+```
+
+Each tool call connects to the daemon and leaves when it returns, so a session holds
+nothing between calls and a `vhid click` from a shell still gets through. Stdout carries
+only JSON-RPC; diagnostics go to stderr. An argument a tool will not act on comes back as
+a tool error naming it, before anything is connected.
 
 ## Building
 
