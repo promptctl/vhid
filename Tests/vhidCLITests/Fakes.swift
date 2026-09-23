@@ -40,8 +40,8 @@ final class RecordingKeyboard: Keyboard {
 /// not exactly where it was aimed, which is the whole reason `click` reports a read-back
 /// position rather than the one it was given.
 final class FakeMouse: Mouse {
-    private let state = Mutex<(x: Double, y: Double, buttons: [Button], releases: Int, moves: Int)>(
-        (x: 0, y: 0, buttons: [], releases: 0, moves: 0))
+    private let state = Mutex<(x: Double, y: Double, buttons: [Button], releases: Int, moves: Int, scrolls: [Scroll])>(
+        (x: 0, y: 0, buttons: [], releases: 0, moves: 0, scrolls: []))
     private let gain: Double
 
     init(at x: Double, _ y: Double, gain: Double = 1) {
@@ -53,6 +53,7 @@ final class FakeMouse: Mouse {
     var buttons: [Button] { state.withLock { $0.buttons } }
     var releases: Int { state.withLock { $0.releases } }
     var moves: Int { state.withLock { $0.moves } }
+    var scrolls: [Scroll] { state.withLock { $0.scrolls } }
 
     func down(_ button: Button) async throws { state.withLock { $0.buttons.append(button) } }
     func releaseAll() async throws { state.withLock { $0.releases += 1 } }
@@ -65,5 +66,5 @@ final class FakeMouse: Mouse {
         }
     }
 
-    func scroll(by delta: Scroll) async throws {}
+    func scroll(by delta: Scroll) async throws { state.withLock { $0.scrolls.append(delta) } }
 }
