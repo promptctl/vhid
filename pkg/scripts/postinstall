@@ -20,6 +20,10 @@ vhid=/usr/local/bin/vhid
 say() { echo "vhid postinstall: $*"; }
 fail() { echo "vhid postinstall: $*" >&2; exit 1; }
 
+# Installing is asking for this daemon to run, so a `launchctl disable` left from before
+# is lifted rather than turned into a refused bootstrap that names nothing.
+launchctl enable "system/$service"
+
 # preinstall stopped any job a previous install left loaded, so a refusal here is
 # another claimant on the label, and the install fails naming it rather than finishing
 # over a daemon that is not running. [LAW:no-silent-failure]
@@ -31,7 +35,7 @@ launchctl bootstrap system "$plist" || fail "launchd would not load $plist; see:
 # this service. [LAW:no-silent-failure]
 record=$(launchctl print "system/$service")
 if ! grep -q "\"$service\" = {" <<<"$record"; then
-  launchctl bootout "system/$service"
+  launchctl bootout "system/$service" || say "and launchd would not unload it either; unload it with: launchctl bootout system/$service"
   fail "launchd gave $service to another job, so this one was unloaded. Find the other claimant with: grep -l '>$service<' /Library/LaunchDaemons/*.plist"
 fi
 say "loaded $service from $plist"

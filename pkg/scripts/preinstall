@@ -11,15 +11,36 @@ set -euo pipefail
 
 service=$(cat "$(dirname "$0")/service")
 
+fail() { echo "vhid preinstall: $*" >&2; exit 1; }
+
+# bootout answers 36, "Operation now in progress", when the job was told to stop and is
+# still unwinding - the daemon releases every key and stops the pqrs daemon it started
+# before it exits. That is a stop under way, not a refusal, so the label is watched until
+# launchd lets go of it, for as long as a clean exit could take and no longer.
+# [LAW:no-ambient-temporal-coupling] The condition waited on is launchd's own answer.
+stop() {
+  local status=0 tries=0
+  launchctl bootout "system/$service" || status=$?
+  case $status in
+    0) return ;;
+    36) ;;
+    *) fail "launchd would not unload $service (bootout exited $status)" ;;
+  esac
+  until ! launchctl print "system/$service" >/dev/null 2>&1; do
+    tries=$((tries + 1))
+    [ $tries -le 30 ] || fail "$service was still loaded 30 s after launchd began unloading it"
+    sleep 1
+  done
+}
+
 # Only launchd's own "no such job" means nothing is loaded. Anything else read nothing,
 # and a failed install is better than one that carries on as if the label were free.
 # [LAW:no-silent-failure]
 if record=$(launchctl print "system/$service" 2>&1); then
   echo "vhid preinstall: stopping the loaded $service job"
-  launchctl bootout "system/$service"
+  stop
 elif grep -q "Could not find service" <<<"$record"; then
   echo "vhid preinstall: no $service job is loaded"
 else
-  echo "vhid preinstall: could not read whether $service is loaded: $record" >&2
-  exit 1
+  fail "could not read whether $service is loaded: $record"
 fi

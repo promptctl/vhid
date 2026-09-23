@@ -84,8 +84,10 @@ vhid ships as one signed, notarized pkg. It installs:
 
 It also installs the pinned
 [Karabiner-DriverKit-VirtualHIDDevice](https://github.com/pqrs-org/Karabiner-DriverKit-VirtualHIDDevice)
-package, pqrs's own signed pkg carried inside this one, and asks macOS to activate its
-driver extension for whoever is logged in. Karabiner-Elements is not needed.
+package, pqrs's own component carried inside this one, and asks macOS to activate its
+driver extension for whoever is logged in. Karabiner-Elements is not needed; on a Mac
+that has it, the installer warns that the driver's Manager app and support files it
+shares are replaced.
 
 One step is left to you, because macOS attributes a driver extension to the person at
 the Mac and no installer can approve it: open **System Settings > General > Login Items &
@@ -159,7 +161,10 @@ certificate. It finds both by team ID and refuses to guess when there are none o
 several. The daemon admits a caller signed with its own certificate, so the installed
 CLI is let in and a dev-signed build is refused. The launchd job is named after the
 service the packed CLI dials (`vhid service`), so the job and the CLI cannot disagree.
-The driver package is fetched and checked by `scripts/virtual-hid-driver fetch`.
+The driver package is fetched and checked against its pinned checksum and pqrs's
+signature by `scripts/virtual-hid-driver fetch`. That is the one check of pqrs's
+signature: productbuild carries the component's contents without it, so on an installing
+Mac the pkg's own Developer ID Installer signature is what covers the driver too.
 
 `scripts/notarize` submits the pkg, prints the notary log if the answer is anything
 but Accepted, staples the ticket, and requires Gatekeeper to assess the pkg as
