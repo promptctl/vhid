@@ -33,8 +33,8 @@ public enum DriverProbe {
     ///
     /// Built from `managerApp` rather than written out beside it, so the two cannot come
     /// to name different installs. [LAW:one-source-of-truth] The script keeps its own
-    /// `MANAGER`, because it is the file that runs it; `make check-docs` resolves that
-    /// copy and fails when the two disagree.
+    /// `MANAGER`, because it is the file that runs it; `scripts/check-driver-pins`
+    /// resolves that copy and fails when the two disagree.
     public static var managerExecutable: String {
         "\(managerApp)/Contents/MacOS/Karabiner-VirtualHIDDevice-Manager"
     }

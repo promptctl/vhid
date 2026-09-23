@@ -9,7 +9,7 @@
 ///
 /// [LAW:one-source-of-truth] `scripts/virtual-hid-driver` is the file that actually
 /// fetches and checksums the package, so it holds the pin it acts on; this is the copy
-/// the app reads out loud, and `make check-docs` fails when the two disagree.
+/// the app reads out loud, and `scripts/check-driver-pins` fails when the two disagree.
 public enum DriverPackage {
     public static let version = "8.4.0"
 

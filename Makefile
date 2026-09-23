@@ -34,7 +34,7 @@ SHELL := /bin/sh
 # this line would sign nothing and call it success. [LAW:no-silent-failure]
 SIGN := scripts/products | tr '\n' '\0' | xargs -0 scripts/sign "$(DEV_IDENTITY)"
 
-.PHONY: all build test sign signing-identity clean
+.PHONY: all build test check-pins sign signing-identity clean
 
 all: build
 
@@ -62,9 +62,20 @@ build: signing-identity
 # suite's: `$(SIGN)` followed by a bare `exit $$status` would discard a failed signing
 # whenever the tests passed, reporting success over exactly the unsigned tree this
 # target exists to prevent.
+#
+# The two driver-script checks come after the signing, because neither links anything
+# and so neither can undo it: the pins against the CLI just built, then the script's own
+# contracts against a stubbed one.
 test: signing-identity
 	swift build
 	swift test; status=$$?; $(SIGN) || exit $$?; exit $$status
+	scripts/check-driver-pins
+	scripts/virtual-hid-driver-test
+
+# The driver pins scripts/virtual-hid-driver acts on, held to the ones the CLI was built
+# with. `test` runs this too; this is the fast way to it after editing a pin.
+check-pins: build
+	scripts/check-driver-pins
 
 # Also the fix for a tree someone has built with bare `swift build`.
 sign:
