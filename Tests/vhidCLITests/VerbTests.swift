@@ -130,4 +130,45 @@ import Testing
         #expect(mouse.buttons == [eight])
         #expect(said.contains("clicked 8 once"))
     }
+
+    // MARK: move, scroll, drag, cursor
+
+    @Test func moveGoesThereAndPressesNothing() async throws {
+        let mouse = FakeMouse(at: 0, 0, gain: 3)
+        let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor })
+        let said = try await MoveCommand.move(to: ScreenPoint(x: 200, y: 120)!, with: pointer)
+        #expect(mouse.buttons.isEmpty)
+        // Within a count's worth: at three points a count, that is as near as it can get.
+        #expect(abs(mouse.cursor.x - 200) <= 3 && abs(mouse.cursor.y - 120) <= 3)
+        #expect(said.hasPrefix("moved to \(mouse.cursor) after "))
+    }
+
+    /// More ticks than one report holds go out as several reports, and every tick is sent.
+    @Test func scrollSendsEveryTickAtThePlaceAsked() async throws {
+        let mouse = FakeMouse(at: 0, 0)
+        let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor })
+        let said = try await ScrollCommand.scroll(at: ScreenPoint(x: 40, y: 30)!, vertical: -300, horizontal: 5, with: pointer)
+        #expect(mouse.scrolls.map { Int($0.vertical.value) }.reduce(0, +) == -300)
+        #expect(mouse.scrolls.map { Int($0.horizontal.value) }.reduce(0, +) == 5)
+        #expect(mouse.scrolls.count == 3)
+        #expect(mouse.cursor == ScreenPoint(x: 40, y: 30)!)
+        #expect(said == "scrolled -300 ticks vertically and 5 ticks horizontally at \(mouse.cursor)")
+    }
+
+    /// The button goes down at the start, the cursor is carried to the end with it held,
+    /// and everything is up again afterwards.
+    @Test func dragPressesAtOneEndAndLetsGoAtTheOther() async throws {
+        let mouse = FakeMouse(at: 0, 0, gain: 2)
+        let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor })
+        let said = try await DragCommand.drag(from: ScreenPoint(x: 10, y: 10)!, to: ScreenPoint(x: 300, y: 200)!, button: .left, with: pointer)
+        #expect(mouse.buttons == [.left])
+        #expect(mouse.releases >= 1)
+        #expect(abs(mouse.cursor.x - 300) < 1 && abs(mouse.cursor.y - 200) < 1)
+        #expect(said.hasPrefix("dragged left from "))
+        #expect(said.contains(" to \(mouse.cursor) after "))
+    }
+
+    @Test func cursorSaysWhereTheCursorIs() throws {
+        #expect(try CursorCommand.cursor { ScreenPoint(x: -12.5, y: 40)! } == "the cursor is at \(ScreenPoint(x: -12.5, y: 40)!)")
+    }
 }
