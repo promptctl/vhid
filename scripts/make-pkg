@@ -127,8 +127,13 @@ echo "$service" >"$staged/service"
 
 components="$work/components"
 mkdir -p "$components"
-# root:wheel on every file whatever owns the staging tree, and 0644 on the plist, which
-# launchd refuses to load when anyone but root can write it.
+# The modes the install leaves are stated rather than inherited from whoever built it: a
+# builder's umask of 077 would otherwise ship a vhid nobody but root can run, in a
+# /usr/local/bin nobody else can list. `--ownership recommended` makes every file
+# root:wheel; the modes are this. The plist is 0644 because launchd refuses a job file
+# anyone but root can write.
+find "$payload" -type d -exec chmod 755 {} +
+chmod 755 "$payload/usr/local/bin/vhid" "$payload/usr/local/libexec/vhidd"
 chmod 644 "$plist"
 pkgbuild --root "$payload" --scripts "$staged" --identifier "$IDENTIFIER" --version "$version" \
   --install-location / --ownership recommended "$components/vhid.pkg" >&2
