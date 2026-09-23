@@ -29,7 +29,7 @@ struct PlayCommand: AsyncParsableCommand {
             start, in order:
               {"t_ms":0,"down":"left"}               a button down: left, right, middle, or 1 to 32
               {"t_ms":8.3,"move":{"dx":4,"dy":-2}}   relative motion in counts, -127 to 127, uncorrected
-              {"t_ms":16.7,"wheel":{"v":-1,"h":0}}   wheel ticks, -127 to 127; v positive scrolls content up
+              {"t_ms":16.7,"wheel":{"v":-1,"h":0}}   wheel ticks, -127 to 127; v positive rolls away from the hand
               {"t_ms":1000,"up":true}                every button up
             A script is refused whole, before the cursor moves, if a line is malformed, t_ms goes \
             backwards or past an hour, or it ends with a button held.
@@ -51,9 +51,9 @@ struct PlayCommand: AsyncParsableCommand {
             // [LAW:parse-dont-validate] Parsed before anything is connected or moved, so a
             // script that cannot be played whole moves nothing.
             let play = try Play.parse(String(decoding: FileHandle.standardInput.readDataToEndOfFile(), as: UTF8.self))
-            let pointer = Devices(of: try service.installation()).pointer
-            let player = Player(pointer: pointer, clock: WakingClock(), wall: Self.epochMicroseconds, lead: Self.lead)
-            ending = .finished(try await player.play(play))
+            ending = .finished(try await Devices.using(try service.installation()) {
+                try await Player(pointer: $0.pointer, clock: WakingClock(), wall: Self.epochMicroseconds, lead: Self.lead).play(play)
+            })
         } catch {
             // The reports that did go out are printed even for a run that stopped, so a
             // harness can see how far it got. [LAW:no-silent-failure]

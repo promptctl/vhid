@@ -18,20 +18,34 @@ import Testing
         #expect(refusal?.pid == 41)
     }
 
-    @Test func aReleaseFreesTheKeyboardForTheNextClaim() throws {
+    @Test func freeingRunsTheReleaseAndFreesTheKeyboardForTheNextClaim() throws {
         let holder = Holder()
         try holder.claim(first, by: 41)
-        holder.release(first)
+        var released = false
+        holder.free(first) { released = true }
+        #expect(released)
         try holder.claim(second, by: 42)
     }
 
-    /// A refused connection never held the keyboard, and its ending must not free it from
-    /// under the one that does.
-    @Test func aReleaseByOneThatDoesNotHoldItChangesNothing() throws {
+    /// A refused connection never held the keyboard, and a connection that left no longer
+    /// does. Either one ending must neither free the keyboard from under the holder nor
+    /// release the holder's keys.
+    @Test func freeingByOneThatDoesNotHoldItChangesNothingAndReleasesNothing() throws {
         let holder = Holder()
         try holder.claim(first, by: 41)
-        holder.release(second)
+        var released = false
+        holder.free(second) { released = true }
+        #expect(!released)
         let refusal = #expect(throws: Holder.Busy.self) { try holder.claim(second, by: 42) }
         #expect(refusal?.pid == 41)
+    }
+
+    @Test func onlyTheHolderIsServed() throws {
+        let holder = Holder()
+        try holder.claim(first, by: 41)
+        var served: [String] = []
+        #expect(holder.whileHolding(first) { served.append("first") })
+        #expect(!holder.whileHolding(second) { served.append("second") })
+        #expect(served == ["first"])
     }
 }

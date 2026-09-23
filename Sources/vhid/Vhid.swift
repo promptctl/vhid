@@ -21,5 +21,8 @@ struct Vhid: AsyncParsableCommand {
             Coordinates are screen points from the top left of the main display, the same ones the \
             cursor is read back in.
             """,
-        subcommands: [TypeCommand.self, KeysCommand.self, ClickCommand.self, PointerCommand.self])
+        subcommands: [
+            TypeCommand.self, KeysCommand.self, ClickCommand.self, MoveCommand.self, ScrollCommand.self,
+            DragCommand.self, CursorCommand.self, PointerCommand.self, McpCommand.self,
+        ])
 }

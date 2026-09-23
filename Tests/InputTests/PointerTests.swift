@@ -12,24 +12,36 @@ import Testing
     /// the report: the whole screen at gain one is a full report, and 160.5 at gain three
     /// asks for 53, not 54, so a known gain lands short and never past.
     @Test func aStepIsTheRemainingDistanceOverTheGainClampedToTheReport() {
-        #expect(Pointer.step(from: Self.origin, to: ScreenPoint(x: 541.5, y: 375)!, gain: 1) == Move(x: Count(clamping: 127), y: Count(clamping: 127)))
-        #expect(Pointer.step(from: Self.origin, to: ScreenPoint(x: 160.5, y: -6)!, gain: 3) == Move(x: Count(clamping: 53), y: Count(clamping: -2)))
-        #expect(Pointer.step(from: ScreenPoint(x: 100, y: 100)!, to: ScreenPoint(x: 90, y: 100)!, gain: 1) == Move(x: Count(clamping: -10), y: .zero))
+        #expect(Pointer.step(from: Self.origin, to: ScreenPoint(x: 541.5, y: 375)!, gain: Pointer.Gain(perCount: 1, upTo: .infinity)) == Move(x: Count(clamping: 127), y: Count(clamping: 127)))
+        #expect(Pointer.step(from: Self.origin, to: ScreenPoint(x: 160.5, y: -6)!, gain: Pointer.Gain(perCount: 3, upTo: .infinity)) == Move(x: Count(clamping: 53), y: Count(clamping: -2)))
+        #expect(Pointer.step(from: ScreenPoint(x: 100, y: 100)!, to: ScreenPoint(x: 90, y: 100)!, gain: Pointer.Gain(perCount: 1, upTo: .infinity)) == Move(x: Count(clamping: -10), y: .zero))
     }
 
     /// Within half a point an axis is arrived and asks for nothing; outside it the ask is
     /// never rounded to nothing, however high the gain.
     @Test func aStepIsZeroWhenArrivedAndNeverZeroWhenNot() {
-        #expect(Pointer.step(from: Self.origin, to: ScreenPoint(x: 0.4, y: -0.5)!, gain: 1) == .none)
-        #expect(Pointer.step(from: Self.origin, to: ScreenPoint(x: 1, y: -0.6)!, gain: 10) == Move(x: Count(clamping: 1), y: Count(clamping: -1)))
+        #expect(Pointer.step(from: Self.origin, to: ScreenPoint(x: 0.4, y: -0.5)!, gain: Pointer.Gain(perCount: 1, upTo: .infinity)) == .none)
+        #expect(Pointer.step(from: Self.origin, to: ScreenPoint(x: 1, y: -0.6)!, gain: Pointer.Gain(perCount: 10, upTo: .infinity)) == Move(x: Count(clamping: 1), y: Count(clamping: -1)))
     }
 
     /// The gain is what moved over what was asked; a report that moved nothing halves the
     /// estimate rather than zeroing it, so the next ask doubles.
     @Test func theGainIsObservedMotionOverAskedMotion() {
         let asked = Move(x: Count(clamping: 127), y: Count(clamping: 127))
-        #expect(Pointer.gain(after: asked, from: Self.origin, to: ScreenPoint(x: 381, y: 381)!, previous: 1) == 3)
-        #expect(Pointer.gain(after: asked, from: Self.origin, to: Self.origin, previous: 1) == 0.5)
+        let length = hypot(127.0, 127.0)
+        #expect(Pointer.gain(after: asked, from: Self.origin, to: ScreenPoint(x: 381, y: 381)!, previous: .assumed) == Pointer.Gain(perCount: 3, upTo: length))
+        #expect(Pointer.gain(after: asked, from: Self.origin, to: Self.origin, previous: .assumed) == Pointer.Gain(perCount: 0.5, upTo: .infinity))
+    }
+
+    /// A gain read off a slow report is not asked to hold for a faster one. The numbers are
+    /// this Mac's: two counts moved the cursor 0.25 points each, and four counts would have
+    /// moved it 0.72. Dividing the 1.2 points left by 0.25 asks for four counts and throws
+    /// the cursor three points past; the ask stays at the two counts the gain was read from.
+    @Test func aStepIsNoFasterThanTheReportItsGainCameFrom() {
+        let slow = Pointer.Gain(perCount: 0.25, upTo: 2)
+        #expect(Pointer.step(from: Self.origin, to: ScreenPoint(x: 1.2, y: 0)!, gain: slow) == Move(x: Count(clamping: 2), y: .zero))
+        // Both axes shrink together, so the report keeps its direction.
+        #expect(Pointer.step(from: Self.origin, to: ScreenPoint(x: 30, y: 40)!, gain: Pointer.Gain(perCount: 1, upTo: 5)) == Move(x: Count(clamping: 3), y: Count(clamping: 4)))
     }
 
     /// A move across the screen: the first full report is thrown by the curve, the loop

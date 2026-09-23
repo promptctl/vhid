@@ -30,10 +30,11 @@ public struct Clicks: RawRepresentable, Hashable, Codable, Sendable {
 /// 127 counts does not move the cursor 127 points; it moves it by whatever the pointer
 /// acceleration curve makes of that speed, which the device is not told. So the pointer
 /// posts a delta toward the target, reads where the cursor actually went, and posts the
-/// next delta from there - and it learns the gain as it goes: each step's observed motion
-/// over its requested motion is the estimate the next request is divided by. The curve
-/// grows with speed and the requests shrink as the target nears, so once the gain is
-/// known each step undershoots rather than overshoots, and the loop converges from below.
+/// next delta from there - and it learns the gain as it goes: each report's observed
+/// motion over its requested motion is the estimate the next request is divided by, and
+/// the next request is never a faster report than the one it was learned from. The curve
+/// grows with speed, so a report no faster moves no further per count, each step
+/// undershoots rather than overshoots, and the loop converges from below.
 /// [LAW:no-ambient-temporal-coupling] The cursor's position is the state the loop waits
 /// on, never a sleep after a report.
 ///
@@ -90,12 +91,42 @@ public struct Pointer: Sendable {
         return cursor
     }
 
-    /// The next report toward `to` from `from`, given that the OS moves the cursor `gain`
-    /// points per count: the remaining distance over the gain, rounded toward zero so a
-    /// known gain undershoots, and clamped to the report's edge. Zero on an axis within
-    /// half a point, which is arrived. Pure. [LAW:decomposition]
-    public static func step(from: ScreenPoint, to: ScreenPoint, gain: Double) -> Move {
-        Move(x: step(to.x - from.x, gain), y: step(to.y - from.y, gain))
+    /// How far the OS carries the cursor per count, and for how fast a report that holds.
+    ///
+    /// **Two numbers, because the curve is a curve.** Measured on this Mac, with reports a
+    /// tenth of a second apart: a two-count report moves the cursor 0.25 points a count and
+    /// a four-count report 0.59. A gain alone, learned from a slow report, asks for a faster
+    /// one, which overshoots; learned from that, it asks for a slower one, which falls short,
+    /// and some moves went round that cycle until the 64 reports ran out, each a
+    /// `WouldNotReach` beside its target. The gain is only known to be an upper bound for
+    /// reports no faster than the one it was read from, so that speed travels with it and
+    /// caps the next ask. With the cap, 300 drags between random points reached both ends,
+    /// none failing, in a median of 17 reports each for the approach and the carry together.
+    /// [LAW:types-are-the-program]
+    public struct Gain: Equatable, Sendable {
+        /// Points per count.
+        public let perCount: Double
+        /// The length, in counts, of the fastest report `perCount` holds for.
+        public let upTo: Double
+
+        public init(perCount: Double, upTo: Double) {
+            self.perCount = perCount
+            self.upTo = upTo
+        }
+
+        /// Before any report: one point a count, for a report of any speed. The first
+        /// report may be thrown further than asked, which is the one stall a move allows.
+        public static let assumed = Gain(perCount: 1, upTo: .infinity)
+    }
+
+    /// The next report toward `to` from `from`: the remaining distance over the gain,
+    /// rounded toward zero so a known gain undershoots, shortened to no faster than the
+    /// report the gain was read from, and clamped to the report's edge. Zero on an axis
+    /// within half a point, which is arrived. Pure. [LAW:decomposition]
+    public static func step(from: ScreenPoint, to: ScreenPoint, gain: Gain) -> Move {
+        let wanted = (x: (to.x - from.x) / gain.perCount, y: (to.y - from.y) / gain.perCount)
+        let scale = min(1, gain.upTo / hypot(wanted.x, wanted.y))
+        return Move(x: step(to.x - from.x, wanted.x * scale), y: step(to.y - from.y, wanted.y * scale))
     }
 
     /// Otherwise at least one count in the target's direction, so a gain estimate too high
@@ -103,9 +134,9 @@ public struct Pointer: Sendable {
     /// anywhere is not a question about these numbers - it is a question about what the
     /// report did - so it is asked in `move`, against the motion that actually happened,
     /// and not guessed at here from an estimate. [LAW:decomposition]
-    private static func step(_ distance: Double, _ gain: Double) -> Count {
+    private static func step(_ distance: Double, _ wanted: Double) -> Count {
         guard abs(distance) > 0.5 else { return .zero }
-        let counts = min(Double(Count.limit), max(1, (abs(distance) / gain).rounded(.towardZero)))
+        let counts = min(Double(Count.limit), max(1, abs(wanted).rounded(.towardZero)))
         return Count(clamping: Int(distance < 0 ? -counts : counts))
     }
 
@@ -117,13 +148,14 @@ public struct Pointer: Sendable {
         abs(Int(step.x.value)) <= 1 && abs(Int(step.y.value)) <= 1
     }
 
-    /// The gain the last report showed: points moved per count asked. A report that moved
-    /// the cursor nowhere says the estimate was too high to move a whole point, so it is
-    /// halved, and the next request doubles until something moves.
-    static func gain(after step: Move, from before: ScreenPoint, to after: ScreenPoint, previous: Double) -> Double {
+    /// The gain the last report showed: points moved per count asked, holding for reports
+    /// up to that one's length. A report that moved the cursor nowhere says the estimate
+    /// was too high to move a whole point, so it is halved, and the next request doubles
+    /// until something moves - at any speed, since nothing is known to hold for any.
+    static func gain(after step: Move, from before: ScreenPoint, to after: ScreenPoint, previous: Gain) -> Gain {
         let asked = hypot(Double(step.x.value), Double(step.y.value))
         let moved = hypot(after.x - before.x, after.y - before.y)
-        return moved > 0 ? moved / asked : previous / 2
+        return moved > 0 ? Gain(perCount: moved / asked, upTo: asked) : Gain(perCount: previous.perCount / 2, upTo: .infinity)
     }
 
     /// Moves the cursor to `target` and answers with how many reports it took.
@@ -156,7 +188,7 @@ public struct Pointer: Sendable {
     @discardableResult
     public func move(to target: ScreenPoint) async throws -> Int {
         var at = try cursor()
-        var gain = 1.0
+        var gain = Gain.assumed
         var stalls = 0
         for reports in 0..<Self.rounds {
             try Task.checkCancellation()
@@ -227,6 +259,36 @@ public struct Pointer: Sendable {
                 try await mouse.scroll(by: chunk)
                 remaining = (remaining.vertical - Int(chunk.vertical.value), remaining.horizontal - Int(chunk.horizontal.value))
             }
+        } catch {
+            throw PointingStopped(cause: error, unreleased: await release())
+        }
+    }
+
+    /// A drag that finished: where the button went down, where it came up, and how many
+    /// motion reports the whole of it took. Both places are read back, for the reason
+    /// `Click.at` is. [FRAMING:representation]
+    public struct Drag: Equatable, Sendable {
+        public let from: ScreenPoint
+        public let to: ScreenPoint
+        public let reports: Int
+    }
+
+    /// Moves to `start`, holds `button` down there, moves to `end` with it held, and lets
+    /// every button go.
+    ///
+    /// The carry is the same loop as any move: the device's motion reports carry whatever
+    /// buttons it is holding, so a move with a button down is a drag to macOS and needs
+    /// nothing of its own. The release is `releaseAll` rather than the one button, for the
+    /// reason `Pointing` has no `up`. [LAW:composability]
+    public func drag(from start: ScreenPoint, to end: ScreenPoint, button: Button) async throws -> Drag {
+        do {
+            let approach = try await move(to: start)
+            let pressed = try cursor()
+            try await mouse.down(button)
+            let carry = try await move(to: end)
+            let released = try cursor()
+            try await mouse.releaseAll()
+            return Drag(from: pressed, to: released, reports: approach + carry)
         } catch {
             throw PointingStopped(cause: error, unreleased: await release())
         }

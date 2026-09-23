@@ -25,11 +25,30 @@ final class Holder: @unchecked Sendable {
         holding = (connection, pid)
     }
 
-    /// Frees the keyboard when `connection` holds it, and changes nothing when it does
-    /// not: a connection that was refused never held it, and its ending must not free
-    /// the keyboard from under the one that does.
-    func release(_ connection: ObjectIdentifier) {
+    /// Runs `body` while `connection` holds the devices, and reports whether it did. The
+    /// lock is held across `body`, so no other connection can be admitted part way
+    /// through it.
+    func whileHolding(_ connection: ObjectIdentifier, _ body: () -> Void) -> Bool {
         lock.lock(); defer { lock.unlock() }
-        if holding?.connection == connection { holding = nil }
+        guard holding?.connection == connection else { return false }
+        body()
+        return true
+    }
+
+    /// Runs `body` and then frees the devices, when `connection` holds them, and changes
+    /// nothing when it does not.
+    ///
+    /// Both under the one lock, so the next connection is admitted only after `body` -
+    /// the release of everything this one left held - has finished.
+    ///
+    /// A connection that does not hold the devices runs nothing here, and that is what
+    /// keeps its ending harmless. It may have been refused and never held them. Or it may
+    /// have left already, and the devices may now be another client's. Releasing keys on
+    /// its behalf would release the new holder's. [LAW:single-enforcer]
+    func free(_ connection: ObjectIdentifier, after body: () -> Void) {
+        lock.lock(); defer { lock.unlock() }
+        guard holding?.connection == connection else { return }
+        body()
+        holding = nil
     }
 }

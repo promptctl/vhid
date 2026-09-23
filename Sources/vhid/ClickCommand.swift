@@ -33,28 +33,16 @@ struct ClickCommand: AsyncParsableCommand {
 
     @OptionGroup var service: ServiceOption
 
-    /// The point asked for, once it is one.
-    ///
-    /// [LAW:parse-dont-validate] `ScreenPoint` refuses what is not a place on the screen,
-    /// and `inf` and `nan` are both things a shell hands over as a Double without
-    /// complaint. [LAW:single-enforcer] One place says so, called from both `validate`
-    /// and `run`, so the refusal cannot come to be worded two ways.
-    private func target() throws -> ScreenPoint {
-        guard let point = ScreenPoint(x: x, y: y) else {
-            throw ValidationError("(\(x), \(y)) is not a place on the screen")
-        }
-        return point
-    }
-
     /// Asked before any `run`, which is what makes the refusal arrive as this verb's own
     /// usage rather than the root command's - and before anything is connected.
     func validate() throws {
-        _ = try target()
+        _ = try place(x, y)
     }
 
     func run() async throws {
-        print(try await Self.click(at: try target(), button: button, times: times,
-                                   with: Devices(of: try service.installation()).pointer))
+        print(try await Devices.using(try service.installation()) {
+            try await Self.click(at: try place(x, y), button: button, times: times, with: $0.pointer)
+        })
     }
 
     /// The verb itself, over a pointer from anywhere - which is what lets it be run
