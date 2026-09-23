@@ -24,7 +24,7 @@ jobs:
   vhid:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: swift --version
       - run: make test
 
@@ -36,7 +36,7 @@ jobs:
       run:
         working-directory: eyes
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: swift --version
       - run: swift build
       - run: swift test
