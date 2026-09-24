@@ -51,11 +51,15 @@ enum KeyboardTypeAnswer {
     /// as a guarantee this cannot keep.
     @discardableResult
     static func file(into path: String = VirtualKeyboardIdentity.keyboardTypePlist) throws(Unwritable) -> Filing {
-        let cache = try Cache.read(at: path)
-        let answers = filed(into: cache.answers)
-        let filing: Filing = answers == cache.answers ? .alreadyFiled : .filed
+        let cache: KeyboardTypeCache
+        do {
+            cache = try KeyboardTypeCache.read(at: path)
+        } catch {
+            throw Unwritable.unreadable(path: path, reason: "\(error)")
+        }
+        let filing: Filing = cache.answersThisKeyboard ? .alreadyFiled : .filed
         if filing == .filed {
-            try cache.replacing(answers: answers).write(to: path)
+            try File.write(cache.replacing(answers: filed(into: cache.answers)), to: path)
         }
         // Every start, and not only the one that wrote. The content and the mode are two
         // different facts about this file with two different conditions, and one guard
@@ -65,7 +69,7 @@ enum KeyboardTypeAnswer {
         // merge, and returned from before the mode was ever looked at - so onboarding's
         // unprivileged read failed permanently while the helper believed itself fine.
         // [LAW:dataflow-not-control-flow]
-        try Cache.makeReadable(at: path)
+        try File.makeReadable(at: path)
         return filing
     }
 
@@ -92,38 +96,9 @@ enum KeyboardTypeAnswer {
         }
     }
 
-    /// `/Library/Preferences/com.apple.keyboardtype` as this writer needs to see it: the
-    /// answers, and whatever else the file holds, kept apart so the second is carried
-    /// through untouched rather than re-derived. [LAW:types-are-the-program] A writer
-    /// that modelled the file as its answers alone would write back a file missing every
-    /// key it did not know about.
-    struct Cache {
-        /// What the file held, read the one way both its writer and its reader read it.
-        private let cache: KeyboardTypeCache
-        var answers: [String: Int] { cache.answers }
-
-        /// What was in the file, or a refusal naming why it could not be read.
-        ///
-        /// [LAW:no-silent-failure] A file that is there and unreadable is never treated as
-        /// a Mac with no answers yet: that reading would have this write back a file
-        /// holding one entry where fourteen devices' answers used to be. Only a file that
-        /// is genuinely absent, and a file holding no answers yet, are empty caches - and
-        /// they are, because a Mac that has met no keyboard has nothing cached.
-        static func read(at path: String) throws(Unwritable) -> Cache {
-            guard FileManager.default.fileExists(atPath: path) else { return Cache(cache: .empty) }
-            do {
-                return Cache(cache: try KeyboardTypeCache.parse(try Data(contentsOf: URL(fileURLWithPath: path))))
-            } catch {
-                throw Unwritable.unreadable(path: path, reason: "\(error)")
-            }
-        }
-
-        func replacing(answers: [String: Int]) -> Cache {
-            var root = cache.root
-            root[KeyboardTypeCache.entry] = answers
-            return Cache(cache: KeyboardTypeCache(root: root, answers: answers))
-        }
-
+    /// The two acts on the file that are the writer's alone: its bytes and its mode. What
+    /// it holds is read through `KeyboardTypeCache`, the reading `vhid doctor` shares.
+    enum File {
         /// The mode the file must end up with, whoever wrote it.
         ///
         /// World-readable is load-bearing rather than incidental: onboarding reads this
@@ -159,7 +134,7 @@ enum KeyboardTypeAnswer {
         /// serves this domain from the file rather than from a cache in front of it.
         /// The bytes alone. The mode is `makeReadable`'s, asserted by the caller on every
         /// start rather than here on the starts that happen to write.
-        func write(to path: String) throws(Unwritable) {
+        static func write(_ cache: KeyboardTypeCache, to path: String) throws(Unwritable) {
             do {
                 try PropertyListSerialization
                     .data(fromPropertyList: cache.root, format: .binary, options: 0)

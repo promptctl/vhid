@@ -540,7 +540,7 @@ public extension Requirement {
     static func keyboardSetupAssistant(answered: Bool, daemon: DaemonReading, installation: Installation) -> Requirement {
         Requirement(
             name: Row.keyboardSetupAssistant.rawValue,
-            reads: answered ? "answered for the virtual keyboard" : "will ask on first use",
+            reads: answered ? "answered ANSI for the virtual keyboard" : "no ANSI answer on file for the virtual keyboard",
             step: answered ? nil : keyboardSetupAssistantStep(daemonHasStarted: daemon.daemonHasStarted, installation: installation))
     }
 
