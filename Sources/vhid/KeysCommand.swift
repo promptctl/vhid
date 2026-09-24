@@ -10,7 +10,7 @@ struct KeysCommand: AsyncParsableCommand {
         discussion: """
             A chord is modifier names and one key joined by +, e.g. leftCommand+s or \
             leftShift+leftCommand+left. A key is a name (\(KeyChord.namedKeys.keys.sorted().joined(separator: ", "))), \
-            the character the layout types with it and nothing held, or a key code written key 0x24.
+            the character the layout types with it (with Command held, in a chord that holds Command), or a key code written key 0x24.
 
             Which key a letter is on is the layout's to say - s is key code 1 on US and 41 on Dvorak - so \
             a chord is read against the console user's layout, in this process rather than in the daemon.

@@ -84,7 +84,7 @@ enum Tools {
             the chords, pressed in order. A chord is modifier names and one key joined by +, e.g. \
             leftCommand+s or leftShift+leftCommand+left. A key is a name \
             (\(KeyChord.namedKeys.keys.sorted().joined(separator: ", "))), the character the layout \
-            types with it and nothing held, or a key code written key 0x24
+            types with it (with Command held, in a chord that holds Command), or a key code written key 0x24
             """)
         return VerbTool("press", """
             Press chords on the virtual keyboard, one after another. Every chord is proven pressable \

@@ -7,9 +7,8 @@ extension KeyboardLayout {
     /// character, the plainer one is what this keeps, so `a` is the A key and not some
     /// option-sequence that happens to produce the same letter.
     ///
-    /// Command is not here. It does not change what a key types - it changes what the key
-    /// means - and a layout asked about it answers with the unmodified character, which
-    /// would fill the map with duplicates that type shortcuts instead of text.
+    /// Command is not here. It turns a key into a shortcut rather than typing text with it,
+    /// and which key a shortcut is on is read off its own layer, by `keys(of:on:)`.
     private static var combinations: [(state: UInt32, modifiers: Modifiers)] {
         [
             (0, []),
@@ -77,6 +76,23 @@ extension KeyboardLayout {
             guard let usage = Usage(virtualKeyCode: code) else { return [(Keystroke, UInt16, UInt32)]() }
             return combinations.map { (Keystroke(usage, $0.modifiers), code, $0.state) }
         }
+    }
+
+    /// Which key types each character by itself on one layer, lowest key code first.
+    ///
+    /// Only keys the device can press are asked, and a key that is dead on this layer types
+    /// nothing by itself, so it answers for no character. [LAW:one-source-of-truth] The same
+    /// `translate` the reverse map is built from.
+    static func keys(of layout: UnsafePointer<UCKeyboardLayout>, on layer: Layer) -> [Character: UInt16] {
+        let keyboardType = UInt32(LMGetKbdType())
+        var keys: [Character: UInt16] = [:]
+        for code in UInt16(0)..<128 where Usage(virtualKeyCode: code) != nil {
+            var nothingPending: UInt32 = 0
+            if let character = one(translate(layout, code, layer.modifierState, keyboardType, &nothingPending)), keys[character] == nil {
+                keys[character] = code
+            }
+        }
+        return keys
     }
 
     /// What one key with one set of modifiers types, given whatever accent is pending.
