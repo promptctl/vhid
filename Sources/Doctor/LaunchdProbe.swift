@@ -47,13 +47,20 @@ public enum LaunchdProbe {
     /// that block from then on, whether or not its daemon has run a line. A job without it
     /// has no such entry - measured, no `endpoints` block at all.
     ///
-    /// pkg/scripts/postinstall asks the same question of the record it just loaded, with a
-    /// grep; a test runs that grep against the same captures and holds the two to the same
-    /// answers. [LAW:one-source-of-truth]
+    /// pkg/scripts/postinstall asks the same question of the record it just loaded, of the
+    /// same block; a test runs its line against the same records and holds the two to the
+    /// same answers. [LAW:one-source-of-truth]
     static func holds(endpointsIn record: String, label: String, service: String) throws -> Bool {
         let lines = record.split(separator: "\n", omittingEmptySubsequences: false)
         guard lines.first == "system/\(label) = {" else {
             throw LaunchdRecordUnrecognised(label: label, reason: "it does not open as the record for system/\(label)")
+        }
+        // A missing block is an answer only in a record whose shape is the one read here:
+        // the keys every job carries, at the depth the block would be at. Without them, a
+        // block that is gone and a block this build no longer recognises look the same,
+        // and the second would read every healthy job as one without its endpoint.
+        for key in ["path", "state"] where !lines.contains(where: { $0.hasPrefix("\t\(key) = ") }) {
+            throw LaunchdRecordUnrecognised(label: label, reason: "it has no `\(key) =` line at the depth this build reads")
         }
         guard let open = lines.firstIndex(of: "\tendpoints = {") else { return false }
         guard let close = lines[open...].firstIndex(of: "\t}") else {

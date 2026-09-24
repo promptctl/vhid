@@ -12,6 +12,11 @@ import Testing
     static let development = Installation.development
     static let fixture = Installation(service: "ai.promptctl.vhid.doctor-fixture")!
 
+    /// The loser's record with the service's name as a quoted key in a block of its own -
+    /// the shape an endpoint has, in a place an endpoint is not.
+    static let nameOutsideTheEndpointsBlock = LaunchdFixtures.lost.replacingOccurrences(
+        of: "\tenvironment = {", with: "\tevents = {\n\t\t\"\(fixture.service)\" = {\n\t\t}\n\t}\n\n\tenvironment = {")
+
     @Test func aJobHoldingItsServiceReadsAsHoldingIt() throws {
         let printed = Command.Output(status: 0, stdout: LaunchdFixtures.holding, stderr: "")
         #expect(try LaunchdProbe.standing(from: printed, installation: Self.development) == .holdingTheService)
@@ -76,6 +81,9 @@ import Testing
             "",
             "system/some.other.label = {\n}",
             LaunchdFixtures.holding.replacingOccurrences(of: "\n\t}\n", with: "\n"),
+            // A record whose keys are not at the depth this build reads, with no endpoints
+            // block it can find: not evidence of a job without its endpoint.
+            LaunchdFixtures.holding.replacingOccurrences(of: "\n\t", with: "\n    "),
         ]
         for stdout in unreadable {
             #expect(throws: LaunchdRecordUnrecognised.self, "\(stdout.prefix(40))") {
@@ -86,10 +94,8 @@ import Testing
 
     /// The service's name as a quoted key outside the `endpoints` block is not an endpoint.
     @Test func theServicesNameOutsideTheEndpointsBlockIsNotAnEndpoint() throws {
-        let elsewhere = LaunchdFixtures.lost.replacingOccurrences(
-            of: "\tenvironment = {", with: "\tevents = {\n\t\t\"\(Self.fixture.service)\" = {\n\t\t}\n\t}\n\n\tenvironment = {")
-        #expect(elsewhere.contains("\"\(Self.fixture.service)\" = {"))
-        let printed = Command.Output(status: 0, stdout: elsewhere, stderr: "")
+        #expect(Self.nameOutsideTheEndpointsBlock.contains("\"\(Self.fixture.service)\" = {"))
+        let printed = Command.Output(status: 0, stdout: Self.nameOutsideTheEndpointsBlock, stderr: "")
         #expect(try LaunchdProbe.standing(from: printed, installation: Self.fixture) == .loadedWithoutTheService)
     }
 
@@ -103,9 +109,15 @@ import Testing
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("pkg/scripts/postinstall")
         let script = try String(contentsOf: postinstall, encoding: .utf8)
-        let checks = script.split(separator: "\n").compactMap { $0.firstMatch(of: /^if ! (grep .*<<<"\$record"); then$/)?.output.1 }
-        let check = try #require(checks.first, "postinstall no longer checks the record it loaded with one grep")
-        let cases: [(Installation, String)] = [(Self.development, LaunchdFixtures.holding), (Self.fixture, LaunchdFixtures.lost)]
+        // The condition of the `if` that reads the record, continuation lines joined.
+        let joined = script.replacingOccurrences(of: "\\\n", with: " ")
+        let checks = joined.split(separator: "\n").compactMap { $0.firstMatch(of: /^if ! (.*<<<"\$record".*); then$/)?.output.1 }
+        let check = try #require(checks.first, "postinstall no longer checks the record it loaded in one if")
+        let cases: [(Installation, String)] = [
+            (Self.development, LaunchdFixtures.holding),
+            (Self.fixture, LaunchdFixtures.lost),
+            (Self.fixture, Self.nameOutsideTheEndpointsBlock),
+        ]
         for (installation, record) in cases {
             let ran = try Command("/bin/bash", "-c", "service=$1; record=$2; \(check)", "check", installation.service, record).run()
             let swift = try LaunchdProbe.standing(from: Command.Output(status: 0, stdout: record, stderr: ""), installation: installation)

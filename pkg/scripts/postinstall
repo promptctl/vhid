@@ -34,11 +34,14 @@ launchctl bootstrap system "$plist" || fail "launchd would not load $plist; see:
 # restarted forever, so it is taken back down: another job under some other label names
 # this service. [LAW:no-silent-failure]
 #
-# A fixed string, because every `.` in a reverse-DNS name is a pattern's wildcard. vhid
-# doctor asks launchd the same question (Sources/Doctor/LaunchdProbe.swift), and a test
-# runs this line against the same captures to hold the two to one answer.
+# Asked of the job's own endpoints block and not of the whole record, where the name can
+# appear under another key, and as a fixed whole line, because every `.` in a
+# reverse-DNS name is a pattern's wildcard. vhid doctor asks launchd the same question
+# (Sources/Doctor/LaunchdProbe.swift), and a test runs this line against the same
+# records to hold the two to one answer.
 record=$(launchctl print "system/$service")
-if ! grep -qF "\"$service\" = {" <<<"$record"; then
+if ! awk '$0 == "\tendpoints = {" { inside = 1; next } $0 == "\t}" { inside = 0 } inside' <<<"$record" \
+    | grep -qxF "$(printf '\t\t"%s" = {' "$service")"; then
   launchctl bootout "system/$service" || say "and launchd would not unload it either; unload it with: launchctl bootout system/$service"
   fail "launchd gave $service to another job, so this one was unloaded. Find the other claimant with: grep -l '>$service<' /Library/LaunchDaemons/*.plist"
 fi
