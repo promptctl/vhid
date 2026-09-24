@@ -19,10 +19,10 @@ import Testing
 
     /// Loaded, running or not, and never given the endpoint: its service name is in its
     /// environment and nowhere in an `endpoints` block, and only the second counts.
-    @Test func aJobThatLostItsServiceReadsAsAnotherHoldingIt() throws {
+    @Test func aJobThatLostItsServiceReadsAsLoadedWithoutIt() throws {
         let printed = Command.Output(status: 0, stdout: LaunchdFixtures.lost, stderr: "")
         #expect(LaunchdFixtures.lost.contains(Self.fixture.service))
-        #expect(try LaunchdProbe.standing(from: printed, installation: Self.fixture) == .anotherJobHoldsTheService)
+        #expect(try LaunchdProbe.standing(from: printed, installation: Self.fixture) == .loadedWithoutTheService)
     }
 
     @Test func aLabelLaunchdHasNoJobUnderReadsAsNoJob() throws {
@@ -34,8 +34,12 @@ import Testing
     /// quoted name, so a service whose name another merely begins with is not a match.
     @Test func holdingAServiceWhoseNameBeginsWithThisOneIsNotHoldingThisOne() throws {
         let prefix = Installation(service: "ai.promptctl.vhid.vhidd")!
-        let printed = Command.Output(status: 0, stdout: LaunchdFixtures.holding, stderr: "")
-        #expect(try LaunchdProbe.standing(from: printed, installation: prefix) == .anotherJobHoldsTheService)
+        // The holder's record, relabelled as a job under the shorter name whose endpoint
+        // is the longer one's.
+        let relabelled = LaunchdFixtures.holding.replacingOccurrences(
+            of: "system/ai.promptctl.vhid.vhidd.dev = {", with: "system/ai.promptctl.vhid.vhidd = {")
+        let printed = Command.Output(status: 0, stdout: relabelled, stderr: "")
+        #expect(try LaunchdProbe.standing(from: printed, installation: prefix) == .loadedWithoutTheService)
     }
 
     /// Any failure that is not launchd saying it has no such job is refused, not read as
@@ -47,9 +51,11 @@ import Testing
             Command.Output(status: 64, stdout: "", stderr: "Unrecognized target specifier."),
             // No job, but under some other label: not an answer about this one.
             Command.Output(status: 113, stdout: "", stderr: LaunchdFixtures.noJob),
+            // The words, with a status that is not the one launchd answers them with.
+            Command.Output(status: 5, stdout: "", stderr: #"Could not find service "ai.promptctl.vhid.vhidd.dev" in domain for system"#),
         ]
         for printed in refusals {
-            #expect(throws: LaunchdUnreadable.self, "\(printed.stderr)") {
+            #expect(throws: DriverUnreadable.self, "\(printed.status) \(printed.stderr)") {
                 try LaunchdProbe.standing(from: printed, installation: Self.development)
             }
         }
@@ -57,20 +63,54 @@ import Testing
 
     /// The refusal names the command and says what launchd said, so the row reads it.
     @Test func theRefusalSaysWhatLaunchdSaid() {
-        let refusal = LaunchdUnreadable(label: "x.y", status: 1, complaint: "Operation not permitted")
-        #expect(refusal.description == "`launchctl print system/x.y` exited 1: Operation not permitted")
+        let printed = Command.Output(status: 1, stdout: "", stderr: "Operation not permitted")
+        let refusal = #expect(throws: DriverUnreadable.self) { try LaunchdProbe.standing(from: printed, installation: Self.development) }
+        #expect(refusal?.description == "could not read the machine: `launchctl print system/ai.promptctl.vhid.vhidd.dev` exited 1: Operation not permitted")
     }
 
-    /// The installer decides whether the job it just loaded got the endpoint by grepping
-    /// for the same marker this reads, and the two must not come to disagree about one job.
-    /// [LAW:one-source-of-truth]
-    @Test func postinstallLooksForTheSameEndpointMarker() throws {
+    /// A record that exits 0 and is not one this build can read is refused, never read as
+    /// a job without its service: a changed format must not make every healthy job look
+    /// like one that lost its endpoint. [LAW:no-silent-failure]
+    @Test func aRecordThisBuildCannotReadIsRefused() {
+        let unreadable = [
+            "",
+            "system/some.other.label = {\n}",
+            LaunchdFixtures.holding.replacingOccurrences(of: "\n\t}\n", with: "\n"),
+        ]
+        for stdout in unreadable {
+            #expect(throws: LaunchdRecordUnrecognised.self, "\(stdout.prefix(40))") {
+                try LaunchdProbe.standing(from: Command.Output(status: 0, stdout: stdout, stderr: ""), installation: Self.development)
+            }
+        }
+    }
+
+    /// The service's name as a quoted key outside the `endpoints` block is not an endpoint.
+    @Test func theServicesNameOutsideTheEndpointsBlockIsNotAnEndpoint() throws {
+        let elsewhere = LaunchdFixtures.lost.replacingOccurrences(
+            of: "\tenvironment = {", with: "\tevents = {\n\t\t\"\(Self.fixture.service)\" = {\n\t\t}\n\t}\n\n\tenvironment = {")
+        #expect(elsewhere.contains("\"\(Self.fixture.service)\" = {"))
+        let printed = Command.Output(status: 0, stdout: elsewhere, stderr: "")
+        #expect(try LaunchdProbe.standing(from: printed, installation: Self.fixture) == .loadedWithoutTheService)
+    }
+
+    /// The installer decides whether the job it just loaded got the endpoint, and doctor
+    /// decides the same about a job it finds; the two must not come to disagree about one
+    /// job. So postinstall's own check - the line itself, run by bash - is asked about every
+    /// capture, and has to answer as this does. [LAW:one-source-of-truth]
+    /// [LAW:behavior-not-structure]
+    @Test func postinstallsCheckAnswersAsThisDoesForEveryCapture() throws {
         let postinstall = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("pkg/scripts/postinstall")
         let script = try String(contentsOf: postinstall, encoding: .utf8)
-        let marker = LaunchdProbe.endpointMarker(Installation(service: "$service")!)
-        #expect(script.contains(#"grep -q "\#(marker.replacingOccurrences(of: "\"", with: "\\\""))" <<<"$record""#))
+        let checks = script.split(separator: "\n").compactMap { $0.firstMatch(of: /^if ! (grep .*<<<"\$record"); then$/)?.output.1 }
+        let check = try #require(checks.first, "postinstall no longer checks the record it loaded with one grep")
+        let cases: [(Installation, String)] = [(Self.development, LaunchdFixtures.holding), (Self.fixture, LaunchdFixtures.lost)]
+        for (installation, record) in cases {
+            let ran = try Command("/bin/bash", "-c", "service=$1; record=$2; \(check)", "check", installation.service, record).run()
+            let swift = try LaunchdProbe.standing(from: Command.Output(status: 0, stdout: record, stderr: ""), installation: installation)
+            #expect((ran.status == 0) == (swift == .holdingTheService), "\(installation): postinstall's grep exited \(ran.status), doctor read \(swift)")
+        }
     }
 
     /// Against this Mac's own launchd: whatever standing it reads, it reads one, for vhid's

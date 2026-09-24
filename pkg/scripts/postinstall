@@ -33,8 +33,12 @@ launchctl bootstrap system "$plist" || fail "launchd would not load $plist; see:
 # daemon has run a line. A job loaded without it is a root process nothing can reach,
 # restarted forever, so it is taken back down: another job under some other label names
 # this service. [LAW:no-silent-failure]
+#
+# A fixed string, because every `.` in a reverse-DNS name is a pattern's wildcard. vhid
+# doctor asks launchd the same question (Sources/Doctor/LaunchdProbe.swift), and a test
+# runs this line against the same captures to hold the two to one answer.
 record=$(launchctl print "system/$service")
-if ! grep -q "\"$service\" = {" <<<"$record"; then
+if ! grep -qF "\"$service\" = {" <<<"$record"; then
   launchctl bootout "system/$service" || say "and launchd would not unload it either; unload it with: launchctl bootout system/$service"
   fail "launchd gave $service to another job, so this one was unloaded. Find the other claimant with: grep -l '>$service<' /Library/LaunchDaemons/*.plist"
 fi

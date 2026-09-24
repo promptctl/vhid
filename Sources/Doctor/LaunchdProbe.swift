@@ -4,9 +4,9 @@ import Installations
 /// Reading launchd for where this installation's job stands.
 ///
 /// [LAW:effects-at-boundaries] The one command is run here and read by a pure function
-/// beside it, so every standing - including a job that lost its service to another, which
-/// takes a second job to produce - is checked against launchd's real output on a Mac that
-/// is in none of them.
+/// beside it, so every standing - including a job loaded without its service, which takes
+/// a second job to produce - is checked against launchd's real output on a Mac that is in
+/// none of them.
 ///
 /// Read without root: `launchctl print` answers any user about a system-domain job.
 public enum LaunchdProbe {
@@ -19,42 +19,57 @@ public enum LaunchdProbe {
     ///
     /// A label launchd has never heard of is a normal answer, and the one this returns
     /// `noJob` for - measured: exit 113, and `Could not find service "<label>" in domain for
-    /// system` on stderr. Any other failure is refused: a launchd that could not be read,
-    /// reported as "no job", would send a reader to load a job that is already loaded.
-    /// [LAW:no-silent-failure]
+    /// system` on stderr. Both are required, the status and the words: any other failure is
+    /// refused, because a launchd that could not be read, reported as "no job", would send
+    /// a reader to load a job that is already loaded. [LAW:no-silent-failure]
     static func standing(from printed: Command.Output, installation: Installation) throws -> JobStanding {
+        let label = installation.launchdLabel
         guard printed.status == 0 else {
-            guard printed.merged.contains("Could not find service \"\(installation.launchdLabel)\"") else {
-                throw LaunchdUnreadable(label: installation.launchdLabel, status: printed.status, complaint: printed.merged)
+            guard printed.status == 113, printed.stderr.contains("Could not find service \"\(label)\"") else {
+                throw DriverUnreadable.toolFailed(tool: "launchctl print system/\(label)", status: printed.status, complaint: printed.merged)
             }
             return .noJob
         }
-        // The endpoint is handed out at load, so a job that holds the service names it in
-        // its `endpoints` block from then on, whether or not its daemon has run a line. A
-        // job that asked for the service and lost has no such entry - measured, no
-        // `endpoints` block at all - because launchd does not make the loser loud.
-        //
-        // [LAW:one-source-of-truth] The same marker pkg/scripts/postinstall greps for when
-        // it decides whether the job it just loaded got the endpoint, so the installer and
-        // doctor cannot come to disagree about one job; a test holds the two together.
-        return printed.stdout.contains(endpointMarker(installation)) ? .holdingTheService : .anotherJobHoldsTheService
+        return try holds(endpointsIn: printed.stdout, label: label, service: installation.service) ? .holdingTheService : .loadedWithoutTheService
     }
 
-    /// The line launchd prints for a job's hold on this installation's service.
-    static func endpointMarker(_ installation: Installation) -> String {
-        "\"\(installation.service)\" = {"
+    /// Whether the record launchd printed for `label` holds an endpoint for `service`.
+    ///
+    /// [LAW:parse-dont-validate] Read as the structure it is, not searched as text. The
+    /// record has to open as the record for this label, or it is not an answer about this
+    /// job and is refused - a format some later macOS prints differently must not read as
+    /// every healthy job having lost its service. Then only the job's own `endpoints`
+    /// block counts: the service's name appears elsewhere in a record that lacks the
+    /// endpoint (measured, in its environment), and a quoted block key of the same shape
+    /// could appear in any other block.
+    ///
+    /// The endpoint is handed out at load, so a job that holds the service names it in
+    /// that block from then on, whether or not its daemon has run a line. A job without it
+    /// has no such entry - measured, no `endpoints` block at all.
+    ///
+    /// pkg/scripts/postinstall asks the same question of the record it just loaded, with a
+    /// grep; a test runs that grep against the same captures and holds the two to the same
+    /// answers. [LAW:one-source-of-truth]
+    static func holds(endpointsIn record: String, label: String, service: String) throws -> Bool {
+        let lines = record.split(separator: "\n", omittingEmptySubsequences: false)
+        guard lines.first == "system/\(label) = {" else {
+            throw LaunchdRecordUnrecognised(label: label, reason: "it does not open as the record for system/\(label)")
+        }
+        guard let open = lines.firstIndex(of: "\tendpoints = {") else { return false }
+        guard let close = lines[open...].firstIndex(of: "\t}") else {
+            throw LaunchdRecordUnrecognised(label: label, reason: "its endpoints block never closes")
+        }
+        return lines[open..<close].contains("\t\t\"\(service)\" = {")
     }
 }
 
-/// Why launchd could not be read. Never a standing: "I could not look" and "there is no
-/// job" are different facts, and a reader that cannot tell them apart acts on the second.
-/// [LAW:no-silent-failure]
-public struct LaunchdUnreadable: Error, CustomStringConvertible, Equatable {
+/// A record `launchctl print` printed that this build cannot read. Never a standing: a
+/// shape nobody here has seen is not evidence of any one of them. [LAW:no-silent-failure]
+public struct LaunchdRecordUnrecognised: Error, CustomStringConvertible, Equatable {
     public let label: String
-    public let status: Int32
-    public let complaint: String
+    public let reason: String
 
     public var description: String {
-        "`launchctl print system/\(label)` exited \(status)\(complaint.isEmpty ? "" : ": \(complaint)")"
+        "`launchctl print system/\(label)` printed a record this build cannot read: \(reason)"
     }
 }
