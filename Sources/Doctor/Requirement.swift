@@ -166,8 +166,24 @@ private func waitsOn(_ row: Requirement.Row) -> String {
 
 /// The daemon's log, which is where it says anything it has to say: it is a daemon, and
 /// its only voice is `os_log` under its own service name.
+///
+/// Both subsystems a daemon can speak under, not only its own: one started without a
+/// usable `--service` refuses under `Installation.unnamedSubsystem` and exits 0, which
+/// launchd does not restart - so its endpoint stays held and nothing answers, the silent
+/// reading exactly. An exact match on the service finds every daemon that started and
+/// misses the one that refused to, and an empty answer reads as a clean log.
+/// [LAW:no-silent-failure]
 private func daemonLog(_ installation: Installation, last window: String) -> String {
-    "/usr/bin/log show --predicate \(shellQuoted("subsystem == \"\(installation.service)\"")) --last \(window)"
+    let predicate = [installation.service, Installation.unnamedSubsystem]
+        .map { "subsystem == \(predicateString($0))" }
+        .joined(separator: " OR ")
+    return "/usr/bin/log show --predicate \(shellQuoted(predicate)) --last \(window)"
+}
+
+/// A name as a string literal in an `NSPredicate`, which `log show` parses: a quote or a
+/// backslash in it would otherwise end the literal early or escape what follows.
+func predicateString(_ text: String) -> String {
+    "\"" + text.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
 }
 
 /// A word as the shell reads back exactly, for a name pasted into a command a person runs.

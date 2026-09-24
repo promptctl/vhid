@@ -274,7 +274,20 @@ import Testing
         let job = try #require(Requirement.launchdJob(.anotherJobHoldsTheService, daemon: .silent(reason: "x"), installation: odd).step)
         #expect(job.contains(#"grep -lF -- '>com.a&amp;b'\''c<'"#))
         let log = try #require(Requirement.daemon(.silent(reason: "x"), installation: odd).step)
-        #expect(log.contains(#"--predicate 'subsystem == "com.a&b'\''c"'"#))
+        #expect(log.contains(#"--predicate 'subsystem == "com.a&b'\''c" OR subsystem == "ai.promptctl.vhid"'"#))
+    }
+
+    /// A quote or a backslash in a name stays inside the predicate's string literal.
+    @Test func aNameIsAPredicateStringLiteralWhateverItHolds() {
+        #expect(predicateString(#"com.a"b"#) == #""com.a\"b""#)
+        #expect(predicateString(#"a\b"#) == #""a\\b""#)
+    }
+
+    /// The log a step sends a reader to spans the subsystem a daemon with no usable
+    /// `--service` refuses under - the refusal that leaves a held service silent.
+    @Test func theLogSpansTheRefusalOfADaemonThatCouldNotNameItself() throws {
+        let step = try #require(Requirement.daemon(.silent(reason: "x"), installation: Self.installation).step)
+        #expect(step.contains(#"subsystem == "\#(Installation.unnamedSubsystem)""#))
     }
 
     // MARK: - the list
