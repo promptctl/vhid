@@ -187,7 +187,9 @@ import Testing
         let (leaver, keyboard) = (first.helper, first.helper.keyboard)
         try await blocking { try keyboard.down(.leftShift) }
         try await blocking { try leaver.leave() }
-        await #expect(throws: NSError.self) { try await blocking { try keyboard.down(.tab) } }
+        let refused = await #expect(throws: NSError.self) { try await blocking { try keyboard.down(.tab) } }
+        #expect(refused?.domain == Installation.refusalDomain)
+        #expect(refused?.localizedDescription == "\(Seat.Ended())")
         #expect(try await blocking { try leaver.status() } == nil)
         #expect(served.devices.asked == [Usage.leftShift.rawValue])
         withExtendedLifetime((served, first)) {}

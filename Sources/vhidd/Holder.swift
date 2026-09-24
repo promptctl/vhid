@@ -12,7 +12,7 @@ import Foundation
 final class Holder: @unchecked Sendable {
     struct Busy: Error, CustomStringConvertible {
         let pid: pid_t
-        var description: String { "pid \(pid) holds the keyboard" }
+        var description: String { "pid \(pid) holds the devices" }
     }
 
     private let lock = NSLock()

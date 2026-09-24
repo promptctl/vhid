@@ -10,18 +10,22 @@ import Helper
 ///
 /// The seat takes the devices on its first act, and an act while another seat holds them
 /// is refused naming that client's pid. Admission checks only the signature, so a
-/// connection that asks nothing but `status` sits here and holds nothing. After `leave`,
-/// every act is refused by name, and none of them takes the devices back.
+/// connection that asks nothing but `status` sits here and holds nothing.
+///
+/// A seat ends once - its client leaves, or its connection ends - and every act after
+/// that is refused by name and takes nothing. Both ways out go through `end`, so an act
+/// already in flight when a client crashed cannot claim the devices for a connection with
+/// nobody left to free them. [LAW:single-enforcer]
 final class Seat: NSObject, HelperService, @unchecked Sendable {
     private let connection: ObjectIdentifier
     private let pid: pid_t
     private let holder: Holder
     private let devices: any ServedDevices
-    /// Whether this client has left. Held under its own lock across each act's claim, so
-    /// an act cannot pass the check and then claim the devices after the leave has freed
-    /// them. Taken before the holder's lock and never after it.
+    /// Whether this seat has ended. Under its own lock across each act's claim, so an act
+    /// cannot pass the check and then claim after `end` has freed the devices. Taken
+    /// before the holder's lock and never after it.
     private let seat = NSLock()
-    private var hasLeft = false
+    private var ended = false
 
     init(_ connection: ObjectIdentifier, pid: pid_t, holder: Holder, devices: any ServedDevices) {
         self.connection = connection
@@ -35,7 +39,7 @@ final class Seat: NSObject, HelperService, @unchecked Sendable {
     private func serve(_ reply: @escaping (Error?) -> Void, _ act: () -> Void) {
         seat.lock(); defer { seat.unlock() }
         do {
-            guard !hasLeft else { throw Left() }
+            guard !ended else { throw Ended() }
             try holder.serve(connection, by: pid, act)
         } catch {
             reply(refusal(error))
@@ -53,11 +57,16 @@ final class Seat: NSObject, HelperService, @unchecked Sendable {
 
     /// Answered only once the devices are free, which is the whole point of asking.
     func leave(reply: @escaping (Error?) -> Void) {
-        seat.lock()
-        hasLeft = true
-        holder.free(connection) { devices.releaseEverything(because: "a client left") }
-        seat.unlock()
+        end(because: "a client left")
         reply(nil)
+    }
+
+    /// Ends this seat: no act after this is served, and the devices, if this seat holds
+    /// them, are released and freed for the next client.
+    func end(because reason: String) {
+        seat.lock(); defer { seat.unlock() }
+        ended = true
+        holder.free(connection) { devices.releaseEverything(because: reason) }
     }
 
     /// Who holds the devices, read and not claimed.
@@ -65,8 +74,8 @@ final class Seat: NSObject, HelperService, @unchecked Sendable {
         reply(holder.pid.map { NSNumber(value: $0) }, nil)
     }
 
-    /// A call on a connection whose client already left.
-    struct Left: Error, CustomStringConvertible {
+    /// A call on a seat that has ended.
+    struct Ended: Error, CustomStringConvertible {
         var description: String { "this connection has already handed the devices back" }
     }
 }

@@ -63,11 +63,11 @@ import Testing
         listener.delegate = far
         listener.resume()
         if invalidated { listener.invalidate() }
-        let helper = HelperConnection(connection: NSXPCConnection(listenerEndpoint: listener.endpoint), replyTimeout: replyTimeout)
+        let helper = { HelperConnection(connection: NSXPCConnection(listenerEndpoint: listener.endpoint), replyTimeout: replyTimeout) }
         // On a thread of its own: the call blocks until the far end answers, and a wait on
         // the cooperative pool can starve the reply. [LAW:no-ambient-temporal-coupling]
         let read = await withCheckedContinuation { continuation in
-            Thread { continuation.resume(returning: DaemonProbe.reading(from: helper)) }.start()
+            Thread { continuation.resume(returning: DaemonProbe.reading(helper)) }.start()
         }
         withExtendedLifetime((far, listener)) {}
         return read
@@ -100,6 +100,27 @@ import Testing
     @Test func aFailureNoneOfThoseNameIsShownAsWhatItSaid() async {
         let read = await reading(.fail)
         guard case .failed(let reason) = read else { Issue.record("read \(read)"); return }
-        #expect(reason.contains("refused by the fake"), "\(reason)")
+        #expect(reason == "refused by the fake")
+    }
+
+    /// A refusal followed by an answer is a daemon that went away mid-call and came back,
+    /// not a refused signature: the second connection's reading stands.
+    @Test func aRefusalThatDoesNotRepeatIsNotTheSignature() async {
+        let refusing = NSXPCListener.anonymous(), answering = NSXPCListener.anonymous()
+        let (no, yes) = (FarEnd(.refuseTheConnection), FarEnd(.holder(nil)))
+        refusing.delegate = no; answering.delegate = yes
+        refusing.resume(); answering.resume()
+        let endpoints = [refusing.endpoint, answering.endpoint]
+        let read = await withCheckedContinuation { continuation in
+            Thread {
+                var asked = 0
+                continuation.resume(returning: DaemonProbe.reading {
+                    defer { asked += 1 }
+                    return HelperConnection(connection: NSXPCConnection(listenerEndpoint: endpoints[asked]), replyTimeout: .seconds(20))
+                })
+            }.start()
+        }
+        #expect(read == .answered(holder: nil))
+        withExtendedLifetime((refusing, answering, no, yes)) {}
     }
 }

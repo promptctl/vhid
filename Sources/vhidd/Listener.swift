@@ -28,7 +28,8 @@ final class Listener: NSObject, NSXPCListenerDelegate {
         }
         let id = ObjectIdentifier(connection)
         connection.exportedInterface = NSXPCInterface(with: HelperService.self)
-        connection.exportedObject = Seat(id, pid: connection.processIdentifier, holder: holder, devices: devices)
+        let seat = Seat(id, pid: connection.processIdentifier, holder: holder, devices: devices)
+        connection.exportedObject = seat
         // Both, and not one: an interrupted connection ends invalid, a closed one ends
         // interrupted, and a client killed mid-burst can take either path. The release is
         // idempotent, so running it twice costs a report and running it never costs the
@@ -38,9 +39,11 @@ final class Listener: NSObject, NSXPCListenerDelegate {
         // Each runs only while this connection still holds the devices. A client that left
         // first has already been released, and by the time its connection ends the devices
         // may be another client's, whose keys are not this ending's to release.
-        connection.invalidationHandler = { [devices, holder] in
-            holder.free(id) { devices.releaseEverything(because: "a client went away") }
-        }
+        //
+        // Invalidation ends the seat and does not only free the holder: an act of this
+        // client's still in flight would otherwise find the devices free and claim them
+        // for a connection with no handler left to give them back.
+        connection.invalidationHandler = { seat.end(because: "a client went away") }
         connection.interruptionHandler = { [devices, holder] in
             _ = holder.whileHolding(id) { devices.releaseEverything(because: "a client was interrupted") }
         }
