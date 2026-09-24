@@ -24,7 +24,7 @@ struct Vhid: AsyncParsableCommand {
             cursor is read back in.
             """,
         subcommands: [
-            TypeCommand.self, KeysCommand.self, ClickCommand.self, MoveCommand.self, ScrollCommand.self,
+            TypeCommand.self, KeysCommand.self, PasteCommand.self, ClickCommand.self, MoveCommand.self, ScrollCommand.self,
             DragCommand.self, CursorCommand.self, PointerCommand.self, McpCommand.self, DriverCommand.self,
             ServiceCommand.self, DoctorCommand.self,
         ])

@@ -18,7 +18,12 @@ public extension Typist {
     /// write comes before the chord, and a write that throws is the whole answer: pasting
     /// over a pasteboard that did not take the text would paste whatever it holds instead.
     /// Empty text and a cancelled run are refused before the write too: either would cost
-    /// the user their clipboard and put nothing in.
+    /// the user their clipboard and put nothing in. So is a keyboard that cannot be reached -
+    /// a daemon not running, not admitting this caller, serving someone else - which the
+    /// release the keyboard answers before the write is what finds out: it holds nothing
+    /// down, and it is the first thing to reach a daemon whose connection is made on first
+    /// use. A keyboard that answers the release and then refuses the key is not found out
+    /// before the write; `PasteStopped` says what that cost.
     ///
     /// [LAW:effects-at-boundaries] The write is taken as a value, so a test can have it
     /// refuse, which a real pasteboard cannot be made to do.
@@ -33,6 +38,10 @@ public extension Typist {
         let chord = try KeyChord(spelled: "leftCommand+v", on: layout)
         let pressable = try lower(chord)
         guard !text.isEmpty else { throw NothingToPaste() }
+        try Task.checkCancellation()
+        try await keyboard.releaseAll()
+        // Again, because the release waits on the daemon, and a run cancelled during that
+        // wait must still find the clipboard the user's.
         try Task.checkCancellation()
         try write(text)
         do {

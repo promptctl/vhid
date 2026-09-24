@@ -1,3 +1,4 @@
+import AppKit
 import Input
 import KeyboardLayout
 import Pointing
@@ -95,6 +96,20 @@ import Testing
             try await KeysCommand.press(["leftCommand"], on: Self.us, with: Typist(keyboard: keyboard))
         }
         #expect(keyboard.down.isEmpty)
+    }
+
+    // MARK: paste
+
+    /// The text lands on the pasteboard, Command-V goes down, and what is said is the chord
+    /// in the spelling that reads back: V on US is key code 9.
+    @Test @MainActor func pasteWritesTheTextAndPressesCommandV() async throws {
+        let pasteboard = scratch()
+        defer { pasteboard.releaseGlobally() }
+        let keyboard = RecordingKeyboard()
+        let said = try await PasteCommand.paste("héllo ✅ 日本", on: Self.us, with: Typist(keyboard: keyboard), through: Clipboard(pasteboard).write)
+        #expect(pasteboard.string(forType: .string) == "héllo ✅ 日本")
+        #expect(keyboard.down.map(\.rawValue) == [0xE3, 0x19])
+        #expect(said == "pasted 10 characters with leftCommand+key 0x9 on \(Self.us.name)")
     }
 
     // MARK: click

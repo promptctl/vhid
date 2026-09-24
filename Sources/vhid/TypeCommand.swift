@@ -13,7 +13,8 @@ struct TypeCommand: AsyncParsableCommand {
 
             The console user's own keyboard layout decides which keys make which characters, and it \
             is read in this process rather than in the daemon: macOS answers that question per \
-            process, and a root daemon asking it is told the US layout whatever the user is typing on.
+            process, and a root daemon asking it is told the US layout whatever the user is typing on. \
+            Text it has no keys for is refused whole; paste puts text in through the clipboard instead.
 
             Text starting with - follows --, as in: vhid type -- "-5 degrees".
             """)

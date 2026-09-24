@@ -8,7 +8,7 @@ import Pointing
 
 /// One verb as an MCP tool: what a client is shown, and what a call does.
 ///
-/// [LAW:one-type-per-behavior] Eight tools and one type. What differs between them is a
+/// [LAW:one-type-per-behavior] Nine tools and one type. What differs between them is a
 /// name, a sentence, a list of parameters and a verb to run, and all four are values.
 struct VerbTool: Sendable {
     let tool: Tool
@@ -46,12 +46,12 @@ struct VerbTool: Sendable {
     }
 }
 
-/// The eight tools, in the order a client lists them.
+/// The nine tools, in the order a client lists them.
 ///
 /// Each is a CLI verb's core called with arguments read from JSON rather than from argv,
 /// so a tool and its verb cannot come to do different things. [LAW:one-source-of-truth]
 enum Tools {
-    static let all: [VerbTool] = [type, press, click, move, scroll, drag, cursor, doctor]
+    static let all: [VerbTool] = [type, press, paste, click, move, scroll, drag, cursor, doctor]
 
     private static let place = "screen points from the top left of the main display, the space cursor reports in; negative on a display left of or above it"
 
@@ -72,7 +72,8 @@ enum Tools {
             Type text on the virtual keyboard, which macOS sees as hardware. It goes wherever keys would \
             go if pressed now: nothing chooses or checks what is in front. The console user's keyboard \
             layout decides which keys make which characters, and text it cannot type is refused whole \
-            before any key goes down.
+            before any key goes down. paste puts in text through the clipboard, which the layout does \
+            not have to have keys for.
             """, [text]) { arguments, installation in
             let (text, layout) = (try arguments[text], try KeyboardLayout.current())
             return try await Devices.using(installation) { try await TypeCommand.type(text, on: layout, with: $0.typist) }
@@ -92,6 +93,20 @@ enum Tools {
             """, [chords]) { arguments, installation in
             let (chords, layout) = (try arguments[chords], try KeyboardLayout.current())
             return try await Devices.using(installation) { try await KeysCommand.press(chords, on: layout, with: $0.typist) }
+        }
+    }()
+
+    static let paste: VerbTool = {
+        let text = Parameter.text("text", "the text to paste, emoji and scripts the keyboard layout has no keys for included")
+        return VerbTool("paste", """
+            Paste text: write it to the clipboard and press Command-V on the virtual keyboard, which \
+            macOS sees as hardware. It goes wherever keys would go if pressed now: nothing chooses or \
+            checks what is in front. The cost is the user's clipboard: the text replaces what was there \
+            and stays, and nothing puts the old contents back. Which key is V is the console user's \
+            keyboard layout's to say.
+            """, [text]) { arguments, installation in
+            let (text, layout) = (try arguments[text], try KeyboardLayout.current())
+            return try await Devices.using(installation) { try await PasteCommand.paste(text, on: layout, with: $0.typist) }
         }
     }()
 

@@ -1,5 +1,6 @@
 import ArgumentParser
 import Darwin
+import Foundation
 import Input
 import MCP
 import System
@@ -12,8 +13,8 @@ struct McpCommand: AsyncParsableCommand {
         abstract: "Serve the verbs as MCP tools over stdin and stdout.",
         discussion: """
             Newline-delimited JSON-RPC on stdin and stdout, and nothing else on stdout: every \
-            diagnostic goes to stderr. The tools are type, press, click, move, scroll, drag, cursor and \
-            doctor. They take what the verbs of the same name take and answer with what those verbs \
+            diagnostic goes to stderr. The tools are \(Tools.all.map(\.tool.name).joined(separator: ", ")). \
+            They take what the verbs of the same name take and answer with what those verbs \
             print.
 
             Tool calls run one at a time, even when a client sends them together, but calls sent \
@@ -52,11 +53,15 @@ struct McpCommand: AsyncParsableCommand {
             // A verb that could not do what it was asked is a tool error, whose words the
             // model reads; a protocol error is for a request that named no tool at all. A
             // call the client withdrew is neither: it is thrown as a cancellation, which
-            // the SDK answers with nothing, as the MCP spec says a cancelled request is.
+            // the SDK answers with nothing, as the MCP spec says a cancelled request is. What
+            // the verb said on the way out still goes to stderr, because it can be the one
+            // report that something already happened - a paste's clipboard, replaced.
+            // [LAW:no-silent-failure]
             do {
                 let said = try await turns.take { try await verb.call(request.arguments ?? [:], on: installation) }
                 return .init(content: [.text(text: said, annotations: nil, _meta: nil)], isError: false)
             } catch where Task.isCancelled {
+                FileHandle.standardError.write(Data("vhid: \(request.name) withdrawn: \(error.reported)\n".utf8))
                 throw CancellationError()
             } catch {
                 return .init(content: [.text(text: error.reported, annotations: nil, _meta: nil)], isError: true)
