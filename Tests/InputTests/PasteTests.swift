@@ -52,7 +52,22 @@ import Testing
         run.cancel()
         await #expect(throws: CancellationError.self) { try await run.value }
         #expect(pasteboard.string(forType: .string) == "what the user had copied")
-        #expect(keyboard.log.isEmpty)
+        // The cancelled run reached the daemon, which holds nothing down; no key went down.
+        #expect(keyboard.log == ["up"])
+    }
+
+    /// A run cancelled while the release waits on the daemon is refused before the write,
+    /// not by the chord after it: the clipboard is still the user's and no key goes down.
+    @Test func aRunCancelledWhileTheDaemonIsReachedLeavesTheClipboardAlone() async throws {
+        let pasteboard = scratch()
+        defer { pasteboard.releaseGlobally() }
+        try Clipboard(pasteboard).write("what the user had copied")
+        let keyboard = CancellingAtReleaseKeyboard()
+        let run = Task { try await Typist(keyboard: keyboard).paste("text", on: Self.us, through: Clipboard(pasteboard).write) }
+        keyboard.aim(at: run)
+        await #expect(throws: CancellationError.self) { try await run.value }
+        #expect(pasteboard.string(forType: .string) == "what the user had copied")
+        #expect(keyboard.log == ["up"])
     }
 
     /// A write the pasteboard refused is reported as it is, and no chord follows it: a
@@ -122,5 +137,24 @@ private final class PasteboardReadingKeyboard: Keyboard {
     func releaseAll() throws {
         let holding = holding
         recorded.withLock { $0.append("up over \(holding)") }
+    }
+}
+
+/// A keyboard that cancels the run it is part of at its first release - the paste's reach
+/// for the daemon - so the cancellation lands between that and the write.
+private final class CancellingAtReleaseKeyboard: Keyboard {
+    private let state = Mutex<(log: [String], run: Task<KeyChord, any Error>?)>(([], nil))
+
+    var log: [String] { state.withLock { $0.log } }
+
+    func aim(at run: Task<KeyChord, any Error>) { state.withLock { $0.run = run } }
+
+    func down(_ usage: Usage) throws { state.withLock { $0.log.append("down \(String(usage.rawValue, radix: 16))") } }
+
+    func releaseAll() throws {
+        state.withLock {
+            $0.log.append("up")
+            $0.run?.cancel()
+        }
     }
 }

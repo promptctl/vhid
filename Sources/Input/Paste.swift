@@ -36,8 +36,10 @@ public extension Typist {
         let chord = try KeyChord(spelled: "leftCommand+v", on: layout)
         let pressable = try lower(chord)
         guard !text.isEmpty else { throw NothingToPaste() }
-        try Task.checkCancellation()
         try await keyboard.releaseAll()
+        // After the release and not before it: the release waits on the daemon, and a run
+        // cancelled during that wait must still find the clipboard the user's.
+        try Task.checkCancellation()
         try write(text)
         do {
             try await press(pressable)
