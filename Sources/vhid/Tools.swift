@@ -97,7 +97,7 @@ enum Tools {
     }()
 
     static let paste: VerbTool = {
-        let text = Parameter.text("text", "the text to paste: any text at all, emoji and scripts the keyboard layout has no keys for included")
+        let text = Parameter.text("text", "the text to paste, emoji and scripts the keyboard layout has no keys for included")
         return VerbTool("paste", """
             Paste text: write it to the clipboard and press Command-V on the virtual keyboard, which \
             macOS sees as hardware. It goes wherever keys would go if pressed now: nothing chooses or \

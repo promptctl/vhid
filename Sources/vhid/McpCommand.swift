@@ -1,5 +1,6 @@
 import ArgumentParser
 import Darwin
+import Foundation
 import Input
 import MCP
 import System
@@ -52,11 +53,15 @@ struct McpCommand: AsyncParsableCommand {
             // A verb that could not do what it was asked is a tool error, whose words the
             // model reads; a protocol error is for a request that named no tool at all. A
             // call the client withdrew is neither: it is thrown as a cancellation, which
-            // the SDK answers with nothing, as the MCP spec says a cancelled request is.
+            // the SDK answers with nothing, as the MCP spec says a cancelled request is. What
+            // the verb said on the way out still goes to stderr, because it can be the one
+            // report that something already happened - a paste's clipboard, replaced.
+            // [LAW:no-silent-failure]
             do {
                 let said = try await turns.take { try await verb.call(request.arguments ?? [:], on: installation) }
                 return .init(content: [.text(text: said, annotations: nil, _meta: nil)], isError: false)
             } catch where Task.isCancelled {
+                FileHandle.standardError.write(Data("vhid: \(request.name) withdrawn: \(error.reported)\n".utf8))
                 throw CancellationError()
             } catch {
                 return .init(content: [.text(text: error.reported, annotations: nil, _meta: nil)], isError: true)

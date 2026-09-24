@@ -52,8 +52,7 @@ import Testing
         run.cancel()
         await #expect(throws: CancellationError.self) { try await run.value }
         #expect(pasteboard.string(forType: .string) == "what the user had copied")
-        // The cancelled run reached the daemon, which holds nothing down; no key went down.
-        #expect(keyboard.log == ["up"])
+        #expect(keyboard.log.isEmpty)
     }
 
     /// A run cancelled while the release waits on the daemon is refused before the write,

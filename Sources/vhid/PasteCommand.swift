@@ -9,8 +9,8 @@ struct PasteCommand: AsyncParsableCommand {
         abstract: "Paste text through the clipboard with the virtual keyboard.",
         discussion: """
             The text is written to the clipboard and Command-V is pressed, wherever keys would go if \
-            they were pressed on hardware. Nothing here chooses or checks what is in front. Any text \
-            can be pasted, emoji and scripts the layout has no keys for included.
+            they were pressed on hardware. Nothing here chooses or checks what is in front. Text the \
+            layout has no keys for can be pasted, emoji and other scripts included.
 
             The cost is the user's clipboard: the text replaces what was there and stays. Nothing \
             puts the old contents back.
@@ -20,7 +20,7 @@ struct PasteCommand: AsyncParsableCommand {
             Text starting with - follows --, as in: vhid paste -- "-5 degrees".
             """)
 
-    @Argument(help: "The text to paste: any text at all.")
+    @Argument(help: "The text to paste, emoji and scripts the layout has no keys for included.")
     var text: String
 
     @OptionGroup var service: ServiceOption
