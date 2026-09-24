@@ -479,7 +479,7 @@ public extension Requirement {
 public extension Requirement {
     /// Whether the devices are free for a verb, or which process holds them.
     ///
-    /// The daemon admits one client at a time, so a held device is a verb from here
+    /// The daemon serves one client at a time, so a held device is a verb from here
     /// refused as busy. Nothing here takes them back: which process that is and whether it
     /// should stop is its owner's call, and doctor says only whose they are.
     static func devices(_ reading: DaemonReading) -> Requirement {

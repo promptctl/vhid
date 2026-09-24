@@ -70,6 +70,10 @@ import Testing
         func move(x: Int8, y: Int8, reply: @escaping (Error?) -> Void) { note("move \(x) \(y)", reply) }
         func scroll(vertical: Int8, horizontal: Int8, reply: @escaping (Error?) -> Void) { note("scroll \(vertical) \(horizontal)", reply) }
         func leave(reply: @escaping (Error?) -> Void) { note("leave", reply) }
+        func status(reply: @escaping (NSNumber?, Error?) -> Void) {
+            lock.lock(); pointing.append("status"); lock.unlock()
+            respond { reply($0 == nil ? NSNumber(value: 41) : nil, $0) }
+        }
 
         func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
             connection.exportedInterface = NSXPCInterface(with: HelperService.self)
@@ -151,12 +155,28 @@ import Testing
         withExtendedLifetime(far) {}
     }
 
-    /// A service that is gone is unreachable, said on the first call.
+    /// A service that is gone is unreachable, said on the first call, with the
+    /// connection's own domain and code: an invalid connection, not a refused one.
     @Test func aServiceThatWentAwayIsUnreachable() async throws {
         let (helper, far) = helper(.acknowledge)
         far.listener.invalidate()
         let keyboard = helper.keyboard
-        await #expect(throws: HelperConnection.Unreachable.self) { try await blocking { try keyboard.down(.space) } }
+        let unreachable = await #expect(throws: HelperConnection.Unreachable.self) { try await blocking { try keyboard.down(.space) } }
+        guard case .connection(let domain, let code, _) = unreachable?.cause else {
+            Issue.record("unreachable for another cause: \(String(describing: unreachable))")
+            return
+        }
+        #expect(domain == NSCocoaErrorDomain)
+        #expect(code == NSXPCConnectionInvalid)
+    }
+
+    /// `status` answers who holds the devices and is no act on them: the connection has
+    /// still not spoken, so a `leave` after it sends nothing.
+    @Test func statusAnswersTheHolderAndLeavesTheConnectionUnspoken() async throws {
+        let (helper, far) = helper(.acknowledge)
+        #expect(try await blocking { try helper.status() } == 41)
+        try await blocking { try helper.leave() }
+        #expect(far.service.pointed == ["status"])
     }
 
     /// A service that neither answers nor hangs up is unreachable at the deadline, rather
@@ -165,7 +185,8 @@ import Testing
         let (helper, far) = helper(.never, replyTimeout: .milliseconds(200))
         let keyboard = helper.keyboard
         let began = ContinuousClock.now
-        await #expect(throws: HelperConnection.Unreachable.self) { try await blocking { try keyboard.down(.space) } }
+        let unreachable = await #expect(throws: HelperConnection.Unreachable.self) { try await blocking { try keyboard.down(.space) } }
+        #expect(unreachable?.cause == .silence(.milliseconds(200)))
         #expect(ContinuousClock.now - began >= .milliseconds(200))
         // Held to the deadline: a far end gone early is unreachable for the wrong reason,
         // and a test that cannot tell the two apart proves nothing.

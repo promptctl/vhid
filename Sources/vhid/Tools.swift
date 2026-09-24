@@ -32,7 +32,7 @@ struct VerbTool: Sendable {
     ///
     /// **Every call reaches the daemon afresh.** A verb reaches the devices through
     /// `Devices.using` inside `perform`, exactly as the CLI's `run` does, and hands them
-    /// back before it returns. So the daemon, which admits one client at a time, is held
+    /// back before it returns. So the daemon, which serves one client at a time, is held
     /// for the length of one call and never for the length of a session. A shell's
     /// `vhid click` between two calls finds it free, and so does a second agent's session.
     /// [LAW:no-ambient-temporal-coupling] The holding is a scope, not a policy.

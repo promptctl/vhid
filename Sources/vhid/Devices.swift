@@ -6,7 +6,7 @@ import Installations
 /// The two devices an installation's daemon owns, as a client reaches them.
 ///
 /// [LAW:decomposition] One sentence, and the reason it is one type rather than two is
-/// that the two cannot be made separately. The helper admits one client at a time, so a
+/// that the two cannot be made separately. The helper serves one client at a time, so a
 /// keyboard and a mouse in one process are one client and share one connection - two
 /// would have the second refused as busy by the first. And the helper takes their
 /// reports as a single sequence, so they share one `DeviceQueue`: with a queue each, the
@@ -24,9 +24,9 @@ struct Devices {
     /// hands them back when it returns.
     ///
     /// **The one way a verb reaches the devices, and the scope is the holding.** The daemon
-    /// admits one client at a time, so a verb holds the devices for exactly as long as this
+    /// serves one client at a time, so a verb holds the devices for exactly as long as this
     /// runs and then leaves, waiting for the daemon to say they are free. The next verb -
-    /// in this process or another - is admitted on that answer rather than racing the
+    /// in this process or another - is served on that answer rather than racing the
     /// daemon's cleanup of this one. [LAW:no-ambient-temporal-coupling]
     ///
     /// The connection is lazy - launchd starts the job on the first call, not here - so a

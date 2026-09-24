@@ -153,7 +153,7 @@ import Testing
     // MARK: turns
 
     /// Calls sent together run one after another, never report by report together: the
-    /// daemon admits one client, and two calls at once would be two.
+    /// daemon serves one client, and two calls at once would be two.
     @Test func callsTakeTurnsAndNeverOverlap() async throws {
         actor Record { var log: [String] = []; func note(_ s: String) { log.append(s) } }
         let turns = Turns(), record = Record()
