@@ -50,6 +50,22 @@ import Testing
         #expect(refused.pasteboard == "scratch")
         #expect(keyboard.log.isEmpty)
     }
+
+    /// A chord that stops after the write is reported with what the write already did: the
+    /// clipboard holds the text, and what was copied there before is gone.
+    @Test func aChordThatStopsSaysTheClipboardAlreadyHoldsTheText() async throws {
+        let pasteboard = scratch()
+        defer { pasteboard.releaseGlobally() }
+        let keyboard = StuckKeyboard()
+        let stopped = try await #require(throws: PasteStopped.self) {
+            try await Typist(keyboard: keyboard).paste("text", on: Self.us, through: Clipboard(pasteboard).write)
+        }
+        #expect(stopped.cause is ChordStopped)
+        #expect(stopped.causes.last is Refused)
+        #expect(pasteboard.string(forType: .string) == "text")
+        #expect("\(stopped)".contains("already on the clipboard"))
+        #expect(keyboard.log == ["down e3", "up"])
+    }
 }
 
 /// A keyboard that notes what its pasteboard holds as each key goes down, which is the

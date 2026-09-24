@@ -20,13 +20,33 @@ public extension Typist {
     /// [LAW:effects-at-boundaries] The write is taken as a value, so a test can have it
     /// refuse, which a real pasteboard cannot be made to do.
     ///
-    /// Answers with the chord it pressed, in the spelling that reads back.
+    /// Answers with the chord it pressed, in the spelling that reads back, once the
+    /// daemon has acknowledged its keys. That is not the moment the app reads the
+    /// pasteboard - the app reads it when it gets to the event, and nothing on this Mac says
+    /// when that is - so a write straight after this returns can be what the app pastes.
+    /// [LAW:no-ambient-temporal-coupling]
     @MainActor @discardableResult
     func paste(_ text: String, on layout: KeyboardLayout, through write: @MainActor (String) throws -> Void) async throws -> KeyChord {
         let chord = try KeyChord(spelled: "leftCommand+v", on: layout)
         let pressable = try lower(chord)
         try write(text)
-        try await press(pressable)
+        do {
+            try await press(pressable)
+        } catch {
+            throw PasteStopped(cause: error)
+        }
         return chord
+    }
+}
+
+/// A paste whose chord stopped after the write had landed. What stopped the chord is the
+/// cause; that the clipboard already held the text is the part only the paste knows, and
+/// the part the person at the Mac needs: what they had copied is gone, and whether the app
+/// got Command-V is not known. [LAW:no-silent-failure]
+public struct PasteStopped: StoppedPartWay, CustomStringConvertible {
+    public let cause: any Error
+
+    public var description: String {
+        "\(cause.reported). The text was already on the clipboard in place of what had been copied there, and whether the app received the paste is not known"
     }
 }
