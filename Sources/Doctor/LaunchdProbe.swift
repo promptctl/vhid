@@ -46,10 +46,6 @@ public enum LaunchdProbe {
     /// The endpoint is handed out at load, so a job that holds the service names it in
     /// that block from then on, whether or not its daemon has run a line. A job without it
     /// has no such entry - measured, no `endpoints` block at all.
-    ///
-    /// pkg/scripts/postinstall asks the same question of the record it just loaded, of the
-    /// same block; a test runs its line against the same records and holds the two to the
-    /// same answers. [LAW:one-source-of-truth]
     static func holds(endpointsIn record: String, label: String, service: String) throws -> Bool {
         let lines = record.split(separator: "\n", omittingEmptySubsequences: false)
         guard lines.first == "system/\(label) = {" else {

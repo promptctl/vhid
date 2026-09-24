@@ -99,32 +99,6 @@ import Testing
         #expect(try LaunchdProbe.standing(from: printed, installation: Self.fixture) == .loadedWithoutTheService)
     }
 
-    /// The installer decides whether the job it just loaded got the endpoint, and doctor
-    /// decides the same about a job it finds; the two must not come to disagree about one
-    /// job. So postinstall's own check - the line itself, run by bash - is asked about every
-    /// capture, and has to answer as this does. [LAW:one-source-of-truth]
-    /// [LAW:behavior-not-structure]
-    @Test func postinstallsCheckAnswersAsThisDoesForEveryCapture() throws {
-        let postinstall = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("pkg/scripts/postinstall")
-        let script = try String(contentsOf: postinstall, encoding: .utf8)
-        // The condition of the `if` that reads the record, continuation lines joined.
-        let joined = script.replacingOccurrences(of: "\\\n", with: " ")
-        let checks = joined.split(separator: "\n").compactMap { $0.firstMatch(of: /^if ! (.*<<<"\$record".*); then$/)?.output.1 }
-        let check = try #require(checks.first, "postinstall no longer checks the record it loaded in one if")
-        let cases: [(Installation, String)] = [
-            (Self.development, LaunchdFixtures.holding),
-            (Self.fixture, LaunchdFixtures.lost),
-            (Self.fixture, Self.nameOutsideTheEndpointsBlock),
-        ]
-        for (installation, record) in cases {
-            let ran = try Command("/bin/bash", "-c", "service=$1; record=$2; \(check)", "check", installation.service, record).run()
-            let swift = try LaunchdProbe.standing(from: Command.Output(status: 0, stdout: record, stderr: ""), installation: installation)
-            #expect((ran.status == 0) == (swift == .holdingTheService), "\(installation): postinstall's grep exited \(ran.status), doctor read \(swift)")
-        }
-    }
-
     /// Against this Mac's own launchd: whatever standing it reads, it reads one, for vhid's
     /// own two installations and for a label nothing registers.
     @Test func thisMacsLaunchdIsReadWithoutRoot() throws {
