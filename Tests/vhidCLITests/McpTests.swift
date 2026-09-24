@@ -12,13 +12,27 @@ import Testing
     /// connect rather than moving the pointer of the Mac running the tests.
     static let nobody = Installation(service: "ai.promptctl.vhid.tests.nobody")!
 
-    @Test func theSevenToolsAreListedInOrder() {
-        #expect(Tools.all.map(\.tool.name) == ["type", "press", "click", "move", "scroll", "drag", "cursor"])
+    @Test func theEightToolsAreListedInOrder() {
+        #expect(Tools.all.map(\.tool.name) == ["type", "press", "click", "move", "scroll", "drag", "cursor", "doctor"])
     }
 
-    /// Only cursor promises to change nothing, because only cursor reaches no device.
-    @Test func onlyCursorIsReadOnly() {
-        #expect(Tools.all.filter { $0.tool.annotations.readOnlyHint == true }.map(\.tool.name) == ["cursor"])
+    /// Only cursor and doctor promise to change nothing: cursor reaches no device, and
+    /// doctor asks the daemon a question that claims none.
+    @Test func onlyCursorAndDoctorAreReadOnly() {
+        #expect(Tools.all.filter { $0.tool.annotations.readOnlyHint == true }.map(\.tool.name) == ["cursor", "doctor"])
+    }
+
+    /// The doctor tool answers with every row, in order, under a one-word verdict. Against
+    /// a service nothing registers, the verdict is always "not ready" - whatever Mac runs
+    /// this - and a Mac that is not ready is an answer, not a failed call.
+    @Test func theDoctorToolAnswersEveryRowUnderItsVerdict() async throws {
+        let said = try await Tools.doctor.call([:], on: Self.nobody)
+        let lines = said.components(separatedBy: "\n")
+        #expect(lines.first == "not ready")
+        let rows = lines.dropFirst().filter { !$0.hasPrefix(" ") }.map { String($0.prefix { $0 != ":" }) }
+        #expect(rows == ["Driver extension", "launchd job", "Daemon", "Signature", "Devices", "Keyboard Setup Assistant"])
+        #expect(said.contains("launchd job: no job"), "\(said)")
+        #expect(await Self.refusal(Tools.doctor, ["service": "x"]) == "service is not an argument this tool takes, and it takes none")
     }
 
     // MARK: arguments
