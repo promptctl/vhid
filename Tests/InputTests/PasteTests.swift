@@ -14,7 +14,6 @@ import Testing
 /// down, and what was on the pasteboard when they did.
 @Suite @MainActor struct PasteTests {
     static let us = try! KeyboardLayout.named("com.apple.keylayout.US")
-    static let dvorak = try! KeyboardLayout.named("com.apple.keylayout.Dvorak")
 
     private func scratch() -> NSPasteboard { NSPasteboard(name: NSPasteboard.Name("ai.promptctl.vhid.tests.\(UUID().uuidString)")) }
 
@@ -30,14 +29,20 @@ import Testing
         #expect(keyboard.log == ["down e3 over héllo ✅ 日本", "down 19 over héllo ✅ 日本", "up"])
     }
 
-    /// V is the key this layout puts `v` on: on Dvorak that is the key US calls period.
-    @Test func onDvorakTheChordPressesTheKeyDvorakPutsVOn() async throws {
+    /// V is the key this layout puts `v` on with Command held: on Dvorak that is the key US
+    /// calls period; on Dvorak - QWERTY ⌘, whose Command layer is QWERTY, and on Russian,
+    /// whose Command layer is Latin, it is the key US calls V.
+    @Test(arguments: [
+        ("com.apple.keylayout.Dvorak", "37"),
+        ("com.apple.keylayout.DVORAK-QWERTYCMD", "19"),
+        ("com.apple.keylayout.Russian", "19"),
+    ])
+    func theChordPressesTheKeyTheCommandLayerPutsVOn(layout: String, usage: String) async throws {
         let pasteboard = scratch()
         defer { pasteboard.releaseGlobally() }
         let keyboard = PasteboardReadingKeyboard(pasteboard)
-        let chord = try await Typist(keyboard: keyboard).paste("text", on: Self.dvorak, through: Clipboard(pasteboard).write)
-        #expect(chord.key == Key(rawValue: UInt16(kVK_ANSI_Period)))
-        #expect(keyboard.log == ["down e3 over text", "down 37 over text", "up"])
+        try await Typist(keyboard: keyboard).paste("text", on: KeyboardLayout.named(layout), through: Clipboard(pasteboard).write)
+        #expect(keyboard.log == ["down e3 over text", "down \(usage) over text", "up"])
     }
 
     /// A write the pasteboard refused is reported as it is, and no chord follows it: a

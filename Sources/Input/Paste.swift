@@ -9,13 +9,14 @@ public extension Typist {
     /// replaced and stays replaced. Nothing here puts the old contents back.
     ///
     /// The chord is spelled the way a caller spells one to `vhid keys`, so V is the key
-    /// this layout puts `v` on - key code 9 on US, 47 on Dvorak - by the one reading of a
-    /// layout every chord goes through. [LAW:one-source-of-truth]
+    /// this layout's Command layer puts `v` on - key code 9 on US, on Dvorak - QWERTY ⌘ and
+    /// on Russian, 47 on Dvorak - by the one reading of a layout every chord goes through.
+    /// [LAW:one-source-of-truth]
     ///
     /// [LAW:parse-dont-validate] The chord is proven pressable before the write, so a
-    /// layout with no `v` refuses with the user's clipboard still theirs. The write comes
-    /// before the chord, and a write that throws is the whole answer: pasting over a
-    /// pasteboard that did not take the text would paste whatever it holds instead.
+    /// chord that cannot be spelled is refused with the user's clipboard still theirs. The
+    /// write comes before the chord, and a write that throws is the whole answer: pasting
+    /// over a pasteboard that did not take the text would paste whatever it holds instead.
     ///
     /// [LAW:effects-at-boundaries] The write is taken as a value, so a test can have it
     /// refuse, which a real pasteboard cannot be made to do.
