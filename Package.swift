@@ -14,6 +14,7 @@ let package = Package(
         .library(name: "VirtualHID", targets: ["VirtualHID"]),
         .library(name: "Helper", targets: ["Helper"]),
         .library(name: "Input", targets: ["Input"]),
+        .library(name: "Doctor", targets: ["Doctor"]),
         .executable(name: "vhidd", targets: ["vhidd"]),
         .executable(name: "vhid", targets: ["vhid"]),
     ],
@@ -99,6 +100,14 @@ let package = Package(
         // and the typist against a keyboard that can be made to fail at the third keystroke
         // of four: no device, no window server, no grant.
         .testTarget(name: "InputTests", dependencies: ["Input", "KeyboardLayout", "Keystrokes", "Pointing"]),
+        // What must hold before a verb can reach the devices, as a table from readings of
+        // this Mac to a step for a person. It reads nothing itself: every requirement is a
+        // pure function of readings taken at the edge, so every combination is exercised
+        // in its tests, including the ones this Mac cannot be put into. The CLI links it
+        // and the daemon does not - the daemon is what it reads about, never a reader.
+        // [LAW:one-way-deps] [LAW:effects-at-boundaries]
+        .target(name: "Doctor", dependencies: ["DriverExtension", "Installations"]),
+        .testTarget(name: "DoctorTests", dependencies: ["Doctor", "DriverExtension", "Installations"]),
         // The root daemon that owns the devices. It links DriverExtension for the identity
         // the keyboard files its Keyboard Setup Assistant answer under, and deliberately
         // not KeyboardLayout: text never reaches this process. [LAW:one-way-deps]
@@ -111,11 +120,12 @@ let package = Package(
         // they get there, and deliberately not VirtualHID: a client never opens a device.
         // DriverExtension is for `vhid driver`, which reads the machine and not the
         // daemon, so scripts/virtual-hid-driver can ask it on a Mac with no daemon yet.
+        // Doctor is for `vhid doctor`, which reads both and says what is left to do.
         // [LAW:one-way-deps]
         .executableTarget(
             name: "vhid",
             dependencies: [
-                "Input", "Helper", "Installations", "KeyboardLayout", "Keystrokes", "Pointing", "DriverExtension",
+                "Input", "Helper", "Installations", "KeyboardLayout", "Keystrokes", "Pointing", "DriverExtension", "Doctor",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "MCP", package: "swift-sdk"),
                 .product(name: "Logging", package: "swift-log"),

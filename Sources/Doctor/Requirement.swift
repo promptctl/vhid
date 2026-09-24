@@ -1,0 +1,442 @@
+import DriverExtension
+import Installations
+
+/// One thing that must hold before a vhid verb can reach the devices, as this Mac actually
+/// stands.
+///
+/// [LAW:one-type-per-behavior] Six very different facts - a driver extension's
+/// registration, a launchd job's hold on a Mach service, a daemon's answer, a signature it
+/// admits, which process holds the devices, a setup assistant's cached answer - are one
+/// type with six instances, because what a reader does with them does not differ: read
+/// what is there, and do the step when there is one.
+///
+/// Ported in shape from low-talker's onboarding, whose reader of these same facts did not
+/// come across when vhid was extracted from it. Keyed on `Installation` rather than on
+/// low-talker's two flavors, and with no menu to feed: `vhid doctor` and its MCP tool are
+/// the readers.
+public struct Requirement: Sendable, Hashable {
+    /// What must hold, in the words every surface uses.
+    public let name: String
+    /// What was read off this Mac. Shown whether or not there is a step, because a
+    /// requirement that says only "not ready" is one nobody can act on or report.
+    public let reads: String
+    /// What is left for a person to do, and nil when nothing is. Genuinely absent rather
+    /// than an empty string: "nothing to do" and "a step nobody wrote" are different
+    /// facts, and a reader that cannot tell them apart prints the second as the first.
+    public let step: String?
+
+    public var met: Bool { step == nil }
+
+    public init(name: String, reads: String, step: String?) {
+        self.name = name
+        self.reads = reads
+        self.step = step
+    }
+}
+
+public extension Requirement {
+    /// What each row is called, in the order doctor prints them.
+    ///
+    /// The order is the order the facts depend on each other: no daemon answers without a
+    /// launchd job to hold its service, no signature is judged by a daemon that did not
+    /// answer, and nobody can say who holds the devices without an answer to say it in.
+    /// A row whose fact waits on an earlier one names that row in its step, so a reader
+    /// working top to bottom is never sent past the thing actually in the way.
+    ///
+    /// One home for the names, because the factories, the rows a failed reading becomes,
+    /// and the tests all say them. [LAW:one-source-of-truth]
+    enum Row: String, Sendable, Hashable, CaseIterable {
+        case driverExtension = "Driver extension"
+        case launchdJob = "launchd job"
+        case daemon = "Daemon"
+        case signature = "Signature"
+        case devices = "Devices"
+        case keyboardSetupAssistant = "Keyboard Setup Assistant"
+    }
+
+    /// A requirement whose fact could not be read.
+    ///
+    /// The row stays in the list rather than being dropped: every requirement is shown
+    /// every time, and one that could not be read is never silently absent from a list a
+    /// reader takes as complete. It carries a step, so it is never `met`.
+    /// [LAW:no-silent-failure]
+    static func unreadable(_ row: Row, _ error: any Error) -> Requirement {
+        Requirement(name: row.rawValue, reads: "could not be read", step: "\(error)")
+    }
+}
+
+public extension Requirement {
+    /// The step as the lines it was written in, and no lines at all when there is nothing
+    /// to do. Split once, so every surface that indents a step works from one shape.
+    /// [LAW:one-source-of-truth]
+    var stepLines: [String] { step.map { $0.components(separatedBy: "\n") } ?? [] }
+}
+
+extension Requirement: CustomStringConvertible {
+    public var description: String {
+        (["\(name): \(reads)"] + stepLines.map { "  \($0)" }).joined(separator: "\n")
+    }
+}
+
+/// Where this Mac stands against everything a vhid verb needs, as one list.
+///
+/// Computed rather than printed, so a test reads it as a value and the CLI and the MCP
+/// tool say the same words without either spelling them a second time.
+/// [LAW:effects-at-boundaries]
+public struct Readiness: Sendable, Hashable, CustomStringConvertible {
+    public let requirements: [Requirement]
+
+    public init(_ requirements: [Requirement]) { self.requirements = requirements }
+
+    /// Nothing is left for anyone to do.
+    public var ready: Bool { requirements.allSatisfy(\.met) }
+
+    /// Every requirement, every time, in a fixed order - the met ones included. A list
+    /// that showed only what was wrong would leave a reader unable to tell "checked and
+    /// fine" from "never checked". [LAW:dataflow-not-control-flow]
+    public var description: String { requirements.map(\.description).joined(separator: "\n") }
+}
+
+// MARK: - shared wording
+
+/// Where a driver extension is approved. Named once because every step that asks for the
+/// click ends up here, and a reader following one of them to a pane that does not exist
+/// is a reader who stops.
+private let loginItemsPane = "System Settings > General > Login Items & Extensions"
+
+/// The step of a row whose fact is not read until an earlier row is met.
+///
+/// Unmet rather than met or absent: nothing was read, so nothing may be claimed, and a
+/// row that dropped out of the list would leave a reader unsure it was ever checked. The
+/// step names the row in the way, so it sends the reader somewhere rather than nowhere.
+/// [LAW:no-silent-failure]
+private func waitsOn(_ row: Requirement.Row) -> String {
+    "Read once the \(row.rawValue) row above is met."
+}
+
+/// The daemon's log, which is where it says anything it has to say: it is a daemon, and
+/// its only voice is `os_log` under its own service name.
+private func daemonLog(_ installation: Installation, last window: String) -> String {
+    "/usr/bin/log show --predicate 'subsystem == \"\(installation.service)\"' --last \(window)"
+}
+
+// MARK: - the driver extension
+
+public extension Requirement {
+    /// The driver extension the virtual devices are published through.
+    ///
+    /// Every word `DriverState` can take gets its own step, because they are not degrees
+    /// of one problem: a Mac with no package needs an install, a Mac holding a
+    /// registration nobody approved needs a click, and a Mac mid-removal needs a restart.
+    static func driverExtension(_ state: DriverState) -> Requirement {
+        Requirement(name: Row.driverExtension.rawValue, reads: state.rawValue, step: step(for: state))
+    }
+
+    /// What installs the package, for both readers there are: someone with a clone of this
+    /// repo, for whom the script does it, and someone who installed vhid's pkg, which
+    /// carries the pinned package and asks for the activation as it finishes.
+    private static let install = """
+        From a clone of this repo:
+            scripts/virtual-hid-driver install
+        Without one, install vhid's pkg again, which carries the driver package
+        and asks macOS to activate it.
+        """
+
+    private static func step(for state: DriverState) -> String? {
+        switch state {
+        // macOS has the extension switched on. `running` additionally means some client
+        // has opened it, which is not something a person does and not something to ask for.
+        case .enabled, .running:
+            nil
+        case .absent:
+            """
+            The driver package (\(DriverPackage.version)) is not on this Mac.
+            \(install)
+            """
+        case .installedInactive:
+            """
+            The package is installed but macOS holds no registration for it,
+            so the activation request never landed. Ask for it again, as you
+            and not under sudo - macOS attributes the request to whoever asks:
+                \(DriverProbe.managerExecutable) activate
+            """
+        case .awaitingApproval:
+            """
+            Open \(loginItemsPane),
+            click the (i) beside Driver Extensions, and turn on
+            \(DriverProbe.bundleID).
+            """
+        case .disabled:
+            """
+            The driver is registered and switched off. Open
+            \(loginItemsPane),
+            click the (i) beside Driver Extensions, and turn on
+            \(DriverProbe.bundleID).
+            """
+        case .pendingReboot:
+            """
+            The driver was removed, and macOS keeps it registered until this
+            Mac restarts. Restart the Mac.
+            """
+        case .residue:
+            """
+            Part of the driver package is here and part is not. From a clone
+            of this repo, remove what is there and install it again:
+                scripts/virtual-hid-driver remove
+                scripts/virtual-hid-driver install
+            """
+        // A registration this build cannot name, or two at once. What was read is in the
+        // fact table `vhid driver state` prints, and pointing there beats inventing a step
+        // for a state nobody has identified. [LAW:no-silent-failure]
+        case .unknown:
+            """
+            macOS holds a registration this build cannot name. The readings
+            it came from:
+                vhid driver state
+            """
+        }
+    }
+}
+
+// MARK: - the launchd job
+
+public extension Requirement {
+    /// The launchd job that holds this installation's Mach service.
+    ///
+    /// [LAW:one-source-of-truth] The installation itself, not names lifted off it: the
+    /// label, the service and the plist path are three readings of one value, and passing
+    /// them separately would let a step name one installation's plist and another's
+    /// service.
+    static func launchdJob(_ standing: JobStanding, installation: Installation) -> Requirement {
+        Requirement(name: Row.launchdJob.rawValue, reads: reads(for: standing), step: step(for: standing, installation: installation))
+    }
+
+    private static func reads(for standing: JobStanding) -> String {
+        switch standing {
+        case .holdingTheService: "loaded, holding the service"
+        case .anotherJobHoldsTheService: "loaded, but another job holds the service"
+        case .noJob: "no job"
+        }
+    }
+
+    /// Where vhid's plist for this installation lives, whoever wrote it: the pkg for the
+    /// installed copy, a person with `scripts/launchd-plist` for a copy built from a tree.
+    private static func plist(_ installation: Installation) -> String {
+        "/Library/LaunchDaemons/\(installation.launchdLabel).plist"
+    }
+
+    private static func step(for standing: JobStanding, installation: Installation) -> String? {
+        switch standing {
+        case .holdingTheService:
+            nil
+        // Both ways a job reaches this label, named rather than chosen between: which one
+        // this installation came by is not something the reading says, and the set of
+        // installations is open, so no case here may pick the route by which one it is.
+        // [LAW:dataflow-not-control-flow]
+        case .noJob:
+            """
+            launchd holds no job under \(installation.launchdLabel), so nothing
+            answers \(installation.service). The installed copy's job is loaded
+            by vhid's pkg: install it again. A copy built from a tree is loaded
+            by hand, from the root of that tree after `make`:
+                scripts/launchd-plist \(installation.service) "$PWD/.build/debug/vhidd" \\
+                    | sudo tee \(plist(installation)) >/dev/null
+                sudo launchctl enable system/\(installation.launchdLabel)
+                sudo launchctl bootstrap system \(plist(installation))
+            """
+        case .anotherJobHoldsTheService:
+            """
+            A job is loaded under \(installation.launchdLabel), and launchd gave
+            \(installation.service) to something else, so this job's daemon
+            never gets the endpoint and answers nothing however healthy it
+            looks. It is a daemon started by hand, or a job under some other
+            label that names this service. Find both:
+                pgrep -fl vhidd
+                grep -l '>\(installation.service)<' /Library/LaunchDaemons/*.plist
+            """
+        }
+    }
+}
+
+// MARK: - the daemon's answer
+
+public extension Requirement {
+    /// Whether a daemon is listening on the service, which is also whether its devices are
+    /// up: it listens only once both are.
+    ///
+    /// A refusal is an answer here. The daemon that refused this binary's signature was
+    /// listening to refuse it, so its devices are up and the one thing wrong is the
+    /// signature - which is the next row's to say, not this one's.
+    static func daemon(_ reading: DaemonReading, installation: Installation) -> Requirement {
+        Requirement(name: Row.daemon.rawValue, reads: daemonReads(reading), step: daemonStep(reading, installation: installation))
+    }
+
+    private static func daemonReads(_ reading: DaemonReading) -> String {
+        switch reading {
+        case .answered, .refusedThisSignature: "listening, both devices up"
+        case .unreachable: "nothing holds the service"
+        case .silent: "the service is held, and nothing answered"
+        case .failed: "the call failed"
+        }
+    }
+
+    private static func daemonStep(_ reading: DaemonReading, installation: Installation) -> String? {
+        switch reading {
+        case .answered, .refusedThisSignature:
+            nil
+        case .unreachable(let reason):
+            """
+            Nothing holds \(installation.service) (\(reason)).
+            When the \(Row.launchdJob.rawValue) row above is unmet, that is why. When it
+            is met, the daemon has exited and launchd has not started it
+            again; its log says why:
+                \(daemonLog(installation, last: "1h"))
+            """
+        case .silent(let reason):
+            """
+            launchd holds \(installation.service) and the daemon did not answer
+            (\(reason)). It listens only once both devices are up, and exits
+            and is started again while they cannot come up - an unmet
+            \(Row.driverExtension.rawValue) row above is the usual reason. Its log says:
+                \(daemonLog(installation, last: "10m"))
+            """
+        case .failed(let reason):
+            """
+            The status call failed in a way this build cannot name: \(reason)
+            The daemon's log for the same moment:
+                \(daemonLog(installation, last: "10m"))
+            """
+        }
+    }
+}
+
+// MARK: - the signature
+
+public extension Requirement {
+    /// Whether the daemon admits this binary.
+    ///
+    /// The daemon admits a caller signed with the certificate it carries itself and refuses
+    /// everything else, and the refusal reaches a client as NSCocoaErrorDomain 4097 - which
+    /// reads like broken XPC and costs an afternoon before anyone suspects the signature.
+    /// This row is that afternoon, spent once.
+    static func signature(_ reading: DaemonReading, installation: Installation) -> Requirement {
+        Requirement(name: Row.signature.rawValue, reads: signatureReads(reading), step: signatureStep(reading, installation: installation))
+    }
+
+    private static func signatureReads(_ reading: DaemonReading) -> String {
+        switch reading {
+        case .answered: "admitted"
+        case .refusedThisSignature: "refused: this vhid is not signed with the daemon's certificate"
+        case .unreachable, .silent, .failed: "not asked"
+        }
+    }
+
+    private static func signatureStep(_ reading: DaemonReading, installation: Installation) -> String? {
+        switch reading {
+        case .answered:
+            nil
+        case .refusedThisSignature:
+            """
+            The daemon on \(installation.service) admits only callers signed with
+            its own certificate. A tree built with bare `swift build` is signed
+            ad hoc; sign it from the root of that tree:
+                make sign
+            The installed vhid and a build from a tree carry different
+            certificates, so each reaches its own daemon: --service says which.
+            """
+        case .unreachable, .silent, .failed:
+            waitsOn(.daemon)
+        }
+    }
+}
+
+// MARK: - the devices
+
+public extension Requirement {
+    /// Whether the devices are free for a verb, or which process holds them.
+    ///
+    /// The daemon admits one client at a time, so a held device is a verb from here
+    /// refused as busy. Nothing here takes them back: which process that is and whether it
+    /// should stop is its owner's call, and doctor says only whose they are.
+    static func devices(_ reading: DaemonReading) -> Requirement {
+        Requirement(name: Row.devices.rawValue, reads: devicesReads(reading), step: devicesStep(reading))
+    }
+
+    private static func devicesReads(_ reading: DaemonReading) -> String {
+        switch reading {
+        case .answered(nil): "free"
+        case .answered(let holder?): "held by pid \(holder)"
+        case .refusedThisSignature, .unreachable, .silent, .failed: "not asked"
+        }
+    }
+
+    private static func devicesStep(_ reading: DaemonReading) -> String? {
+        switch reading {
+        case .answered(nil):
+            nil
+        case .answered(let holder?):
+            """
+            pid \(holder) holds the devices, and a verb from here is refused as
+            busy until it hands them back. Which process that is:
+                ps -o command= -p \(holder)
+            """
+        // The daemon refused to say, and it refused on the signature: that row is what
+        // stands in the way, not the daemon's.
+        case .refusedThisSignature:
+            waitsOn(.signature)
+        case .unreachable, .silent, .failed:
+            waitsOn(.daemon)
+        }
+    }
+}
+
+// MARK: - the Keyboard Setup Assistant
+
+public extension Requirement {
+    /// Whether Keyboard Setup Assistant already holds a verdict for the virtual keyboard.
+    ///
+    /// The only row that bites on first *use* rather than at install: the moment the
+    /// virtual keyboard enumerates, macOS raises the assistant, it takes focus, and it
+    /// swallows the keystrokes meant for the app in front. The daemon files this keyboard's
+    /// answer itself as it starts, before it brings the keyboard up, so what is left to say
+    /// is whether that filing has had its chance.
+    ///
+    /// Which makes the daemon's reading part of this row's step and not context around it.
+    /// "Wait for the daemon to file it" is true only while no daemon has started; said to
+    /// someone whose daemon has, it is an instruction to wait for something that already
+    /// happened, and the one thing that can actually be wrong - the filing failed, and the
+    /// daemon logged why - goes unmentioned. [LAW:no-silent-failure]
+    ///
+    /// - Parameter daemonHasStarted: from `DaemonReading.daemonHasStarted`, whose row is
+    ///   read first for exactly this reason. [LAW:no-ambient-temporal-coupling]
+    static func keyboardSetupAssistant(answered: Bool, daemonHasStarted: Bool, installation: Installation) -> Requirement {
+        Requirement(
+            name: Row.keyboardSetupAssistant.rawValue,
+            reads: answered ? "answered for the virtual keyboard" : "will ask on first use",
+            step: answered ? nil : keyboardSetupAssistantStep(daemonHasStarted: daemonHasStarted, installation: installation))
+    }
+
+    /// Both arms open the same way, because the reader needs the same fact either way: the
+    /// assistant is about to take the first line typed. They differ in what is left to do.
+    ///
+    /// The started arm's window is wide and says it may not be wide enough: the filing is
+    /// logged once, at the daemon's start, and a `KeepAlive` daemon can have started long
+    /// before this ran. An empty window is what a reader takes for "no failure here", which
+    /// is the silence this arm exists to break. [LAW:no-silent-failure]
+    private static func keyboardSetupAssistantStep(daemonHasStarted: Bool, installation: Installation) -> String {
+        let opening = """
+            macOS raises Keyboard Setup Assistant the first time the virtual
+            keyboard types, and it takes those keystrokes. The daemon files the
+            keyboard's answer as it starts,
+            """
+        return daemonHasStarted ? """
+            \(opening) and it has started - so the
+            filing is what failed. It logged why as it started, which may be
+            further back than this window; widen it if nothing comes back:
+                \(daemonLog(installation, last: "24h"))
+            """ : """
+            \(opening) so this clears once a daemon
+            has started: see the \(Row.daemon.rawValue) row above.
+            """
+    }
+}
