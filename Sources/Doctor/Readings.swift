@@ -11,19 +11,25 @@
 /// /Library/LaunchDaemons, bootstrapped under a label equal to the service
 /// (`Installation.launchdLabel`). low-talker had a fourth, a bootstrapped job shadowing an
 /// app's own `SMAppService` registration, which vhid has no app to make.
-public enum JobStanding: Sendable, Hashable, CaseIterable {
+///
+/// The raw values are the words `vhid service standing` prints, which is how
+/// pkg/scripts/postinstall reads this without a reader of its own. [LAW:one-source-of-truth]
+public enum JobStanding: String, Sendable, Hashable, CaseIterable {
     /// A job is loaded under this installation's label and launchd gave it the endpoint.
-    case holdingTheService
-    /// A job is loaded under this installation's label and launchd did not give it the
-    /// endpoint, so something else holds the service.
+    case holdingTheService = "holding-the-service"
+    /// A job is loaded under this installation's label and launchd holds no endpoint for
+    /// the service on its behalf.
     ///
-    /// launchd does not make the loser loud: a second claimant on a Mach service name
-    /// bootstraps with exit 0, runs, and never gets the endpoint (measured, and recorded
-    /// on `Installation.launchdLabel`). A job in this state looks loaded and answers
-    /// nothing, which is why it is a standing of its own.
-    case anotherJobHoldsTheService
+    /// Named for what was read and not for a cause, because launchd's record has two
+    /// causes and prints them identically - measured, no `endpoints` block at all either
+    /// way. The usual one is another job holding the service: launchd does not make the
+    /// loser loud, and a second claimant on a Mach service name bootstraps with exit 0,
+    /// runs, and never gets the endpoint (recorded on `Installation.launchdLabel`). The
+    /// other is a plist under this label that never named the service. A job in this
+    /// state looks loaded and answers nothing, which is why it is a standing of its own.
+    case loadedWithoutTheService = "loaded-without-the-service"
     /// launchd has no job under this installation's label.
-    case noJob
+    case noJob = "no-job"
 }
 
 /// What one side-effect-free status call to the daemon came back as.

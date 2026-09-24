@@ -319,7 +319,7 @@ public extension Requirement {
     private static func reads(for standing: JobStanding) -> String {
         switch standing {
         case .holdingTheService: "loaded, holding the service"
-        case .anotherJobHoldsTheService: "loaded, but another job holds the service"
+        case .loadedWithoutTheService: "loaded, without the service's endpoint"
         case .noJob: "no job"
         }
     }
@@ -352,15 +352,18 @@ public extension Requirement {
                 """
         // Only a job can hold a system-domain Mach service - launchd hands the endpoint to
         // the job whose plist names it, and a process launchd did not start cannot check
-        // one in - so the holder is a plist under some other label, and the search is for
-        // that plist. A search of processes would list this job's own daemon, running
+        // one in - so both causes are found by one search of the plists: another label's
+        // among them is the holder, and this label's missing from them is a plist that
+        // never asked. A search of processes would list this job's own daemon, running
         // without the endpoint, and invite the reader to kill the wrong one.
-        case .anotherJobHoldsTheService:
+        case .loadedWithoutTheService:
             return """
-                A job is loaded under \(installation.launchdLabel), and launchd gave
-                \(installation.service) to a job under another label, so this job's
-                daemon never gets the endpoint and answers nothing however
-                healthy it looks. Every plist that names the service:
+                A job is loaded under \(installation.launchdLabel), and launchd holds
+                no endpoint for \(installation.service) for it, so its daemon answers
+                nothing however healthy it looks. Either a job under another label
+                holds the service, or this job's plist never named it. Every plist
+                that names the service - another label's is the holder, and this
+                label's missing means its plist is the one to fix:
                     \(plistsNaming(installation))
                 """
         }

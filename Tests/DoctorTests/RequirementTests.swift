@@ -115,7 +115,7 @@ import Testing
     /// Another holder is found, not guessed at: every plist is searched for the service's own
     /// name, as a fixed string.
     @Test func anotherHolderIsSearchedForByTheServiceName() throws {
-        let step = try #require(Requirement.launchdJob(.anotherJobHoldsTheService, daemon: .silent(reason: "x"), installation: Self.installation).step)
+        let step = try #require(Requirement.launchdJob(.loadedWithoutTheService, daemon: .silent(reason: "x"), installation: Self.installation).step)
         #expect(step.contains("grep -lF -- '>com.example.doctor-test<' /Library/LaunchDaemons/*.plist"))
         // A search of processes lists this job's own daemon, running without the endpoint.
         #expect(!step.contains("pgrep"))
@@ -271,7 +271,7 @@ import Testing
     /// and a quote in it cannot end the quoting around the log predicate.
     @Test func stepsSearchForTheNameAsThePlistSpellsItAndQuoteThePredicate() throws {
         let odd = Installation(service: "com.a&b'c")!
-        let job = try #require(Requirement.launchdJob(.anotherJobHoldsTheService, daemon: .silent(reason: "x"), installation: odd).step)
+        let job = try #require(Requirement.launchdJob(.loadedWithoutTheService, daemon: .silent(reason: "x"), installation: odd).step)
         #expect(job.contains(#"grep -lF -- '>com.a&amp;b'\''c<'"#))
         let log = try #require(Requirement.daemon(.silent(reason: "x"), installation: odd).step)
         #expect(log.contains(#"--predicate 'subsystem == "com.a&b'\''c" OR subsystem == "ai.promptctl.vhid"'"#))

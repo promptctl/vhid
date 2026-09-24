@@ -33,12 +33,19 @@ launchctl bootstrap system "$plist" || fail "launchd would not load $plist; see:
 # daemon has run a line. A job loaded without it is a root process nothing can reach,
 # restarted forever, so it is taken back down: another job under some other label names
 # this service. [LAW:no-silent-failure]
-record=$(launchctl print "system/$service")
-if ! grep -q "\"$service\" = {" <<<"$record"; then
-  launchctl bootout "system/$service" || say "and launchd would not unload it either; unload it with: launchctl bootout system/$service"
-  fail "launchd gave $service to another job, so this one was unloaded. Find the other claimant with: grep -l '>$service<' /Library/LaunchDaemons/*.plist"
-fi
-say "loaded $service from $plist"
+#
+# Asked of the installed vhid, which reads launchd's record with the probe vhid doctor
+# uses, so the installer and doctor cannot come to disagree about one job. A record it
+# cannot read fails the install and unloads nothing: an unread record is not evidence
+# the job lacks its endpoint. [LAW:one-source-of-truth]
+standing=$("$vhid" service standing --service "$service") || fail "$vhid could not read launchd's record of $service; see: launchctl print system/$service"
+case "$standing" in
+  holding-the-service) say "loaded $service from $plist" ;;
+  loaded-without-the-service)
+    launchctl bootout "system/$service" || say "and launchd would not unload it either; unload it with: launchctl bootout system/$service"
+    fail "launchd loaded $plist but holds no endpoint for $service on its behalf, so it was unloaded. Either another job names $service - find it with: grep -l '>$service<' /Library/LaunchDaemons/*.plist - or $plist does not name it under MachServices" ;;
+  *) fail "launchd has no job for $service just after loading $plist (vhid service standing said: $standing)" ;;
+esac
 
 # The activation is the logged-in user's to ask for: macOS attributes the request to
 # whoever makes it, and the approval that person gives in System Settings answers it.
