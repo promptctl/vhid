@@ -18,12 +18,14 @@ struct Vhid: AsyncParsableCommand {
             binary has to be signed with it: build with `make`, which signs, rather than with \
             `swift build`, which ad hoc signs and leaves every call refused.
 
+            When a verb fails, `vhid doctor` names what is not in place and the step left.
+
             Coordinates are screen points from the top left of the main display, the same ones the \
             cursor is read back in.
             """,
         subcommands: [
             TypeCommand.self, KeysCommand.self, ClickCommand.self, MoveCommand.self, ScrollCommand.self,
             DragCommand.self, CursorCommand.self, PointerCommand.self, McpCommand.self, DriverCommand.self,
-            ServiceCommand.self,
+            ServiceCommand.self, DoctorCommand.self,
         ])
 }

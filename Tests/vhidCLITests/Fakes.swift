@@ -1,4 +1,5 @@
 import Input
+import Installations
 import Keystrokes
 import Pointing
 import Synchronization
@@ -67,4 +68,11 @@ final class FakeMouse: Mouse {
     }
 
     func scroll(by delta: Scroll) async throws { state.withLock { $0.scrolls.append(delta) } }
+}
+
+extension Installation {
+    /// A service nothing registers, so an argument that is wrongly let through fails to
+    /// connect rather than moving the pointer of the Mac running the tests, and a doctor
+    /// asked about it is never ready, on any Mac.
+    static let nobody = Installation(service: "ai.promptctl.vhid.tests.nobody")!
 }

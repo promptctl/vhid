@@ -1,4 +1,5 @@
 import Foundation
+@testable import Doctor
 import Installations
 import MCP
 import Pointing
@@ -8,24 +9,37 @@ import Testing
 /// What the MCP server offers, and what it says to arguments it will not act on. No
 /// daemon: every refusal here is one that comes back before a connection is made.
 @Suite struct McpTests {
-    /// A service nothing registers, so an argument that is wrongly let through fails to
-    /// connect rather than moving the pointer of the Mac running the tests.
-    static let nobody = Installation(service: "ai.promptctl.vhid.tests.nobody")!
-
-    @Test func theSevenToolsAreListedInOrder() {
-        #expect(Tools.all.map(\.tool.name) == ["type", "press", "click", "move", "scroll", "drag", "cursor"])
+    @Test func theEightToolsAreListedInOrder() {
+        #expect(Tools.all.map(\.tool.name) == ["type", "press", "click", "move", "scroll", "drag", "cursor", "doctor"])
     }
 
-    /// Only cursor promises to change nothing, because only cursor reaches no device.
-    @Test func onlyCursorIsReadOnly() {
-        #expect(Tools.all.filter { $0.tool.annotations.readOnlyHint == true }.map(\.tool.name) == ["cursor"])
+    /// Only cursor and doctor promise to change nothing: cursor reaches no device, and
+    /// doctor asks the daemon a question that claims none.
+    @Test func onlyCursorAndDoctorAreReadOnly() {
+        #expect(Tools.all.filter { $0.tool.annotations.readOnlyHint == true }.map(\.tool.name) == ["cursor", "doctor"])
+    }
+
+    /// The doctor tool answers with every row, in order, under a one-word verdict. Against
+    /// a service nothing registers, the verdict is always "not ready" - whatever Mac runs
+    /// this - and a Mac that is not ready is an answer, not a failed call.
+    @Test func theDoctorToolAnswersEveryRowUnderItsVerdict() async throws {
+        let said = try await Tools.doctor.call([:], on: Installation.nobody)
+        let lines = said.components(separatedBy: "\n")
+        #expect(lines.first == "not ready")
+        let rows = lines.dropFirst().filter { !$0.hasPrefix(" ") }
+        #expect(rows.count == Requirement.Row.allCases.count, "\(said)")
+        for (line, row) in zip(rows, Requirement.Row.allCases) {
+            #expect(line.hasPrefix(row.rawValue + ": "), "\(said)")
+        }
+        #expect(said.contains("\(Requirement.Row.launchdJob.rawValue): no job"), "\(said)")
+        #expect(await Self.refusal(Tools.doctor, ["service": "x"]) == "service is not an argument this tool takes, and it takes none")
     }
 
     // MARK: arguments
 
     private static func refusal(_ tool: VerbTool, _ given: [String: Value]) async -> String? {
         do {
-            _ = try await tool.call(given, on: Self.nobody)
+            _ = try await tool.call(given, on: Installation.nobody)
             return nil
         } catch let refused as ArgumentRefused {
             return refused.description

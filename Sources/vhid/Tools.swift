@@ -1,3 +1,5 @@
+import Dispatch
+import Doctor
 import Input
 import Installations
 import KeyboardLayout
@@ -6,7 +8,7 @@ import Pointing
 
 /// One verb as an MCP tool: what a client is shown, and what a call does.
 ///
-/// [LAW:one-type-per-behavior] Seven tools and one type. What differs between them is a
+/// [LAW:one-type-per-behavior] Eight tools and one type. What differs between them is a
 /// name, a sentence, a list of parameters and a verb to run, and all four are values.
 struct VerbTool: Sendable {
     let tool: Tool
@@ -44,12 +46,12 @@ struct VerbTool: Sendable {
     }
 }
 
-/// The seven tools, in the order a client lists them.
+/// The eight tools, in the order a client lists them.
 ///
 /// Each is a CLI verb's core called with arguments read from JSON rather than from argv,
 /// so a tool and its verb cannot come to do different things. [LAW:one-source-of-truth]
 enum Tools {
-    static let all: [VerbTool] = [type, press, click, move, scroll, drag, cursor]
+    static let all: [VerbTool] = [type, press, click, move, scroll, drag, cursor, doctor]
 
     private static let place = "screen points from the top left of the main display, the space cursor reports in; negative on a display left of or above it"
 
@@ -145,5 +147,26 @@ enum Tools {
         Where the pointer is now, in the coordinates click takes. Read from the window server.
         """, readOnly: true, []) { _, _ in
         try CursorCommand.cursor(Pointer.screenCursor)
+    }
+
+    /// `vhid doctor` as a tool. A Mac that is not ready is an answer and not a failure of
+    /// the call, so it comes back as what the verb prints, whose first line says it.
+    ///
+    /// The reading waits on subprocesses and on a status reply of up to five seconds, so it
+    /// is taken on a dispatch thread and not on the cooperative pool, whose few threads the
+    /// server's transport runs on too - the same move `DeviceQueue` makes for the device
+    /// calls. [LAW:no-ambient-temporal-coupling]
+    static let doctor: VerbTool = VerbTool("doctor", """
+        Every requirement a verb needs before it can reach the devices on this Mac - the driver \
+        extension, the daemon's launchd job, the daemon, its admitting this vhid, who holds the \
+        devices, the Keyboard Setup Assistant answer - each with what was read and the step left \
+        for a person when it is not met, under a first line of ready or not ready. Fixes nothing \
+        and takes the devices from no one; a daemon launchd has a job for but has not started is \
+        started by the question, as it would be by any verb.
+        """, readOnly: true, []) { _, installation in
+        let readiness = await withCheckedContinuation { reading in
+            DispatchQueue.global().async { reading.resume(returning: Readiness.read(for: installation)) }
+        }
+        return DoctorCommand.doctor(readiness)
     }
 }

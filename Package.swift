@@ -101,12 +101,14 @@ let package = Package(
         // of four: no device, no window server, no grant.
         .testTarget(name: "InputTests", dependencies: ["Input", "KeyboardLayout", "Keystrokes", "Pointing"]),
         // What must hold before a verb can reach the devices, as a table from readings of
-        // this Mac to a step for a person. It reads nothing itself: every requirement is a
-        // pure function of readings taken at the edge, so every combination is exercised
-        // in its tests, including the ones this Mac cannot be put into. The CLI links it
-        // and the daemon does not - the daemon is what it reads about, never a reader.
-        // Helper is for the one status call it asks the daemon, over the same connection
-        // every verb dials. [LAW:one-way-deps] [LAW:effects-at-boundaries]
+        // this Mac to a step for a person. The table reads nothing: every requirement is a
+        // pure function of readings, so every combination is exercised in its tests,
+        // including the ones this Mac cannot be put into. The probes that take the readings
+        // sit beside it, each at its own edge, and `Readiness.read` is the one place they
+        // are all taken. The CLI links it and the daemon does not - the daemon is what it
+        // reads about, never a reader. Helper is for the one status call it asks the
+        // daemon, over the same connection every verb dials. [LAW:one-way-deps]
+        // [LAW:effects-at-boundaries]
         .target(name: "Doctor", dependencies: ["DriverExtension", "Installations", "Helper"]),
         .testTarget(name: "DoctorTests", dependencies: ["Doctor", "DriverExtension", "Installations", "Helper"]),
         // The root daemon that owns the devices. It links DriverExtension for the identity
@@ -138,7 +140,7 @@ let package = Package(
         .testTarget(
             name: "vhidCLITests",
             dependencies: [
-                "vhid", "Input", "Helper", "Installations", "Keystrokes", "Pointing",
+                "vhid", "Input", "Helper", "Installations", "Keystrokes", "Pointing", "Doctor",
                 .product(name: "MCP", package: "swift-sdk"),
             ]
         ),

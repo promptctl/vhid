@@ -43,6 +43,7 @@ vhid scroll 800 500 --vertical 3
 vhid drag 100 100 400 300
 vhid cursor
 vhid pointer play < script.jsonl
+vhid doctor
 ```
 
 It types where the keyboard is pointed and clicks where it is told. There is no
@@ -61,7 +62,7 @@ left of or above it has negative ones, which follow `--`.
 ## Over MCP
 
 `vhid mcp` serves the same verbs as MCP tools over stdio: `type`, `press`, `click`, `move`,
-`scroll`, `drag` and `cursor`. Point a client at the binary with the one argument:
+`scroll`, `drag`, `cursor` and `doctor`. Point a client at the binary with the one argument:
 
 ```json
 { "command": "/path/to/vhid", "args": ["mcp"] }
@@ -98,6 +99,13 @@ loaded but cannot bring the devices up, and launchd keeps restarting it.
 
 The installed CLI talks to the installed daemon by default. A build from this tree talks
 to the development copy, `ai.promptctl.vhid.vhidd.dev`, so the two can run side by side.
+
+When a verb fails, run `vhid doctor`. It prints `ready` or `not ready`, then one row per
+requirement — the driver extension, the daemon's launchd job, the daemon, whether it
+admits this vhid, who holds the devices, and the Keyboard Setup Assistant answer — each
+with what it read on this Mac and the step left for you, and exits 1 while any row has a
+step. It fixes nothing and takes the devices from no client that holds them; a daemon
+launchd has a job for but has not started is started by its question, as by any verb.
 
 ## Building
 
