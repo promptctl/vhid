@@ -6,23 +6,44 @@ import Helper
 /// The listener used to hand every connection the devices themselves, which was right
 /// while the only way to stop holding them was to disconnect. Now a client can leave and
 /// keep its connection for a moment afterwards, so what it is handed has to know whose
-/// seat it is. Every act is served only while this connection holds the devices, and is
-/// refused by name after it has left. [LAW:single-enforcer]
+/// seat it is. [LAW:single-enforcer]
+///
+/// The seat takes the devices on its first act, and an act while another seat holds them
+/// is refused naming that client's pid. Admission checks only the signature, so a
+/// connection that asks nothing but `status` sits here and holds nothing.
+///
+/// A seat ends once - its client leaves, or its connection ends - and every act after
+/// that is refused by name and takes nothing. Both ways out go through `end`, so an act
+/// already in flight when a client crashed cannot claim the devices for a connection with
+/// nobody left to free them. [LAW:single-enforcer]
 final class Seat: NSObject, HelperService, @unchecked Sendable {
     private let connection: ObjectIdentifier
+    private let pid: pid_t
     private let holder: Holder
     private let devices: any ServedDevices
+    /// Whether this seat has ended. Under its own lock across each act's claim, so an act
+    /// cannot pass the check and then claim after `end` has freed the devices. Taken
+    /// before the holder's lock and never after it.
+    private let seat = NSLock()
+    private var ended = false
 
-    init(_ connection: ObjectIdentifier, holder: Holder, devices: any ServedDevices) {
+    init(_ connection: ObjectIdentifier, pid: pid_t, holder: Holder, devices: any ServedDevices) {
         self.connection = connection
+        self.pid = pid
         self.holder = holder
         self.devices = devices
     }
 
-    /// [LAW:dataflow-not-control-flow] Every act is the same act: the devices, if this seat
-    /// still holds them, and the refusal otherwise.
+    /// [LAW:dataflow-not-control-flow] Every act is the same act: the devices, claimed for
+    /// this seat if nobody holds them, and the refusal otherwise.
     private func serve(_ reply: @escaping (Error?) -> Void, _ act: () -> Void) {
-        guard holder.whileHolding(connection, act) else { return reply(refusal(Left())) }
+        seat.lock(); defer { seat.unlock() }
+        do {
+            guard !ended else { throw Ended() }
+            try holder.serve(connection, by: pid, act)
+        } catch {
+            reply(refusal(error))
+        }
     }
 
     func down(usage: UInt16, reply: @escaping (Error?) -> Void) { serve(reply) { devices.down(usage: usage, reply: reply) } }
@@ -36,12 +57,25 @@ final class Seat: NSObject, HelperService, @unchecked Sendable {
 
     /// Answered only once the devices are free, which is the whole point of asking.
     func leave(reply: @escaping (Error?) -> Void) {
-        holder.free(connection) { devices.releaseEverything(because: "a client left") }
+        end(because: "a client left")
         reply(nil)
     }
 
-    /// A call on a connection whose client already left.
-    struct Left: Error, CustomStringConvertible {
+    /// Ends this seat: no act after this is served, and the devices, if this seat holds
+    /// them, are released and freed for the next client.
+    func end(because reason: String) {
+        seat.lock(); defer { seat.unlock() }
+        ended = true
+        holder.free(connection) { devices.releaseEverything(because: reason) }
+    }
+
+    /// Who holds the devices, read and not claimed.
+    func status(reply: @escaping (NSNumber?, Error?) -> Void) {
+        reply(holder.pid.map { NSNumber(value: $0) }, nil)
+    }
+
+    /// A call on a seat that has ended.
+    struct Ended: Error, CustomStringConvertible {
         var description: String { "this connection has already handed the devices back" }
     }
 }

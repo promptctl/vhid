@@ -397,7 +397,7 @@ public extension Requirement {
 
     private static func daemonReads(_ reading: DaemonReading) -> String {
         switch reading {
-        case .answered, .refusedThisSignature: "listening, both devices up"
+        case .answered, .refusedThisVhid: "listening, both devices up"
         case .unreachable: "nothing holds the service"
         case .silent: "the service is held, and nothing answered"
         case .failed: "the call failed"
@@ -406,7 +406,7 @@ public extension Requirement {
 
     private static func daemonStep(_ reading: DaemonReading, installation: Installation) -> String? {
         switch reading {
-        case .answered, .refusedThisSignature:
+        case .answered, .refusedThisVhid:
             nil
         case .unreachable(let reason):
             """
@@ -450,7 +450,7 @@ public extension Requirement {
     private static func signatureReads(_ reading: DaemonReading) -> String {
         switch reading {
         case .answered: "admitted"
-        case .refusedThisSignature: "refused: this vhid is not signed with the daemon's certificate"
+        case .refusedThisVhid: "refused: the daemon ended this vhid's connection"
         case .unreachable, .silent, .failed: "not asked"
         }
     }
@@ -459,7 +459,7 @@ public extension Requirement {
         switch reading {
         case .answered:
             nil
-        case .refusedThisSignature:
+        case .refusedThisVhid:
             """
             The daemon on \(installation.service) admits only callers signed with
             its own certificate. A tree built with bare `swift build` is signed
@@ -467,6 +467,9 @@ public extension Requirement {
                 make sign
             The installed vhid and a build from a tree carry different
             certificates, so each reaches its own daemon: --service says which.
+            A daemon older than this vhid refuses it the same way; when this
+            vhid is signed, restart the daemon so it runs the build beside it:
+                sudo launchctl kickstart -k system/\(installation.launchdLabel)
             """
         case .unreachable, .silent, .failed:
             waitsOn(.daemon)
@@ -479,7 +482,7 @@ public extension Requirement {
 public extension Requirement {
     /// Whether the devices are free for a verb, or which process holds them.
     ///
-    /// The daemon admits one client at a time, so a held device is a verb from here
+    /// The daemon serves one client at a time, so a held device is a verb from here
     /// refused as busy. Nothing here takes them back: which process that is and whether it
     /// should stop is its owner's call, and doctor says only whose they are.
     static func devices(_ reading: DaemonReading) -> Requirement {
@@ -490,7 +493,7 @@ public extension Requirement {
         switch reading {
         case .answered(nil): "free"
         case .answered(let holder?): "held by pid \(holder)"
-        case .refusedThisSignature, .unreachable, .silent, .failed: "not asked"
+        case .refusedThisVhid, .unreachable, .silent, .failed: "not asked"
         }
     }
 
@@ -506,7 +509,7 @@ public extension Requirement {
             """
         // The daemon refused to say, and it refused on the signature: that row is what
         // stands in the way, not the daemon's.
-        case .refusedThisSignature:
+        case .refusedThisVhid:
             waitsOn(.signature)
         case .unreachable, .silent, .failed:
             waitsOn(.daemon)

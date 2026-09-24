@@ -1,8 +1,13 @@
 import Foundation
 import Helper
 
-/// Accepts a connection when the caller is who the requirement says and nobody else has
-/// the devices, and refuses it otherwise, saying why.
+/// Accepts a connection when the caller is who the requirement says, and refuses it
+/// otherwise, saying why.
+///
+/// Whether the devices are free is not asked here: a connection holds them from its
+/// first act, which its `Seat` claims. Refusing a busy daemon at admission would say
+/// "busy" in the same NSError a refused signature says it in, and would turn away a
+/// client that only wanted to ask who holds them. [LAW:single-enforcer]
 final class Listener: NSObject, NSXPCListenerDelegate {
     private let devices: any ServedDevices
     private let callers: CallerIdentity
@@ -17,14 +22,14 @@ final class Listener: NSObject, NSXPCListenerDelegate {
         do {
             guard let token = connection.callerAuditToken else { throw CallerIdentity.Refused.noAuditToken }
             try callers.check(auditToken: token)
-            try holder.claim(ObjectIdentifier(connection), by: connection.processIdentifier)
         } catch {
             log("refused a connection from pid \(connection.processIdentifier): \(error)")
             return false
         }
         let id = ObjectIdentifier(connection)
         connection.exportedInterface = NSXPCInterface(with: HelperService.self)
-        connection.exportedObject = Seat(id, holder: holder, devices: devices)
+        let seat = Seat(id, pid: connection.processIdentifier, holder: holder, devices: devices)
+        connection.exportedObject = seat
         // Both, and not one: an interrupted connection ends invalid, a closed one ends
         // interrupted, and a client killed mid-burst can take either path. The release is
         // idempotent, so running it twice costs a report and running it never costs the
@@ -34,9 +39,11 @@ final class Listener: NSObject, NSXPCListenerDelegate {
         // Each runs only while this connection still holds the devices. A client that left
         // first has already been released, and by the time its connection ends the devices
         // may be another client's, whose keys are not this ending's to release.
-        connection.invalidationHandler = { [devices, holder] in
-            holder.free(id) { devices.releaseEverything(because: "a client went away") }
-        }
+        //
+        // Invalidation ends the seat and does not only free the holder: an act of this
+        // client's still in flight would otherwise find the devices free and claim them
+        // for a connection with no handler left to give them back.
+        connection.invalidationHandler = { seat.end(because: "a client went away") }
         connection.interruptionHandler = { [devices, holder] in
             _ = holder.whileHolding(id) { devices.releaseEverything(because: "a client was interrupted") }
         }

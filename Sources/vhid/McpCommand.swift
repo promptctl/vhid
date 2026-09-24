@@ -70,7 +70,7 @@ struct McpCommand: AsyncParsableCommand {
 ///
 /// **Why: the SDK runs every request in a task of its own.** Two calls sent together - a
 /// click and a type in one turn of an agent's - would reach for the daemon at once, and it
-/// admits one client: the second came back refused as busy, by this very process. Taking
+/// serves one client: the second came back refused as busy, by this very process. Taking
 /// turns makes the session one client again, and no two calls interleave report by report.
 ///
 /// **Not the order they were sent in.** A call's turn is taken when its handler reaches

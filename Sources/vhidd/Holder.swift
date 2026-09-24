@@ -12,21 +12,34 @@ import Foundation
 final class Holder: @unchecked Sendable {
     struct Busy: Error, CustomStringConvertible {
         let pid: pid_t
-        var description: String { "pid \(pid) holds the keyboard" }
+        var description: String { "pid \(pid) holds the devices" }
     }
 
     private let lock = NSLock()
     private var holding: (connection: ObjectIdentifier, pid: pid_t)?
 
-    /// The keyboard is `connection`'s until it is released, or `Busy` names whose it is.
-    func claim(_ connection: ObjectIdentifier, by pid: pid_t) throws {
+    /// Runs `body` as `connection`'s act on the devices, claiming them for it first when
+    /// nobody holds them, or throws `Busy` naming whose they are.
+    ///
+    /// The claim and the act under one lock, so no other connection can take the devices
+    /// between them, and the devices are this connection's until it is freed. The claim is
+    /// made by the first act and not at admission, so a connection that only asks who
+    /// holds them never holds them. [LAW:single-enforcer]
+    func serve(_ connection: ObjectIdentifier, by pid: pid_t, _ body: () -> Void) throws {
         lock.lock(); defer { lock.unlock() }
-        if let holding { throw Busy(pid: holding.pid) }
+        if let holding, holding.connection != connection { throw Busy(pid: holding.pid) }
         holding = (connection, pid)
+        body()
+    }
+
+    /// The pid of whichever client holds the devices, or nil when none does.
+    var pid: pid_t? {
+        lock.lock(); defer { lock.unlock() }
+        return holding?.pid
     }
 
     /// Runs `body` while `connection` holds the devices, and reports whether it did. The
-    /// lock is held across `body`, so no other connection can be admitted part way
+    /// lock is held across `body`, so no other connection can claim them part way
     /// through it.
     func whileHolding(_ connection: ObjectIdentifier, _ body: () -> Void) -> Bool {
         lock.lock(); defer { lock.unlock() }
@@ -38,7 +51,7 @@ final class Holder: @unchecked Sendable {
     /// Runs `body` and then frees the devices, when `connection` holds them, and changes
     /// nothing when it does not.
     ///
-    /// Both under the one lock, so the next connection is admitted only after `body` -
+    /// Both under the one lock, so the next connection can claim them only after `body` -
     /// the release of everything this one left held - has finished.
     ///
     /// A connection that does not hold the devices runs nothing here, and that is what

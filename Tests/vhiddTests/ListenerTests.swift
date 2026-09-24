@@ -1,4 +1,5 @@
 import Foundation
+import Installations
 import Keystrokes
 import Testing
 @testable import Helper
@@ -6,8 +7,9 @@ import Testing
 
 /// The listener as a client meets it: the real `Listener` on an anonymous listener in this
 /// process, with a requirement this process satisfies, and devices of the test's own
-/// behind it. One client is admitted, a second is refused while the first holds the
-/// devices, and the first going away releases everything and frees them.
+/// behind it. Every client is admitted; the first to act holds the devices, a second's
+/// act is refused while it does, and the first going away releases everything and frees
+/// them. A client that only asks who holds them takes nothing.
 /// [LAW:behavior-not-structure]
 @Suite struct ListenerTests {
     /// The devices served: remember what they were asked, and say when they were released.
@@ -56,9 +58,9 @@ import Testing
         let devices: FakeDevices
     }
 
-    private func serve() throws -> Served {
+    private func serve(requiring requirement: String? = nil) throws -> Served {
         let devices = FakeDevices()
-        let delegate = Listener(devices: devices, callers: try CallerIdentity(requirement: try OwnProcess.requirement()))
+        let delegate = Listener(devices: devices, callers: try CallerIdentity(requirement: try requirement ?? OwnProcess.requirement()))
         let listener = NSXPCListener.anonymous()
         listener.delegate = delegate
         listener.resume()
@@ -81,14 +83,15 @@ import Testing
         }
     }
 
-    /// Whether a fresh client pressing `usage` was admitted; a refused connection is
-    /// unreachable from the client's side.
+    /// Whether a fresh client pressing `usage` was served. A client refused as busy hears
+    /// the daemon's own refusal; anything else it hears is not an answer to this, and is
+    /// thrown.
     private func admitted(_ served: Served, pressing usage: Usage) async throws -> Bool {
         let keyboard = client(of: served).helper.keyboard
         do {
             try await blocking { try keyboard.down(usage) }
             return true
-        } catch is HelperConnection.Unreachable {
+        } catch let refused as NSError where refused.domain == Installation.refusalDomain {
             return false
         }
     }
@@ -128,7 +131,7 @@ import Testing
     }
 
     /// The race `leave` exists to close. A client that leaves is answered only once the
-    /// devices are free, so the next client is admitted on the first try - no retry loop,
+    /// devices are free, so the next client is served on the first try - no retry loop,
     /// unlike the test above. The leaver's connection is still open: it is refused if it
     /// calls again, and when it does end, its ending releases nothing, because the keys
     /// down by then are the next client's. [LAW:no-ambient-temporal-coupling]
@@ -154,5 +157,57 @@ import Testing
         try await blocking { try next.down(.tab) }
         #expect(served.devices.releasedBecause == ["a client left"], "the leaver's ending released the next client's keys")
         withExtendedLifetime((served, first, second)) {}
+    }
+
+    /// A client asking who holds the devices is answered with the holder's pid, and takes
+    /// nothing from it: the holder goes on acting, and a third client's act is still
+    /// refused as the holder's. Before anyone acts, nobody holds them.
+    @Test func statusAnswersTheHolderWithoutTakingTheDevices() async throws {
+        let served = try serve()
+        let asker = client(of: served).helper
+        #expect(try await blocking { try asker.status() } == nil)
+
+        let first = client(of: served)
+        let keyboard = first.helper.keyboard
+        try await blocking { try keyboard.down(.leftShift) }
+        #expect(try await blocking { try asker.status() } == getpid())
+
+        try await blocking { try keyboard.down(.space) }
+        #expect(served.devices.asked == [Usage.leftShift.rawValue, Usage.space.rawValue])
+        #expect(try await admitted(served, pressing: .tab) == false)
+        #expect(served.devices.releasedBecause.isEmpty)
+        withExtendedLifetime((served, first)) {}
+    }
+
+    /// An act after `leave` is refused, and does not take the devices back: nobody holds
+    /// them afterwards.
+    @Test func anActAfterLeavingTakesNothingBack() async throws {
+        let served = try serve()
+        let first = client(of: served)
+        let (leaver, keyboard) = (first.helper, first.helper.keyboard)
+        try await blocking { try keyboard.down(.leftShift) }
+        try await blocking { try leaver.leave() }
+        let refused = await #expect(throws: NSError.self) { try await blocking { try keyboard.down(.tab) } }
+        #expect(refused?.domain == Installation.refusalDomain)
+        #expect(refused?.localizedDescription == "\(Seat.Ended())")
+        #expect(try await blocking { try leaver.status() } == nil)
+        #expect(served.devices.asked == [Usage.leftShift.rawValue])
+        withExtendedLifetime((served, first)) {}
+    }
+
+    /// A caller the requirement does not admit is refused before its connection opens,
+    /// and hears it as an interrupted connection: the code `vhid doctor` reads as a
+    /// refused signature, which it can only because admission refuses on nothing else.
+    @Test func aCallerOutsideTheRequirementHearsAnInterruptedConnection() async throws {
+        let served = try serve(requiring: #"identifier "ai.promptctl.vhid.tests.nobody""#)
+        let asker = client(of: served).helper
+        let refused = await #expect(throws: HelperConnection.Unreachable.self) { try await blocking { try asker.status() } }
+        guard case .connection(let domain, let code, _) = refused?.cause else {
+            Issue.record("refused for another cause: \(String(describing: refused))")
+            return
+        }
+        #expect(domain == NSCocoaErrorDomain)
+        #expect(code == NSXPCConnectionInterrupted)
+        withExtendedLifetime(served) {}
     }
 }
