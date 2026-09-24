@@ -27,18 +27,18 @@ struct PasteCommand: AsyncParsableCommand {
 
     func run() async throws {
         let layout = try KeyboardLayout.current()
-        print(try await Devices.using(try service.installation()) {
-            try await Self.paste(text, on: layout, with: $0.typist) { try Clipboard.general.write($0) }
-        })
+        print(try await Devices.using(try service.installation()) { try await Self.paste(text, on: layout, with: $0.typist) })
     }
 
     /// The verb itself, over a typist and a pasteboard from anywhere. [LAW:decomposition]
+    /// The pasteboard every app pastes from is the default, so the CLI and the tool cannot
+    /// come to write different ones. [LAW:one-source-of-truth]
     ///
     /// The chord is reported in the spelling that reads back, as `keys` reports its own:
     /// what was asked for was V, and what was pressed is the key this layout puts V on.
     @MainActor
     static func paste(_ text: String, on layout: KeyboardLayout, with typist: Typist,
-                      through write: @MainActor (String) throws -> Void) async throws -> String {
+                      through write: @MainActor (String) throws -> Void = { try Clipboard.general.write($0) }) async throws -> String {
         let chord = try await typist.paste(text, on: layout, through: write)
         return "pasted \(counted(text.count, "character")) with \(chord) on \(layout.name)"
     }

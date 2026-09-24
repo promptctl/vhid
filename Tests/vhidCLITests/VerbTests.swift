@@ -112,19 +112,6 @@ import Testing
         #expect(said == "pasted 10 characters with leftCommand+key 0x9 on \(Self.us.name)")
     }
 
-    /// Nothing to paste is refused with what the user had copied still there and no key down.
-    @Test @MainActor func pastingNothingLeavesTheClipboardAlone() async throws {
-        let pasteboard = scratch()
-        defer { pasteboard.releaseGlobally() }
-        try Clipboard(pasteboard).write("what the user had copied")
-        let keyboard = RecordingKeyboard()
-        await #expect(throws: NothingToPaste.self) {
-            try await PasteCommand.paste("", on: Self.us, with: Typist(keyboard: keyboard), through: Clipboard(pasteboard).write)
-        }
-        #expect(pasteboard.string(forType: .string) == "what the user had copied")
-        #expect(keyboard.down.isEmpty)
-    }
-
     // MARK: click
 
     /// The one positional output of the verb is read back from the cursor, not repeated

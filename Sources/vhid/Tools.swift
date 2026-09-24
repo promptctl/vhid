@@ -106,9 +106,7 @@ enum Tools {
             keyboard layout's to say.
             """, [text]) { arguments, installation in
             let (text, layout) = (try arguments[text], try KeyboardLayout.current())
-            return try await Devices.using(installation) {
-                try await PasteCommand.paste(text, on: layout, with: $0.typist) { try Clipboard.general.write($0) }
-            }
+            return try await Devices.using(installation) { try await PasteCommand.paste(text, on: layout, with: $0.typist) }
         }
     }()
 

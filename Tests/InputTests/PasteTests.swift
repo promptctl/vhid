@@ -24,7 +24,7 @@ import Testing
         let keyboard = PasteboardReadingKeyboard(pasteboard)
         let chord = try await Typist(keyboard: keyboard).paste("héllo ✅ 日本", on: Self.us, through: Clipboard(pasteboard).write)
         #expect(chord == KeyChord(key: Key(rawValue: UInt16(kVK_ANSI_V)), modifiers: [.leftCommand]))
-        #expect(keyboard.log == ["down e3 over héllo ✅ 日本", "down 19 over héllo ✅ 日本", "up"])
+        #expect(keyboard.log == ["up over what the user had copied", "down e3 over héllo ✅ 日本", "down 19 over héllo ✅ 日本", "up over héllo ✅ 日本"])
     }
 
     /// V is the key this layout puts `v` on with Command held: on Dvorak that is the key US
@@ -34,7 +34,7 @@ import Testing
         defer { pasteboard.releaseGlobally() }
         let keyboard = PasteboardReadingKeyboard(pasteboard)
         try await Typist(keyboard: keyboard).paste("text", on: KeyboardLayout.named("com.apple.keylayout.Dvorak"), through: Clipboard(pasteboard).write)
-        #expect(keyboard.log == ["down e3 over text", "down 37 over text", "up"])
+        #expect(keyboard.log == ["up over nothing", "down e3 over text", "down 37 over text", "up over text"])
     }
 
     /// Nothing to paste and a cancelled run are both refused with what the user had copied
@@ -63,6 +63,21 @@ import Testing
             try await Typist(keyboard: keyboard).paste("text", on: Self.us) { _ in throw ClipboardRefused(pasteboard: "scratch") }
         }
         #expect(refused.pasteboard == "scratch")
+        #expect(keyboard.log == ["up"])
+    }
+
+    /// A daemon that will not take keys is found out before the write, so the refusal costs
+    /// the user nothing: what they had copied is still there. [LAW:no-silent-failure]
+    @Test func aKeyboardThatRefusesEverythingLeavesTheClipboardAlone() async throws {
+        let pasteboard = scratch()
+        defer { pasteboard.releaseGlobally() }
+        try Clipboard(pasteboard).write("what the user had copied")
+        let keyboard = RefusingKeyboard()
+        keyboard.allow = 0
+        await #expect(throws: Refused.self) {
+            try await Typist(keyboard: keyboard).paste("text", on: Self.us, through: Clipboard(pasteboard).write)
+        }
+        #expect(pasteboard.string(forType: .string) == "what the user had copied")
         #expect(keyboard.log.isEmpty)
     }
 
@@ -79,12 +94,13 @@ import Testing
         #expect(stopped.causes.last is Refused)
         #expect(pasteboard.string(forType: .string) == "text")
         #expect("\(stopped)".contains("already on the clipboard"))
-        #expect(keyboard.log == ["down e3", "up"])
+        #expect(keyboard.log == ["up", "down e3", "up"])
     }
 }
 
-/// A keyboard that notes what its pasteboard holds as each key goes down, which is the
-/// moment an app pasting would read it.
+/// A keyboard that notes what its pasteboard holds at every call: at a key going down,
+/// which is the moment an app pasting would read it, and at a release, which is when the
+/// daemon is reached.
 ///
 /// Holds the pasteboard's name rather than the pasteboard, because a name is Sendable and
 /// looks up the same pasteboard.
@@ -96,10 +112,15 @@ private final class PasteboardReadingKeyboard: Keyboard {
 
     var log: [String] { recorded.withLock { $0 } }
 
+    private var holding: String { NSPasteboard(name: NSPasteboard.Name(pasteboard)).string(forType: .string) ?? "nothing" }
+
     func down(_ usage: Usage) throws {
-        let holding = NSPasteboard(name: NSPasteboard.Name(pasteboard)).string(forType: .string) ?? "nothing"
+        let holding = holding
         recorded.withLock { $0.append("down \(String(usage.rawValue, radix: 16)) over \(holding)") }
     }
 
-    func releaseAll() throws { recorded.withLock { $0.append("up") } }
+    func releaseAll() throws {
+        let holding = holding
+        recorded.withLock { $0.append("up over \(holding)") }
+    }
 }
