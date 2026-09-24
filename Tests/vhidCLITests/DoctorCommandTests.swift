@@ -1,4 +1,5 @@
 import ArgumentParser
+import Installations
 import Testing
 @testable import vhid
 
@@ -6,7 +7,7 @@ import Testing
 @Suite struct DoctorCommandTests {
     /// A service nothing registers is never ready, on any Mac, so this exit is fixed.
     @Test func aMacThatIsNotReadyExitsOne() throws {
-        let doctor = try DoctorCommand.parse(["--service", McpTests.nobody.service])
+        let doctor = try DoctorCommand.parse(["--service", Installation.nobody.service])
         let exit = #expect(throws: ExitCode.self) { try doctor.run() }
         #expect(exit == ExitCode(1))
     }

@@ -1,3 +1,4 @@
+import Dispatch
 import Doctor
 import Input
 import Installations
@@ -148,17 +149,24 @@ enum Tools {
         try CursorCommand.cursor(Pointer.screenCursor)
     }
 
-    /// `vhid doctor` as a tool: the same list, read by the same `Readiness.read`. A Mac
-    /// that is not ready is an answer and not a failure of the call, so it comes back as
-    /// the rows, which say so; the first line says it in one word for a caller that wants
-    /// only that.
+    /// `vhid doctor` as a tool. A Mac that is not ready is an answer and not a failure of
+    /// the call, so it comes back as what the verb prints, whose first line says it.
+    ///
+    /// The reading waits on subprocesses and on a status reply of up to five seconds, so it
+    /// is taken on a dispatch thread and not on the cooperative pool, whose few threads the
+    /// server's transport runs on too - the same move `DeviceQueue` makes for the device
+    /// calls. [LAW:no-ambient-temporal-coupling]
     static let doctor: VerbTool = VerbTool("doctor", """
         Every requirement a verb needs before it can reach the devices on this Mac - the driver \
         extension, the daemon's launchd job, the daemon, its admitting this vhid, who holds the \
         devices, the Keyboard Setup Assistant answer - each with what was read and the step left \
-        for a person when it is not met. Changes nothing, and takes the devices from no one.
+        for a person when it is not met, under a first line of ready or not ready. Fixes nothing \
+        and takes the devices from no one; a daemon launchd has a job for but has not started is \
+        started by the question, as it would be by any verb.
         """, readOnly: true, []) { _, installation in
-        let readiness = Readiness.read(for: installation)
-        return "\(readiness.ready ? "ready" : "not ready")\n\(readiness)"
+        let readiness = await withCheckedContinuation { reading in
+            DispatchQueue.global().async { reading.resume(returning: Readiness.read(for: installation)) }
+        }
+        return DoctorCommand.doctor(readiness)
     }
 }

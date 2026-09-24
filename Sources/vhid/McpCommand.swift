@@ -12,8 +12,9 @@ struct McpCommand: AsyncParsableCommand {
         abstract: "Serve the verbs as MCP tools over stdin and stdout.",
         discussion: """
             Newline-delimited JSON-RPC on stdin and stdout, and nothing else on stdout: every \
-            diagnostic goes to stderr. The tools are type, press, click, move, scroll, drag and cursor. \
-            They take what the verbs of the same name take and answer with what those verbs print.
+            diagnostic goes to stderr. The tools are type, press, click, move, scroll, drag, cursor and \
+            doctor. They take what the verbs of the same name take and answer with what those verbs \
+            print.
 
             Tool calls run one at a time, even when a client sends them together, but calls sent \
             together run in no promised order: a call that must follow another, a type after the \

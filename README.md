@@ -100,11 +100,12 @@ loaded but cannot bring the devices up, and launchd keeps restarting it.
 The installed CLI talks to the installed daemon by default. A build from this tree talks
 to the development copy, `ai.promptctl.vhid.vhidd.dev`, so the two can run side by side.
 
-When a verb fails, run `vhid doctor`. It prints one row per requirement — the driver
-extension, the daemon's launchd job, the daemon, whether it admits this vhid, who holds
-the devices, and the Keyboard Setup Assistant answer — each with what it read on this
-Mac and the step left for you, and exits 1 while any row has a step. It changes
-nothing, and takes the devices from no client that holds them.
+When a verb fails, run `vhid doctor`. It prints `ready` or `not ready`, then one row per
+requirement — the driver extension, the daemon's launchd job, the daemon, whether it
+admits this vhid, who holds the devices, and the Keyboard Setup Assistant answer — each
+with what it read on this Mac and the step left for you, and exits 1 while any row has a
+step. It fixes nothing and takes the devices from no client that holds them; a daemon
+launchd has a job for but has not started is started by its question, as by any verb.
 
 ## Building
 
