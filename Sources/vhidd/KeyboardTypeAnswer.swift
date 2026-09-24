@@ -98,12 +98,9 @@ enum KeyboardTypeAnswer {
     /// that modelled the file as its answers alone would write back a file missing every
     /// key it did not know about.
     struct Cache {
-        /// Every top-level key, the answers included, as they were read.
-        private let root: [String: Any]
-        /// The answers under `keyboardtype`, by device key.
-        let answers: [String: Int]
-
-        private static let entry = "keyboardtype"
+        /// What the file held, read the one way both its writer and its reader read it.
+        private let cache: KeyboardTypeCache
+        var answers: [String: Int] { cache.answers }
 
         /// What was in the file, or a refusal naming why it could not be read.
         ///
@@ -113,28 +110,18 @@ enum KeyboardTypeAnswer {
         /// is genuinely absent, and a file holding no answers yet, are empty caches - and
         /// they are, because a Mac that has met no keyboard has nothing cached.
         static func read(at path: String) throws(Unwritable) -> Cache {
-            guard FileManager.default.fileExists(atPath: path) else { return Cache(root: [:], answers: [:]) }
-            let contents: Any
+            guard FileManager.default.fileExists(atPath: path) else { return Cache(cache: .empty) }
             do {
-                contents = try PropertyListSerialization.propertyList(
-                    from: try Data(contentsOf: URL(fileURLWithPath: path)), options: [], format: nil)
+                return Cache(cache: try KeyboardTypeCache.parse(try Data(contentsOf: URL(fileURLWithPath: path))))
             } catch {
                 throw Unwritable.unreadable(path: path, reason: "\(error)")
             }
-            guard let root = contents as? [String: Any] else {
-                throw Unwritable.unreadable(path: path, reason: "its root is not a dictionary")
-            }
-            guard let cached = root[entry] else { return Cache(root: root, answers: [:]) }
-            guard let answers = cached as? [String: Int] else {
-                throw Unwritable.unreadable(path: path, reason: "its \(entry) entry is not a dictionary of numbers")
-            }
-            return Cache(root: root, answers: answers)
         }
 
         func replacing(answers: [String: Int]) -> Cache {
-            var root = self.root
-            root[Self.entry] = answers
-            return Cache(root: root, answers: answers)
+            var root = cache.root
+            root[KeyboardTypeCache.entry] = answers
+            return Cache(cache: KeyboardTypeCache(root: root, answers: answers))
         }
 
         /// The mode the file must end up with, whoever wrote it.
@@ -165,8 +152,8 @@ enum KeyboardTypeAnswer {
         }
 
         /// Written as the file rather than through `defaults`, because that is how the
-        /// answers are read back: onboarding parses this same path with this same
-        /// serializer, and a write that went through another door would be a second way
+        /// answers are read back: `vhid doctor` parses this same path through the same
+        /// `KeyboardTypeCache`, and a write that went through another door would be a second way
         /// for one fact to be stored. Measured on this Mac: a direct write to the file is
         /// what `defaults read` reports a moment later, in both directions, so cfprefsd
         /// serves this domain from the file rather than from a cache in front of it.
@@ -175,7 +162,7 @@ enum KeyboardTypeAnswer {
         func write(to path: String) throws(Unwritable) {
             do {
                 try PropertyListSerialization
-                    .data(fromPropertyList: root, format: .binary, options: 0)
+                    .data(fromPropertyList: cache.root, format: .binary, options: 0)
                     .write(to: URL(fileURLWithPath: path), options: .atomic)
             } catch {
                 throw Unwritable.notWritten(path: path, reason: "\(error)")
