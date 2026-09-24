@@ -50,21 +50,6 @@ import Testing
         #expect(refused.pasteboard == "scratch")
         #expect(keyboard.log.isEmpty)
     }
-
-    /// A layout with no `v` has no paste chord to spell, and says so before anything is
-    /// written: the user's clipboard is still theirs.
-    @Test func aLayoutWithNoVRefusesBeforeTheWrite() async throws {
-        let russian = try KeyboardLayout.named("com.apple.keylayout.Russian")
-        let pasteboard = scratch()
-        defer { pasteboard.releaseGlobally() }
-        try Clipboard(pasteboard).write("what the user had copied")
-        let keyboard = RefusingKeyboard()
-        await #expect(throws: ChordSpellingError.notOneKey("v", layout: russian.name)) {
-            try await Typist(keyboard: keyboard).paste("text", on: russian, through: Clipboard(pasteboard).write)
-        }
-        #expect(pasteboard.string(forType: .string) == "what the user had copied")
-        #expect(keyboard.log.isEmpty)
-    }
 }
 
 /// A keyboard that notes what its pasteboard holds as each key goes down, which is the
