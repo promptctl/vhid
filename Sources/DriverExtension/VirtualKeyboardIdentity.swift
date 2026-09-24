@@ -26,7 +26,7 @@ public enum VirtualKeyboardIdentity {
     /// Where macOS files those answers, as `defaults` names the domain.
     ///
     /// Beside the key rather than beside either process that touches it: the helper
-    /// writes this file as root and onboarding reads it as the user, and a writer and a
+    /// writes this file as root and `vhid doctor` reads it as the user, and a writer and a
     /// reader holding their own spellings of one path is two clocks - one of them
     /// answering about a file nobody wrote. [LAW:one-source-of-truth]
     public static let keyboardTypeDomain = "/Library/Preferences/com.apple.keyboardtype"

@@ -129,7 +129,7 @@ import Testing
         #expect(try KeyboardTypeAnswer.file(into: path) == .filed)
     }
 
-    /// Onboarding reads this file with no privilege at all, so the mode it is left in is
+    /// `vhid doctor` reads this file with no privilege at all, so the mode it is left in is
     /// part of filing the answer and not a detail of how it was written: a cache this
     /// helper tightened would leave the assistant's row permanently unreadable for every
     /// ordinary user, with the answer inside it perfectly correct.
@@ -192,7 +192,7 @@ import Testing
     /// The two failures cost different things and only one of them is about the assistant:
     /// by the time the mode is asserted the answer is filed, so an operator told the
     /// keyboard may swallow the first line typed would be watching for a dialog that is
-    /// never going to appear, while the failure that did happen - onboarding can no longer
+    /// never going to appear, while the failure that did happen - `vhid doctor` can no longer
     /// read the file - went unnamed. Every one of these used to say the same sentence.
     /// [LAW:no-silent-failure]
     ///
@@ -250,11 +250,11 @@ import Testing
 
     // MARK: - why the helper is the one that files it
 
-    /// The reason this is the helper's job and not the app's, kept as a check rather than
-    /// as a sentence: the daemon the helper cannot start without lives *inside* the driver
-    /// package's own payload. So on a Mac with no driver there is no helper either, and
-    /// the app has no root to reach - which is why onboarding names the driver install to
-    /// a reader instead of taking it. If this ever stops being true, the ticket's account
+    /// The reason this is the helper's job and not `vhid doctor`'s, kept as a check rather
+    /// than as a sentence: the daemon the helper cannot start without lives *inside* the
+    /// driver package's own payload. So on a Mac with no driver there is no helper either,
+    /// and doctor has no root to reach - which is why it names the driver install to a
+    /// reader instead of taking it. If this ever stops being true, the ticket's account
     /// of what blocks a self-installing driver row stops being true with it.
     @Test func theDaemonTheHelperNeedsIsInsideThePackageItCouldNotInstall() {
         #expect(DaemonProcess.executable.hasPrefix(DriverProbe.supportDirectory))

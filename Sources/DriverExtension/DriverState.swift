@@ -2,11 +2,12 @@
 /// as one word, and the readings that word is derived from.
 ///
 /// [LAW:one-source-of-truth] This is the whole vocabulary for the driver's state, and
-/// it exists once. `scripts/virtual-hid-driver` prints these words, the menu-bar app
-/// shows them, `expect` asserts them and README.md documents them; a second spelling
-/// anywhere is a way for two readers to come to different conclusions about one
-/// machine. The probe used to live in bash, where the app - which cannot run a script
-/// out of this repo - had no way to reach it.
+/// it exists once. `vhid driver state` and `scripts/virtual-hid-driver` print these
+/// words, `vhid doctor` shows them in its Driver extension row, `expect` asserts them
+/// and README.md documents them; a second spelling anywhere is a way for two readers to
+/// come to different conclusions about one machine. The probe used to live in bash,
+/// where an installed vhid - which has no clone to run a script out of - had no way to
+/// reach it.
 
 /// Which of the installer package's two payload trees are on disk.
 public enum Payload: String, Sendable, Hashable, CaseIterable {
