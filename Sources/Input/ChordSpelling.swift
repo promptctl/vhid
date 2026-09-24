@@ -12,9 +12,10 @@ public extension KeyChord {
     ///   `left`, `f5`, and the rest of `namedKeys`;
     /// - the character the layout types with that key, `s` or `/`. Read off `layout`,
     ///   because which key a letter is on is the layout's to say: `s` is key code 1 on US
-    ///   and 41 on Dvorak, and a chord is the key. Read with Command held when the chord
-    ///   holds Command, because that is the layer the shortcut is matched on: on Dvorak -
-    ///   QWERTY ⌘, `leftCommand+v` is key code 9 although `v` alone is 47;
+    ///   and 41 on Dvorak, and a chord is the key. Read with Command held first when the
+    ///   chord holds Command, because that is the layer the shortcut is matched on: on
+    ///   Dvorak - QWERTY ⌘, `leftCommand+v` is key code 9 although `v` alone is 47. Never a
+    ///   keypad key, which is named by its code;
     /// - `key 0x24`, the spelling `KeyChord.description` gives every key, so any chord
     ///   this program prints can be handed straight back to it. [LAW:one-source-of-truth]
     ///
@@ -35,9 +36,11 @@ public extension KeyChord {
         }
         guard keys.count <= 1 else { throw .moreThanOneKey(spelling) }
         // A character is read once every modifier is known, because they may be written
-        // after it.
-        let layer: KeyboardLayout.Layer = modifiers.isDisjoint(with: [.leftCommand, .rightCommand]) ? .plain : .command
-        let key = try keys.first.map { term throws(ChordSpellingError) in try term.key(on: layout, layer) }
+        // after it. A chord holding Command reads the Command layer first, where the
+        // shortcut is matched, and then the plain one, where the letter on the key cap is:
+        // `leftCommand+м` on Russian is the key that types м.
+        let layers: [KeyboardLayout.Layer] = modifiers.isDisjoint(with: [.leftCommand, .rightCommand]) ? [.plain] : [.command, .plain]
+        let key = try keys.first.map { term throws(ChordSpellingError) in try term.key(on: layout, layers) }
         // Every term is a modifier or a key and an empty term is refused as neither, so
         // there is always at least one of them by here.
         self.init(modifiers: modifiers, key: key)!
@@ -62,27 +65,30 @@ public extension KeyChord {
     /// A term that is not a modifier, in whichever of the three spellings it is written in.
     private enum KeyTerm {
         case key(Key)
-        case character(String)
+        case character(Character)
 
         init(_ term: String, in spelling: String) throws(ChordSpellingError) {
             if let named = namedKeys[term] {
                 self = .key(named)
             } else if term.hasPrefix(KeyChord.keyPrefix), let code = UInt16(term.dropFirst(KeyChord.keyPrefix.count), radix: 16) {
                 self = .key(Key(rawValue: code))
-            } else if term.count == 1 {
-                self = .character(term)
+            } else if let character = term.first, term.count == 1 {
+                self = .character(character)
             } else {
                 throw .unknownTerm(term, in: spelling)
             }
         }
 
-        /// One key and the layer's modifiers only: a character reached through Shift or a
-        /// dead key is not a key of its own, and the modifiers are the chord's to name.
-        func key(on layout: KeyboardLayout, _ layer: KeyboardLayout.Layer) throws(ChordSpellingError) -> Key {
+        /// One key and a layer's modifiers only, on the first layer that has one: a
+        /// character reached through Shift or a dead key is not a key of its own, and the
+        /// modifiers are the chord's to name.
+        func key(on layout: KeyboardLayout, _ layers: [KeyboardLayout.Layer]) throws(ChordSpellingError) -> Key {
             switch self {
             case .key(let key): return key
-            case .character(let term):
-                guard let code = layout.key(typing: Character(term), on: layer) else { throw .notOneKey(term, layout: layout.name, layer) }
+            case .character(let character):
+                guard let code = layers.lazy.compactMap({ layout.key(typing: character, on: $0) }).first else {
+                    throw .notOneKey(String(character), layout: layout.name, layers)
+                }
                 return Key(rawValue: code)
             }
         }
@@ -94,16 +100,16 @@ public enum ChordSpellingError: Error, CustomStringConvertible, Equatable {
     /// A term that is no modifier, no key name, no key code and no single character - an
     /// empty one between two `+` included.
     case unknownTerm(String, in: String)
-    /// A character the layout does not type with one key on the layer the chord is read off.
-    case notOneKey(String, layout: String, KeyboardLayout.Layer)
+    /// A character the layout does not type with one key on any layer the chord is read off.
+    case notOneKey(String, layout: String, [KeyboardLayout.Layer])
     case moreThanOneKey(String)
 
     public var description: String {
         switch self {
         case .unknownTerm(let term, let spelling):
             "\(term.debugDescription) in \(spelling.debugDescription) is not a modifier (\(Modifier.allCases.map(\.rawValue).joined(separator: ", "))), a key name (\(KeyChord.namedKeys.keys.sorted().joined(separator: ", "))), a key code written key 0x24, or a single character"
-        case .notOneKey(let character, let layout, let layer):
-            "\(layout) does not type \(character.debugDescription) with one key and \(layer == .plain ? "nothing" : "only Command") held; name the key it is on, and the modifiers as modifiers"
+        case .notOneKey(let character, let layout, let layers):
+            "\(layout) does not type \(character.debugDescription) with one key and \(layers.map(\.description).joined(separator: " or ")); name the key it is on, and the modifiers as modifiers"
         case .moreThanOneKey(let spelling):
             "\(spelling.debugDescription) names more than one key; a chord is modifiers and one key, and several chords are several arguments"
         }

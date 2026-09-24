@@ -21,7 +21,8 @@ public struct KeyboardLayout: Sendable {
     /// for a character reached through dead keys.
     private let byCharacter: [Character: [Keystroke]]
     /// The one key that types each character, on each layer a chord's key is read off.
-    private let keysByLayer: [Layer: [Character: UInt16]]
+    private let plainKeys: [Character: UInt16]
+    private let commandKeys: [Character: UInt16]
     /// What the layout calls itself, for a failure that has to name it.
     public let name: String
 
@@ -83,7 +84,8 @@ public struct KeyboardLayout: Sendable {
         name = Self.name(of: source)
         let layout = UnsafeRawPointer(bytes).assumingMemoryBound(to: UCKeyboardLayout.self)
         byCharacter = Self.reverseMap(of: layout)
-        keysByLayer = Dictionary(uniqueKeysWithValues: Layer.allCases.map { ($0, Self.keys(of: layout, on: $0)) })
+        plainKeys = Self.keys(of: layout, on: .plain)
+        commandKeys = Self.keys(of: layout, on: .command)
     }
 
     private static func name(of source: TISInputSource) -> String {
@@ -126,12 +128,14 @@ public struct KeyboardLayout: Sendable {
         byCharacter.first { $0.value == [keystroke] }?.key
     }
 
-    /// The virtual key code of the key that types `character` by itself on `layer`, or nil
-    /// when no one key does - a character reached through Shift, Option or a dead key
-    /// included. The lowest key code wins, so `1` is the number row's key and not the
-    /// keypad's.
+    /// The virtual key code of the key outside the keypad that types `character` by itself
+    /// on `layer`, or nil when no one key does - a character reached through Shift, Option
+    /// or a dead key included. The lowest key code wins when two do.
     public func key(typing character: Character, on layer: Layer) -> UInt16? {
-        keysByLayer[layer]?[character]
+        switch layer {
+        case .plain: plainKeys[character]
+        case .command: commandKeys[character]
+        }
     }
 
     /// Which modifiers a key is read with when the question is which key a chord presses.
@@ -142,16 +146,22 @@ public struct KeyboardLayout: Sendable {
     /// Mac: Dvorak - QWERTY ⌘ types `v` on key code 47 with nothing held and `.` with
     /// Command, and `v` with Command on key code 9, which is where Command-V pastes. Russian
     /// types `м` on key code 9 and `v` with Command held. [LAW:types-are-the-program]
-    public enum Layer: CaseIterable, Sendable {
-        /// Nothing held.
+    public enum Layer: Sendable, CustomStringConvertible {
         case plain
-        /// Command held, and nothing else.
         case command
 
         var modifierState: UInt32 {
             switch self {
             case .plain: 0
             case .command: UInt32(cmdKey >> 8)
+            }
+        }
+
+        /// What is held on this layer, as a sentence about a key says it.
+        public var description: String {
+            switch self {
+            case .plain: "nothing held"
+            case .command: "only Command held"
             }
         }
     }

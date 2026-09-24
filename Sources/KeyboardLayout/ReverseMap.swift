@@ -72,24 +72,26 @@ extension KeyboardLayout {
 
     /// Every key this can press, with the modifiers held, in preference order.
     private static var everyKey: [(keystroke: Keystroke, code: UInt16, state: UInt32)] {
-        (UInt16(0)..<128).flatMap { code in
-            guard let usage = Usage(virtualKeyCode: code) else { return [(Keystroke, UInt16, UInt32)]() }
-            return combinations.map { (Keystroke(usage, $0.modifiers), code, $0.state) }
-        }
+        pressable.flatMap { key in combinations.map { (Keystroke(key.usage, $0.modifiers), key.code, $0.state) } }
     }
+
+    /// Every key code the device has a usage for, lowest first.
+    private static let pressable: [(code: UInt16, usage: Usage)] =
+        (UInt16(0)..<128).compactMap { code in Usage(virtualKeyCode: code).map { (code, $0) } }
 
     /// Which key types each character by itself on one layer, lowest key code first.
     ///
-    /// Only keys the device can press are asked, and a key that is dead on this layer types
-    /// nothing by itself, so it answers for no character. [LAW:one-source-of-truth] The same
-    /// `translate` the reverse map is built from.
+    /// The keys `everyKey` asks, less the keypad: a keypad key is a key of its own, named by
+    /// its code, and never the one a character means - US types `*` on keypad * with nothing
+    /// held, and `*` on the main keys is Shift and 8. A key that is dead on this layer types
+    /// nothing by itself, so it answers for no character. [LAW:one-source-of-truth]
     static func keys(of layout: UnsafePointer<UCKeyboardLayout>, on layer: Layer) -> [Character: UInt16] {
         let keyboardType = UInt32(LMGetKbdType())
         var keys: [Character: UInt16] = [:]
-        for code in UInt16(0)..<128 where Usage(virtualKeyCode: code) != nil {
+        for key in pressable where !key.usage.isKeypad {
             var nothingPending: UInt32 = 0
-            if let character = one(translate(layout, code, layer.modifierState, keyboardType, &nothingPending)), keys[character] == nil {
-                keys[character] = code
+            if let character = one(translate(layout, key.code, layer.modifierState, keyboardType, &nothingPending)), keys[character] == nil {
+                keys[character] = key.code
             }
         }
         return keys

@@ -40,7 +40,21 @@ import Input
         #expect(try KeyChord(spelled: "leftControl+v", on: dvorakQwerty).key == Key(rawValue: UInt16(kVK_ANSI_Period)))
         let russian = try KeyboardLayout.named("com.apple.keylayout.Russian")
         #expect(try KeyChord(spelled: "м", on: russian).key == Key(rawValue: UInt16(kVK_ANSI_V)))
-        #expect(throws: ChordSpellingError.notOneKey("v", layout: russian.name, .plain)) { try KeyChord(spelled: "leftShift+v", on: russian) }
+        #expect(throws: ChordSpellingError.notOneKey("v", layout: russian.name, [.plain])) { try KeyChord(spelled: "leftShift+v", on: russian) }
+    }
+
+    /// The letter on the key cap still names the key under Command, when the Command
+    /// layer types something else there.
+    @Test func aChordHoldingCommandFallsToTheLetterOnTheKey() throws {
+        let russian = try KeyboardLayout.named("com.apple.keylayout.Russian")
+        #expect(try KeyChord(spelled: "leftCommand+м", on: russian).key == Key(rawValue: UInt16(kVK_ANSI_V)))
+    }
+
+    /// A keypad key is named by its code, never by a character: `*` on US is Shift and 8,
+    /// and the keypad's `*` is not what the chord means by it.
+    @Test func aCharacterIsNeverAKeypadKey() throws {
+        #expect(throws: ChordSpellingError.notOneKey("*", layout: Self.us.name, [.command, .plain])) { try KeyChord(spelled: "leftCommand+*", on: Self.us) }
+        #expect(try KeyChord(spelled: "1", on: Self.us).key == Key(rawValue: UInt16(kVK_ANSI_1)))
     }
 
     @Test func aNamedKeyNeedsNoLayoutCharacter() throws {
@@ -80,9 +94,9 @@ import Input
     }
 
     @Test func aCharacterThatNeedsAModifierIsNotAKey() {
-        #expect(throws: ChordSpellingError.notOneKey("S", layout: "com.apple.keylayout.US", .command)) { try KeyChord(spelled: "leftCommand+S", on: Self.us) }
+        #expect(throws: ChordSpellingError.notOneKey("S", layout: "com.apple.keylayout.US", [.command, .plain])) { try KeyChord(spelled: "leftCommand+S", on: Self.us) }
         // A dead key and the letter under it is two keys.
-        #expect(throws: ChordSpellingError.notOneKey("\u{e9}", layout: "com.apple.keylayout.US", .plain)) { try KeyChord(spelled: "\u{e9}", on: Self.us) }
+        #expect(throws: ChordSpellingError.notOneKey("\u{e9}", layout: "com.apple.keylayout.US", [.plain])) { try KeyChord(spelled: "\u{e9}", on: Self.us) }
     }
 
     @Test func whatNamesNoChordIsRefusedByName() {
@@ -90,6 +104,6 @@ import Input
         #expect(throws: ChordSpellingError.unknownTerm("", in: "leftCommand+")) { try KeyChord(spelled: "leftCommand+", on: Self.us) }
         #expect(throws: ChordSpellingError.unknownTerm("", in: "")) { try KeyChord(spelled: "", on: Self.us) }
         #expect(throws: ChordSpellingError.moreThanOneKey("a+b")) { try KeyChord(spelled: "a+b", on: Self.us) }
-        #expect(throws: ChordSpellingError.notOneKey("\u{1F600}", layout: "com.apple.keylayout.US", .plain)) { try KeyChord(spelled: "\u{1F600}", on: Self.us) }
+        #expect(throws: ChordSpellingError.notOneKey("\u{1F600}", layout: "com.apple.keylayout.US", [.plain])) { try KeyChord(spelled: "\u{1F600}", on: Self.us) }
     }
 }
