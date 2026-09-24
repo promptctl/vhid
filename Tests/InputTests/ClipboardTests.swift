@@ -8,8 +8,6 @@ import Testing
 /// get, not which AppKit calls were made - and never against `.general`, because the
 /// person at this Mac is using theirs.
 @Suite @MainActor struct ClipboardTests {
-    private func scratch() -> NSPasteboard { NSPasteboard(name: NSPasteboard.Name("ai.promptctl.vhid.tests.\(UUID().uuidString)")) }
-
     @Test func theTextWrittenIsTheTextAnAppWouldPaste() throws {
         let pasteboard = scratch()
         defer { pasteboard.releaseGlobally() }

@@ -15,8 +15,6 @@ import Testing
 @Suite @MainActor struct PasteTests {
     static let us = try! KeyboardLayout.named("com.apple.keylayout.US")
 
-    private func scratch() -> NSPasteboard { NSPasteboard(name: NSPasteboard.Name("ai.promptctl.vhid.tests.\(UUID().uuidString)")) }
-
     /// The write lands before the chord, so the app pasting finds the text there and not
     /// whatever was on the pasteboard before.
     @Test func theTextIsOnThePasteboardBeforeTheChordGoesDown() async throws {
@@ -30,19 +28,31 @@ import Testing
     }
 
     /// V is the key this layout puts `v` on with Command held: on Dvorak that is the key US
-    /// calls period; on Dvorak - QWERTY ⌘, whose Command layer is QWERTY, and on Russian,
-    /// whose Command layer is Latin, it is the key US calls V.
-    @Test(arguments: [
-        ("com.apple.keylayout.Dvorak", "37"),
-        ("com.apple.keylayout.DVORAK-QWERTYCMD", "19"),
-        ("com.apple.keylayout.Russian", "19"),
-    ])
-    func theChordPressesTheKeyTheCommandLayerPutsVOn(layout: String, usage: String) async throws {
+    /// calls period. Which key that is on every layer is ChordSpellingTests' to hold.
+    @Test func onDvorakTheChordPressesTheKeyDvorakPutsVOn() async throws {
         let pasteboard = scratch()
         defer { pasteboard.releaseGlobally() }
         let keyboard = PasteboardReadingKeyboard(pasteboard)
-        try await Typist(keyboard: keyboard).paste("text", on: KeyboardLayout.named(layout), through: Clipboard(pasteboard).write)
-        #expect(keyboard.log == ["down e3 over text", "down \(usage) over text", "up"])
+        try await Typist(keyboard: keyboard).paste("text", on: KeyboardLayout.named("com.apple.keylayout.Dvorak"), through: Clipboard(pasteboard).write)
+        #expect(keyboard.log == ["down e3 over text", "down 37 over text", "up"])
+    }
+
+    /// Nothing to paste and a cancelled run are both refused with what the user had copied
+    /// still on the clipboard, and no key down.
+    @Test func emptyTextAndACancelledRunLeaveTheClipboardAlone() async throws {
+        let pasteboard = scratch()
+        defer { pasteboard.releaseGlobally() }
+        try Clipboard(pasteboard).write("what the user had copied")
+        let keyboard = RefusingKeyboard()
+        let typist = Typist(keyboard: keyboard)
+        await #expect(throws: NothingToPaste.self) { try await typist.paste("", on: Self.us, through: Clipboard(pasteboard).write) }
+        // Made on this actor, so it does not begin until the test suspends: it is cancelled
+        // before its first line runs.
+        let run = Task { try await typist.paste("text", on: Self.us, through: Clipboard(pasteboard).write) }
+        run.cancel()
+        await #expect(throws: CancellationError.self) { try await run.value }
+        #expect(pasteboard.string(forType: .string) == "what the user had copied")
+        #expect(keyboard.log.isEmpty)
     }
 
     /// A write the pasteboard refused is reported as it is, and no chord follows it: a

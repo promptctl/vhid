@@ -17,6 +17,8 @@ public extension Typist {
     /// chord that cannot be spelled is refused with the user's clipboard still theirs. The
     /// write comes before the chord, and a write that throws is the whole answer: pasting
     /// over a pasteboard that did not take the text would paste whatever it holds instead.
+    /// Empty text and a cancelled run are refused before the write too: either would cost
+    /// the user their clipboard and put nothing in.
     ///
     /// [LAW:effects-at-boundaries] The write is taken as a value, so a test can have it
     /// refuse, which a real pasteboard cannot be made to do.
@@ -30,6 +32,8 @@ public extension Typist {
     func paste(_ text: String, on layout: KeyboardLayout, through write: @MainActor (String) throws -> Void) async throws -> KeyChord {
         let chord = try KeyChord(spelled: "leftCommand+v", on: layout)
         let pressable = try lower(chord)
+        guard !text.isEmpty else { throw NothingToPaste() }
+        try Task.checkCancellation()
         try write(text)
         do {
             try await press(pressable)
@@ -38,6 +42,12 @@ public extension Typist {
         }
         return chord
     }
+}
+
+/// Empty text, refused before the write: a paste of nothing would still take what the
+/// user had copied.
+public struct NothingToPaste: Error, CustomStringConvertible {
+    public var description: String { "there is no text to paste; the clipboard was left as it was" }
 }
 
 /// A paste whose chord stopped after the write had landed. What stopped the chord is the
