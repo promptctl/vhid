@@ -17,6 +17,10 @@ public struct Usage: RawRepresentable, Hashable, Comparable, Sendable {
         guard (0xE0...0xE7).contains(rawValue) else { return nil }
         return UInt8(1 << (rawValue - 0xE0))
     }
+
+    /// Whether this is a key on the numeric keypad, which the keyboard page numbers
+    /// 0x53 through 0x63, and keypad = at 0x67.
+    public var isKeypad: Bool { (0x53...0x63).contains(rawValue) || rawValue == 0x67 }
 }
 
 public extension Usage {

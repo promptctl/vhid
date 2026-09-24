@@ -7,9 +7,8 @@ extension KeyboardLayout {
     /// character, the plainer one is what this keeps, so `a` is the A key and not some
     /// option-sequence that happens to produce the same letter.
     ///
-    /// Command is not here. It does not change what a key types - it changes what the key
-    /// means - and a layout asked about it answers with the unmodified character, which
-    /// would fill the map with duplicates that type shortcuts instead of text.
+    /// Command is not here. It turns a key into a shortcut rather than typing text with it,
+    /// and which key a shortcut is on is read off its own layer, by `keys(of:on:)`.
     private static var combinations: [(state: UInt32, modifiers: Modifiers)] {
         [
             (0, []),
@@ -73,10 +72,31 @@ extension KeyboardLayout {
 
     /// Every key this can press, with the modifiers held, in preference order.
     private static var everyKey: [(keystroke: Keystroke, code: UInt16, state: UInt32)] {
-        (UInt16(0)..<128).flatMap { code in
-            guard let usage = Usage(virtualKeyCode: code) else { return [(Keystroke, UInt16, UInt32)]() }
-            return combinations.map { (Keystroke(usage, $0.modifiers), code, $0.state) }
+        pressable.flatMap { key in combinations.map { (Keystroke(key.usage, $0.modifiers), key.code, $0.state) } }
+    }
+
+    /// Every key code the device has a usage for, lowest first.
+    private static let pressable: [(code: UInt16, usage: Usage)] =
+        (UInt16(0)..<128).compactMap { code in Usage(virtualKeyCode: code).map { (code, $0) } }
+
+    /// Which key types each character by itself on one layer, lowest key code first.
+    ///
+    /// The keys `everyKey` asks, less the keypad: a keypad key is a key of its own, named by
+    /// its code, and never the one a character means - US types `*` on keypad * with nothing
+    /// held, and `*` on the main keys is Shift and 8. A key that is dead on this layer types
+    /// nothing by itself, so it answers for no character. Read as `typing` reads text, so
+    /// Return is the `\n` a caller writes rather than the `\r` the layout answers with.
+    /// [LAW:one-source-of-truth]
+    static func keys(of layout: UnsafePointer<UCKeyboardLayout>, on layer: Layer) -> [Character: UInt16] {
+        let keyboardType = UInt32(LMGetKbdType())
+        var keys: [Character: UInt16] = [:]
+        for key in pressable where !key.usage.isKeypad {
+            var nothingPending: UInt32 = 0
+            if let character = one(normalized(translate(layout, key.code, layer.modifierState, keyboardType, &nothingPending))), keys[character] == nil {
+                keys[character] = key.code
+            }
         }
+        return keys
     }
 
     /// What one key with one set of modifiers types, given whatever accent is pending.

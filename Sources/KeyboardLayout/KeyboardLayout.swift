@@ -20,6 +20,9 @@ public struct KeyboardLayout: Sendable {
     /// The keystrokes for each character: one for most, and as many as the layout takes
     /// for a character reached through dead keys.
     private let byCharacter: [Character: [Keystroke]]
+    /// The one key that types each character, on each layer a chord's key is read off.
+    private let plainKeys: [Character: UInt16]
+    private let commandKeys: [Character: UInt16]
     /// What the layout calls itself, for a failure that has to name it.
     public let name: String
 
@@ -79,7 +82,10 @@ public struct KeyboardLayout: Sendable {
         let data = Unmanaged<CFData>.fromOpaque(pointer).takeUnretainedValue()
         guard let bytes = CFDataGetBytePtr(data) else { throw NoLayout.noKeyLayoutData(Self.name(of: source)) }
         name = Self.name(of: source)
-        byCharacter = Self.reverseMap(of: UnsafeRawPointer(bytes).assumingMemoryBound(to: UCKeyboardLayout.self))
+        let layout = UnsafeRawPointer(bytes).assumingMemoryBound(to: UCKeyboardLayout.self)
+        byCharacter = Self.reverseMap(of: layout)
+        plainKeys = Self.keys(of: layout, on: .plain)
+        commandKeys = Self.keys(of: layout, on: .command)
     }
 
     private static func name(of source: TISInputSource) -> String {
@@ -122,6 +128,45 @@ public struct KeyboardLayout: Sendable {
         byCharacter.first { $0.value == [keystroke] }?.key
     }
 
+    /// The virtual key code of the key outside the keypad that types `character` by itself
+    /// on `layer`, or nil when no one key does - a character reached through Shift, Option
+    /// or a dead key included. The lowest key code wins when two do.
+    public func key(typing character: Character, on layer: Layer) -> UInt16? {
+        guard let character = Self.normalized(String(character)).first else { return nil }
+        switch layer {
+        case .plain: return plainKeys[character]
+        case .command: return commandKeys[character]
+        }
+    }
+
+    /// Which modifiers a key is read with when the question is which key a chord presses.
+    ///
+    /// Two layers, because Command is the one modifier that can change the answer. On most
+    /// layouts it types what the key types with nothing held, but a layout can carry a key
+    /// map of its own for Command, and shortcuts are matched on that map. Measured on this
+    /// Mac: Dvorak - QWERTY ⌘ types `v` on key code 47 with nothing held and `.` with
+    /// Command, and `v` with Command on key code 9, which is where Command-V pastes. Russian
+    /// types `м` on key code 9 and `v` with Command held. [LAW:types-are-the-program]
+    public enum Layer: Sendable, CustomStringConvertible {
+        case plain
+        case command
+
+        var modifierState: UInt32 {
+            switch self {
+            case .plain: 0
+            case .command: UInt32(cmdKey >> 8)
+            }
+        }
+
+        /// What is held on this layer, as a sentence about a key says it.
+        public var description: String {
+            switch self {
+            case .plain: "nothing held"
+            case .command: "only Command held"
+            }
+        }
+    }
+
     /// Whether this layout can type every character of `text`, without building anything.
     ///
     /// The same question `typing` answers by throwing, so it reads the text the same way.
@@ -147,7 +192,7 @@ public struct KeyboardLayout: Sendable {
     /// both come back from the screen as a newline. A caller comparing what it asked for
     /// against what it reads would find a mismatch in a run that typed perfectly.
     /// [LAW:parse-dont-validate]
-    private static func normalized(_ text: String) -> String {
+    static func normalized(_ text: String) -> String {
         text.precomposedStringWithCanonicalMapping
             .replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
