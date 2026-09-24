@@ -14,7 +14,7 @@ import Testing
 
     /// Every daemon reading, one of each.
     static let daemonReadings: [DaemonReading] = [
-        .answered(holder: nil), .answered(holder: 4242), .refusedThisSignature,
+        .answered(holder: nil), .answered(holder: 4242), .refusedThisVhid,
         .unreachable(reason: "NSCocoaErrorDomain 4099"), .silent(reason: "no answer in 5 seconds"),
         .failed(reason: "something new"),
     ]
@@ -128,7 +128,7 @@ import Testing
         for reading in Self.daemonReadings {
             let row = Requirement.daemon(reading, installation: Self.installation)
             let listening = switch reading {
-            case .answered, .refusedThisSignature: true
+            case .answered, .refusedThisVhid: true
             case .unreachable, .silent, .failed: false
             }
             #expect(row.met == listening, "\(reading)")
@@ -142,7 +142,7 @@ import Testing
             let step = try #require(Requirement.daemon(reading, installation: Self.installation).step)
             let said = switch reading {
             case .unreachable(let reason), .silent(let reason), .failed(let reason): reason
-            case .answered, .refusedThisSignature: ""
+            case .answered, .refusedThisVhid: ""
             }
             #expect(step.contains(said), "\(reading)")
             // Nothing holding the service leaves no daemon whose log could say why: the
@@ -173,12 +173,14 @@ import Testing
         }
     }
 
-    /// The refusal is named as a refusal of the signature, and the step is the one that
-    /// fixes an ad hoc tree - not a reconnect.
-    @Test func aRefusalNamesTheSignatureAndHowToSignTheTree() throws {
-        let row = Requirement.signature(.refusedThisSignature, installation: Self.installation)
-        #expect(row.reads.contains("not signed with the daemon's certificate"))
-        #expect(try #require(row.step).contains("make sign"))
+    /// The refusal is named for what was read, and the step covers both of its causes:
+    /// signing an ad hoc tree, and restarting a daemon older than this vhid.
+    @Test func aRefusalNamesBothOfItsCausesAndTheStepForEach() throws {
+        let row = Requirement.signature(.refusedThisVhid, installation: Self.installation)
+        #expect(row.reads == "refused: the daemon ended this vhid's connection")
+        let step = try #require(row.step)
+        #expect(step.contains("make sign"))
+        #expect(step.contains("sudo launchctl kickstart -k system/\(Self.installation.launchdLabel)"))
     }
 
     /// A daemon that never answered judged no signature, so the row claims nothing and
@@ -209,7 +211,7 @@ import Testing
     /// A refused caller was told nothing about the devices, and what stands in its way is
     /// the signature - not the daemon, which answered.
     @Test func whoHoldsTheDevicesWaitsOnWhicheverRowIsInTheWay() {
-        #expect(Requirement.devices(.refusedThisSignature).step == "Read once the Signature row above is met.")
+        #expect(Requirement.devices(.refusedThisVhid).step == "Read once the Signature row above is met.")
         for reading in Self.daemonReadings where !reading.daemonHasStarted {
             #expect(Requirement.devices(reading).step == "Read once the Daemon row above is met.")
         }
@@ -249,7 +251,7 @@ import Testing
     @Test func onlyAnAnswerOrARefusalProvesADaemonStarted() {
         for reading in Self.daemonReadings {
             let proves = switch reading {
-            case .answered, .refusedThisSignature: true
+            case .answered, .refusedThisVhid: true
             case .unreachable, .silent, .failed: false
             }
             #expect(reading.daemonHasStarted == proves, "\(reading)")

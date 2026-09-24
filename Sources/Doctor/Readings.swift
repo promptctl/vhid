@@ -46,9 +46,15 @@ public enum DaemonReading: Sendable, Hashable {
     /// when that connection is lost. A daemon without its devices has no listener to
     /// answer from.
     case answered(holder: Int32?)
-    /// The daemon refused this process: it admits only callers signed with its own
-    /// certificate (NSCocoaErrorDomain 4097 at the client).
-    case refusedThisSignature
+    /// The daemon ended this process's connection, twice (NSCocoaErrorDomain 4097 at the
+    /// client).
+    ///
+    /// Named for what was read and not for a cause, because two causes end a connection
+    /// the same way. The usual one is the signature: the daemon admits only callers
+    /// signed with its own certificate. The other is a daemon older than this vhid, which
+    /// does not know the status call and drops the connection it came on - measured - as
+    /// a running dev daemon is after `make` rebuilds it, until it is restarted.
+    case refusedThisVhid
     /// Nothing holds the service, so there was nobody to ask (NSCocoaErrorDomain 4099).
     case unreachable(reason: String)
     /// Something holds the service and said nothing before the deadline.
@@ -75,7 +81,7 @@ public enum DaemonReading: Sendable, Hashable {
     /// [LAW:types-are-the-program]
     public var daemonHasStarted: Bool {
         switch self {
-        case .answered, .refusedThisSignature: true
+        case .answered, .refusedThisVhid: true
         case .unreachable, .silent, .failed: false
         }
     }
@@ -88,7 +94,7 @@ public enum DaemonReading: Sendable, Hashable {
     /// what launchd itself said. [LAW:no-silent-failure]
     public var someoneHoldsTheService: Bool {
         switch self {
-        case .answered, .refusedThisSignature, .silent: true
+        case .answered, .refusedThisVhid, .silent: true
         case .unreachable, .failed: false
         }
     }

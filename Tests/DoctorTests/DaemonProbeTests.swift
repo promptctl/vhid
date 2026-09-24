@@ -83,7 +83,7 @@ import Testing
 
     /// A refused connection is the signature, told apart from a service nobody holds.
     @Test func aRefusedConnectionIsThisSignatureRefused() async {
-        #expect(await reading(.refuseTheConnection) == .refusedThisSignature)
+        #expect(await reading(.refuseTheConnection) == .refusedThisVhid)
     }
 
     @Test func aServiceNobodyHoldsIsUnreachable() async {

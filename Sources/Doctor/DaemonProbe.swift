@@ -23,7 +23,7 @@ public enum DaemonProbe {
     /// or silent. Two refusals in a row is the signature. [LAW:no-silent-failure]
     static func reading(_ connect: () -> HelperConnection) -> DaemonReading {
         let first = asked(connect())
-        guard first == .refusedThisSignature else { return first }
+        guard first == .refusedThisVhid else { return first }
         return asked(connect())
     }
 
@@ -51,7 +51,7 @@ public enum DaemonProbe {
     static func reading(failure error: any Error) -> DaemonReading {
         guard let unreachable = error as? HelperConnection.Unreachable else { return .failed(reason: (error as NSError).localizedDescription) }
         switch unreachable.cause {
-        case .connection(domain: NSCocoaErrorDomain, code: NSXPCConnectionInterrupted, description: _): return .refusedThisSignature
+        case .connection(domain: NSCocoaErrorDomain, code: NSXPCConnectionInterrupted, description: _): return .refusedThisVhid
         case .connection(domain: NSCocoaErrorDomain, code: NSXPCConnectionInvalid, description: _): return .unreachable(reason: unreachable.description)
         case .silence: return .silent(reason: unreachable.description)
         case .connection, .notAHelper: return .failed(reason: unreachable.description)
