@@ -27,9 +27,9 @@ public enum DriverProbe {
     public static let supportDirectory = "/Library/Application Support/org.pqrs/Karabiner-DriverKit-VirtualHIDDevice"
 
     /// The Manager binary inside that app, which is what asks macOS to activate the
-    /// driver. `vhid doctor` names it to a reader who has no clone and so cannot run
-    /// `scripts/virtual-hid-driver`, for whom the activation is otherwise a step with no
-    /// command attached to it.
+    /// driver. `vhid doctor` names it as the activation step for every reader, because
+    /// one who has no clone cannot run `scripts/virtual-hid-driver`, and for them the
+    /// activation is otherwise a step with no command attached to it.
     ///
     /// Built from `managerApp` rather than written out beside it, so the two cannot come
     /// to name different installs. [LAW:one-source-of-truth] The script keeps its own

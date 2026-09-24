@@ -23,15 +23,11 @@ public enum VirtualKeyboardIdentity {
     /// ISO or JIS support would have to move this and the layout map together.
     public static let ansiKeyboardType = 40
 
-    /// Where macOS files those answers, as `defaults` names the domain.
+    /// Where macOS files those answers.
     ///
     /// Beside the key rather than beside either process that touches it: the helper
     /// writes this file as root and `vhid doctor` reads it as the user, and a writer and a
     /// reader holding their own spellings of one path is two clocks - one of them
     /// answering about a file nobody wrote. [LAW:one-source-of-truth]
-    public static let keyboardTypeDomain = "/Library/Preferences/com.apple.keyboardtype"
-
-    /// The same thing as a file. `defaults` takes the domain and
-    /// `PropertyListSerialization` takes the file, and they are one path.
-    public static let keyboardTypePlist = keyboardTypeDomain + ".plist"
+    public static let keyboardTypePlist = "/Library/Preferences/com.apple.keyboardtype.plist"
 }

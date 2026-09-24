@@ -98,9 +98,9 @@ import Testing
         }
     }
 
-    /// The words themselves. `expect <verdict>`, README.md and the app all spell them,
-    /// and a rename that only touched the enum would leave those three reading a word
-    /// this program no longer emits. [LAW:one-source-of-truth]
+    /// The words themselves. `expect <verdict>` and README.md spell them, and a rename
+    /// that only touched the enum would leave those two reading a word this program no
+    /// longer emits; `vhid doctor` prints the enum's own words and follows a rename. [LAW:one-source-of-truth]
     @Test func theVerdictWordsAreTheOnesEveryReaderSpells() {
         #expect(Set(DriverState.allCases.map(\.rawValue)) == [
             "absent", "installed-inactive", "awaiting-approval", "disabled",

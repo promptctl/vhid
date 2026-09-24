@@ -69,9 +69,9 @@ enum KeyboardTypeAnswer {
         // over both is what made the mode repairable on the first boot and never again:
         // a file left 0600 by an interrupted first start, or tightened later by anything
         // outside this process, was read on every subsequent start, found to need no
-        // merge, and returned from before the mode was ever looked at - so the
-        // unprivileged read, now `vhid doctor`'s, failed permanently while the helper
-        // believed itself fine.
+        // merge, and returned from before the mode was ever looked at - so low-talker's
+        // unprivileged reader failed permanently while the helper believed itself fine,
+        // and `vhid doctor`, the reader now, would fail the same way.
         // [LAW:dataflow-not-control-flow]
         try File.makeReadable(at: path)
         return filing
