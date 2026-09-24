@@ -11,11 +11,12 @@ import Foundation
 /// verdict under `<product>-<vendor>-<country>` and never asks again about a device that
 /// already has one, so a device that files its own is never asked about.
 ///
-/// [LAW:decomposition] This is the helper's, and not onboarding's, because of who can do
+/// [LAW:decomposition] This is the helper's, and not `vhid doctor`'s, because of who can do
 /// it rather than who noticed: the file is under /Library/Preferences and wants root,
 /// this process is root, and it is the one process that must already be running before
-/// the virtual keyboard can type at all. Onboarding used to print a `sudo defaults write`
-/// for a reader to paste - a step that had no owner, not a step that needed a person.
+/// the virtual keyboard can type at all. low-talker's onboarding used to print a `sudo
+/// defaults write` for a reader to paste - a step that had no owner, not a step that
+/// needed a person.
 enum KeyboardTypeAnswer {
     /// The cache with this keyboard's own answer in it, and every other device's left
     /// exactly as it was.
@@ -68,8 +69,9 @@ enum KeyboardTypeAnswer {
         // over both is what made the mode repairable on the first boot and never again:
         // a file left 0600 by an interrupted first start, or tightened later by anything
         // outside this process, was read on every subsequent start, found to need no
-        // merge, and returned from before the mode was ever looked at - so onboarding's
-        // unprivileged read failed permanently while the helper believed itself fine.
+        // merge, and returned from before the mode was ever looked at - so low-talker's
+        // unprivileged reader failed permanently while the helper believed itself fine,
+        // and `vhid doctor`, the reader now, would fail the same way.
         // [LAW:dataflow-not-control-flow]
         try File.makeReadable(at: path)
         return filing
@@ -103,8 +105,8 @@ enum KeyboardTypeAnswer {
     enum File {
         /// The mode the file must end up with, whoever wrote it.
         ///
-        /// World-readable is load-bearing rather than incidental: onboarding reads this
-        /// file with no privilege, and a file this helper tightened would leave that row
+        /// World-readable is load-bearing rather than incidental: `vhid doctor` reads this
+        /// file with no privilege, and a file this helper tightened would leave its row
         /// permanently unreadable for every ordinary user while the answer inside it was
         /// perfectly correct. Measured on this platform: an atomic *replace* keeps the
         /// existing file's mode, so a Mac that already has this file is never tightened -
@@ -155,7 +157,7 @@ enum KeyboardTypeAnswer {
     /// the caller cannot tell them apart. The two that leave the answer unfiled mean the
     /// assistant may take the first line typed; `modeNotSet` means the opposite - the
     /// answer is filed and the assistant is answered - and costs something else entirely,
-    /// which is that onboarding's unprivileged read of the file may stop working. A caller
+    /// which is that `vhid doctor`'s unprivileged read of the file may stop working. A caller
     /// framing every one of these as "could not file the answer" sent an operator looking
     /// for a dialog that was never going to appear, while the failure that had actually
     /// happened went unnamed. So the sentence lives here, per case, and the caller logs
@@ -189,8 +191,8 @@ enum KeyboardTypeAnswer {
             case .modeNotSet(let path, let reason):
                 """
                 this keyboard's answer is filed and Keyboard Setup Assistant is answered, \
-                but the mode on \(path) could not be asserted, so onboarding's unprivileged \
-                read of it may fail: \(reason)
+                but the mode on \(path) could not be asserted, so vhid doctor, which reads it \
+                without privilege, may find it unreadable: \(reason)
                 """
             }
         }

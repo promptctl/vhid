@@ -72,9 +72,10 @@ do {
     //
     // A failure here does not stop the helper. The keyboard still types; what is lost is
     // that the assistant may take the first line of it, which is worth saying loudly and
-    // is not worth refusing to type over. Said here, and read back by onboarding's own
-    // row, which stays unmet until the answer is actually on disk - so this is reported
-    // twice and swallowed nowhere. [LAW:no-silent-failure]
+    // is not worth refusing to type over. Said here, and read back by `vhid doctor`'s
+    // Keyboard Setup Assistant row, which stays unmet until the answer is on disk and
+    // readable without privilege - so this is reported twice and swallowed nowhere.
+    // [LAW:no-silent-failure]
     // The failure says what it cost, because only it knows: a mode that could not be set
     // leaves the answer filed and the assistant answered, and a frame written here would
     // have told an operator to expect a dialog that is never going to appear.

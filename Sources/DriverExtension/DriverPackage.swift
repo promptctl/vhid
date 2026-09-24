@@ -3,13 +3,14 @@
 ///
 /// [LAW:decomposition] Apart from `DriverProbe`, which is about finding the driver on
 /// this Mac: this is about the artifact that puts it there, and the two answer different
-/// questions to different readers. Onboarding names these to a reader who installed
-/// vhid and has no clone of this repo, for whom `scripts/virtual-hid-driver
-/// install` is not an instruction that can be followed.
+/// questions to different readers. `vhid doctor` names its version to every reader,
+/// including one who installed vhid and has no clone of this repo, for whom
+/// `scripts/virtual-hid-driver install` is not an instruction that can be followed.
 ///
 /// [LAW:one-source-of-truth] `scripts/virtual-hid-driver` is the file that actually
 /// fetches and checksums the package, so it holds the pin it acts on; this is the copy
-/// the app reads out loud, and `scripts/check-driver-pins` fails when the two disagree.
+/// `vhid doctor` names and `vhid driver pins` prints, and `scripts/check-driver-pins`
+/// fails when the two disagree.
 public enum DriverPackage {
     public static let version = "8.4.0"
 

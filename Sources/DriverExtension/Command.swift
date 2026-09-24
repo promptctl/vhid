@@ -5,7 +5,8 @@ import Foundation
 /// Small on purpose: a reading needs a status and two streams, and a general process
 /// wrapper would be a second thing to maintain for the sake of arguments nobody passes.
 /// It lives beside the driver probe because that is where the first reading was taken;
-/// onboarding takes its own the same way rather than growing a second runner.
+/// `vhid doctor`'s launchd reading is taken the same way rather than growing a second
+/// runner.
 public struct Command {
     public let tool: URL
     public let arguments: [String]

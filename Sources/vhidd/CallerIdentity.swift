@@ -18,8 +18,8 @@ struct CallerIdentity {
     /// signed this helper.
     ///
     /// [LAW:one-source-of-truth] Read off this process's own signature rather than
-    /// compiled in or handed over by whoever installed the job. The app, the CLI and this
-    /// helper are signed together - by the dev identity `make signing-identity` makes, or
+    /// compiled in or handed over by whoever installed the job. The CLI and this helper are
+    /// signed together - by the dev identity `make signing-identity` makes, or
     /// by the Developer ID that ships them - so "whoever signed me" is the one statement
     /// of who may call that is true of every installation without anyone writing it down.
     /// A helper signed ad hoc has no certificate to name and does not start; an

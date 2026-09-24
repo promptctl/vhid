@@ -58,8 +58,8 @@ public final class VirtualKeyboard: KeyPress {
     /// formed, and initializes a device that is not the one asked for.
     ///
     /// The numbers come from `VirtualKeyboardIdentity` rather than sitting inline,
-    /// because onboarding builds the Keyboard Setup Assistant's cache key out of the
-    /// same three. [LAW:one-source-of-truth]
+    /// because the Keyboard Setup Assistant's cache key - which the daemon files under and
+    /// `vhid doctor` reads back - is built out of the same three. [LAW:one-source-of-truth]
     static let parameters: [UInt8] = [
         VirtualKeyboardIdentity.vendorID,
         VirtualKeyboardIdentity.productID,
