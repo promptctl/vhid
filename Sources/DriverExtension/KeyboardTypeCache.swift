@@ -77,18 +77,28 @@ public struct KeyboardTypeCache {
 
     /// The cache could not be read, and why.
     public struct Unreadable: Error, CustomStringConvertible, Equatable {
-        public enum Reason: Sendable, Equatable {
+        /// Why, in words that name no path and no step: a reader running as root and one
+        /// running as the user each say what it means for them.
+        public enum Reason: Sendable, Equatable, CustomStringConvertible {
             case notReadableByThisUser
             case readFailed(String)
             case unparsable(String)
+
+            public var description: String {
+                switch self {
+                case .notReadableByThisUser: "permission denied"
+                case .readFailed(let why): why
+                case .unparsable(let why): "it is not a keyboard type cache: \(why)"
+                }
+            }
         }
 
         public let path: String
         public let reason: Reason
 
-        /// The one cause a person can see and act on gets its step in the words: the
-        /// daemon asserts the mode as it starts, once the answer is filed, and logs why
-        /// when it could not.
+        /// As the unprivileged reader, `vhid doctor`, says it. The one cause a person can
+        /// see and act on gets its step in the words: the daemon asserts the mode as it
+        /// starts, once the answer is filed, and logs why when it could not.
         public var description: String {
             switch reason {
             case .notReadableByThisUser:
@@ -97,10 +107,8 @@ public struct KeyboardTypeCache {
                 starts, once the answer is filed, and logs why when it cannot; to read \
                 it now: sudo chmod 644 \(path)
                 """
-            case .readFailed(let why):
-                "\(path) could not be read: \(why)"
-            case .unparsable(let why):
-                "\(path) is not a keyboard type cache: \(why)"
+            case .readFailed, .unparsable:
+                "\(path) could not be read: \(reason)"
             }
         }
     }

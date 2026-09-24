@@ -55,7 +55,9 @@ enum KeyboardTypeAnswer {
         do {
             cache = try KeyboardTypeCache.read(at: path)
         } catch {
-            throw Unwritable.unreadable(path: path, reason: "\(error)")
+            // The reason alone: the reader's own sentence is said to an unprivileged user
+            // and names the path, which this one already does.
+            throw Unwritable.unreadable(path: path, reason: "\(error.reason)")
         }
         let filing: Filing = cache.answersThisKeyboard ? .alreadyFiled : .filed
         if filing == .filed {
