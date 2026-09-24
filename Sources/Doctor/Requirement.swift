@@ -60,8 +60,20 @@ public extension Requirement {
     /// every time, and one that could not be read is never silently absent from a list a
     /// reader takes as complete. It carries a step, so it is never `met`.
     /// [LAW:no-silent-failure]
+    ///
+    /// The error is what was read, so it goes where readings go, folded onto the row's one
+    /// line; the step is an instruction like every other step. An error in the step's place
+    /// read as a step nobody wrote - and one whose description was empty printed as a row
+    /// with no step at all while counting as unmet.
     static func unreadable(_ row: Row, _ error: any Error) -> Requirement {
-        Requirement(name: row.rawValue, reads: "could not be read", step: "\(error)")
+        let said = "\(error)".split(whereSeparator: \.isNewline).joined(separator: "; ")
+        return Requirement(
+            name: row.rawValue,
+            reads: said.isEmpty ? "could not be read, and the failure gave no reason" : "could not be read: \(said)",
+            step: """
+                Until this is read, nothing says it holds. Run doctor again; a
+                reason that stays is the thing to fix.
+                """)
     }
 }
 
@@ -86,7 +98,45 @@ extension Requirement: CustomStringConvertible {
 public struct Readiness: Sendable, Hashable, CustomStringConvertible {
     public let requirements: [Requirement]
 
-    public init(_ requirements: [Requirement]) { self.requirements = requirements }
+    /// The whole list, from the readings, and the one way a caller gets one.
+    ///
+    /// [LAW:types-are-the-program] Every row, once, in `Row` order, built here rather than
+    /// assembled by each surface: a step that says "the Daemon row above" is true
+    /// only of a list in which that row is above, and a list a caller put together by hand
+    /// could drop a row, repeat one, or be empty and read as ready. A reading that could
+    /// not be taken arrives as the failure it was and becomes that row's `unreadable`, so
+    /// a failed probe never removes its row. [LAW:no-silent-failure]
+    ///
+    /// The status round trip is a reading and not a `Result`: every way it ends is already
+    /// one of `DaemonReading`'s cases, the failures included.
+    public init(
+        installation: Installation,
+        driver: Result<DriverState, any Error>,
+        job: Result<JobStanding, any Error>,
+        daemon: DaemonReading,
+        keyboardSetupAssistantAnswered: Result<Bool, any Error>
+    ) {
+        func row<Reading>(_ row: Requirement.Row, _ reading: Result<Reading, any Error>, _ make: (Reading) -> Requirement) -> Requirement {
+            switch reading {
+            case .success(let read): make(read)
+            case .failure(let error): .unreadable(row, error)
+            }
+        }
+        self.init([
+            row(.driverExtension, driver) { .driverExtension($0) },
+            row(.launchdJob, job) { .launchdJob($0, daemon: daemon, installation: installation) },
+            .daemon(daemon, installation: installation),
+            .signature(daemon, installation: installation),
+            .devices(daemon),
+            row(.keyboardSetupAssistant, keyboardSetupAssistantAnswered) {
+                .keyboardSetupAssistant(answered: $0, daemon: daemon, installation: installation)
+            },
+        ])
+    }
+
+    /// Any list at all, for a test to read how one is printed and judged. Not public: a
+    /// surface builds the whole list from readings, above.
+    init(_ requirements: [Requirement]) { self.requirements = requirements }
 
     /// Nothing is left for anyone to do.
     public var ready: Bool { requirements.allSatisfy(\.met) }
@@ -117,7 +167,35 @@ private func waitsOn(_ row: Requirement.Row) -> String {
 /// The daemon's log, which is where it says anything it has to say: it is a daemon, and
 /// its only voice is `os_log` under its own service name.
 private func daemonLog(_ installation: Installation, last window: String) -> String {
-    "/usr/bin/log show --predicate 'subsystem == \"\(installation.service)\"' --last \(window)"
+    "/usr/bin/log show --predicate \(shellQuoted("subsystem == \"\(installation.service)\"")) --last \(window)"
+}
+
+/// A word as the shell reads back exactly, for a name pasted into a command a person runs.
+///
+/// A service name is anything `Installation` admits, which is everything but whitespace:
+/// a quote in one would end the quoting it was pasted into, and the command a person
+/// copies would be a different command. Left bare when nothing in it is special to the
+/// shell, which is every name vhid itself registers, so the steps stay readable.
+/// [LAW:parse-dont-validate]
+func shellQuoted(_ word: String) -> String {
+    let plain = word.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || "._-/:@%+=,".contains($0)) }
+    return plain && !word.isEmpty ? word : "'" + word.replacingOccurrences(of: "'", with: "'\\''") + "'"
+}
+
+/// A name as `scripts/launchd-plist` writes it into a plist, which escapes what XML
+/// reserves. A search of the plists has to look for the name as it is on disk, or a name
+/// holding one of these is never found. [LAW:one-source-of-truth] with that script's `xml`.
+func xmlEscaped(_ text: String) -> String {
+    text.replacingOccurrences(of: "&", with: "&amp;")
+        .replacingOccurrences(of: "<", with: "&lt;")
+        .replacingOccurrences(of: ">", with: "&gt;")
+        .replacingOccurrences(of: "\"", with: "&quot;")
+}
+
+/// The one search for which plist names a service, as a fixed string rather than a
+/// pattern: every `.` in a reverse-DNS name is a regex wildcard.
+private func plistsNaming(_ installation: Installation) -> String {
+    "grep -lF -- \(shellQuoted(">\(xmlEscaped(installation.service))<")) /Library/LaunchDaemons/*.plist"
 }
 
 // MARK: - the driver extension
@@ -207,8 +285,19 @@ public extension Requirement {
     /// label, the service and the plist path are three readings of one value, and passing
     /// them separately would let a step name one installation's plist and another's
     /// service.
-    static func launchdJob(_ standing: JobStanding, installation: Installation) -> Requirement {
-        Requirement(name: Row.launchdJob.rawValue, reads: reads(for: standing), step: step(for: standing, installation: installation))
+    ///
+    /// The daemon's reading as well, because launchd asked about this label cannot see a
+    /// job under some other label that names this service - and that job is exactly what
+    /// the no-job step's bootstrap would lose to, exit 0 and no endpoint. Whether anyone
+    /// holds the service is what the round trip says, so "no job here" and "something
+    /// holds the service" together are read as the stray job they are, not as a job to
+    /// load. [LAW:no-silent-failure]
+    static func launchdJob(_ standing: JobStanding, daemon: DaemonReading, installation: Installation) -> Requirement {
+        let strayHolder = standing == .noJob && daemon.someoneHoldsTheService
+        return Requirement(
+            name: Row.launchdJob.rawValue,
+            reads: strayHolder ? "no job, and something else holds the service" : reads(for: standing),
+            step: strayHolder ? strayHolderStep(installation) : step(for: standing, installation: installation))
     }
 
     private static func reads(for standing: JobStanding) -> String {
@@ -226,35 +315,51 @@ public extension Requirement {
     }
 
     private static func step(for standing: JobStanding, installation: Installation) -> String? {
+        let (label, service, plist) = (shellQuoted(installation.launchdLabel), shellQuoted(installation.service), shellQuoted(plist(installation)))
         switch standing {
         case .holdingTheService:
-            nil
+            return nil
         // Both ways a job reaches this label, named rather than chosen between: which one
         // this installation came by is not something the reading says, and the set of
         // installations is open, so no case here may pick the route by which one it is.
         // [LAW:dataflow-not-control-flow]
         case .noJob:
-            """
-            launchd holds no job under \(installation.launchdLabel), so nothing
-            answers \(installation.service). The installed copy's job is loaded
-            by vhid's pkg: install it again. A copy built from a tree is loaded
-            by hand, from the root of that tree after `make`:
-                scripts/launchd-plist \(installation.service) "$PWD/.build/debug/vhidd" \\
-                    | sudo tee \(plist(installation)) >/dev/null
-                sudo launchctl enable system/\(installation.launchdLabel)
-                sudo launchctl bootstrap system \(plist(installation))
-            """
+            return """
+                launchd holds no job under \(installation.launchdLabel), so nothing
+                answers \(installation.service). The installed copy's job is loaded
+                by vhid's pkg: install it again. A copy built from a tree is loaded
+                by hand, from the root of that tree after `make`:
+                    scripts/launchd-plist \(service) "$PWD/.build/debug/vhidd" \\
+                        | sudo tee \(plist) >/dev/null
+                    sudo launchctl enable system/\(label)
+                    sudo launchctl bootstrap system \(plist)
+                """
+        // Only a job can hold a system-domain Mach service - launchd hands the endpoint to
+        // the job whose plist names it, and a process launchd did not start cannot check
+        // one in - so the holder is a plist under some other label, and the search is for
+        // that plist. A search of processes would list this job's own daemon, running
+        // without the endpoint, and invite the reader to kill the wrong one.
         case .anotherJobHoldsTheService:
-            """
-            A job is loaded under \(installation.launchdLabel), and launchd gave
-            \(installation.service) to something else, so this job's daemon
-            never gets the endpoint and answers nothing however healthy it
-            looks. It is a daemon started by hand, or a job under some other
-            label that names this service. Find both:
-                pgrep -fl vhidd
-                grep -l '>\(installation.service)<' /Library/LaunchDaemons/*.plist
-            """
+            return """
+                A job is loaded under \(installation.launchdLabel), and launchd gave
+                \(installation.service) to a job under another label, so this job's
+                daemon never gets the endpoint and answers nothing however
+                healthy it looks. Every plist that names the service:
+                    \(plistsNaming(installation))
+                """
         }
+    }
+
+    /// No job under this label, and a daemon on the service all the same: a job under
+    /// another label holds it, and loading this installation's own would lose to it.
+    private static func strayHolderStep(_ installation: Installation) -> String {
+        """
+        launchd holds no job under \(installation.launchdLabel), yet something
+        holds \(installation.service): a job under another label names it,
+        and a job loaded under this one would never get the endpoint. Every
+        plist that names the service, before loading anything:
+            \(plistsNaming(installation))
+        """
     }
 }
 
@@ -288,9 +393,9 @@ public extension Requirement {
             """
             Nothing holds \(installation.service) (\(reason)).
             When the \(Row.launchdJob.rawValue) row above is unmet, that is why. When it
-            is met, the daemon has exited and launchd has not started it
-            again; its log says why:
-                \(daemonLog(installation, last: "1h"))
+            is met, the two readings disagree - launchd holds a loaded job's
+            endpoint whether or not its daemon runs - so the job changed
+            between them: run doctor again.
             """
         case .silent(let reason):
             """
@@ -407,13 +512,14 @@ public extension Requirement {
     /// happened, and the one thing that can actually be wrong - the filing failed, and the
     /// daemon logged why - goes unmentioned. [LAW:no-silent-failure]
     ///
-    /// - Parameter daemonHasStarted: from `DaemonReading.daemonHasStarted`, whose row is
-    ///   read first for exactly this reason. [LAW:no-ambient-temporal-coupling]
-    static func keyboardSetupAssistant(answered: Bool, daemonHasStarted: Bool, installation: Installation) -> Requirement {
+    /// - Parameter daemon: the same reading the Daemon row above is built from, and not a
+    ///   flag lifted off it, so this row cannot say a daemon started while that one says
+    ///   none answered. [LAW:one-source-of-truth] [LAW:no-ambient-temporal-coupling]
+    static func keyboardSetupAssistant(answered: Bool, daemon: DaemonReading, installation: Installation) -> Requirement {
         Requirement(
             name: Row.keyboardSetupAssistant.rawValue,
             reads: answered ? "answered for the virtual keyboard" : "will ask on first use",
-            step: answered ? nil : keyboardSetupAssistantStep(daemonHasStarted: daemonHasStarted, installation: installation))
+            step: answered ? nil : keyboardSetupAssistantStep(daemonHasStarted: daemon.daemonHasStarted, installation: installation))
     }
 
     /// Both arms open the same way, because the reader needs the same fact either way: the

@@ -39,6 +39,27 @@ import Testing
         #expect(Set(steps).count == steps.count)
     }
 
+    /// What each unmet state sends a reader to do, state by state: the steps being distinct
+    /// says nothing about any one of them being the right one.
+    @Test func eachUnmetDriverStateSendsTheReaderToItsOwnFix() throws {
+        let expected: [DriverState: [String]] = [
+            .absent: [DriverPackage.version, "scripts/virtual-hid-driver install", "vhid's pkg"],
+            .installedInactive: ["\(DriverProbe.managerExecutable) activate"],
+            .awaitingApproval: ["Login Items & Extensions", DriverProbe.bundleID],
+            .disabled: ["switched off", "Login Items & Extensions", DriverProbe.bundleID],
+            .pendingReboot: ["Restart the Mac"],
+            .residue: ["scripts/virtual-hid-driver remove", "scripts/virtual-hid-driver install"],
+            .unknown: ["vhid driver state"],
+        ]
+        #expect(Set(expected.keys) == Set(DriverState.allCases.filter { !Requirement.driverExtension($0).met }))
+        for (state, phrases) in expected {
+            let step = try #require(Requirement.driverExtension(state).step)
+            for phrase in phrases {
+                #expect(step.contains(phrase), "\(state) does not say \(phrase)")
+            }
+        }
+    }
+
     /// The click only a person can give names the pane and the extension it is given to.
     @Test func awaitingApprovalNamesThePaneAndTheExtension() throws {
         let step = try #require(Requirement.driverExtension(.awaitingApproval).step)
@@ -58,27 +79,46 @@ import Testing
 
     @Test func theJobRowIsMetExactlyWhenTheJobHoldsTheService() {
         for standing in JobStanding.allCases {
-            let row = Requirement.launchdJob(standing, installation: Self.installation)
-            #expect(row.met == (standing == .holdingTheService), "\(standing)")
-            #expect(row.name == "launchd job")
+            for daemon in Self.daemonReadings {
+                let row = Requirement.launchdJob(standing, daemon: daemon, installation: Self.installation)
+                #expect(row.met == (standing == .holdingTheService), "\(standing) \(daemon)")
+                #expect(row.name == "launchd job")
+            }
+        }
+    }
+
+    /// No job under this label while something answers the service is a job under another
+    /// label holding it - and loading this installation's own job would lose to it, exit 0
+    /// and no endpoint. So the step finds the holder and never loads anything.
+    @Test func noJobWhileSomethingHoldsTheServiceFindsTheHolderInsteadOfLoadingAJob() throws {
+        for daemon in Self.daemonReadings where daemon.someoneHoldsTheService {
+            let row = Requirement.launchdJob(.noJob, daemon: daemon, installation: Self.installation)
+            #expect(row.reads == "no job, and something else holds the service", "\(daemon)")
+            let step = try #require(row.step)
+            #expect(step.contains("grep -lF -- '>com.example.doctor-test<' /Library/LaunchDaemons/*.plist"))
+            #expect(!step.contains("bootstrap"), "\(daemon)")
+        }
+        for daemon in Self.daemonReadings where !daemon.someoneHoldsTheService {
+            #expect(Requirement.launchdJob(.noJob, daemon: daemon, installation: Self.installation).step?.contains("bootstrap") == true)
         }
     }
 
     /// No job: the step writes, enables and loads the plist under this installation's own
     /// label, and names the service that label must carry.
     @Test func noJobLoadsThisInstallationsOwnPlist() throws {
-        let step = try #require(Requirement.launchdJob(.noJob, installation: Self.installation).step)
+        let step = try #require(Requirement.launchdJob(.noJob, daemon: .unreachable(reason: "4099"), installation: Self.installation).step)
         #expect(step.contains("scripts/launchd-plist com.example.doctor-test"))
         #expect(step.contains("sudo launchctl bootstrap system /Library/LaunchDaemons/com.example.doctor-test.plist"))
         #expect(step.contains("sudo launchctl enable system/com.example.doctor-test"))
     }
 
-    /// Another holder is found, not guessed at: both places it can be are searched for the
-    /// service's own name.
+    /// Another holder is found, not guessed at: every plist is searched for the service's own
+    /// name, as a fixed string.
     @Test func anotherHolderIsSearchedForByTheServiceName() throws {
-        let step = try #require(Requirement.launchdJob(.anotherJobHoldsTheService, installation: Self.installation).step)
-        #expect(step.contains("grep -l '>com.example.doctor-test<' /Library/LaunchDaemons/*.plist"))
-        #expect(step.contains("pgrep -fl vhidd"))
+        let step = try #require(Requirement.launchdJob(.anotherJobHoldsTheService, daemon: .silent(reason: "x"), installation: Self.installation).step)
+        #expect(step.contains("grep -lF -- '>com.example.doctor-test<' /Library/LaunchDaemons/*.plist"))
+        // A search of processes lists this job's own daemon, running without the endpoint.
+        #expect(!step.contains("pgrep"))
     }
 
     // MARK: - the daemon
@@ -95,8 +135,8 @@ import Testing
         }
     }
 
-    /// Each way of not answering carries what the call said, and sends the reader to this
-    /// installation's own log.
+    /// Each way of not answering carries what the call said, and sends the reader where the
+    /// reason is: this installation's own log, when there is a daemon to have written it.
     @Test func eachWayOfNotAnsweringQuotesTheCallAndThisInstallationsLog() throws {
         for reading in Self.daemonReadings where !Requirement.daemon(reading, installation: Self.installation).met {
             let step = try #require(Requirement.daemon(reading, installation: Self.installation).step)
@@ -105,7 +145,14 @@ import Testing
             case .answered, .refusedThisSignature: ""
             }
             #expect(step.contains(said), "\(reading)")
-            #expect(step.contains("subsystem == \"com.example.doctor-test\""), "\(reading)")
+            // Nothing holding the service leaves no daemon whose log could say why: the
+            // launchd row does, or the two readings disagree and a second look is the step.
+            if case .unreachable = reading {
+                #expect(step.contains(Requirement.Row.launchdJob.rawValue))
+                #expect(step.contains("run doctor again"))
+            } else {
+                #expect(step.contains("subsystem == \"com.example.doctor-test\""), "\(reading)")
+            }
         }
     }
 
@@ -172,8 +219,8 @@ import Testing
 
     @Test func theAssistantRowIsMetExactlyWhenTheAnswerIsOnDisk() {
         for answered in [false, true] {
-            for started in [false, true] {
-                let row = Requirement.keyboardSetupAssistant(answered: answered, daemonHasStarted: started, installation: Self.installation)
+            for daemon in Self.daemonReadings {
+                let row = Requirement.keyboardSetupAssistant(answered: answered, daemon: daemon, installation: Self.installation)
                 #expect(row.met == answered)
             }
         }
@@ -182,7 +229,7 @@ import Testing
     /// With a daemon started, the filing has had its chance and failed, so the step sends
     /// the reader to the log it failed in - never to wait.
     @Test func anUnansweredAssistantAfterADaemonStartedSendsTheReaderToTheLog() throws {
-        let step = try #require(Requirement.keyboardSetupAssistant(answered: false, daemonHasStarted: true, installation: Self.installation).step)
+        let step = try #require(Requirement.keyboardSetupAssistant(answered: false, daemon: .answered(holder: nil), installation: Self.installation).step)
         #expect(step.contains("filing is what failed"))
         #expect(step.contains("subsystem == \"com.example.doctor-test\""))
         #expect(!step.contains("clears once"))
@@ -190,7 +237,7 @@ import Testing
 
     /// With no daemon started yet, nothing has failed: the answer is filed when one starts.
     @Test func anUnansweredAssistantBeforeAnyDaemonWaitsOnTheDaemon() throws {
-        let step = try #require(Requirement.keyboardSetupAssistant(answered: false, daemonHasStarted: false, installation: Self.installation).step)
+        let step = try #require(Requirement.keyboardSetupAssistant(answered: false, daemon: .unreachable(reason: "4099"), installation: Self.installation).step)
         #expect(step.contains("clears once a daemon"))
         #expect(!step.contains("log show"))
     }
@@ -209,6 +256,27 @@ import Testing
         }
     }
 
+    // MARK: - names pasted into commands
+
+    /// A name the shell would read differently is quoted so it reads back exactly; vhid's
+    /// own names, which hold nothing special, stay bare.
+    @Test func aNameIsQuotedOnlyWhenTheShellWouldReadItDifferently() {
+        #expect(shellQuoted("ai.promptctl.vhid.vhidd.dev") == "ai.promptctl.vhid.vhidd.dev")
+        #expect(shellQuoted("com.a'b") == #"'com.a'\''b'"#)
+        #expect(shellQuoted("a$b") == "'a$b'")
+        #expect(shellQuoted("") == "''")
+    }
+
+    /// A service holding a character XML reserves is searched for as the plist spells it,
+    /// and a quote in it cannot end the quoting around the log predicate.
+    @Test func stepsSearchForTheNameAsThePlistSpellsItAndQuoteThePredicate() throws {
+        let odd = Installation(service: "com.a&b'c")!
+        let job = try #require(Requirement.launchdJob(.anotherJobHoldsTheService, daemon: .silent(reason: "x"), installation: odd).step)
+        #expect(job.contains(#"grep -lF -- '>com.a&amp;b'\''c<'"#))
+        let log = try #require(Requirement.daemon(.silent(reason: "x"), installation: odd).step)
+        #expect(log.contains(#"--predicate 'subsystem == "com.a&b'\''c"'"#))
+    }
+
     // MARK: - the list
 
     /// A reading that could not be taken stays in the list as an unmet row, carrying why.
@@ -217,7 +285,17 @@ import Testing
         let row = Requirement.unreadable(.launchdJob, Refused())
         #expect(!row.met)
         #expect(row.name == "launchd job")
-        #expect(row.step == "launchctl exited 113")
+        #expect(row.reads == "could not be read: launchctl exited 113")
+        #expect(row.step?.contains("Run doctor again") == true)
+    }
+
+    /// A failure with nothing to say still reads as a failure, and one that says several
+    /// lines stays on its row's one line.
+    @Test func anUnreadableRowSaysSomethingWhateverTheErrorSaid() {
+        struct Silent: Error, CustomStringConvertible { var description: String { "" } }
+        struct Wordy: Error, CustomStringConvertible { var description: String { "first\nsecond" } }
+        #expect(Requirement.unreadable(.daemon, Silent()).reads == "could not be read, and the failure gave no reason")
+        #expect(Requirement.unreadable(.daemon, Wordy()).reads == "could not be read: first; second")
     }
 
     /// Ready means every row met, and one unmet row anywhere is enough to say not.
@@ -226,7 +304,40 @@ import Testing
         let unmet = Requirement.devices(.answered(holder: 1))
         #expect(Readiness([met, met]).ready)
         #expect(!Readiness([met, unmet, met]).ready)
-        #expect(Readiness([]).ready)
+    }
+
+    /// The list from readings is every row, once, in `Row` order - whatever the readings
+    /// said, including the ones that could not be taken. A step that says "the row above"
+    /// is only true of a list in that order.
+    @Test func theListFromReadingsIsEveryRowOnceInOrder() {
+        struct Failed: Error {}
+        let readings: [(Result<DriverState, any Error>, Result<JobStanding, any Error>, Result<Bool, any Error>)] = [
+            (.success(.running), .success(.holdingTheService), .success(true)),
+            (.failure(Failed()), .failure(Failed()), .failure(Failed())),
+        ]
+        for (driver, job, answered) in readings {
+            for daemon in Self.daemonReadings {
+                let list = Readiness(installation: Self.installation, driver: driver, job: job, daemon: daemon,
+                                     keyboardSetupAssistantAnswered: answered)
+                #expect(list.requirements.map(\.name) == Requirement.Row.allCases.map(\.rawValue))
+            }
+        }
+    }
+
+    /// A Mac where every reading is the working one is ready, and the list says so.
+    @Test func aWorkingMacIsReady() {
+        let list = Readiness(installation: Self.installation, driver: .success(.running), job: .success(.holdingTheService),
+                             daemon: .answered(holder: nil), keyboardSetupAssistantAnswered: .success(true))
+        #expect(list.ready)
+    }
+
+    /// A reading that could not be taken becomes that row's unreadable, never a missing row.
+    @Test func aFailedReadingBecomesItsOwnRowUnread() {
+        struct Failed: Error, CustomStringConvertible { var description: String { "no" } }
+        let list = Readiness(installation: Self.installation, driver: .success(.running), job: .failure(Failed()),
+                             daemon: .answered(holder: nil), keyboardSetupAssistantAnswered: .success(true))
+        #expect(!list.ready)
+        #expect(list.requirements[1].reads == "could not be read: no")
     }
 
     /// Every row printed, met ones included, each step indented under its row.

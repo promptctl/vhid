@@ -73,4 +73,17 @@ public enum DaemonReading: Sendable, Hashable {
         case .unreachable, .silent, .failed: false
         }
     }
+
+    /// Whether something holds the service - answering, refusing, or holding it silent.
+    ///
+    /// Asked of a label launchd has no job under, where a yes means a job under some other
+    /// label holds this service. A failure this build cannot classify answers no: nothing
+    /// it said is known to come from a holder, and a no leaves the launchd row saying only
+    /// what launchd itself said. [LAW:no-silent-failure]
+    public var someoneHoldsTheService: Bool {
+        switch self {
+        case .answered, .refusedThisSignature, .silent: true
+        case .unreachable, .failed: false
+        }
+    }
 }
