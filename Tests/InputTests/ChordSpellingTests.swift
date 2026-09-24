@@ -57,6 +57,12 @@ import Input
         #expect(try KeyChord(spelled: "1", on: Self.us).key == Key(rawValue: UInt16(kVK_ANSI_1)))
     }
 
+    /// A line break is Return however it is written, as it is when text is typed.
+    @Test(arguments: ["\n", "\r", "\r\n"])
+    func aLineBreakIsReturn(term: String) throws {
+        #expect(try KeyChord(spelled: "leftCommand+" + term, on: Self.us).key == Key(rawValue: UInt16(kVK_Return)))
+    }
+
     @Test func aNamedKeyNeedsNoLayoutCharacter() throws {
         #expect(try KeyChord(spelled: "return", on: Self.us) == KeyChord(key: Key(rawValue: UInt16(kVK_Return))))
         #expect(try KeyChord(spelled: "leftShift+leftCommand+left", on: Self.us)

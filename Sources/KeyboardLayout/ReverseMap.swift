@@ -84,13 +84,15 @@ extension KeyboardLayout {
     /// The keys `everyKey` asks, less the keypad: a keypad key is a key of its own, named by
     /// its code, and never the one a character means - US types `*` on keypad * with nothing
     /// held, and `*` on the main keys is Shift and 8. A key that is dead on this layer types
-    /// nothing by itself, so it answers for no character. [LAW:one-source-of-truth]
+    /// nothing by itself, so it answers for no character. Read as `typing` reads text, so
+    /// Return is the `\n` a caller writes rather than the `\r` the layout answers with.
+    /// [LAW:one-source-of-truth]
     static func keys(of layout: UnsafePointer<UCKeyboardLayout>, on layer: Layer) -> [Character: UInt16] {
         let keyboardType = UInt32(LMGetKbdType())
         var keys: [Character: UInt16] = [:]
         for key in pressable where !key.usage.isKeypad {
             var nothingPending: UInt32 = 0
-            if let character = one(translate(layout, key.code, layer.modifierState, keyboardType, &nothingPending)), keys[character] == nil {
+            if let character = one(normalized(translate(layout, key.code, layer.modifierState, keyboardType, &nothingPending))), keys[character] == nil {
                 keys[character] = key.code
             }
         }

@@ -132,9 +132,10 @@ public struct KeyboardLayout: Sendable {
     /// on `layer`, or nil when no one key does - a character reached through Shift, Option
     /// or a dead key included. The lowest key code wins when two do.
     public func key(typing character: Character, on layer: Layer) -> UInt16? {
+        guard let character = Self.normalized(String(character)).first else { return nil }
         switch layer {
-        case .plain: plainKeys[character]
-        case .command: commandKeys[character]
+        case .plain: return plainKeys[character]
+        case .command: return commandKeys[character]
         }
     }
 
@@ -191,7 +192,7 @@ public struct KeyboardLayout: Sendable {
     /// both come back from the screen as a newline. A caller comparing what it asked for
     /// against what it reads would find a mismatch in a run that typed perfectly.
     /// [LAW:parse-dont-validate]
-    private static func normalized(_ text: String) -> String {
+    static func normalized(_ text: String) -> String {
         text.precomposedStringWithCanonicalMapping
             .replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
