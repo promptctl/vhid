@@ -8,7 +8,7 @@ import Pointing
 
 /// One verb as an MCP tool: what a client is shown, and what a call does.
 ///
-/// [LAW:one-type-per-behavior] Eight tools and one type. What differs between them is a
+/// [LAW:one-type-per-behavior] Every tool, one type. What differs between them is a
 /// name, a sentence, a list of parameters and a verb to run, and all four are values.
 struct VerbTool: Sendable {
     let tool: Tool
@@ -46,7 +46,7 @@ struct VerbTool: Sendable {
     }
 }
 
-/// The eight tools, in the order a client lists them.
+/// Every tool, in the order a client lists them.
 ///
 /// Each is a CLI verb's core called with arguments read from JSON rather than from argv,
 /// so a tool and its verb cannot come to do different things. [LAW:one-source-of-truth]

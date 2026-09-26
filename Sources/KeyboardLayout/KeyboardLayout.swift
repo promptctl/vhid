@@ -145,7 +145,7 @@ public struct KeyboardLayout: Sendable {
     /// layouts it types what the key types with nothing held, but a layout can carry a key
     /// map of its own for Command, and shortcuts are matched on that map. Measured on this
     /// Mac: Dvorak - QWERTY ⌘ types `v` on key code 47 with nothing held and `.` with
-    /// Command, and `v` with Command on key code 9, which is the key Command-V presses. Russian
+    /// Command, and `v` with Command on key code 9, which is the key a Command-V shortcut fires on. Russian
     /// types `м` on key code 9 and `v` with Command held. [LAW:types-are-the-program]
     public enum Layer: Sendable, CustomStringConvertible {
         case plain

@@ -9,7 +9,7 @@ import Testing
 /// What the MCP server offers, and what it says to arguments it will not act on. No
 /// daemon: every refusal here is one that comes back before a connection is made.
 @Suite struct McpTests {
-    @Test func theEightToolsAreListedInOrder() {
+    @Test func theToolsAreListedInOrder() {
         #expect(Tools.all.map(\.tool.name) == ["type", "press", "click", "move", "scroll", "drag", "cursor", "doctor"])
     }
 
