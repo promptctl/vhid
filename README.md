@@ -32,6 +32,15 @@ boundary rather than a rule someone has to remember.
 The cost of that isolation is this paragraph: `make test` at the root does not run
 `eyes`' tests, and nothing but this table says so.
 
+## Scope
+
+vhid's core is input that macOS sees as hardware, from a virtual keyboard and mouse;
+its sibling package `eyes` reads the screen so that input can be aimed. A feature that
+works through the devices fits naturally. A feature that reaches around them — the
+clipboard, posting synthetic events, app-specific APIs — belongs here only when the case
+for it is overwhelmingly compelling, close to a requirement, *and* it would make no sense
+as a separate project.
+
 ## The CLI
 
 ```sh
