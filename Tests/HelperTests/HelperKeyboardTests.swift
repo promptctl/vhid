@@ -155,11 +155,14 @@ import Testing
         withExtendedLifetime(far) {}
     }
 
-    /// A service that is gone is unreachable, said on the first call, with the
+    /// A service nobody holds is unreachable, said on the first call, with the
     /// connection's own domain and code: an invalid connection, not a refused one.
-    @Test func aServiceThatWentAwayIsUnreachable() async throws {
-        let (helper, far) = helper(.acknowledge)
-        far.listener.invalidate()
+    ///
+    /// A Mach name nothing registers, not an anonymous listener invalidated under the
+    /// connection: XPC answers that one 4097 or 4099 by timing, and 4097 is what doctor
+    /// reads as a refusal.
+    @Test func aServiceNobodyHoldsIsUnreachable() async throws {
+        let helper = HelperConnection(connection: NSXPCConnection(machServiceName: "ai.promptctl.vhid.tests.nobody", options: .privileged), replyTimeout: .seconds(20))
         let keyboard = helper.keyboard
         let unreachable = await #expect(throws: HelperConnection.Unreachable.self) { try await blocking { try keyboard.down(.space) } }
         guard case .connection(let domain, let code, _) = unreachable?.cause else {
