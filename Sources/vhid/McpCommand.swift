@@ -55,7 +55,7 @@ struct McpCommand: AsyncParsableCommand {
             // call the client withdrew is neither: it is thrown as a cancellation, which
             // the SDK answers with nothing, as the MCP spec says a cancelled request is. What
             // the verb said on the way out still goes to stderr, because it can be the one
-            // report that something already happened - a paste's clipboard, replaced.
+            // report of what the verb had already done when it was withdrawn.
             // [LAW:no-silent-failure]
             do {
                 let said = try await turns.take { try await verb.call(request.arguments ?? [:], on: installation) }

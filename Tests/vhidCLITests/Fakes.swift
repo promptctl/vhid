@@ -1,4 +1,3 @@
-import AppKit
 import Input
 import Installations
 import Keystrokes
@@ -77,7 +76,3 @@ extension Installation {
     /// asked about it is never ready, on any Mac.
     static let nobody = Installation(service: "ai.promptctl.vhid.tests.nobody")!
 }
-
-/// A pasteboard of the test's own, never `.general`: the person at this Mac is using
-/// theirs. The caller releases it.
-func scratch() -> NSPasteboard { NSPasteboard(name: NSPasteboard.Name("ai.promptctl.vhid.tests.\(UUID().uuidString)")) }
