@@ -11,13 +11,6 @@ from hardware: no event taps, no Accessibility grant, no window-server synthesis
 is told to click. Which app is in front, whether a dialog is covering it, and whether
 you meant to do this are not its questions to ask.
 
-**What belongs here.** vhid's core is input that macOS sees as hardware, from a virtual
-keyboard and mouse, plus `eyes`, which reads the screen so that input can be aimed. A
-feature that works through the devices fits naturally. A feature that reaches around
-them — the clipboard, synthetic events, app-specific APIs — belongs here only when the
-case for it is overwhelmingly compelling, close to a requirement, *and* it would make no
-sense as a separate project.
-
 Extracted from [low-talker](https://github.com/promptctl/low-talker), whose dictation
 typed through this stack first.
 
@@ -38,6 +31,15 @@ boundary rather than a rule someone has to remember.
 
 The cost of that isolation is this paragraph: `make test` at the root does not run
 `eyes`' tests, and nothing but this table says so.
+
+## Scope
+
+vhid's core is input that macOS sees as hardware, from a virtual keyboard and mouse;
+its sibling package `eyes` reads the screen so that input can be aimed. A feature that
+works through the devices fits naturally. A feature that reaches around them — the
+clipboard, posting synthetic events, app-specific APIs — belongs here only when the case
+for it is overwhelmingly compelling, close to a requirement, *and* it would make no sense
+as a separate project.
 
 ## The CLI
 
