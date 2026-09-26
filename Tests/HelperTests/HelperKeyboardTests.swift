@@ -155,8 +155,10 @@ import Testing
         withExtendedLifetime(far) {}
     }
 
-    /// A service that is gone is unreachable, said on the first call, with the
-    /// connection's own domain and code: an invalid connection, not a refused one.
+    /// A service that went away under an open connection is unreachable, said on the first
+    /// call, with the connection's own domain and code. Which code is XPC's timing to
+    /// choose: invalid, or interrupted if the connection had reached the listener first.
+    /// Doctor asks twice for that reason (`DaemonProbe.reading`).
     @Test func aServiceThatWentAwayIsUnreachable() async throws {
         let (helper, far) = helper(.acknowledge)
         far.listener.invalidate()
@@ -167,7 +169,7 @@ import Testing
             return
         }
         #expect(domain == NSCocoaErrorDomain)
-        #expect(code == NSXPCConnectionInvalid)
+        #expect([NSXPCConnectionInvalid, NSXPCConnectionInterrupted].contains(code))
     }
 
     /// `status` answers who holds the devices and is no act on them: the connection has
