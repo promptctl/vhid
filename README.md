@@ -46,7 +46,6 @@ as a separate project.
 ```sh
 vhid type "hello"
 vhid keys leftCommand+s
-vhid paste "héllo ✅ 日本"
 vhid click 800 500 --button left --times 2
 vhid move 800 500
 vhid scroll 800 500 --vertical 3
@@ -63,9 +62,7 @@ under a point is the caller's to know.
 Which keys make which characters is the console user's keyboard layout, read in the CLI
 rather than in the daemon: macOS answers that question per process, and a root daemon
 asking it is told the US layout whatever the user is typing on. `type` refuses text the
-layout has no keys for; `paste` puts any text in by writing it to the clipboard and
-pressing the layout's Command-V. Its cost is the user's clipboard: the text replaces what
-was there and stays, and nothing puts the old contents back.
+layout has no keys for.
 
 `--service` says which installation to talk to. It defaults to the one the binary was
 built for: the installed copy for the installed CLI, and the development copy for a
@@ -74,7 +71,7 @@ left of or above it has negative ones, which follow `--`.
 
 ## Over MCP
 
-`vhid mcp` serves the same verbs as MCP tools over stdio: `type`, `press`, `paste`, `click`,
+`vhid mcp` serves the same verbs as MCP tools over stdio: `type`, `press`, `click`,
 `move`, `scroll`, `drag`, `cursor` and `doctor`. Point a client at the binary with the one argument:
 
 ```json
@@ -84,8 +81,7 @@ left of or above it has negative ones, which follow `--`.
 Each tool call connects to the daemon and leaves when it returns, so a session holds
 nothing between calls and a `vhid click` from a shell still gets through. Stdout carries
 only JSON-RPC; diagnostics go to stderr. An argument a tool will not act on comes back as
-a tool error naming it, before anything is connected. `paste` costs the user's clipboard
-here as on the command line: the text replaces what was there and stays.
+a tool error naming it, before anything is connected.
 
 ## Installing
 

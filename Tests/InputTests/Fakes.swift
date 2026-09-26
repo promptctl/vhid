@@ -1,4 +1,3 @@
-import AppKit
 import Input
 import Keystrokes
 import Pointing
@@ -200,7 +199,3 @@ final class SteadyGainMouse: Mouse {
 
     var pointer: Pointer { Pointer(mouse: self) { self.position } }
 }
-
-/// A pasteboard of the test's own, so a test never writes to the one the person at this
-/// Mac is using. The caller releases it.
-func scratch() -> NSPasteboard { NSPasteboard(name: NSPasteboard.Name("ai.promptctl.vhid.tests.\(UUID().uuidString)")) }

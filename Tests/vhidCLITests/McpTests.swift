@@ -9,8 +9,8 @@ import Testing
 /// What the MCP server offers, and what it says to arguments it will not act on. No
 /// daemon: every refusal here is one that comes back before a connection is made.
 @Suite struct McpTests {
-    @Test func theNineToolsAreListedInOrder() {
-        #expect(Tools.all.map(\.tool.name) == ["type", "press", "paste", "click", "move", "scroll", "drag", "cursor", "doctor"])
+    @Test func theEightToolsAreListedInOrder() {
+        #expect(Tools.all.map(\.tool.name) == ["type", "press", "click", "move", "scroll", "drag", "cursor", "doctor"])
     }
 
     /// Only cursor and doctor promise to change nothing: cursor reaches no device, and
@@ -78,7 +78,6 @@ import Testing
     @Test func textThatReadsAsADataURLIsRefused() async throws {
         let text = try JSONDecoder().decode(Value.self, from: Data(#""data:,hi""#.utf8))
         #expect(await Self.refusal(Tools.type, ["text": text])?.hasPrefix("text begins data:") == true)
-        #expect(await Self.refusal(Tools.paste, ["text": text])?.hasPrefix("text begins data:") == true)
     }
 
     @Test func aPlaceNeedsBothCoordinatesAndNothingElse() async {
