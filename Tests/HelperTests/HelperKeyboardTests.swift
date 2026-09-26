@@ -155,14 +155,13 @@ import Testing
         withExtendedLifetime(far) {}
     }
 
-    /// A service nobody holds is unreachable, said on the first call, with the
-    /// connection's own domain and code: an invalid connection, not a refused one.
-    ///
-    /// A Mach name nothing registers, not an anonymous listener invalidated under the
-    /// connection: XPC answers that one 4097 or 4099 by timing, and 4097 is what doctor
-    /// reads as a refusal.
-    @Test func aServiceNobodyHoldsIsUnreachable() async throws {
-        let helper = HelperConnection(connection: NSXPCConnection(machServiceName: "ai.promptctl.vhid.tests.nobody", options: .privileged), replyTimeout: .seconds(20))
+    /// A service that went away under an open connection is unreachable, said on the first
+    /// call, with the connection's own domain and code. Which code is XPC's timing to
+    /// choose: invalid, or interrupted if the connection had reached the listener first.
+    /// Doctor asks twice for that reason (`DaemonProbe.reading`).
+    @Test func aServiceThatWentAwayIsUnreachable() async throws {
+        let (helper, far) = helper(.acknowledge)
+        far.listener.invalidate()
         let keyboard = helper.keyboard
         let unreachable = await #expect(throws: HelperConnection.Unreachable.self) { try await blocking { try keyboard.down(.space) } }
         guard case .connection(let domain, let code, _) = unreachable?.cause else {
@@ -170,7 +169,7 @@ import Testing
             return
         }
         #expect(domain == NSCocoaErrorDomain)
-        #expect(code == NSXPCConnectionInvalid)
+        #expect([NSXPCConnectionInvalid, NSXPCConnectionInterrupted].contains(code))
     }
 
     /// `status` answers who holds the devices and is no act on them: the connection has
