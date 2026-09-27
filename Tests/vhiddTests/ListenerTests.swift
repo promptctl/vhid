@@ -45,8 +45,12 @@ import Testing
             released.signal()
         }
 
+        /// Blocks until the release or ten seconds, so it is called through `blocking`, off
+        /// the cooperative pool the rest of the test runs on. Ten because the bound only
+        /// ends a hang: on a loaded CI runner this test has taken six seconds, and at two
+        /// the release was missed twice (vhid-ci-flake-80e).
         func awaitRelease() -> Bool {
-            released.wait(timeout: .now() + .seconds(2)) == .success
+            released.wait(timeout: .now() + .seconds(10)) == .success
         }
     }
 
@@ -111,17 +115,17 @@ import Testing
     /// The first client going away releases everything, and the devices are then another
     /// client's. The release comes before the devices are let go, and the test can see
     /// only the first of the two, so the next client's admission is asked for until it
-    /// comes or two seconds pass.
+    /// comes or ten seconds pass.
     @Test func aClientGoingAwayReleasesEverythingAndFreesTheDevices() async throws {
         let served = try serve()
         let first = client(of: served)
         let keyboard = first.helper.keyboard
         try await blocking { try keyboard.down(.leftShift) }
         first.connection.invalidate()
-        #expect(served.devices.awaitRelease())
+        #expect(try await blocking { [devices = served.devices] in devices.awaitRelease() })
         #expect(served.devices.releasedBecause.first == "a client went away")
 
-        let deadline = ContinuousClock.now + .seconds(2)
+        let deadline = ContinuousClock.now + .seconds(10)
         var next = try await admitted(served, pressing: .space)
         while !next, ContinuousClock.now < deadline {
             next = try await admitted(served, pressing: .space)
