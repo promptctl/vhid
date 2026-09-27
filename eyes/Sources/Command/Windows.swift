@@ -24,27 +24,35 @@ struct Windows: AsyncParsableCommand {
     /// screen full of them. It arrives from `--owner "$APP"` with `APP` unset, which is a
     /// mistake worth a sentence rather than a confident empty list.
     func validate() throws {
+        try Self.refuseEmpty(owner, named: "--owner")
+    }
+
+    /// One wording for the command line and the MCP tool alike, each naming the argument
+    /// the way its caller spelled it. [LAW:single-enforcer]
+    static func refuseEmpty(_ owner: String?, named name: String) throws {
         guard owner?.isEmpty != true else {
             throw ValidationError(
-                "--owner was given an empty value, which would filter out every window. "
-                    + "Leave --owner off to list them all. (A shell variable that did not expand?)"
+                "\(name) was given an empty value, which would filter out every window. "
+                    + "Leave \(name) off to list them all. (A shell variable that did not expand?)"
             )
         }
     }
 
     @MainActor
     func run() async throws {
-        let listing = try Geometry.onScreen()
-        // The filter always runs; an absent --owner is a predicate that admits everything
+        print(Self.report(try Geometry.onScreen(), owner: owner))
+    }
+
+    /// The scope line and a row per window: what the verb prints and what the MCP tool
+    /// answers, from one function, so the two cannot report differently.
+    /// [LAW:one-source-of-truth]
+    static func report(_ listing: WindowListing, owner: String?) -> String {
+        // The filter always runs; an absent owner is a predicate that admits everything
         // rather than a branch that skips the operation. [LAW:dataflow-not-control-flow]
         let shown = listing.windows.filter { window in
             owner.map { window.owner?.localizedCaseInsensitiveContains($0) ?? false } ?? true
         }
-
-        print(Self.scope(shown: shown.count, listing: listing))
-        for window in shown {
-            print(Self.row(window))
-        }
+        return ([scope(shown: shown.count, listing: listing)] + shown.map(row)).joined(separator: "\n")
     }
 
     /// The scope line, printed before the findings, because every reading below it is
