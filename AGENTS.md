@@ -5,10 +5,10 @@
 Read these README.md sections first; they are the source, not this file:
 
 - [Two packages](README.md#two-packages) — `.` and `eyes/` are separate SwiftPM packages, kept apart on purpose.
-- [Scope](README.md#scope) — what belongs in vhid and what does not.
-- [Building](README.md#building) — build with `make`, not bare `swift build`, or the daemon refuses the binary.
+- [Scope](README.md#scope) — a feature that reaches around the devices (clipboard, synthetic events, app APIs) needs an overwhelming case.
+- [Building](README.md#building) — use `make` and `make test`; bare `swift build` or `swift test` leaves the tree ad hoc signed and the daemon refuses it.
 
-A green `make test` at the root says nothing about `eyes/`. If you touched `eyes/`, run `cd eyes && swift build && swift test`.
+A green `make test` at the root says nothing about `eyes/`; its tests run separately, as the Two packages table shows.
 
 <!-- BEGIN LIT INTEGRATION -->
 ## lit Agent-Native Workflow

@@ -30,7 +30,7 @@ linking the two, and nothing in review catches that line, so the separation is a
 boundary rather than a rule someone has to remember.
 
 The cost of that isolation is this paragraph: `make test` at the root does not run
-`eyes`' tests, and nothing but this table says so.
+`eyes`' tests.
 
 ## Scope
 
