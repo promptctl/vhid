@@ -71,7 +71,7 @@ daemon=$x/vhid.pkg/Payload/Library/LaunchDaemons/$service.plist
 if [ -f "$daemon" ]; then
   label=$(plist "$daemon" Label)
   [ "$label" = "$service" ] || fail "the job's Label is '$label', not '$service'"
-  keys=$(plutil -extract MachServices xml1 -o - "$daemon" 2>/dev/null | sed -n 's|.*<key>\(.*\)</key>.*|\1|p')
+  keys=$(plutil -extract MachServices xml1 -o - "$daemon" 2>/dev/null | sed -n 's|.*<key>\(.*\)</key>.*|\1|p' || true)
   [ "$keys" = "$service" ] || fail "the job's MachServices keys are '$(tr '\n' ' ' <<<"$keys")', not only '$service'"
   count=$(plist "$daemon" ProgramArguments)
   [[ $count =~ ^[0-9]+$ ]] || count=0
