@@ -1,3 +1,4 @@
+import AppKit
 import ArgumentParser
 import Eyes
 import Foundation
@@ -12,7 +13,7 @@ import Foundation
 struct Windows: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "windows",
-        abstract: "List the on-screen windows, front to back, with their layer and bounds."
+        abstract: "List the on-screen windows, front to back, with their layer and bounds, and the frontmost application."
     )
 
     @Option(help: "Only windows owned by applications whose name contains this.")
@@ -40,19 +41,31 @@ struct Windows: AsyncParsableCommand {
 
     @MainActor
     func run() async throws {
-        print(Self.report(try Geometry.onScreen(), owner: owner))
+        // Frontmost first: an activation lands before the listing that reflects it.
+        let frontmost = Frontmost.now()
+        print(Self.report(try Geometry.onScreen(), owner: owner, frontmost: frontmost))
     }
 
     /// The scope line and a row per window: what the verb prints and what the MCP tool
     /// answers, from one function, so the two cannot report differently.
     /// [LAW:one-source-of-truth]
-    static func report(_ listing: WindowListing, owner: String?) -> String {
+    ///
+    /// The frontmost application's rows are marked by its pid, not found by row order:
+    /// menus and the Dock sit on higher layers, so the first row is often not its window.
+    static func report(_ listing: WindowListing, owner: String?, frontmost: Frontmost?) -> String {
         // The filter always runs; an absent owner is a predicate that admits everything
         // rather than a branch that skips the operation. [LAW:dataflow-not-control-flow]
         let shown = listing.windows.filter { window in
             owner.map { window.owner?.localizedCaseInsensitiveContains($0) ?? false } ?? true
         }
-        return ([scope(shown: shown.count, listing: listing)] + shown.map(row)).joined(separator: "\n")
+        let rows = shown.map { row($0, front: $0.pid == frontmost?.pid) }
+        // Judged against the whole listing too, so a window the owner filter hid is not
+        // reported as a window that is not on screen.
+        let front = frontmost.map { app -> (Frontmost, FrontRows) in
+            let owns = { (w: Window) in w.pid == app.pid }
+            return (app, shown.contains(where: owns) ? .shown : listing.windows.contains(where: owns) ? .filtered : .none)
+        }
+        return ([scope(shown: shown.count, listing: listing, frontmost: front)] + rows).joined(separator: "\n")
     }
 
     /// The scope line, printed before the findings, because every reading below it is
@@ -67,7 +80,10 @@ struct Windows: AsyncParsableCommand {
     ///
     /// Pure, so the sentence a caller has to trust is checked by a test rather than read
     /// off a terminal by eye. [LAW:effects-at-boundaries]
-    static func scope(shown: Int, listing: WindowListing) -> String {
+    ///
+    /// It names the frontmost application whether or not a row of it is shown, because
+    /// that is usually where keystrokes go, and says so when nothing is frontmost.
+    static func scope(shown: Int, listing: WindowListing, frontmost: (app: Frontmost, rows: FrontRows)?) -> String {
         let filtered = listing.windows.count - shown
         let clauses: [String?] = [
             "\(shown) window\(shown == 1 ? "" : "s"), front to back",
@@ -80,15 +96,42 @@ struct Windows: AsyncParsableCommand {
         return clauses.compactMap { $0 }.joined(separator: "; ")
             + ". On screen only: minimized, hidden and other-Space windows were never looked at."
             + " Owner, layer and bounds; titles need Screen Recording."
+            + (frontmost.map { " Frontmost: \($0.app), \($0.rows.rawValue)." }
+                ?? " No application is frontmost.")
+            // Frontmost is not the same as holding the keys, and the line says so rather
+            // than promising where `vhid type` lands. [LAW:no-silent-failure]
+            + " A panel of another process over it (Spotlight, a Save dialog) can hold the keys instead."
     }
 
     /// One window as a row: id, owner, layer, then the rectangle in the coordinates vhid
     /// clicks. Tab-separated because the owner is the one field that can hold a space.
-    static func row(_ window: Window) -> String {
+    /// The frontmost application's rows end in a fifth column, `front`.
+    static func row(_ window: Window, front: Bool = false) -> String {
         // A window whose owning process has no application name is still a window with a
         // place to click; it is named as unnamed rather than left blank, so the column
         // cannot be mistaken for an empty field.
         return "\(window.id)\t\(window.owner ?? "(unnamed)")\tL\(window.layer)"
-            + "\t\(window.frame)"
+            + "\t\(window.frame)" + (front ? "\tfront" : "")
+    }
+
+    /// Where the frontmost application's windows are, of the three things a scope line
+    /// has to tell apart.
+    enum FrontRows: String {
+        case shown = "its rows marked front"
+        case filtered = "its rows hidden by the owner filter"
+        case none = "with no window listed"
+    }
+}
+
+/// The frontmost application: usually where keystrokes go, and nothing eyes chooses.
+struct Frontmost: Sendable, Hashable, CustomStringConvertible {
+    let pid: Int32
+    let name: String?
+
+    var description: String { "\(name ?? "(unnamed)") (pid \(pid))" }
+
+    @MainActor
+    static func now() -> Frontmost? {
+        NSWorkspace.shared.frontmostApplication.map { Frontmost(pid: $0.processIdentifier, name: $0.localizedName) }
     }
 }

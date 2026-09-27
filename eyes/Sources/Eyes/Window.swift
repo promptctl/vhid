@@ -48,8 +48,9 @@ public struct Window: Sendable, Hashable {
 /// windows out of twenty-seven entries and says nothing about the other fifteen is a
 /// narrow answer with no way to tell it from a whole one.
 public struct WindowListing: Sendable, Hashable {
-    /// In the window server's own front-to-back order, which is preserved because the
-    /// first row being the frontmost window is most of what makes this useful.
+    /// In the window server's own front-to-back order, which is compositing order: menus,
+    /// the Dock and the menu bar sit above application windows, so the first row is often
+    /// not the focused application's window.
     public let windows: [Window]
     /// What was left out, by why. Empty when nothing was.
     public let excluded: [WindowExclusion]

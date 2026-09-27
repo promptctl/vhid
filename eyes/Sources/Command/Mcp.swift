@@ -83,11 +83,14 @@ enum EyesTools {
 
     typealias DisplayList = @Sendable () async -> [Display]
 
+    typealias FrontmostApp = @Sendable () async -> Frontmost?
+
     static func all(
         windows listing: @escaping Listing = { try await Geometry.onScreen() },
+        frontmost: @escaping FrontmostApp = { await Frontmost.now() },
         displays: @escaping DisplayList = { Geometry.displays() }
     ) -> [EyesTool] {
-        [windows(listing), Self.displays(displays)]
+        [windows(listing, frontmost: frontmost), Self.displays(displays)]
     }
 
     static func displays(_ list: @escaping DisplayList) -> EyesTool { EyesTool(
@@ -106,7 +109,7 @@ enum EyesTools {
             return Displays.report(await list())
         }) }
 
-    static func windows(_ listing: @escaping Listing) -> EyesTool { EyesTool(
+    static func windows(_ listing: @escaping Listing, frontmost: @escaping FrontmostApp) -> EyesTool { EyesTool(
         tool: Tool(
             name: "windows",
             description: Windows.configuration.abstract
@@ -125,7 +128,8 @@ enum EyesTools {
         call: { given in
             let owner = try string("owner", in: given, only: ["owner"])
             try Windows.refuseEmpty(owner, named: "owner")
-            return Windows.report(try await listing(), owner: owner)
+            let front = await frontmost()
+            return Windows.report(try await listing(), owner: owner, frontmost: front)
         }) }
 
     /// The one optional string argument `name`, refusing any argument not in `taken` and
