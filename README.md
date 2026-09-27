@@ -106,7 +106,9 @@ the Mac and no installer can approve it: open **System Settings > General > Logi
 Extensions**, click the (i) beside **Driver Extensions**, and turn on
 `org.pqrs.Karabiner-DriverKit-VirtualHIDDevice`. The installer's last page says the
 same. `vhid driver state` prints `running` once it is on. Until then the daemon is
-loaded but cannot bring the devices up, and launchd keeps restarting it.
+loaded but cannot bring the devices up: it keeps trying, backing off to once a minute,
+and refuses every verb with `devices not up:` and the reason. Once the driver is on, the
+next attempt brings the devices up with no restart.
 
 The installed CLI talks to the installed daemon by default. A build from this tree talks
 to the development copy, `ai.promptctl.vhid.vhidd.dev`, so the two can run side by side.

@@ -142,3 +142,49 @@ extension DaemonProcess.Effects {
         }
     }
 }
+
+/// How long to wait before each attempt after a failed one: `first`, doubled per failure,
+/// never more than `most`. A pure schedule, so the pace at which the daemon is started and
+/// stopped is a value a test reads rather than a clock it waits on.
+/// [LAW:effects-at-boundaries]
+struct Backoff: Equatable {
+    let first: Duration
+    let most: Duration
+
+    /// The wait after the `failures`th failure in a row, counting from one.
+    func after(_ failures: Int) -> Duration {
+        // Doubled at most 32 times: past that the cap has long since won, and a shift any
+        // wider than a Duration's count would trap.
+        min(first * (1 << min(max(failures - 1, 0), 32)), most)
+    }
+}
+
+extension DaemonProcess.Effects {
+    /// Reaches the devices however long it takes, telling `whenDown` why after every
+    /// attempt that fails and waiting out `backoff` before the next.
+    ///
+    /// [LAW:no-ambient-temporal-coupling] `reach` stops any daemon it started before it
+    /// throws, so every start of the daemon is separated from the one before by a whole
+    /// backoff window: a driver awaiting approval costs one spawn per window, not one per
+    /// launchd restart.
+    func reachEventually(
+        within limit: Duration,
+        backoff: Backoff,
+        pause: (Duration) -> Void,
+        whenDown: (any Error) -> Void,
+        whenLost: @escaping @Sendable (DaemonError, DaemonProcess.Origin) -> Void
+    ) -> DaemonProcess.Reached<Device> {
+        var failures = 0
+        while true {
+            do {
+                return try reach(within: limit, whenLost: whenLost)
+            } catch {
+                failures += 1
+                whenDown(error)
+                let wait = backoff.after(failures)
+                log("could not bring the devices up (\(error)); trying again in \(wait)")
+                pause(wait)
+            }
+        }
+    }
+}
