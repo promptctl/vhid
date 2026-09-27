@@ -24,7 +24,8 @@ struct PlayCommand: AsyncParsableCommand {
         abstract: "Replay a timed script of raw mouse reports from stdin, and print when each went out.",
         discussion: """
             The script is JSON Lines on stdin. The first line is where the cursor starts, reached \
-            before the clock starts: {"to":{"x":800,"y":500}}, in \(Help.place). Every line after it is one report at t_ms milliseconds from the clock's \
+            before the clock starts: {"to":{"x":800,"y":500}}, in \(Help.place). \
+            Every line after it is one report at t_ms milliseconds from the clock's \
             start, in order:
               {"t_ms":0,"down":"left"}               a button down: left, right, middle, or 1 to 32
               {"t_ms":8.3,"move":{"dx":4,"dy":-2}}   relative motion in counts, -127 to 127, uncorrected

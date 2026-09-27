@@ -32,12 +32,7 @@ enum Help {
     static let x = "the x coordinate, in " + place
     static let y = "the y coordinate, in " + place
     static let text = "the text to type: anything the keyboard layout has keys for, dead-key sequences and line breaks included"
-    static let chords = """
-        the chords, pressed in order. A chord is modifier names and one key joined by +, e.g. \
-        leftCommand+s or leftShift+leftCommand+left. A key is a name \
-        (\(KeyChord.namedKeys.keys.sorted().joined(separator: ", "))), the character the layout \
-        types with it (with Command held first, in a chord that holds Command), or a key code written key 0x24
-        """
+    static let chords = "the chords, pressed in order"
     static let button = "which button: left, right, middle, or a number from 1 to 32"
     static let times = "how many presses without moving between them, at least 1"
     static let vertical = "wheel ticks, positive rolling the wheel away from the hand. With macOS's Natural scrolling on, as it is by default, that moves the view toward the end of what is scrolled, so the content slides up; with it off, toward the start. Negative is the other way"
@@ -63,6 +58,11 @@ enum Help {
         """, commandLine: ["Text starting with - follows --, as in: vhid type -- \"-5 degrees\"."])
 
     static let press = VerbHelp(name: "press", abstract: "Press chords on the virtual keyboard, one after another.", discussion: """
+        A chord is modifier names and one key joined by +, e.g. leftCommand+s or \
+        leftShift+leftCommand+left. A key is a name (\(KeyChord.namedKeys.keys.sorted().joined(separator: ", "))), \
+        the character the layout types with it (with Command held first, in a chord that holds Command), \
+        or a key code written key 0x24.
+
         Which key a letter is on is the layout's to say - s is key code 1 on US and 41 on Dvorak - so \
         a chord is read against the console user's layout, in this process rather than in the daemon.
 
