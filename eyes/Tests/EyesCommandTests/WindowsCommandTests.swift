@@ -42,7 +42,7 @@ import Testing
     }
 
     /// The frontmost application is named even with no row shown, and the scope tells a
-    /// window the owner filter hid from an application with no window on screen.
+    /// window the owner filter hid from an application with no window listed.
     @Test func aFrontmostApplicationWithNoRowShownIsStillNamed() {
         let listing = WindowListing(windows: [window(id: 1, owner: "Safari"), window(id: 2, owner: "Terminal")], excluded: [])
         let absent = Windows.report(listing, owner: nil, frontmost: Frontmost(pid: 77, name: "Float"))

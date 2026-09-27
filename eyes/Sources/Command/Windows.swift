@@ -82,7 +82,7 @@ struct Windows: AsyncParsableCommand {
     /// off a terminal by eye. [LAW:effects-at-boundaries]
     ///
     /// It names the frontmost application whether or not a row of it is shown, because
-    /// that is where keystrokes go, and says so when nothing is frontmost.
+    /// that is usually where keystrokes go, and says so when nothing is frontmost.
     static func scope(shown: Int, listing: WindowListing, frontmost: (app: Frontmost, rows: FrontRows)?) -> String {
         let filtered = listing.windows.count - shown
         let clauses: [String?] = [
