@@ -42,8 +42,11 @@ public enum DaemonReading: Sendable, Hashable {
     /// The daemon answered, and said which process holds the devices, if any.
     ///
     /// An answer is also the proof that both devices are up: while they are down the
-    /// daemon refuses the call with the reason, which reads as `failed`.
+    /// daemon refuses the call with the reason, which reads as `devicesDown`.
     case answered(holder: Int32?)
+    /// The daemon answered, admitting this vhid, and said its devices are not up and why -
+    /// an unapproved driver extension, usually. It keeps trying, and serves once they are.
+    case devicesDown(reason: String)
     /// The daemon ended this process's connection, twice (NSCocoaErrorDomain 4097 at the
     /// client).
     ///
@@ -78,7 +81,7 @@ public enum DaemonReading: Sendable, Hashable {
     /// [LAW:types-are-the-program]
     public var daemonHasStarted: Bool {
         switch self {
-        case .answered, .refusedThisVhid: true
+        case .answered, .devicesDown, .refusedThisVhid: true
         case .unreachable, .silent, .failed: false
         }
     }
@@ -91,7 +94,7 @@ public enum DaemonReading: Sendable, Hashable {
     /// what launchd itself said. [LAW:no-silent-failure]
     public var someoneHoldsTheService: Bool {
         switch self {
-        case .answered, .refusedThisVhid, .silent: true
+        case .answered, .devicesDown, .refusedThisVhid, .silent: true
         case .unreachable, .failed: false
         }
     }

@@ -147,6 +147,9 @@ enum NotOnTheDevice: Error, CustomStringConvertible {
 /// process-wide installation there would run its initializer against the test runner's
 /// own arguments, find no `--service`, and end the test process with the refusal it is
 /// written to make. [LAW:decomposition]
+///
+/// Devices that are not up cross under their own code, which is how doctor tells that
+/// refusal from the rest. [LAW:types-are-the-program]
 func refusal(_ error: any Error) -> NSError {
-    NSError(domain: Installation.refusalDomain, code: 1, userInfo: [NSLocalizedDescriptionKey: "\(error)"])
+    NSError(domain: Installation.refusalDomain, code: error is Readiness.Down ? Installation.devicesDownCode : 1, userInfo: [NSLocalizedDescriptionKey: "\(error)"])
 }

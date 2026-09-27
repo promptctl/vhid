@@ -60,4 +60,14 @@ import VirtualHID
         #expect(!readiness.lost(DaemonError.closed, in: earlier))
         #expect(try readiness.devices() === devices)
     }
+
+    /// An attempt that failed keeps its reason: its connection closing afterwards is the
+    /// failure's consequence, not a new cause.
+    @Test func aLateLossDoesNotReplaceWhyTheAttemptFailed() {
+        let readiness = Readiness()
+        let attempt = readiness.begin()
+        readiness.failed(DaemonError.silent)
+        #expect(!readiness.lost(DaemonError.closed, in: attempt))
+        #expect(refusal(readiness) == "devices not up: \(DaemonError.silent)")
+    }
 }

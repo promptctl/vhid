@@ -117,6 +117,7 @@ do {
                 devices.releaseEverything(because: "starting")
                 return devices
             },
+            now: { .now },
             pause: { Thread.sleep(forTimeInterval: $0.seconds) }
         )
     }

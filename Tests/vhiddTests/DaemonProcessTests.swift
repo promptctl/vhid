@@ -145,7 +145,7 @@ import VirtualHID
         let readiness = Readiness()
         var downWhileWaiting: [Bool] = []
         #expect(throws: Stop.self) {
-            try logged.keepUp(within: .milliseconds(20), backoff: Backoff(first: .seconds(2), most: .seconds(5)), readiness: readiness, serve: { _ in RecordingDevices() }) { wait in
+            try logged.keepUp(within: .milliseconds(20), backoff: Backoff(first: .seconds(2), most: .seconds(5)), readiness: readiness, serve: { _ in RecordingDevices() }, now: { .now }) { wait in
                 events.append("wait \(wait)")
                 downWhileWaiting.append((try? readiness.devices()) == nil)
                 if events.filter({ $0.hasPrefix("wait") }).count == 3 { throw Stop() }
@@ -156,8 +156,9 @@ import VirtualHID
     }
 
     /// Devices whose connection is lost are taken down, the daemon started for them is
-    /// stopped, and after the first wait they are reached and served again - the process
-    /// never ends over it.
+    /// stopped, and after a wait they are reached and served again - the process never
+    /// ends over it. Devices lost as soon as they came up count as failures, so the wait
+    /// grows rather than restarting the daemon every two seconds.
     @Test func lostDevicesAreStoppedAndBroughtUpAgain() {
         let world = World(connections: [.failure(.noSocket(path: "nowhere")), .success(Device())])
         let readiness = Readiness()
@@ -170,16 +171,31 @@ import VirtualHID
                 let lose = world.lost!
                 DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(20)) { lose(.closed) }
                 return RecordingDevices()
-            }) { wait in
+            }, now: { .now }) { wait in
                 waits.append(wait)
                 downWhileWaiting.append((try? readiness.devices()) == nil)
                 if waits.count == 2 { throw Stop() }
             }
         }
         #expect(served == 2)
-        #expect(waits == [.seconds(2), .seconds(2)])
+        #expect(waits == [.seconds(2), .seconds(4)])
         #expect(downWhileWaiting == [true, true])
         #expect(world.terminated == [World.pid])
+    }
+
+    /// Once stopping has begun, every daemon started is stopped and none is started after:
+    /// a launch racing SIGTERM is refused rather than orphaned.
+    @Test func stoppingAllStopsWhatWasStartedAndRefusesLaterStarts() throws {
+        let world = World(connections: [])
+        let children = Children()
+        let tracked = children.tracking(world.effects)
+        let pid = try tracked.launch()
+        children.stopAll(world.effects)
+        #expect(world.terminated == [pid])
+        #expect(throws: Children.Stopping.self) { try tracked.launch() }
+        #expect(world.launched == 1)
+        tracked.terminate(pid)
+        #expect(world.terminated == [pid])
     }
 
     @Test func theBackoffDoublesToItsCap() {

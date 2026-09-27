@@ -120,4 +120,8 @@ public extension Installation {
     /// kind, not on which copy answered - including a client of an installation this package
     /// has never heard of.
     static let refusalDomain = daemon + ".refusal"
+
+    /// The code a refusal crosses under when the devices are not up, so a client reads that
+    /// by its code and not its words. Every other refusal is code 1.
+    static let devicesDownCode = 2
 }

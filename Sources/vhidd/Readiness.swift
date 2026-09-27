@@ -42,9 +42,10 @@ final class Readiness: @unchecked Sendable {
     private var state = State.down(.starting)
     /// Counts attempts, so a connection is known by the attempt that opened it.
     private var attempt = 0
-    /// Whether the current attempt's connection has been lost, which can happen before its
-    /// devices are handed over as well as after.
-    private var lostThisAttempt = false
+    /// How the current attempt ended, if it has: at most one ending each, so a loss
+    /// reported late by an attempt that already failed cannot replace why it failed, and
+    /// devices whose connection went before they were handed over are not handed over.
+    private var ended = false
 
     /// The devices, or why they are not up.
     func devices() throws -> any ServedDevices {
@@ -68,12 +69,13 @@ final class Readiness: @unchecked Sendable {
     func begin() -> Int {
         condition.lock(); defer { condition.unlock() }
         attempt += 1
-        lostThisAttempt = false
+        ended = false
         return attempt
     }
 
     func failed(_ error: any Error) {
         condition.lock(); defer { condition.unlock() }
+        ended = true
         state = .down(.failed(error))
     }
 
@@ -81,16 +83,16 @@ final class Readiness: @unchecked Sendable {
     /// lost before they were handed over, in which case they stay down on that loss.
     func up(_ devices: any ServedDevices) {
         condition.lock(); defer { condition.unlock() }
-        guard !lostThisAttempt else { return }
+        guard !ended else { return }
         state = .up(devices)
     }
 
-    /// Takes the devices down when `attempt` is the current one, and says whether it was.
-    /// A loss from an earlier attempt's connection is that attempt's, already answered.
+    /// Takes the devices down when `attempt` is the current one and has not already ended,
+    /// and says whether it did.
     func lost(_ error: any Error, in attempt: Int) -> Bool {
         condition.lock(); defer { condition.unlock() }
-        guard attempt == self.attempt else { return false }
-        lostThisAttempt = true
+        guard attempt == self.attempt, !ended else { return false }
+        ended = true
         state = .down(.failed(error))
         condition.broadcast()
         return true

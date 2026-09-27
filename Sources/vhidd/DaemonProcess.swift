@@ -168,6 +168,13 @@ struct Backoff: Equatable {
 final class Children: @unchecked Sendable {
     private let lock = NSLock()
     private var pids: Set<pid_t> = []
+    /// Set by `stopAll`, after which nothing is launched: a launch racing SIGTERM would
+    /// otherwise start a daemon after the stop had already been made.
+    private var stopping = false
+
+    struct Stopping: Error, CustomStringConvertible {
+        var description: String { "vhidd is stopping, so it starts no daemon" }
+    }
 
     /// `effects` with every launch recorded and every termination limited to what is.
     func tracking<Device>(_ effects: DaemonProcess.Effects<Device>) -> DaemonProcess.Effects<Device> {
@@ -176,6 +183,7 @@ final class Children: @unchecked Sendable {
             bringUp: effects.bringUp,
             launch: {
                 self.lock.lock(); defer { self.lock.unlock() }
+                guard !self.stopping else { throw Stopping() }
                 let pid = try effects.launch()
                 self.pids.insert(pid)
                 return pid
@@ -188,10 +196,12 @@ final class Children: @unchecked Sendable {
         )
     }
 
-    /// Stops every daemon still recorded.
+    /// Stops every daemon still recorded, and every launch after it refuses.
     func stopAll(_ effects: DaemonProcess.Effects<some Any>) {
-        let running = { lock.lock(); defer { lock.unlock() }; return pids }()
-        running.forEach(effects.terminate)
+        lock.lock(); defer { lock.unlock() }
+        stopping = true
+        pids.forEach(effects.terminate)
+        pids.removeAll()
     }
 }
 
@@ -206,12 +216,17 @@ extension DaemonProcess.Effects {
     /// it started before it throws, and a loss stops the one behind it, so every start is
     /// separated from the one before by a whole wait. [LAW:no-ambient-temporal-coupling]
     ///
+    /// Failures count until the devices stay up for `backoff.most`, so a daemon that comes
+    /// up and dies at once is started ever less often, and one that served for a while is
+    /// reached again after the shortest wait.
+    ///
     /// Returns only by `pause` throwing, which the daemon's never does.
     func keepUp(
         within limit: Duration,
         backoff: Backoff,
         readiness: Readiness,
         serve: (DaemonProcess.Reached<Device>) -> any ServedDevices,
+        now: () -> ContinuousClock.Instant,
         pause: (Duration) throws -> Void
     ) rethrows -> Never {
         var failures = 0
@@ -221,11 +236,12 @@ extension DaemonProcess.Effects {
                 let reached = try reach(within: limit) { lost, _ in _ = readiness.lost(lost, in: attempt) }
                 readiness.up(serve(reached))
                 log("serving")
+                let since = now()
                 let why = readiness.whileUp()
                 // Lost, so whatever the daemon held for vhidd went with the connection; a
                 // daemon started here is stopped so the next attempt starts it afresh.
                 stop(reached.daemon)
-                failures = 1
+                failures = now() - since >= backoff.most ? 1 : failures + 1
                 log("the devices went down (\(why)); bringing them up again in \(backoff.after(failures))")
             } catch {
                 failures += 1
