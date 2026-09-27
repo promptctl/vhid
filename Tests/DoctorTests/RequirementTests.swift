@@ -48,7 +48,7 @@ import Testing
             .awaitingApproval: ["Login Items & Extensions", DriverProbe.bundleID],
             .disabled: ["switched off", "Login Items & Extensions", DriverProbe.bundleID],
             .pendingReboot: ["Restart the Mac"],
-            .residue: ["scripts/virtual-hid-driver remove", "scripts/virtual-hid-driver install"],
+            .residue: ["scripts/virtual-hid-driver remove", "scripts/virtual-hid-driver install", "install vhid's pkg again", "restart the", "run vhid doctor again"],
             .unknown: ["vhid driver state"],
         ]
         #expect(Set(expected.keys) == Set(DriverState.allCases.filter { !Requirement.driverExtension($0).met }))

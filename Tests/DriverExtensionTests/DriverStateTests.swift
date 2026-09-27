@@ -40,6 +40,23 @@ import Testing
         }
     }
 
+    /// What doctor's residue step rests on: an install lays down both payload trees and the
+    /// receipt, and whatever residue survives that is settled by a restart, which drops a
+    /// registration waiting on it and unloads a driver nothing has switched on.
+    @Test func aRestartSettlesWhateverResidueAnInstallLeaves() {
+        for registration in Registration.allCases where registration != .unknown && registration != .ambiguous {
+            for ioNode in [false, true] {
+                let installed = DriverFacts(payload: .both, receipt: DriverPackage.version, registration: registration, ioNode: ioNode, elementsReceipt: .absent)
+                guard DriverState(installed) == .residue else { continue }
+                let restarted = DriverFacts(
+                    payload: .both, receipt: DriverPackage.version,
+                    registration: registration == .pendingReboot ? .unregistered : registration,
+                    ioNode: ioNode && registration == .enabled, elementsReceipt: .absent)
+                #expect(DriverState(restarted) != .residue, "\(installed)")
+            }
+        }
+    }
+
     /// The receipt's version never moves a verdict; only whether one is held does. A
     /// table that read the version would make every package upgrade a new state.
     @Test func theReceiptVersionChangesNoVerdict() {
