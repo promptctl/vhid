@@ -165,8 +165,9 @@ are what is left.
 `--driver` withdraws the driver extension as whoever is logged in, then deletes the
 driver package's files and receipt. Before stopping anything it refuses, saying why,
 when the driver cannot safely be removed: Karabiner-Elements is installed, the
-development job is loaded, nobody is logged in to withdraw the extension, or a reading
-it needs cannot be taken. If the removal fails partway, vhid is left stopped with its
+development job is loaded, nobody is logged in to withdraw the extension, the extension
+is registered but the Manager app that withdraws it is gone (reinstalling the pkg brings
+it back), or a reading it needs cannot be taken. If the removal fails partway, vhid is left stopped with its
 files in place, and the message says so; run the same command again once the cause is
 fixed, or drop `--driver` to remove vhid alone. A withdrawn extension can stay
 registered until the next restart.
