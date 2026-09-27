@@ -130,9 +130,9 @@ the daemon: it admits a caller carrying the certificate it carries itself, and r
 everything else. SwiftPM ad hoc signs every product it links, and an ad hoc signature
 names a hash that changes with the binary, so it can neither be required of a caller nor
 satisfied by one. A tree built with bare `swift build` therefore gets
-`NSCocoaErrorDomain 4097` on the first call — which reads like a connection that failed
-rather than an identity that was refused, and costs an afternoon in the XPC plumbing
-before anyone suspects the signature. `make sign` repairs a tree that has been built
+`NSCocoaErrorDomain 4097` on the first call. vhid says the daemon ended the connection
+and names the signature as the likely cause, because XPC itself reports only a
+connection that failed. `make sign` repairs a tree that has been built
 that way.
 
 A build talks to the development daemon, `ai.promptctl.vhid.vhidd.dev`, and nothing

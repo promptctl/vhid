@@ -149,7 +149,13 @@ enum NotOnTheDevice: Error, CustomStringConvertible {
 /// written to make. [LAW:decomposition]
 ///
 /// Devices that are not up cross under their own code, which is how doctor tells that
-/// refusal from the rest. [LAW:types-are-the-program]
+/// refusal from the rest; an act the seat turned away crosses under another, which is how
+/// a client knows no key of its is held. [LAW:types-are-the-program]
 func refusal(_ error: any Error) -> NSError {
-    NSError(domain: Installation.refusalDomain, code: error is Readiness.Down ? Installation.devicesDownCode : 1, userInfo: [NSLocalizedDescriptionKey: "\(error)"])
+    let code = switch error {
+    case is Readiness.Down: Installation.devicesDownCode
+    case is Holder.Busy, is Seat.Ended, is Seat.Lost: Installation.seatRefusedCode
+    default: 1
+    }
+    return NSError(domain: Installation.refusalDomain, code: code, userInfo: [NSLocalizedDescriptionKey: "\(error)"])
 }

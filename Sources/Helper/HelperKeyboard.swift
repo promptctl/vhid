@@ -11,6 +11,6 @@ public struct HelperKeyboard: KeyPress {
     }
 
     public func releaseAll() throws {
-        try helper.call { service, reply in service.releaseAll(reply: reply) }
+        try helper.release { service, reply in service.releaseAll(reply: reply) }
     }
 }

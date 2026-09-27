@@ -22,11 +22,18 @@ import Foundation
 public final class HelperConnection: @unchecked Sendable {
     private let connection: NSXPCConnection
     private let replyTimeout: Duration
+    /// The Mach service dialled, which every failure names: installations run side by
+    /// side, and "the helper" does not say which one did not answer.
+    private let service: String
 
-    /// Whether anything has been sent over this connection. The connection is lazy, so
-    /// until something is, the daemon has never seen it and holds nothing for it.
-    private let spoken = NSLock()
+    /// What this connection has been through, under one lock: whether anything has been
+    /// sent over it, whether the daemon has ever run an act of it, and whether it was given up
+    /// on after the daemon went silent. The connection is lazy, so until something is sent
+    /// the daemon has never seen it and holds nothing for it.
+    private let history = NSLock()
     private var hasSpoken = false
+    private var hasActed = false
+    private var abandoned: Duration?
 
     /// The connection's failure, or vhidd's silence, as one thing a caller can catch.
     ///
@@ -42,17 +49,51 @@ public final class HelperConnection: @unchecked Sendable {
             case silence(Duration)
             /// The far end is something other than vhidd's service.
             case notAHelper
+            /// This connection was given up on after the daemon was silent this long, so
+            /// nothing more crosses it.
+            case abandoned(Duration)
         }
 
+        public let service: String
         public let cause: Cause
 
-        public var description: String {
+        /// Whether the connection failed before reaching the daemon: nobody holds the
+        /// service, or the daemon refused the connection as it opened. Either also ends a
+        /// connection the daemon already served, which is why this alone proves nothing.
+        var neverGotThrough: Bool {
             switch cause {
-            case .connection(let domain, let code, let description): "the helper could not be reached: \(description) (\(domain) \(code))"
-            case .silence(let deadline): "the helper did not answer in \(deadline)"
-            case .notAHelper: "the helper answered with something that is not a helper"
+            case .connection(NSCocoaErrorDomain, NSXPCConnectionInvalid, _), .connection(NSCocoaErrorDomain, NSXPCConnectionInterrupted, _): true
+            case .connection, .silence, .notAHelper, .abandoned: false
             }
         }
+
+        /// Which link failed, in the words of what to do about it. The two codes NSXPC
+        /// gives a client that never got through are named for what they mean here; any
+        /// other is shown as it came.
+        public var description: String {
+            switch cause {
+            case .connection(NSCocoaErrorDomain, NSXPCConnectionInvalid, _):
+                "no launchd job answers \(service) (\(NSCocoaErrorDomain) \(NSXPCConnectionInvalid)): the daemon is not installed or not loaded"
+            case .connection(NSCocoaErrorDomain, NSXPCConnectionInterrupted, _):
+                "\(service) ended the connection (\(NSCocoaErrorDomain) \(NSXPCConnectionInterrupted)): the daemon refused this binary's signature, or exited while the call was in flight"
+            case .connection(let domain, let code, let description): "\(service) could not be reached: \(description) (\(domain) \(code))"
+            case .silence(let deadline): "\(service) did not answer in \(deadline)"
+            case .notAHelper: "\(service) answered with something that is not vhidd's service"
+            case .abandoned(let deadline): "the connection to \(service) was dropped after it did not answer in \(deadline)"
+            }
+        }
+    }
+
+    /// The daemon's own refusal of a call, with the words it gave and the service that gave
+    /// them. The domain and code are kept so a reader tells the devices being down from any
+    /// other refusal by its code. [LAW:types-are-the-program]
+    public struct Refused: Error, CustomStringConvertible {
+        public let service: String
+        public let domain: String
+        public let code: Int
+        public let reason: String
+
+        public var description: String { "\(service) refused: \(reason)" }
     }
 
     /// Connects to vhidd's Mach service. The connection is lazy - launchd starts the
@@ -65,13 +106,14 @@ public final class HelperConnection: @unchecked Sendable {
     /// side by side, and a connection that guessed would type through another copy's
     /// keyboard. [LAW:no-silent-failure]
     public convenience init(installation: Installation, replyTimeout: Duration = .seconds(5)) {
-        self.init(connection: NSXPCConnection(machServiceName: installation.service, options: .privileged), replyTimeout: replyTimeout)
+        self.init(connection: NSXPCConnection(machServiceName: installation.service, options: .privileged), service: installation.service, replyTimeout: replyTimeout)
     }
 
     /// Over a connection someone else made, which is how a test puts a service of its own
     /// on the far end. [LAW:decomposition]
-    init(connection: NSXPCConnection, replyTimeout: Duration) {
+    init(connection: NSXPCConnection, service: String, replyTimeout: Duration) {
         self.connection = connection
+        self.service = service
         self.replyTimeout = replyTimeout
         connection.remoteObjectInterface = NSXPCInterface(with: HelperService.self)
         connection.resume()
@@ -82,16 +124,41 @@ public final class HelperConnection: @unchecked Sendable {
     /// Hands the devices back to the daemon, and returns once they are free.
     ///
     /// A connection that never spoke never reached the daemon, so there is nothing to hand
-    /// back. Asking anyway would be the connection's first message: it would claim the
-    /// devices only to free them, and fail as busy while someone else holds them.
+    /// back, and asking would only add a failure to the one that stopped the caller.
     /// [LAW:dataflow-not-control-flow] Whether it spoke is a fact of the connection,
     /// recorded by `call`, not a guess about which verbs send reports.
     public func leave() throws {
-        spoken.lock()
+        history.lock()
         let reached = hasSpoken
-        spoken.unlock()
+        history.unlock()
         guard reached else { return }
-        try call { service, reply in service.leave(reply: reply) }
+        try release { service, reply in service.leave(reply: reply) }
+    }
+
+    /// A call that frees what the daemon holds for this connection, which succeeds when
+    /// its failure proves nothing is held.
+    ///
+    /// A release is always sent. What its failure means is the question: "a key may be
+    /// held" is only true when the daemon could have set one down for this connection.
+    /// Two failures prove it did not, and are the release having nothing to do:
+    /// - the daemon turned the call away at the seat (`Installation.turnedAway`), which
+    ///   it does only for a connection whose acts never reach the devices;
+    /// - the connection never got through (4099, 4097) and the daemon never ran an act of
+    ///   it.
+    /// [LAW:single-enforcer] Read here, once, for the keyboard, the mouse and leaving.
+    func release(_ body: (HelperService, @escaping (Error?) -> Void) -> Void) throws {
+        do {
+            try call(body)
+        } catch let refused as Refused where Installation.turnedAway(domain: refused.domain, code: refused.code) {
+            return
+        } catch let unreachable as Unreachable where !acted && unreachable.neverGotThrough {
+            return
+        }
+    }
+
+    private var acted: Bool {
+        history.lock(); defer { history.unlock() }
+        return hasActed
     }
 
     /// Which process holds the devices, or nil when none does.
@@ -142,10 +209,19 @@ public final class HelperConnection: @unchecked Sendable {
     /// One act on the devices: the connection has spoken from here on, and the reply is an
     /// acknowledgement or a refusal.
     func call(_ body: (HelperService, @escaping (Error?) -> Void) -> Void) throws {
-        spoken.lock()
+        history.lock()
         hasSpoken = true
-        spoken.unlock()
-        try exchange { service, reply in body(service) { error in reply(error.map { .failed($0) } ?? .answered(())) } }
+        history.unlock()
+        let outcome = Result { try exchange { service, reply in body(service) { error in reply(error.map { .failed($0) } ?? .answered(())) } } }
+        // The daemon ran this act: it acknowledged it, or reached the devices and failed
+        // there. Not a refusal at the seat, the connection's failure, or silence.
+        let ran = switch outcome {
+        case .success: true
+        case .failure(let refused as Refused): !Installation.turnedAway(domain: refused.domain, code: refused.code)
+        case .failure: false
+        }
+        history.lock(); hasActed = hasActed || ran; history.unlock()
+        try outcome.get()
     }
 
     /// One round trip, with the reply turned back into a value or a throw.
@@ -155,22 +231,33 @@ public final class HelperConnection: @unchecked Sendable {
     /// only reads the first types into a dead service forever. All three arrive here, and
     /// all three throw.
     private func exchange<Answer>(_ body: (HelperService, @escaping (Word<Answer>) -> Void) -> Void) throws -> Answer {
+        history.lock()
+        let gaveUp = abandoned
+        history.unlock()
+        if let gaveUp { throw Unreachable(service: service, cause: .abandoned(gaveUp)) }
         let outcome = Outcome<Answer>()
         let proxy = connection.remoteObjectProxyWithErrorHandler { error in
             let failed = error as NSError
-            outcome.say(.failed(Unreachable(cause: .connection(domain: failed.domain, code: failed.code, description: failed.localizedDescription))))
+            outcome.say(.failed(Unreachable(service: self.service, cause: .connection(domain: failed.domain, code: failed.code, description: failed.localizedDescription))))
         }
-        guard let service = proxy as? HelperService else { throw Unreachable(cause: .notAHelper) }
-        body(service) { outcome.say($0) }
-        switch outcome.await(replyTimeout) {
+        guard let helper = proxy as? HelperService else { throw Unreachable(service: service, cause: .notAHelper) }
+        body(helper) { outcome.say($0) }
+        let word = outcome.await(replyTimeout)
+        switch word {
         case .answered(let answer): return answer
-        case .failed(let error): throw error
+        case .failed(let error as Unreachable): throw error
+        case .failed(let error):
+            // What the daemon replied: a plain NSError carrying its words, since that is all
+            // NSXPC carries. Named for the service that said it. [LAW:no-silent-failure]
+            let refused = error as NSError
+            throw Refused(service: service, domain: refused.domain, code: refused.code, reason: refused.localizedDescription)
         case nil:
             // A vhidd silent this long is taken as gone, and the connection with it: every
             // call after this one, the leave included, fails at once rather than waiting out
             // a deadline of its own. The daemon releases what it held when it sees this.
+            history.lock(); abandoned = replyTimeout; history.unlock()
             connection.invalidate()
-            throw Unreachable(cause: .silence(replyTimeout))
+            throw Unreachable(service: service, cause: .silence(replyTimeout))
         }
     }
 }

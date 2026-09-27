@@ -11,7 +11,7 @@ public struct HelperMouse: PointingDevice {
     }
 
     public func releaseAll() throws {
-        try helper.call { service, reply in service.releaseButtons(reply: reply) }
+        try helper.release { service, reply in service.releaseButtons(reply: reply) }
     }
 
     public func move(by delta: Move) throws {
