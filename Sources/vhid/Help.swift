@@ -49,10 +49,10 @@ enum Help {
     /// numbers. Each verb's example is kept as argv so a test parses exactly what the help
     /// prints. [LAW:one-source-of-truth]
     enum NegativeExample {
-        static let click = ["click", "--times", "2", "--", "-100", "-40"]
+        static let click = ["click", "--button", "left", "--", "-100", "-40"]
         static let move = ["move", "--", "-100", "-40"]
         static let scroll = ["scroll", "--vertical", "3", "--", "-100", "-40"]
-        static let drag = ["drag", "--button", "right", "--", "-100", "40", "200", "40"]
+        static let drag = ["drag", "--button", "left", "--", "-100", "40", "200", "40"]
     }
 
     private static func negative(_ argv: [String]) -> String {
