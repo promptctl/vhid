@@ -17,13 +17,13 @@ The format stays JSON Lines, parsed whole or refused whole, as `Play.parse` does
 
 | Line | Meaning |
 | --- | --- |
-| `{"t_ms":0,"keys":["leftShift","keyboardA"]}` | these keys, and no others, are down from now |
+| `{"t_ms":0,"keys":["leftShift",4]}` | these keys, and no others, are down from now |
 | `{"t_ms":0,"buttons":["left"]}` | these buttons, and no others, are down from now |
 | `{"t_ms":8,"move":{"dx":4,"dy":0}}` | raw counts, unchanged from today |
 | `{"t_ms":8,"at":{"x":812.5,"y":400}}` | the cursor should be here now |
 | `{"t_ms":16,"wheel":{"v":-1,"h":0}}` | wheel ticks, unchanged from today |
 
-A key is named by its HID usage, the physical key, never by the character a layout puts on it: a name from the keyboard page (`keyboardA`, `leftShift`) or its number. The characters `vhid press` reads are resolved through the current layout and, when Command is held, through the Command layer (`Sources/Input/ChordSpelling.swift`). A held set spelled that way could name different keys on two lines of one script, and a different key again on another layout.
+A key is named by its HID usage, the physical key, never by the character a layout puts on it: a name `Usage` already gives a key that types no character (`leftShift`, `returnKey`, `escape`), or the usage number from the keyboard page for any key (4 is the key A sits on in US QWERTY). The characters `vhid press` reads are resolved through the current layout and, when Command is held, through the Command layer (`Sources/Input/ChordSpelling.swift`). A held set spelled that way could name different keys on two lines of one script, and a different key again on another layout.
 
 `buttons` takes the words and numbers a `down` line takes today, and it replaces `down` and `up`. Buttons become a held set for the same reason keys do: a recording of two buttons where one is released first cannot be written as "every button up". That breaks every existing `vhid pointer play` script, and it is meant to: `vhid play` replaces that command, and nothing has been released yet.
 
