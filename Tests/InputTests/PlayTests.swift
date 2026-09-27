@@ -17,10 +17,10 @@ import Testing
             """)
         #expect(play.start == ScreenPoint(x: 800, y: 500.5)!)
         #expect(play.events == [
-            Play.Timed(at: .zero, report: .buttons([.left])),
-            Play.Timed(at: .nanoseconds(8_333_000), report: .move(Move(x: Count(clamping: 4), y: Count(clamping: -127)))),
-            Play.Timed(at: .nanoseconds(8_333_000), report: .wheel(Scroll(vertical: Count(clamping: -1), horizontal: Count(clamping: 2)))),
-            Play.Timed(at: .seconds(1), report: .buttons([])),
+            Play.Timed(at: .zero, report: .buttons([.left]), line: 2),
+            Play.Timed(at: .nanoseconds(8_333_000), report: .move(Move(x: Count(clamping: 4), y: Count(clamping: -127))), line: 4),
+            Play.Timed(at: .nanoseconds(8_333_000), report: .wheel(Scroll(vertical: Count(clamping: -1), horizontal: Count(clamping: 2))), line: 5),
+            Play.Timed(at: .seconds(1), report: .buttons([]), line: 6),
         ])
     }
 
@@ -37,12 +37,12 @@ import Testing
             {"t_ms":9,"buttons":[]}
             """)
         #expect(play.events == [
-            Play.Timed(at: .zero, report: .keys(try HeldKeys([.leftShift, Usage(rawValue: 4)]))),
-            Play.Timed(at: .milliseconds(5), report: .buttons([.left, Button(rawValue: 8)!])),
-            Play.Timed(at: .milliseconds(6), report: .at(ScreenPoint(x: 12.5, y: 20)!)),
-            Play.Timed(at: .milliseconds(7), report: .keys(try HeldKeys([Usage(rawValue: 0x28)]))),
-            Play.Timed(at: .milliseconds(8), report: .keys(.none)),
-            Play.Timed(at: .milliseconds(9), report: .buttons([])),
+            Play.Timed(at: .zero, report: .keys(try HeldKeys([.leftShift, Usage(rawValue: 4)])), line: 2),
+            Play.Timed(at: .milliseconds(5), report: .buttons([.left, Button(rawValue: 8)!]), line: 3),
+            Play.Timed(at: .milliseconds(6), report: .at(ScreenPoint(x: 12.5, y: 20)!), line: 4),
+            Play.Timed(at: .milliseconds(7), report: .keys(try HeldKeys([Usage(rawValue: 0x28)])), line: 5),
+            Play.Timed(at: .milliseconds(8), report: .keys(.none), line: 6),
+            Play.Timed(at: .milliseconds(9), report: .buttons([]), line: 7),
         ])
     }
 
@@ -57,7 +57,7 @@ import Testing
     /// A script written with Windows line endings is the same script.
     @Test func crlfLinesAreLines() throws {
         let play = try Play.parse(#"{"to":{"x":1,"y":1}}"# + "\r\n" + #"{"t_ms":0,"buttons":[]}"# + "\r\n")
-        #expect(play.events == [Play.Timed(at: .zero, report: .buttons([]))])
+        #expect(play.events == [Play.Timed(at: .zero, report: .buttons([]), line: 2)])
     }
 
     static let start = #"{"to":{"x":1,"y":1}}"#
@@ -91,8 +91,8 @@ import Testing
         (start + "\n" + #"{"t_ms":0,"buttons":["thumb"]}"#, 2, "names no button"),
         (start + "\n" + #"{"t_ms":5,"buttons":[]}"# + "\n" + #"{"t_ms":4,"buttons":[]}"#, 3, "goes backwards"),
         (start + "\n" + #"{"t_ms":0,"buttons":["right"]}"# + "\n" + #"{"t_ms":1,"move":{"dx":1,"dy":1}}"#, 3, "ends with button 2 held"),
-        (start + "\n" + #"{"t_ms":0,"keys":["leftShift"]}"#, 2, "ends with key 225 held"),
-        (start + "\n" + #"{"t_ms":0,"keys":["leftShift"]}"# + "\n" + #"{"t_ms":1,"buttons":[]}"#, 3, "ends with key 225 held"),
+        (start + "\n" + #"{"t_ms":0,"keys":["leftShift"]}"#, 2, "ends with leftShift held"),
+        (start + "\n" + #"{"t_ms":0,"keys":["leftShift"]}"# + "\n" + #"{"t_ms":1,"buttons":[]}"#, 3, "ends with leftShift held"),
         (start + "\n" + #"{"t_ms":0,"move":{"dx":1,"dy":0}}"# + "\n" + #"{"t_ms":1,"at":{"x":5,"y":5}}"#, 3, "move lines or with at lines"),
         (start + "\n" + #"{"t_ms":0,"keys":[3]}"#, 2, "usage number from 4 to 231"),
         (start + "\n" + #"{"t_ms":0,"keys":[232]}"#, 2, "usage number from 4 to 231"),
@@ -130,7 +130,7 @@ import Testing
             {"t_ms":1,"move":{"dx":5,"dy":0}}
             {"t_ms":10,"buttons":[]}
             """)
-        let played = try await Player(pointer: Pointer(mouse: mouse, cursor: fake.cursor), clock: clock, wall: { Self.epoch }, lead: .zero).play(play)
+        let played = try await Player(pointer: Pointer(mouse: mouse, cursor: fake.cursor), clock: clock, wall: { Self.epoch }, lead: .zero).play(MouseScript(play))
         #expect(played.startReports == 0)
         #expect(played.reports == [
             Played.Report(scheduled: Self.epoch, sent: Self.epoch, acked: Self.epoch + 3000),
@@ -161,7 +161,7 @@ import Testing
             {"t_ms":60000,"buttons":[]}
             """)
         let run = Task { @MainActor in
-            try await Player(pointer: fake.pointer, clock: clock, wall: { Self.epoch }, lead: .zero).play(play)
+            try await Player(pointer: fake.pointer, clock: clock, wall: { Self.epoch }, lead: .zero).play(MouseScript(play))
         }
         clock.cancel(afterSleeps: 1) { run.cancel() }
         let stopped = try await #require(throws: PlayStopped.self) { try await run.value }
@@ -187,7 +187,7 @@ import Testing
             {"t_ms":0,"buttons":["left"]}
             {"t_ms":10,"buttons":[]}
             """)
-        let played = try await Player(pointer: fake.pointer, clock: clock, wall: { Self.epoch }, lead: .milliseconds(2)).play(play)
+        let played = try await Player(pointer: fake.pointer, clock: clock, wall: { Self.epoch }, lead: .milliseconds(2)).play(MouseScript(play))
         #expect(played.reports.map(\.scheduled) == [Self.epoch, Self.epoch + 10_000])
         // The watch put the clock exactly on the deadline, so nothing went out late.
         #expect(played.lateness.max == 0)
@@ -212,7 +212,7 @@ import Testing
             {"t_ms":2,"buttons":[]}
             """)
         let stopped = try await #require(throws: PlayStopped.self) {
-            try await Player(pointer: fake.pointer, clock: clock, wall: { Self.epoch }, lead: .zero).play(play)
+            try await Player(pointer: fake.pointer, clock: clock, wall: { Self.epoch }, lead: .zero).play(MouseScript(play))
         }
         #expect(stopped.played.count == 1)
         #expect(stopped.of == 3)
@@ -274,31 +274,39 @@ final class ManualClock: Clock {
     }
 }
 
-/// What the mouse alone can play of a script, decided before the cursor moves.
-@Suite struct PlayerStepsTests {
+/// What the mouse alone can play of a script, decided before anything is connected.
+@Suite struct MouseScriptTests {
     static let start = #"{"to":{"x":1,"y":1}}"#
 
-    /// A held set that grows presses what it adds; an empty one releases everything.
-    @Test func buttonSetsBecomePressesAndARelease() throws {
-        let play = try Play.parse("""
+    /// A held set that grows by one presses it; an empty one releases everything; one that
+    /// restates what is held sends nothing.
+    @Test func buttonSetsBecomeOneReportEach() throws {
+        let script = try MouseScript(Play.parse("""
             \(Self.start)
             {"t_ms":0,"buttons":["left"]}
-            {"t_ms":1,"buttons":["left","right",8]}
-            {"t_ms":2,"buttons":[]}
-            """)
-        #expect(try Player<ContinuousClock>.steps(of: play) == [.press([.left]), .press([.right, Button(rawValue: 8)!]), .releaseAll])
+            {"t_ms":1,"buttons":["left"]}
+            {"t_ms":2,"buttons":["left",8]}
+            {"t_ms":3,"buttons":[]}
+            """))
+        #expect(script.acts == [
+            MouseScript.Act(at: .zero, report: .press(.left)),
+            MouseScript.Act(at: .milliseconds(2), report: .press(Button(rawValue: 8)!)),
+            MouseScript.Act(at: .milliseconds(3), report: .releaseAll),
+        ])
     }
 
-    /// Acts that need a device act the mouse does not have are refused, naming the act.
+    /// Acts the mouse has no report for are refused at the line that asks for them.
     @Test(arguments: [
-        (#"{"t_ms":0,"buttons":["left","right"]}"# + "\n" + #"{"t_ms":1,"buttons":["left"]}"# + "\n" + #"{"t_ms":2,"buttons":[]}"#, 2, "keeps others"),
-        (#"{"t_ms":0,"keys":["leftShift"]}"# + "\n" + #"{"t_ms":1,"keys":[]}"#, 1, "keys line"),
-        (#"{"t_ms":0,"at":{"x":5,"y":5}}"#, 1, "at line"),
+        ("\n" + #"{"t_ms":0,"buttons":["left","right"]}"# + "\n" + #"{"t_ms":1,"buttons":[]}"#, 3, "2 buttons at once"),
+        (#"{"t_ms":0,"buttons":["left"]}"# + "\n" + #"{"t_ms":0,"buttons":["left","right"]}"# + "\n" + #"{"t_ms":1,"buttons":["left"]}"# + "\n" + #"{"t_ms":2,"buttons":[]}"#, 4, "keeps others"),
+        (#"{"t_ms":0,"keys":["leftShift"]}"# + "\n" + #"{"t_ms":1,"keys":[]}"#, 2, "keys line"),
+        (#"{"t_ms":0,"at":{"x":5,"y":5}}"#, 2, "at line"),
+        (#"{"t_ms":0,"buttons":[]}"#, 2, "no line of this script"),
     ])
-    func actsTheMouseCannotTakeAreRefused(lines: String, act: Int, saying: String) throws {
+    func actsTheMouseCannotTakeAreRefusedAtTheirLine(lines: String, line: Int, saying: String) throws {
         let play = try Play.parse(Self.start + "\n" + lines)
-        let refused = try #require(throws: Unplayable.self) { try Player<ContinuousClock>.steps(of: play) }
-        #expect(refused.act == act)
+        let refused = try #require(throws: Play.ScriptInvalid.self) { try MouseScript(play) }
+        #expect(refused.line == line)
         #expect(refused.reason.contains(saying), "\(refused)")
     }
 }

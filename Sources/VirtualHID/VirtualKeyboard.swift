@@ -12,9 +12,6 @@ import Synchronization
 /// disagree with what the device is holding, and that disagreement has one shape: a key
 /// the driver believes is down that nobody remembers pressing, which macOS then repeats.
 struct KeyboardReport {
-    /// The usage field is fixed width, as wide as `HeldKeys` allows.
-    static let capacity = HeldKeys.capacity
-
     let modifiers: UInt8
     let usages: [UInt16]
 
@@ -31,7 +28,7 @@ struct KeyboardReport {
     }
 
     var bytes: [UInt8] {
-        let padded = usages + Array(repeating: 0, count: Self.capacity - usages.count)
+        let padded = usages + Array(repeating: 0, count: HeldKeys.capacity - usages.count)
         return [1, modifiers, 0] + padded.flatMap { [UInt8($0 & 0xff), UInt8($0 >> 8)] }
     }
 }

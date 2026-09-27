@@ -24,7 +24,7 @@ private func reports(_ fake: FakeDaemon) -> [[UInt8]] {
 }
 
 private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
-    let padded = usages + Array(repeating: 0, count: KeyboardReport.capacity - usages.count)
+    let padded = usages + Array(repeating: 0, count: HeldKeys.capacity - usages.count)
     return [1, modifiers, 0] + padded.flatMap { [UInt8($0 & 0xff), UInt8($0 >> 8)] }
 }
 
@@ -201,7 +201,7 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
     /// than by dropping one, which would be a key held that no report mentions.
     @Test func moreKeysThanOneReportCarriesIsRefused() throws {
         let thirtyTwo = Set((0x04...0x23).map { Usage(rawValue: UInt16($0)) })
-        #expect(thirtyTwo.count == KeyboardReport.capacity)
+        #expect(thirtyTwo.count == HeldKeys.capacity)
         #expect(throws: Never.self) { try KeyboardReport(held: thirtyTwo) }
         #expect(throws: TooManyKeys.self) { try KeyboardReport(held: thirtyTwo.union([Usage(rawValue: 0x24)])) }
         // Modifiers are not in that field, so eight of them cost nothing against the cap.

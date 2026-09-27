@@ -29,6 +29,9 @@ public struct Play: Hashable, Sendable {
     public struct Timed: Hashable, Sendable {
         public let at: Duration
         public let report: Report
+        /// The script line it was written on, so a refusal made after parsing still names
+        /// the line a person can find.
+        public let line: Int
     }
 
     /// One act, as data. [LAW:one-type-per-behavior]
@@ -58,14 +61,13 @@ public struct Play: Hashable, Sendable {
             throw ScriptInvalid(line: lines.first?.number ?? 1, reason: "a script is a {\"to\":{\"x\":…,\"y\":…}} line and at least one report after it")
         }
         let start = try decode(StartLine.self, first).to
-        let events = try lines.dropFirst().map { try decode(ReportLine.self, $0).timed }
-        for (line, (previous, next)) in zip(lines.dropFirst(2), zip(events, events.dropFirst())) where next.at < previous.at {
-            throw ScriptInvalid(line: line.number, reason: "t_ms goes backwards: \(next.at) after \(previous.at)")
+        let events = try lines.dropFirst().map { line in try decode(ReportLine.self, line).timed(on: line.number) }
+        for (previous, next) in zip(events, events.dropFirst()) where next.at < previous.at {
+            throw ScriptInvalid(line: next.line, reason: "t_ms goes backwards: \(next.at) after \(previous.at)")
         }
-        let lined = zip(lines.dropFirst(), events)
-        if let firstMove = lined.first(where: { if case .move = $0.1.report { true } else { false } }),
-           let firstAt = lined.first(where: { if case .at = $0.1.report { true } else { false } }) {
-            throw ScriptInvalid(line: max(firstMove.0.number, firstAt.0.number), reason: "a script moves the pointer with move lines or with at lines, and this one has both (move on line \(firstMove.0.number), at on line \(firstAt.0.number))")
+        if let firstMove = events.first(where: { if case .move = $0.report { true } else { false } }),
+           let firstAt = events.first(where: { if case .at = $0.report { true } else { false } }) {
+            throw ScriptInvalid(line: max(firstMove.line, firstAt.line), reason: "a script moves the pointer with move lines or with at lines, and this one has both (move on line \(firstMove.line), at on line \(firstAt.line))")
         }
         // What each held set is at the end: the last line that states it, or nothing held
         // when no line ever did.
@@ -79,7 +81,7 @@ public struct Play: Hashable, Sendable {
             }
         }
         guard keys.usages.isEmpty else {
-            throw ScriptInvalid(line: last.number, reason: "the script ends with key \(keys.usages.sorted().map { "\($0.rawValue)" }.joined(separator: ", ")) held: end it with {\"t_ms\":…,\"keys\":[]}")
+            throw ScriptInvalid(line: last.number, reason: "the script ends with \(keys.usages.sorted().map(\.spelled).joined(separator: ", ")) held: end it with {\"t_ms\":…,\"keys\":[]}")
         }
         guard buttons.isEmpty else {
             throw ScriptInvalid(line: last.number, reason: "the script ends with button \(buttons.sorted().map { "\($0.rawValue)" }.joined(separator: ", ")) held: end it with {\"t_ms\":…,\"buttons\":[]}")
@@ -141,15 +143,19 @@ private struct StartLine: Decodable {
     /// mistake one line later was refused by name. A misspelt key in a script is a report
     /// that does not do what it says, wherever in the line it sits.
     init(from decoder: Decoder) throws {
-        let line = try container(decoder, taking: ["to"])
-        let start = try container(line.superDecoder(forKey: AnyKey("to")), taking: ["x", "y"])
-        let x = try start.decode(Double.self, forKey: AnyKey("x"))
-        let y = try start.decode(Double.self, forKey: AnyKey("y"))
-        guard let point = ScreenPoint(x: x, y: y) else {
-            throw Refusal(reason: "to is (\(x.clean), \(y.clean)), which is not a place on the screen")
-        }
-        to = point
+        to = try point(try container(decoder, taking: ["to"]), AnyKey("to"))
     }
+}
+
+/// A place on the screen, as the start line and an `at` line both write one.
+private func point(_ line: KeyedDecodingContainer<AnyKey>, _ key: AnyKey) throws -> ScreenPoint {
+    let place = try container(line.superDecoder(forKey: key), taking: ["x", "y"])
+    let x = try place.decode(Double.self, forKey: AnyKey("x"))
+    let y = try place.decode(Double.self, forKey: AnyKey("y"))
+    guard let point = ScreenPoint(x: x, y: y) else {
+        throw Refusal(reason: "\(key.stringValue) is (\(x.clean), \(y.clean)), which is not a place on the screen")
+    }
+    return point
 }
 
 private extension Double {
@@ -161,21 +167,24 @@ private extension Double {
 /// `t_ms` and exactly one act.
 private struct ReportLine: Decodable {
     static let reports: Set<String> = ["at", "buttons", "keys", "move", "wheel"]
-    let timed: Play.Timed
+    let at: Duration
+    let report: Play.Report
+
+    func timed(on line: Int) -> Play.Timed { Play.Timed(at: at, report: report, line: line) }
 
     init(from decoder: Decoder) throws {
         let line = try container(decoder, taking: Self.reports.union(["t_ms"]))
         let named = line.allKeys.map(\.stringValue).filter(Self.reports.contains).sorted()
-        guard named.count == 1, let report = named.first else {
+        guard named.count == 1, let kind = named.first else {
             throw Refusal(reason: "a line carries exactly one of \(Self.reports.sorted().joined(separator: ", ")), and this one has \(named.isEmpty ? "none" : named.joined(separator: " and "))")
         }
         let milliseconds = try line.decode(Double.self, forKey: AnyKey("t_ms"))
         guard (0...Play.longest).contains(milliseconds) else {
             throw Refusal(reason: "t_ms is \(milliseconds), and it is milliseconds from the start, 0 through \(Int(Play.longest)), an hour")
         }
-        let key = AnyKey(report)
+        let key = AnyKey(kind)
         let decoded: Play.Report
-        switch report {
+        switch kind {
         case "move":
             let (x, y) = try axes(line, key, "dx", "dy")
             decoded = .move(Move(x: x, y: y))
@@ -183,13 +192,7 @@ private struct ReportLine: Decodable {
             let (vertical, horizontal) = try axes(line, key, "v", "h")
             decoded = .wheel(Scroll(vertical: vertical, horizontal: horizontal))
         case "at":
-            let point = try container(line.superDecoder(forKey: key), taking: ["x", "y"])
-            let x = try point.decode(Double.self, forKey: AnyKey("x"))
-            let y = try point.decode(Double.self, forKey: AnyKey("y"))
-            guard let at = ScreenPoint(x: x, y: y) else {
-                throw Refusal(reason: "at is (\(x.clean), \(y.clean)), which is not a place on the screen")
-            }
-            decoded = .at(at)
+            decoded = .at(try point(line, key))
         case "buttons":
             decoded = .buttons(Set(try heldSet(line, key, button)))
         default:
@@ -200,7 +203,8 @@ private struct ReportLine: Decodable {
                 throw Refusal(reason: "keys holds \(error.held) keys besides the modifiers, and one report carries \(HeldKeys.capacity)")
             }
         }
-        timed = Play.Timed(at: .nanoseconds(Int64((milliseconds * 1e6).rounded())), report: decoded)
+        at = .nanoseconds(Int64((milliseconds * 1e6).rounded()))
+        report = decoded
     }
 }
 
@@ -243,13 +247,27 @@ private func button(_ list: inout UnkeyedDecodingContainer, _ key: String) throw
     return button
 }
 
+/// The words a `keys` line may name a key by: a holdable modifier, or a key a chord names
+/// by name. [LAW:one-source-of-truth] Read both ways, so a refusal spells a key the way the
+/// script could have written it.
+private let keyWords: [String: Usage] = {
+    let modifiers = Modifier.holdable.compactMap { modifier in modifier.usage.map { (modifier.rawValue, $0) } }
+    let named = KeyChord.namedKeys.compactMap { name, key in Usage(virtualKeyCode: key.rawValue).map { (name, $0) } }
+    return Dictionary(uniqueKeysWithValues: modifiers + named)
+}()
+
+private extension Usage {
+    /// This key as a script would write it: its word when it has one, else its number.
+    var spelled: String { keyWords.first { $0.value == self }?.key ?? "\(rawValue)" }
+}
+
 /// One key of a `keys` list: a key by its HID usage, never by the character a layout puts
 /// on it, since a held set spelled in characters could name a different key on each line
 /// and on each layout. A name is a holdable modifier or a key a chord names by name; a
 /// number is any keyboard-page usage from 4 through 231, the range that names keys.
 private func usage(_ list: inout UnkeyedDecodingContainer, _ key: String) throws -> Usage {
     if let name = try? list.decode(String.self) {
-        guard let usage = Modifier(rawValue: name)?.usage ?? KeyChord.namedKeys[name].flatMap({ Usage(virtualKeyCode: $0.rawValue) }) else {
+        guard let usage = keyWords[name] else {
             throw Refusal(reason: "\(key) has \(name.debugDescription), which names no key: use a modifier (\(Modifier.holdableNames)), one of \(KeyChord.keyNameList), or a usage number from \(Usage.keys.lowerBound) to \(Usage.keys.upperBound)")
         }
         return usage

@@ -21,20 +21,23 @@ struct PointerCommand: AsyncParsableCommand {
 struct PlayCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "play",
-        abstract: "Replay a timed script of raw mouse reports from stdin, and print when each went out.",
+        abstract: "Replay a timed script of mouse acts from stdin, one report each, and print when each went out.",
         discussion: """
             The script is JSON Lines on stdin. The first line is where the cursor starts, reached \
             before the clock starts: {"to":{"x":800,"y":500}}, in \(Help.place). \
-            Every line after it is one report at t_ms milliseconds from the clock's \
-            start, in order:
-              {"t_ms":0,"buttons":["left"]}          exactly these buttons held from now: left, right, middle, or 1 to 32
+            Every line after it is one act at t_ms milliseconds from the clock's \
+            start, in order, each sent as one report:
+              {"t_ms":0,"buttons":["left"]}          exactly these buttons held from now: left, right, middle, or 1 to 32;
+                                                     one more than before, or none
               {"t_ms":8.3,"move":{"dx":4,"dy":-2}}   relative motion in counts, -127 to 127, uncorrected
               {"t_ms":16.7,"wheel":{"v":-1,"h":0}}   wheel ticks, -127 to 127; v positive rolls away from the hand
               {"t_ms":1000,"buttons":[]}             every button up
             A script is refused whole, before the cursor moves, if a line is malformed, t_ms goes \
-            backwards or past an hour, it ends with a button held, or a buttons line lets go of \
-            some buttons and keeps others. keys and at lines are refused here; the mouse alone \
-            cannot play them.
+            backwards or past an hour, it ends with a button held, or a buttons line adds more \
+            than one button or lets go of some and keeps others. The script format also has keys \
+            and at lines, for the keyboard and for steering to a point; the mouse alone cannot \
+            play them, so they are refused here. A buttons line that repeats the held set sends \
+            nothing and prints no report line.
 
             Stdout is JSON Lines: one {"report":{"index":…,"scheduled_us":…,"sent_us":…,"acked_us":…}} \
             per report, times in microseconds since the Unix epoch, then \
@@ -52,7 +55,7 @@ struct PlayCommand: AsyncParsableCommand {
         do {
             // [LAW:parse-dont-validate] Parsed before anything is connected or moved, so a
             // script that cannot be played whole moves nothing.
-            let play = try Play.parse(String(decoding: FileHandle.standardInput.readDataToEndOfFile(), as: UTF8.self))
+            let play = try MouseScript(Play.parse(String(decoding: FileHandle.standardInput.readDataToEndOfFile(), as: UTF8.self)))
             ending = .finished(try await Devices.using(try service.installation()) {
                 try await Player(pointer: $0.pointer, clock: ContinuousClock(), wall: Self.epochMicroseconds, lead: Self.lead).play(play)
             })
@@ -76,7 +79,7 @@ struct PlayCommand: AsyncParsableCommand {
     ///
     /// **`finished` holds a play that sent something, and the type system is what says
     /// so.** `Played`'s initialiser is internal to `Input`, so the only one this target
-    /// can hold is one `Player.play` returned, and a `Play` carries at least one report by
+    /// can hold is one `Player.play` returned, and a `MouseScript` carries at least one act by
     /// construction - which is the precondition `Lateness` documents and relies on. There
     /// is therefore no guard here against an empty finished play: it cannot be spelled
     /// from outside `Input`, and a guard would have to invent a meaning for a done line
