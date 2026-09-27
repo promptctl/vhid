@@ -194,13 +194,17 @@ ships something nobody can run, and the build stays green while it happens.
 ## Releasing
 
 ```sh
-NOTARY_PROFILE=<profile> scripts/release <version> dist    # dist/vhid-<version>.pkg
+NOTARY_PROFILE=<profile> scripts/release dist    # dist/vhid-<version>.pkg
 ```
+
+The version is the one in `VERSION`, and a release is built from the commit tagged
+`v<version>` with `git status` clean: any other build reports `<version>-dev+<commit>`
+from `vhid --version`, and `scripts/make-pkg` refuses to package it.
 
 That runs two scripts, and each can also be run on its own:
 
 ```sh
-scripts/make-pkg <version> dist                         # built and signed
+scripts/make-pkg dist                                   # built and signed
 NOTARY_PROFILE=<profile> scripts/notarize dist/vhid-<version>.pkg   # notarized and stapled
 ```
 

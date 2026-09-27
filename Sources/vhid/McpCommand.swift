@@ -4,6 +4,7 @@ import Foundation
 import Input
 import MCP
 import System
+import Version
 
 /// The verbs as MCP tools, over stdio, for an agent that drives a Mac in one session
 /// rather than a process per keystroke.
@@ -31,6 +32,11 @@ struct McpCommand: AsyncParsableCommand {
 
     @OptionGroup var service: ServiceOption
 
+    /// The server as a client's initialize finds it, before any tool is attached.
+    static func server() -> Server {
+        Server(name: "vhid", version: Version.current, capabilities: .init(tools: .init(listChanged: false)))
+    }
+
     func run() async throws {
         let installation = try service.installation()
         // [LAW:single-enforcer] Stdout belongs to the protocol, and that is made true of the
@@ -43,7 +49,7 @@ struct McpCommand: AsyncParsableCommand {
             throw Errno(rawValue: errno)
         }
 
-        let server = Server(name: "vhid", version: "0", capabilities: .init(tools: .init(listChanged: false)))
+        let server = Self.server()
         let turns = Turns()
         await server.withMethodHandler(ListTools.self) { _ in .init(tools: Tools.all.map(\.tool)) }
         await server.withMethodHandler(CallTool.self) { request in

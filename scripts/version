@@ -1,0 +1,31 @@
+#!/bin/sh
+# Prints the version this tree builds: VERSION's value alone when HEAD is the commit tagged
+# v<VERSION> and git status shows nothing, and otherwise that value marked as a development
+# build of the commit it came from, as 0.1.0-dev+1a2b3c4, or 0.1.0-dev with no git to ask.
+# [LAW:one-source-of-truth] VERSION is the one place the number is written, and this is
+# the one reader of it.
+#
+#   scripts/version [--base] [repo]     --base: VERSION's value alone; repo defaults to this one
+set -eu
+base=false
+[ "${1:-}" = --base ] && { base=true; shift; }
+root=${1:-$(cd "$(dirname "$0")/.." && pwd)}
+version=$(tr -d '[:space:]' <"$root/VERSION")
+# [LAW:parse-dont-validate] It goes into a Swift literal, XML, pkgbuild's --version and a
+# file name, so it is dotted numbers with an optional pre-release tag or nothing is built.
+echo "$version" | grep -Eqx '[0-9]+(\.[0-9]+)*(-[0-9A-Za-z.]+)?' || {
+  echo "version: VERSION '$version' is not dotted numbers with an optional -tag, such as 0.1.0 or 0.2.0-rc.1" >&2
+  exit 1
+}
+$base && { echo "$version"; exit 0; }
+# --no-optional-locks: the build plugin that runs this may not write into .git.
+git() { command git --no-optional-locks -C "$root" "$@"; }
+commit=$(git rev-parse --short HEAD 2>/dev/null) || { echo "$version-dev"; exit 0; }
+# Untracked files count: SwiftPM compiles an untracked source as readily as a tracked one.
+# A status git could not give is not a clean one.
+status=$(git status --porcelain 2>/dev/null) || status=unknown
+if git tag --points-at HEAD | grep -qxF "v$version" && [ -z "$status" ]; then
+  echo "$version"
+else
+  echo "$version-dev+$commit"
+fi

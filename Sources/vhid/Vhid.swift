@@ -1,4 +1,5 @@
 import ArgumentParser
+import Version
 
 /// The verbs, against a daemon that owns the two virtual devices.
 ///
@@ -22,6 +23,7 @@ struct Vhid: AsyncParsableCommand {
 
             Coordinates are \(Help.place).
             """,
+        version: Version.current,
         subcommands: [
             TypeCommand.self, PressCommand.self, ClickCommand.self, MoveCommand.self, ScrollCommand.self,
             DragCommand.self, CursorCommand.self, PointerCommand.self, McpCommand.self, DriverCommand.self,
