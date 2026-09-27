@@ -15,12 +15,15 @@ public extension Reading {
     ///   - candidates: everything the reader recognised in `region`, in reading order.
     ///   - examined: how many runs the reader looked at, including ones it could not use.
     ///   - excluded: what the reader dropped before judging, and why.
+    ///   - reach: how far the reader itself got. A reader that stopped short stays stopped
+    ///     whatever the limit does; one that got through is stopped only by the limit.
     static func judging(
         _ candidates: [Found],
         query: Query,
         region: ScreenRect,
         examined: Int,
-        excluded: [Exclusion]
+        excluded: [Exclusion],
+        reach: Reach
     ) -> Reading {
         let scored = candidates.map { (found: $0, distance: query.match.distance(to: $0.text.value)) }
         let matching = scored.filter { query.match.tolerates($0.distance) }.flatMap { query.match.narrowing($0.found) }
@@ -37,7 +40,7 @@ public extension Reading {
             region: region,
             examined: examined,
             excluded: excluded + (cut > 0 ? [Exclusion(reason: .ranked, count: cut)] : []),
-            reach: cut > 0 ? .stopped(.resultLimit(query.limit)) : .whole
+            reach: reach == .whole && cut > 0 ? .stopped(.resultLimit(query.limit)) : reach
         )
         return Reading(outcome: outcome, scope: scope)
     }

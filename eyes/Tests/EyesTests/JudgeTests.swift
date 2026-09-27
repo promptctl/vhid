@@ -19,7 +19,8 @@ import Testing
             query: Query(match: match, region: .rect(Self.region), limit: limit),
             region: Self.region,
             examined: texts.count,
-            excluded: []
+            excluded: [],
+            reach: .whole
         )
     }
 
@@ -92,7 +93,7 @@ import Testing
         }
         let run = Found(first: words[0], rest: Array(words.dropFirst()), source: .pixels(confidence: Confidence(1)!))
         let read = Reading.judging([run], query: Query(match: .contains("edit"), region: .rect(Self.region)),
-                                   region: Self.region, examined: 1, excluded: [])
+                                   region: Self.region, examined: 1, excluded: [], reach: .whole)
         guard case .matched(let m) = read.outcome else { Issue.record("nothing"); return }
         #expect(m.first.text.value == "Edit")
         #expect(m.first.frame.centre == ScreenPoint(x: 70, y: 10))
@@ -125,5 +126,15 @@ import Testing
             Issue.record("nothing"); return
         }
         #expect(m.all.map(\.text.value) == ["Save", "Save"])
+    }
+
+    /// A reader that stopped short stays stopped when the limit also cuts: its own stop is
+    /// the earlier cause, and either way the reading proves no absence.
+    @Test func aReadersOwnStopOutlastsTheLimit() {
+        let read = Reading.judging(["OK", "OK"].enumerated().map { found($1, y: Double($0) * 20) },
+                                   query: Query(match: nil, region: .rect(Self.region), limit: Limit(1)!),
+                                   region: Self.region, examined: 2, excluded: [], reach: .stopped(.unanswered))
+        #expect(read.scope.reach == .stopped(.unanswered))
+        #expect(read.scope.excluded == [Exclusion(reason: .ranked, count: 1)])
     }
 }
