@@ -1,3 +1,4 @@
+import Input
 import Foundation
 @testable import Doctor
 import Installations
@@ -51,8 +52,8 @@ import Testing
     /// An unknown modifier is refused as a tool error, before any device is reached, on
     /// every pointer tool that holds them.
     @Test func anUnknownModifierIsRefusedNamingIt() async {
-        #expect(await Self.refusal(Tools.click, ["x": 1, "y": 2, "modifiers": "leftShift+hyper"])?.hasPrefix("modifiers is \"leftShift+hyper\", and it is modifier keys") == true)
-        #expect(await Self.refusal(Tools.scroll, ["x": 1, "y": 2, "modifiers": "function"])?.hasPrefix("modifiers is \"function\"") == true)
+        #expect(await Self.refusal(Tools.click, ["x": 1, "y": 2, "modifiers": "leftShift+hyper"])?.hasSuffix("\"hyper\" in \"leftShift+hyper\" is not a modifier to hold (\(Modifier.holdableNames))") == true)
+        #expect(await Self.refusal(Tools.scroll, ["x": 1, "y": 2, "modifiers": "function"])?.hasSuffix("function is not a key the device can hold") == true)
         #expect(await Self.refusal(Tools.drag, ["from": ["x": 1, "y": 2], "to": ["x": 3, "y": 4], "modifiers": 3])?.hasPrefix("modifiers is 3") == true)
     }
 

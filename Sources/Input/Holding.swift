@@ -12,7 +12,7 @@ public struct HeldModifiers: Hashable, Sendable, CustomStringConvertible {
     public let pressed: Modifiers
 
     public init(_ modifiers: Set<Modifier>) throws(UnholdableModifiers) {
-        let unholdable = Modifier.allCases.filter { modifiers.contains($0) && $0.usage == nil }
+        let unholdable = Modifier.allCases.filter { modifiers.contains($0) && !Modifier.holdable.contains($0) }
         guard unholdable.isEmpty else { throw UnholdableModifiers(modifiers: unholdable) }
         pressed = Modifiers(modifiers.compactMap(\.usage))
     }
@@ -35,7 +35,7 @@ public extension HeldModifiers {
         var named: Set<Modifier> = []
         for term in spelling.split(separator: "+", omittingEmptySubsequences: false).map(String.init) {
             guard let modifier = Modifier(rawValue: term) else {
-                throw ModifiersRefused(description: "\(term.debugDescription) in \(spelling.debugDescription) is not a modifier (\(Modifier.names))")
+                throw ModifiersRefused(description: "\(term.debugDescription) in \(spelling.debugDescription) is not a modifier to hold (\(Modifier.holdableNames))")
             }
             named.insert(modifier)
         }

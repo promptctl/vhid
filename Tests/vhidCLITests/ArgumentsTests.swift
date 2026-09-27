@@ -61,12 +61,13 @@ import Testing
         #expect(try ScrollCommand.parse(["--modifiers", "leftCommand", "1", "2"]).modifiers == HeldModifiers([.leftCommand]))
         #expect(try DragCommand.parse(["--modifiers", "leftOption", "1", "2", "3", "4"]).modifiers == HeldModifiers([.leftOption]))
         #expect(try ClickCommand.parse(["1", "2"]).modifiers == .none)
-        for spelling in ["leftShift+hyper", "function", ""] {
-            let message = ClickCommand.message(for: ArgumentsFailure { try ClickCommand.parse(["--modifiers", spelling, "1", "2"]) })
-            #expect(message.contains("--modifiers"), "\(spelling): \(message)")
+        for (spelling, reason) in [("leftShift+hyper", "\"hyper\" in \"leftShift+hyper\" is not a modifier to hold (leftShift, "),
+                                   ("function", "function is not a key the device can hold"),
+                                   ("", "\"\" in \"\" is not a modifier to hold")] {
+            let refused = #expect(throws: (any Error).self) { try ClickCommand.parse(["--modifiers", spelling, "1", "2"]) }
+            let message = refused.map { ClickCommand.message(for: $0) } ?? ""
+            #expect(message.contains("--modifiers") && message.contains(reason), "\(spelling): \(message)")
         }
-        let message = ClickCommand.message(for: ArgumentsFailure { try ClickCommand.parse(["--modifiers", "leftShift+hyper", "1", "2"]) })
-        #expect(message.contains("\"hyper\" in \"leftShift+hyper\" is not a modifier"), "\(message)")
     }
 
     @Test func anOrdinaryPointParses() throws {
@@ -121,12 +122,3 @@ import Testing
     }
 }
 
-/// The error a parse threw, for reading the message ArgumentParser would print.
-private func ArgumentsFailure(_ parse: () throws -> Any) -> any Error {
-    do {
-        _ = try parse()
-        return CancellationError()
-    } catch {
-        return error
-    }
-}

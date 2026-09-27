@@ -22,9 +22,10 @@ struct Parameter<Taken: Sendable>: Sendable {
     let schema: [String: Value]
     /// The value when the argument is left out, and nil for one that must be given.
     let absent: Taken?
-    /// The value this JSON is, or nil when it is not one. The rule it applies is the
-    /// vocabulary's own, never restated here. [LAW:single-enforcer]
-    let read: @Sendable (Value) -> Taken?
+    /// The value this JSON is, or nil when it is not one - or the vocabulary's own refusal,
+    /// thrown, when it says why. The rule it applies is the vocabulary's own, never
+    /// restated here. [LAW:single-enforcer]
+    let read: @Sendable (Value) throws -> Taken?
 }
 
 /// A parameter with its type forgotten, which is what a tool's list of them is made of.
@@ -115,7 +116,7 @@ extension Parameter where Taken == HeldModifiers {
     /// the same spellings. [LAW:single-enforcer]
     static func modifiers(_ name: String) -> Self {
         Self(name: name, expected: Help.modifiers, schema: ["type": "string"], absent: nil) {
-            $0.stringValue.flatMap { try? HeldModifiers(spelled: $0) }
+            try $0.stringValue.map { spelled throws(ModifiersRefused) in try HeldModifiers(spelled: spelled) }
         }
     }
 }
@@ -189,10 +190,15 @@ struct Arguments {
                     + "turns into bytes before vhid sees it, so the string sent cannot be recovered exactly. "
                     + "Send it in two calls, split inside \"data:\"")
             }
-            guard let taken = parameter.read(value) else {
-                throw ArgumentRefused("\(parameter.name) is \(value.json), and it is \(parameter.expected)")
+            let refused = ArgumentRefused("\(parameter.name) is \(value.json), and it is \(parameter.expected)")
+            do {
+                guard let taken = try parameter.read(value) else { throw refused }
+                return taken
+            } catch let known as ArgumentRefused {
+                throw known
+            } catch {
+                throw ArgumentRefused(refused.description.then("\(error)"))
             }
-            return taken
         }
     }
 }

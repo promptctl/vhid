@@ -39,8 +39,9 @@ extension Button: ExpressibleByArgument {
 }
 
 /// `--modifiers` as the verbs read it: `HeldModifiers(spelled:)`, whose refusal names the
-/// word that is not a modifier. A transform rather than `ExpressibleByArgument`, whose
-/// failable init would drop that reason for "is invalid". [LAW:no-silent-failure]
+/// word that is not a modifier, as the MCP parameter's does. A transform rather than
+/// `ExpressibleByArgument`, whose failable init would drop that reason for "is invalid".
+/// [LAW:no-silent-failure]
 func heldModifiers(_ spelling: String) throws -> HeldModifiers {
     try HeldModifiers(spelled: spelling)
 }
