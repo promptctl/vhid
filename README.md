@@ -45,7 +45,7 @@ as a separate project.
 
 ```sh
 vhid type "hello"
-vhid keys leftCommand+s
+vhid press leftCommand+s
 vhid click 800 500 --button left --times 2
 vhid move 800 500
 vhid scroll 800 500 --vertical 3

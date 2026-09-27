@@ -49,11 +49,11 @@ import Testing
         #expect((stopped?.typed ?? 4) < 4)
     }
 
-    // MARK: keys
+    // MARK: press
 
-    @Test func keysPressesEveryChordAndNamesThemBack() async throws {
+    @Test func pressPressesEveryChordAndNamesThemBack() async throws {
         let keyboard = RecordingKeyboard()
-        let said = try await KeysCommand.press(["leftCommand+s", "return"], on: Self.us, with: Typist(keyboard: keyboard))
+        let said = try await PressCommand.press(["leftCommand+s", "return"], on: Self.us, with: Typist(keyboard: keyboard))
         #expect(said.hasSuffix(" on \(Self.us.name)"))
         // Reported in the spelling that reads back, not the one that was typed.
         #expect(said.contains("leftCommand+key 0x"))
@@ -69,7 +69,7 @@ import Testing
     @Test func aStoppedListOfChordsSaysHowManyWentDown() async throws {
         let keyboard = RecordingKeyboard(failingAtKey: 1)
         let stopped = await #expect(throws: ChordsStopped.self) {
-            try await KeysCommand.press(["return", "tab", "delete"], on: Self.us, with: Typist(keyboard: keyboard))
+            try await PressCommand.press(["return", "tab", "delete"], on: Self.us, with: Typist(keyboard: keyboard))
         }
         #expect(stopped?.pressed == 1)
         #expect(stopped?.of == 3)
@@ -82,7 +82,7 @@ import Testing
     @Test func aBadChordLateInTheListPressesNothing() async throws {
         let keyboard = RecordingKeyboard()
         await #expect(throws: (any Error).self) {
-            try await KeysCommand.press(["leftCommand+s", "return", "nosuchkey"], on: Self.us, with: Typist(keyboard: keyboard))
+            try await PressCommand.press(["leftCommand+s", "return", "nosuchkey"], on: Self.us, with: Typist(keyboard: keyboard))
         }
         #expect(keyboard.down.isEmpty, "a chord was pressed before the whole list had been proven")
     }
@@ -92,7 +92,7 @@ import Testing
     @Test func aChordOfModifiersAloneIsRefusedBeforeAnythingIsPressed() async throws {
         let keyboard = RecordingKeyboard()
         await #expect(throws: (any Error).self) {
-            try await KeysCommand.press(["leftCommand"], on: Self.us, with: Typist(keyboard: keyboard))
+            try await PressCommand.press(["leftCommand"], on: Self.us, with: Typist(keyboard: keyboard))
         }
         #expect(keyboard.down.isEmpty)
     }

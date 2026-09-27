@@ -91,19 +91,19 @@ enum Tools {
             before the first one goes down.
             """, [chords]) { arguments, installation in
             let (chords, layout) = (try arguments[chords], try KeyboardLayout.current())
-            return try await Devices.using(installation) { try await KeysCommand.press(chords, on: layout, with: $0.typist) }
+            return try await Devices.using(installation) { try await PressCommand.press(chords, on: layout, with: $0.typist) }
         }
     }()
 
     static let click: VerbTool = {
         let button = Parameter.button("button").absent(.left)
-        let count = Parameter.clicks("count").absent(.single)
+        let times = Parameter.clicks("times").absent(.single)
         return VerbTool("click", """
             Move the pointer to a point on the screen and click there. The point it reports is read \
             back from the cursor, and can differ from the one asked for by under a point.
-            """, [x, y, button, count]) { arguments, installation in
-            let (at, button, count) = (try point(arguments), try arguments[button], try arguments[count])
-            return try await Devices.using(installation) { try await ClickCommand.click(at: at, button: button, times: count, with: $0.pointer) }
+            """, [x, y, button, times]) { arguments, installation in
+            let (at, button, times) = (try point(arguments), try arguments[button], try arguments[times])
+            return try await Devices.using(installation) { try await ClickCommand.click(at: at, button: button, times: times, with: $0.pointer) }
         }
     }()
 

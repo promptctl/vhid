@@ -145,7 +145,7 @@ private extension Value {
 /// The arguments one call carries, read one parameter at a time.
 ///
 /// Made only by `init(_:for:)`, which refuses an argument the tool does not take: a
-/// misspelt `times` for `count` would otherwise click once where three were asked for,
+/// wrong name, `count` for `times`, would otherwise click once where three were asked for,
 /// and say it had. [LAW:no-silent-failure]
 struct Arguments {
     private let given: [String: Value]
