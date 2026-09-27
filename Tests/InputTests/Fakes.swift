@@ -55,7 +55,7 @@ struct Refused: Error {}
 /// A pointing device that records every report reaching it. Where `FakeMouse` stands in
 /// for the whole mouse, this stands under one - so a test can ask not only whether a
 /// failure was raised but whether anything reached the device before it.
-final class RecordingPointing: Pointing {
+final class RecordingPointing: PointingDevice {
     private let recorded = Mutex<[String]>([])
 
     var log: [String] { recorded.withLock { $0 } }

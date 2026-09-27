@@ -36,7 +36,7 @@ struct PointingReport {
 /// can read it turns into a sequence of deltas above this seam. [LAW:one-way-deps]
 ///
 /// **The calling process must be root**, for the reason `DaemonConnection` gives.
-public final class VirtualPointing: Pointing {
+public final class VirtualPointing: PointingDevice {
     private let daemon: DaemonConnection
     private let reportTimeout: Duration
     /// The buttons the device is holding, under the lock its reports are posted under, for

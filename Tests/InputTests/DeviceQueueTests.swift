@@ -43,7 +43,7 @@ private final class BlockingKeyPress: KeyPress {
 }
 
 /// A pointing device that answers at once, into the journal a keyboard writes.
-private struct JournalPointing: Pointing {
+private struct JournalPointing: PointingDevice {
     let journal: Journal
 
     func down(_ button: Button) throws { journal.record("down button \(button.rawValue)") }

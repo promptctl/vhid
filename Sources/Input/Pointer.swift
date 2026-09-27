@@ -279,7 +279,7 @@ public struct Pointer: Sendable {
     /// The carry is the same loop as any move: the device's motion reports carry whatever
     /// buttons it is holding, so a move with a button down is a drag to macOS and needs
     /// nothing of its own. The release is `releaseAll` rather than the one button, for the
-    /// reason `Pointing` has no `up`. [LAW:composability]
+    /// reason `PointingDevice` has no `up`. [LAW:composability]
     public func drag(from start: ScreenPoint, to end: ScreenPoint, button: Button) async throws -> Drag {
         do {
             let approach = try await move(to: start)
