@@ -94,14 +94,16 @@ enum EyesTools {
         displays: @escaping DisplayList = { Geometry.displays() },
         reading look: @escaping Look = { try await PixelReader().read($0) }
     ) -> [EyesTool] {
-        [windows(listing, frontmost: frontmost), Self.displays(displays), find(look), read(look)]
+        let serial = OneAtATime(look)
+        let read: Look = { try await serial.read($0) }
+        return [windows(listing, frontmost: frontmost), Self.displays(displays), find(read), Self.read(read)]
     }
 
     /// Where `find` and `read` look, as `--display`, `--window` and `--rect` take it.
     private static let place: [String: Value] = [
-        "display": .object(["type": "integer", "description": "Read this display, by the id `displays` lists. Defaults to the main display."]),
-        "window": .object(["type": "integer", "description": "Read this window's bounds, by the id `windows` lists."]),
-        "rect": .object(["type": "string", "description": "Read this rectangle: x,y,width,height in the points vhid clicks."]),
+        "display": .object(["type": "integer", "description": .string(Help.display)]),
+        "window": .object(["type": "integer", "description": .string(Help.window)]),
+        "rect": .object(["type": "string", "description": .string(Help.rect)]),
         "limit": .object(["type": "integer", "minimum": 1, "description": "The most rows to answer with. Defaults to \(Limit.default.count)."]),
     ]
 
@@ -116,9 +118,9 @@ enum EyesTools {
             inputSchema: .object([
                 "type": "object",
                 "properties": .object(place.merging([
-                    "text": .object(["type": "string", "description": "The text to look for. Matches any run that contains it."]),
-                    "exact": .object(["type": "boolean", "description": "Match only a run that is exactly this text."]),
-                    "edits": .object(["type": "integer", "minimum": 0, "description": "Match a run within this many single-character edits of the text."]),
+                    "text": .object(["type": "string", "description": .string(Help.text)]),
+                    "exact": .object(["type": "boolean", "description": .string(Help.exact)]),
+                    "edits": .object(["type": "integer", "minimum": 0, "description": .string(Help.edits)]),
                 ]) { $1 }),
                 "required": .array(["text"]),
                 "additionalProperties": false,
@@ -130,8 +132,8 @@ enum EyesTools {
                 throw ArgumentRefused(description: "text is required: the text to look for")
             }
             let match = try Find.match(text, exact: try argument("exact", in: given, \.boolValue, "a boolean") ?? false,
-                                       edits: try argument("edits", in: given, \.intValue, "an integer"), flag: "")
-            return try await Report.text(try query(match, given), reading: look)
+                                       edits: try argument("edits", in: given, \.intValue, "an integer"), as: .argument)
+            return try await answer(try query(match, given), look)
         }) }
 
     static func read(_ look: @escaping Look) -> EyesTool { EyesTool(
@@ -146,21 +148,33 @@ enum EyesTools {
             annotations: .init(readOnlyHint: true, openWorldHint: true)),
         call: { given in
             try refuseStray(given, taken: ["display", "window", "rect", "limit"])
-            return try await Report.text(try query(nil, given), reading: look)
+            return try await answer(try query(nil, given), look)
         }) }
 
     /// The region and limit `find` and `read` share, through the verbs' own rules.
     private static func query(_ match: Match?, _ given: [String: Value]) throws -> Query {
         let id = { (name: String) throws -> UInt32? in
             try argument(name, in: given, \.intValue, "an integer").map { n in
-                guard let id = UInt32(exactly: n) else { throw ArgumentRefused(description: "\(name) is \(n), and ids are not negative") }
+                guard let id = UInt32(exactly: n) else {
+                    throw ArgumentRefused(description: "\(name) is \(n), which is not a window-server id (0 to \(UInt32.max))")
+                }
                 return id
             }
         }
         let region = try Where.region(display: try id("display"), window: try id("window"),
-                                      rect: try argument("rect", in: given, \.stringValue, "a string"), flag: "")
-        let limit = try Find.limit(try argument("limit", in: given, \.intValue, "an integer") ?? Limit.default.count, flag: "")
+                                      rect: try argument("rect", in: given, \.stringValue, "a string"), as: .argument)
+        let limit = try Where.limit(try argument("limit", in: given, \.intValue, "an integer") ?? Limit.default.count, as: .argument)
         return Query(match: match, region: region, limit: limit)
+    }
+
+    /// The verbs' report, with the grant refusal pointed at the process that holds the
+    /// grant for a server: the app hosting it, not eyes. [LAW:no-silent-failure]
+    private static func answer(_ query: Query, _ look: Look) async throws -> String {
+        do {
+            return try await Report.text(query, reading: look)
+        } catch PixelsError.noGrant {
+            throw ArgumentRefused(description: "\(PixelsError.noGrant) Under eyes mcp the grant is the app's that runs this server, not eyes'.")
+        }
     }
 
     static func displays(_ list: @escaping DisplayList) -> EyesTool { EyesTool(
@@ -223,5 +237,23 @@ enum EyesTools {
         guard let stray = given.keys.sorted().first(where: { !taken.contains($0) }) else { return }
         throw ArgumentRefused(description: "\(stray) is not an argument this tool takes: "
             + (taken.isEmpty ? "it takes none" : "it takes \(taken.joined(separator: ", "))"))
+    }
+}
+
+/// Reads one query at a time. Two Vision recognitions in flight in one process crashed
+/// inside TextRecognition in 4 of 15 runs (PixelReader), and the MCP server starts a task
+/// per request, so an agent's parallel calls would otherwise put two in flight.
+actor OneAtATime {
+    private let look: EyesTools.Look
+    private var tail: Task<Void, Never>?
+
+    init(_ look: @escaping EyesTools.Look) { self.look = look }
+
+    func read(_ query: Query) async throws -> Reading {
+        let before = tail
+        let look = look
+        let mine = Task { _ = await before?.value; return try await look(query) }
+        tail = Task { _ = try? await mine.value }
+        return try await mine.value
     }
 }

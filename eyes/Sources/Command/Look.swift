@@ -3,15 +3,34 @@ import CoreGraphics
 import Eyes
 import Pixels
 
+/// How a caller spells an argument's name in a refusal: `--limit` on the command line,
+/// `limit` to an MCP client.
+enum Spelling {
+    case flag, argument
+
+    func callAsFunction(_ name: String) -> String { self == .flag ? "--\(name)" : name }
+}
+
+/// What each argument means, said once for a verb's help and its MCP tool's schema.
+/// [LAW:one-source-of-truth]
+enum Help {
+    static let text = "The text to look for. Matches any run that contains it."
+    static let exact = "Match only a run that is exactly this text."
+    static let edits = "Match a run within this many single-character edits of the text, for recogniser slips."
+    static let display = "Read this display, by its window-server id, which `eyes displays` lists and every scope line names. Defaults to the main display."
+    static let window = "Read this window's bounds, by the id `eyes windows` prints."
+    static let rect = "Read this rectangle: x,y,width,height in the points vhid clicks."
+}
+
 /// Where `find` and `read` look, shared so the two verbs cannot disagree about it.
 struct Where: ParsableArguments {
-    @Option(help: "Read this display, by its window-server id, which every scope line names. Defaults to the main display.")
+    @Option(help: .init(stringLiteral: Help.display))
     var display: UInt32?
 
-    @Option(help: "Read this window's bounds, by the id `eyes windows` prints.")
+    @Option(help: .init(stringLiteral: Help.window))
     var window: UInt32?
 
-    @Option(help: "Read this rectangle: x,y,width,height in the points vhid clicks.")
+    @Option(help: .init(stringLiteral: Help.rect))
     var rect: String?
 
     func validate() throws {
@@ -19,7 +38,7 @@ struct Where: ParsableArguments {
     }
 
     var region: Region {
-        get throws { try Self.region(display: display, window: window, rect: rect, flag: "--") }
+        get throws { try Self.region(display: display, window: window, rect: rect, as: .flag) }
     }
 
     /// The one place a region is spelled from its three arguments, for the verbs and the
@@ -29,20 +48,26 @@ struct Where: ParsableArguments {
     /// The main display is the default rather than every display, because `Region` has no
     /// word for everywhere; the scope line names which display was read, so the default is
     /// never mistaken for the whole desk.
-    static func region(display: UInt32?, window: UInt32?, rect: String?, flag: String) throws -> Region {
+    static func region(display: UInt32?, window: UInt32?, rect: String?, as s: Spelling) throws -> Region {
         guard [display != nil, window != nil, rect != nil].filter({ $0 }).count <= 1 else {
-            throw ValidationError("give at most one of \(flag)display, \(flag)window, \(flag)rect")
+            throw ValidationError("give at most one of \(s("display")), \(s("window")), \(s("rect"))")
         }
-        return try rect.map { .rect(try parsedRect($0, flag: flag)) }
+        return try rect.map { .rect(try parsedRect($0, as: s)) }
             ?? window.map(Region.window)
             ?? .display(display ?? CGMainDisplayID())
     }
 
-    private static func parsedRect(_ spelled: String, flag: String) throws -> ScreenRect {
+    /// How many rows, for both verbs and both tools.
+    static func limit(_ count: Int, as s: Spelling) throws -> Limit {
+        guard let limit = Limit(count) else { throw ValidationError("\(s("limit")) must be at least 1") }
+        return limit
+    }
+
+    private static func parsedRect(_ spelled: String, as s: Spelling) throws -> ScreenRect {
         let parts = spelled.split(separator: ",").map { Double($0.trimmingCharacters(in: .whitespaces)) }
         guard parts.count == 4, let x = parts[0], let y = parts[1], let w = parts[2], let h = parts[3],
               [x, y, w, h].allSatisfy({ abs($0) <= 1_000_000 }), w > 0, h > 0
-        else { throw ValidationError("\(flag)rect wants x,y,width,height in points - a positive size, nothing past a million - got \(spelled)") }
+        else { throw ValidationError("\(s("rect")) wants x,y,width,height in points - a positive size, nothing past a million - got \(spelled)") }
         return ScreenRect(x: x, y: y, width: w, height: h)
     }
 }

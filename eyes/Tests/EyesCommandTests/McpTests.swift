@@ -6,7 +6,8 @@ import Testing
 
 /// What `eyes mcp` offers, asked through a client over an in-memory transport, with a
 /// listing written here in place of the window server.
-@Suite struct McpTests {
+/// Serialized: the fake reader records into one shared `asked`.
+@Suite(.serialized) struct McpTests {
     private static let listing = WindowListing(
         windows: [
             Window(id: 1, owner: "Safari", pid: 400, frame: ScreenRect(x: 0, y: 33, width: 1512, height: 949), layer: 0),
@@ -15,8 +16,16 @@ import Testing
         excluded: [])
     private static let front = Frontmost(pid: 401, name: "Finder")
 
+    /// Every query the fake reader was handed, so a test can check what reached it.
+    actor Asked {
+        var queries: [Query] = []
+        func add(_ q: Query) { queries.append(q) }
+    }
+    private static let asked = Asked()
+
     /// A reader that sees one run, "Save", everywhere but display 666, where it has no grant.
     private static let look: EyesTools.Look = { query in
+        await asked.add(query)
         if query.region == .display(666) { throw PixelsError.noGrant }
         let save = Found(text: Text("Save")!, frame: ScreenRect(x: -300, y: 40, width: 40, height: 20), source: .pixels(confidence: Confidence(1)!))
         return Reading(outcome: .matched(Matches([save])!), scope: Scope(region: ScreenRect(x: -1512, y: 316, width: 1512, height: 982), examined: 1, reach: .whole))
@@ -96,6 +105,7 @@ import Testing
         ] {
             let (said, isError) = try await call(arguments, tool: tool)
             #expect(isError != true)
+            #expect(await Self.asked.queries.last == query)
             #expect(said == (try await Report.text(query, reading: Self.look)))
         }
     }
@@ -105,7 +115,7 @@ import Testing
         for tool in ["find", "read"] {
             let (said, isError) = try await call(tool == "find" ? ["text": "Save", "display": 666] : ["display": 666], tool: tool)
             #expect(isError == true)
-            #expect(said.hasPrefix("Screen Recording is not granted"))
+            #expect(said == "\(PixelsError.noGrant) Under eyes mcp the grant is the app's that runs this server, not eyes'.")
         }
     }
 
@@ -118,7 +128,8 @@ import Testing
             ("find", ["text": "a", "exact": "yes"], "exact is yes, and it takes a boolean"),
             ("read", ["limit": 0], "limit must be at least 1"),
             ("read", ["display": 1, "window": 2], "give at most one of display, window, rect"),
-            ("read", ["display": -1], "display is -1, and ids are not negative"),
+            ("read", ["display": -1], "display is -1, which is not a window-server id (0 to 4294967295)"),
+            ("read", ["window": 4_294_967_296], "window is 4294967296, which is not a window-server id (0 to 4294967295)"),
             ("read", ["rect": "1,2,3"], "rect wants x,y,width,height in points - a positive size, nothing past a million - got 1,2,3"),
             ("read", ["text": "a"], "text is not an argument this tool takes: it takes display, window, rect, limit"),
         ] {
@@ -126,5 +137,27 @@ import Testing
             #expect(isError == true, "\(tool) \(arguments)")
             #expect(said == expected)
         }
+    }
+
+    /// Reads never overlap, however many calls arrive at once: two Vision recognitions in
+    /// one process are a measured crash.
+    @Test func readsRunOneAtATime() async throws {
+        actor Gauge {
+            var now = 0, most = 0
+            func enter() { now += 1; most = max(most, now) }
+            func leave() { now -= 1 }
+        }
+        let gauge = Gauge()
+        let serial = OneAtATime { query in
+            await gauge.enter()
+            try await Task.sleep(for: .milliseconds(20))
+            await gauge.leave()
+            return Reading(outcome: .nearest([]), scope: Scope(region: ScreenRect(x: 0, y: 0, width: 1, height: 1), examined: 0, reach: .whole))
+        }
+        try await withThrowingTaskGroup(of: Reading.self) { group in
+            for _ in 0..<5 { group.addTask { try await serial.read(Query(match: nil, region: .display(1))) } }
+            for try await _ in group {}
+        }
+        #expect(await gauge.most == 1)
     }
 }

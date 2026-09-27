@@ -8,13 +8,13 @@ struct Find: AsyncParsableCommand {
         discussion: "Case never matters. With nothing found, prints the nearest runs and how many edits off each is."
     )
 
-    @Argument(help: "The text to look for. Matches any run that contains it.")
+    @Argument(help: .init(stringLiteral: Help.text))
     var text: String
 
-    @Flag(help: "Match only a run that is exactly this text.")
+    @Flag(help: .init(stringLiteral: Help.exact))
     var exact = false
 
-    @Option(help: "Match a run within this many single-character edits of the text, for recogniser slips.")
+    @Option(help: .init(stringLiteral: Help.edits))
     var edits: Int?
 
     @Option(help: "The most matches to print.")
@@ -23,30 +23,24 @@ struct Find: AsyncParsableCommand {
     @OptionGroup var place: Where
 
     func validate() throws {
-        _ = try Self.match(text, exact: exact, edits: edits, flag: "--")
-        _ = try Self.limit(limit, flag: "--")
+        _ = try Self.match(text, exact: exact, edits: edits, as: .flag)
+        _ = try Where.limit(limit, as: .flag)
     }
 
     @MainActor
     func run() async throws {
-        try await look(Query(match: Self.match(text, exact: exact, edits: edits, flag: "--"),
-                             region: place.region, limit: Self.limit(limit, flag: "--")))
+        try await look(Query(match: Self.match(text, exact: exact, edits: edits, as: .flag),
+                             region: place.region, limit: Where.limit(limit, as: .flag)))
     }
 
     /// What to match, or the refusal - one rule for the verb and the MCP tool, each naming
-    /// an argument the way its caller spells it (`flag` is `--` or nothing).
-    /// [LAW:single-enforcer]
-    static func match(_ text: String, exact: Bool, edits: Int?, flag: String) throws -> Match {
+    /// an argument the way its caller spells it. [LAW:single-enforcer]
+    static func match(_ text: String, exact: Bool, edits: Int?, as s: Spelling) throws -> Match {
         guard Text(text) != nil else { throw ValidationError("the text to find is blank") }
-        guard !(exact && edits != nil) else { throw ValidationError("give \(flag)exact or \(flag)edits, not both") }
+        guard !(exact && edits != nil) else { throw ValidationError("give \(s("exact")) or \(s("edits")), not both") }
         guard let edits else { return exact ? .exact(text) : .contains(text) }
-        guard let within = Edits(edits) else { throw ValidationError("\(flag)edits cannot be negative") }
+        guard let within = Edits(edits) else { throw ValidationError("\(s("edits")) cannot be negative") }
         return .within(edits: within, of: text)
-    }
-
-    static func limit(_ count: Int, flag: String) throws -> Limit {
-        guard let limit = Limit(count) else { throw ValidationError("\(flag)limit must be at least 1") }
-        return limit
     }
 }
 
@@ -62,11 +56,11 @@ struct Read: AsyncParsableCommand {
     @OptionGroup var place: Where
 
     func validate() throws {
-        _ = try Find.limit(limit, flag: "--")
+        _ = try Where.limit(limit, as: .flag)
     }
 
     @MainActor
     func run() async throws {
-        try await look(Query(match: nil, region: place.region, limit: Find.limit(limit, flag: "--")))
+        try await look(Query(match: nil, region: place.region, limit: Where.limit(limit, as: .flag)))
     }
 }
