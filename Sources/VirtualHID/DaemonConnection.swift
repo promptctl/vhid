@@ -64,7 +64,7 @@ public final class DaemonConnection: Sendable {
         case pointingReady = 5
 
         /// The words `DaemonError` reports this status in.
-        var name: String {
+        public var name: String {
             switch self {
             case .none: "none"
             case .driverActivated: "driver activated"
@@ -156,8 +156,9 @@ public final class DaemonConnection: Sendable {
     /// really was. That is why a connection is meant to be held open rather than made per
     /// call.
     ///
-    /// A deadline missed here is never `.silent`: the daemon has spoken - it answered the
-    /// request this follows and it heartbeats - so the failure names what it said instead.
+    /// A deadline missed here is `.notReady` carrying the daemon's latest word on each
+    /// status, never `.silent`: bring-up reaches this only after the daemon answered its
+    /// request, so what it said, or that it said nothing about the driver, is the reason.
     func wait(for status: Status, by deadline: ContinuousClock.Instant) throws {
         try link.wait(by: deadline, until: { $0.status[status] == true }, missed: { .notReady(awaiting: status, said: $0.status) })
     }

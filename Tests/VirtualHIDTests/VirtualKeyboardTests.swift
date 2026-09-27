@@ -85,9 +85,9 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
     /// A daemon that answered and then never said the keyboard is ready is not silent: the
     /// failure is what it did say, which is how an unapproved driver gets named.
     @Test(arguments: [
-        ([], "it last said nothing about the driver"),
+        ([], "nothing about the driver"),
         ([(.driverActivated, false)], "driver activated: no"),
-        ([(.driverActivated, true), (.driverConnected, false)], "driver activated: yes, driver connected: no"),
+        ([(.driverConnected, false), (.driverActivated, true)], "driver activated: yes, driver connected: no"),
         ([(.driverConnected, true), (.keyboardReady, false)], "driver connected: yes, keyboard ready: no"),
     ] as [([(DaemonConnection.Status, Bool)], String)])
     func aReadinessTimeoutNamesWhatTheDaemonSaid(pushed: [(DaemonConnection.Status, Bool)], named: String) throws {
@@ -98,8 +98,7 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
         }
         let error = try #require(throws: DaemonError.self) { try keyboard(on: fake).start(within: .milliseconds(300)) }
         guard case .notReady(.keyboardReady, _) = error else { Issue.record("threw \(error)"); return }
-        #expect(error.description.hasPrefix("the daemon never said keyboard ready"))
-        #expect(error.description.contains(named))
+        #expect(error.description == "the daemon never said keyboard ready; it last said \(named)")
     }
 
     /// The daemon health-checks its clients, and a client that does not answer is one it
