@@ -1,7 +1,7 @@
 import KeyboardLayout
 import Keystrokes
 
-/// The one inserter: text and chords, lowered to keystrokes and pressed on a keyboard,
+/// The one typist: text and chords, lowered to keystrokes and pressed on a keyboard,
 /// with every key released again when a run stops.
 ///
 /// Two steps, and the value between them is the proof. `lower` turns text or a chord into
@@ -12,11 +12,11 @@ import Keystrokes
 /// any. [LAW:parse-dont-validate]
 ///
 /// **What `lower` refuses is what cannot be pressed, and nothing else.** It used to also
-/// refuse a keystroke that would press the hotkey the app listening for dictation was
-/// watching for - a real hazard in that app, and none of this package's business. A
-/// keystroke that means something to some program on this Mac is still a keystroke the
-/// device can send, and a caller who does not want to send it does not send it. Anything
-/// that has to avoid its own hotkey knows which one that is; this does not.
+/// refuse a keystroke that would press low-talker's dictation hotkey - a real hazard in
+/// low-talker, and none of this package's business. A keystroke that means something to
+/// some program on this Mac is still a keystroke the device can send, and a client that
+/// does not want to send it does not send it. A client with a shortcut of its own to avoid
+/// knows which one that is; this does not.
 public struct Typist {
     public let keyboard: any Keyboard
 

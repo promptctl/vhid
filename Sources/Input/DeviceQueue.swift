@@ -5,9 +5,9 @@ import Dispatch
 ///
 /// A report to the keyboard or the mouse blocks the thread it is made on until the far
 /// side answers, and that wait is the pacing the driver needs, so it stays; what moves is
-/// the thread. On the caller's own actor it held that actor for as long as the insert took
+/// the thread. On the caller's own actor it held that actor for as long as the typing took
 /// - ten seconds for a long sentence - so anything else that actor was responsible for
-/// waited with it; the app this was written in lost its keyboard tap that way, and macOS
+/// waited with it; low-talker, the app this was written in, lost its keyboard tap that way, and macOS
 /// switches off a tap that cannot be heard. On the cooperative pool it would hold one of
 /// the few threads the rest of the process runs on, which is how `HelperKeyboardTests`
 /// once starved a three-core runner. A queue nothing else runs on is the one place the

@@ -6,7 +6,7 @@ import Testing
 /// they were transcribed from rather than against themselves.
 ///
 /// The character rows are proven elsewhere - by the alphabet the 3ti.2 spike drove a real
-/// driver with - and the modifier row by the table the hotkey already uses. These rows had
+/// driver with - and the modifier row by the table low-talker's hotkey already used. These rows had
 /// nothing: `UCKeyTranslate` answers empty for every one of them, so no layout test can
 /// reach them, and a transposed usage among the sixty-odd entries here would sit unnoticed
 /// until something pressed an arrow key and got a keypad digit.
