@@ -80,9 +80,11 @@ final class Readiness: @unchecked Sendable {
         return attempt
     }
 
+    /// The attempt's own verdict, so it replaces a loss the attempt reported on its way
+    /// to failing: a failing attempt stops the daemon it started, and that connection
+    /// closing is the failure's consequence, not its cause.
     func failed(_ error: any Error) {
         condition.lock(); defer { condition.unlock() }
-        guard !ended else { return }
         ended = true
         state = .down(.failed(error))
     }
