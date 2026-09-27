@@ -329,7 +329,7 @@ public struct CursorUnreadable: Error, CustomStringConvertible {
     public var description: String { "the window server would not say where the cursor is" }
 }
 
-/// A pointing run that stopped: the helper went quiet, the caller cancelled it, or the
+/// A pointing run that stopped: vhidd went quiet, the caller cancelled it, or the
 /// cursor would not go where it was sent. What stopped it is the cause; whether the
 /// buttons are known to be up is the part the operator has to act on.
 public struct PointingStopped: StoppedPartWay, CustomStringConvertible {

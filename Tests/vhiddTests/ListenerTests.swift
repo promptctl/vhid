@@ -75,7 +75,7 @@ import Testing
     }
 
     /// Runs `body` on a thread of the test's own and awaits what it returned or threw:
-    /// `HelperConnection` blocks until the helper answers, and a wait on the cooperative
+    /// `HelperConnection` blocks until vhidd answers, and a wait on the cooperative
     /// pool starves the reply it is waiting for. [LAW:no-ambient-temporal-coupling]
     private func blocking<T: Sendable>(_ body: @escaping @Sendable () throws -> T) async throws -> T {
         try await withCheckedThrowingContinuation { continuation in

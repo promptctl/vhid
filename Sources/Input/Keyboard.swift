@@ -28,7 +28,7 @@ public protocol Keyboard: Sendable {
 /// [LAW:decomposition] One sentence: it makes a synchronous device asynchronous by
 /// running each call somewhere the wait costs nothing. The queue is handed in rather than
 /// made here, because the keyboard and the mouse a caller posts through must share one -
-/// the helper takes their reports as a single sequence, and two queues would let the
+/// vhidd takes their reports as a single sequence, and two queues would let the
 /// order they were asked in and the order they arrive in differ.
 public struct QueuedKeyboard: Keyboard {
     public let keyboard: any KeyPress

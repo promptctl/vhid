@@ -10,7 +10,7 @@ import Testing
 /// `scripts/launchd-plist` is the one writer of that plist, and `scripts/make-pkg` runs it
 /// with the service the packed CLI names. A plist whose Label, MachServices key and
 /// `--service` disagree is a daemon listening under one name while clients dial another,
-/// and it surfaces only as a helper nobody can reach - so the writer's output is read back
+/// and it surfaces only as a vhidd nobody can reach - so the writer's output is read back
 /// through the daemon's own parser rather than matched as text. [LAW:behavior-not-structure]
 struct LaunchdPlistTests {
     /// Carries `&` and `<`, the two characters that leave a plist unparseable when written

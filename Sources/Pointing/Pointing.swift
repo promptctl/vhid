@@ -59,7 +59,7 @@ public struct Scroll: Hashable, Sendable {
 /// click to land on it. What is on the other side - the driver in this process, or a root
 /// daemon across an XPC boundary - is not a fact anything above here needs, which is what
 /// lets the same clicking code run under `sudo` against the device and unprivileged
-/// against the helper. [LAW:composability]
+/// against vhidd. [LAW:composability]
 ///
 /// There is no `up(_:)`, for the reason `KeyPress` gives: the device derives every report
 /// from its own set of held buttons, and a caller releasing one at a time would be

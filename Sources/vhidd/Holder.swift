@@ -5,8 +5,8 @@ import Foundation
 /// (see `Devices`): two clients acting at once would each post reports missing the
 /// other's, and the first to leave would release the keys and buttons the other held.
 /// [LAW:types-are-the-program] Refusal is the truthful answer to a second client, and a
-/// client that wants to share can connect per act - the connection is lazy, and the
-/// helper paid for readiness once.
+/// client that wants to share can connect per act - the connection is lazy, and
+/// vhidd paid for readiness once.
 ///
 /// Connections are named by identifier and not held: a holder that kept the connection
 /// would keep it alive, and the release runs from a handler the connection itself owns.

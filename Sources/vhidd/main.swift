@@ -70,7 +70,7 @@ do {
     // `reach` would be a race with the dialog it exists to prevent.
     // [LAW:no-ambient-temporal-coupling]
     //
-    // A failure here does not stop the helper. The keyboard still types; what is lost is
+    // A failure here does not stop vhidd. The keyboard still types; what is lost is
     // that the assistant may take the first line of it, which is worth saying loudly and
     // is not worth refusing to type over. Said here, and read back by `vhid doctor`'s
     // Keyboard Setup Assistant row, which stays unmet until the answer is on disk and
@@ -89,7 +89,7 @@ do {
     }
 
     // The connection is lost on the reading thread, and no key can be released over a
-    // connection that is gone. What can be done is to stop the daemon this helper
+    // connection that is gone. What can be done is to stop the daemon vhidd
     // started, which takes the device and whatever it held down with it; a daemon
     // somebody else runs stays theirs. Then end: launchd restarts this job after an
     // unsuccessful exit, and the next start reaches or restarts the daemon.
@@ -102,7 +102,7 @@ do {
     log("the keyboard is up: the daemon answered in \(reached.startup.keyboard.answered), ready after \(reached.startup.keyboard.ready)")
     log("the mouse is up: the daemon answered in \(reached.startup.mouse.answered), ready after \(reached.startup.mouse.ready)")
     let devices = Devices(keyboard: reached.devices.keyboard, mouse: reached.devices.mouse)
-    // Whatever the daemon was holding for its last occupant - a helper that exited on a
+    // Whatever the daemon was holding for its last occupant - a vhidd that exited on a
     // lost connection while the daemon lived on, or a hand-run session - is up before
     // any client is served. Unconditionally: the daemon's origin says who started it,
     // not what it holds. [LAW:dataflow-not-control-flow]

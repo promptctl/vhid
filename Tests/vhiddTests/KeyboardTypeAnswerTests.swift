@@ -3,7 +3,7 @@ import Foundation
 import Testing
 @testable import vhidd
 
-/// Filing this keyboard's answer with Keyboard Setup Assistant, which the helper does as
+/// Filing this keyboard's answer with Keyboard Setup Assistant, which vhidd does as
 /// it starts so the assistant never takes the first line typed.
 ///
 /// The cache is a shared system file holding every keyboard this Mac has ever met - it
@@ -91,7 +91,7 @@ import Testing
     /// to file, and on no start after it, is the whole of what can be done here.
     ///
     /// Which start it was is the returned value and not a silence: "already there" is the
-    /// ordinary case on every boot after the first, and a helper that had stopped filing
+    /// ordinary case on every boot after the first, and a vhidd that had stopped filing
     /// anything would look identical without it. [LAW:no-silent-failure]
     @Test func aStartThatFindsTheAnswerAlreadyThereFilesNothing() throws {
         let path = scratch("twice")
@@ -102,10 +102,10 @@ import Testing
     }
 
     /// And that the two outcomes reach a reader as two different sentences, which is the
-    /// entire reason there are two of them rather than a Bool nobody looks at. The helper
+    /// entire reason there are two of them rather than a Bool nobody looks at. vhidd
     /// interpolates the case into the line it logs as it starts, so a reader running
     /// README's `log show` can tell a start that filed the answer from one that found it
-    /// already there - and, through that, a working helper from one that has stopped
+    /// already there - and, through that, a working vhidd from one that has stopped
     /// filing anything.
     ///
     /// Held here because it went missing here once: the enum was justified by a log line
@@ -131,7 +131,7 @@ import Testing
 
     /// `vhid doctor` reads this file with no privilege at all, so the mode it is left in is
     /// part of filing the answer and not a detail of how it was written: a cache this
-    /// helper tightened would leave the assistant's row permanently unreadable for every
+    /// vhidd tightened would leave the assistant's row permanently unreadable for every
     /// ordinary user, with the answer inside it perfectly correct.
     ///
     /// Every starting condition is here because the filing reaches them by different
@@ -248,15 +248,15 @@ import Testing
         #expect(try read(path)["keyboardtype"] as? String == "not a dictionary")
     }
 
-    // MARK: - why the helper is the one that files it
+    // MARK: - why vhidd is the one that files it
 
-    /// The reason this is the helper's job and not `vhid doctor`'s, kept as a check rather
-    /// than as a sentence: the daemon the helper cannot start without lives *inside* the
-    /// driver package's own payload. So on a Mac with no driver there is no helper either,
+    /// The reason this is vhidd's job and not `vhid doctor`'s, kept as a check rather
+    /// than as a sentence: the daemon vhidd cannot start without lives *inside* the
+    /// driver package's own payload. So on a Mac with no driver there is no vhidd either,
     /// and doctor has no root to reach - which is why it names the driver install to a
     /// reader instead of taking it. If this ever stops being true, the ticket's account
     /// of what blocks a self-installing driver row stops being true with it.
-    @Test func theDaemonTheHelperNeedsIsInsideThePackageItCouldNotInstall() {
+    @Test func theDaemonVhiddNeedsIsInsideThePackageItCouldNotInstall() {
         #expect(DaemonProcess.executable.hasPrefix(DriverProbe.supportDirectory))
     }
 }

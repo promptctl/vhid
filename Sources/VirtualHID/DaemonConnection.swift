@@ -24,7 +24,7 @@ import Foundation
 /// [LAW:no-ambient-temporal-coupling]
 ///
 /// **One connection carries both devices.** The daemon keeps a keyboard and a pointing
-/// device per client connection and destroys both when the client hangs up, so a helper
+/// device per client connection and destroys both when the client hangs up, so a client
 /// that owns a keyboard and a mouse holds one of these and hands it to each.
 public final class DaemonConnection: Sendable {
     static let socketPath = "/Library/Application Support/org.pqrs/tmp/rootonly/karabiner_virtual_hid_device_service.sock"

@@ -2,7 +2,7 @@ import Foundation
 
 /// The one way out of this process, claimed by whichever reason to leave comes first.
 ///
-/// [LAW:no-ambient-temporal-coupling] Two things end the helper - launchd's SIGTERM, and
+/// [LAW:no-ambient-temporal-coupling] Two things end vhidd - launchd's SIGTERM, and
 /// the daemon's connection going - and each can set the other off. Leaving on SIGTERM
 /// releases the keys, which is a request; a request whose write fails is the connection
 /// being lost, and the loss is reported on the thread that wrote, inside the release.

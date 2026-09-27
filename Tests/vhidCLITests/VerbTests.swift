@@ -21,7 +21,7 @@ import Testing
     }
 
     /// One of something is one of it. The rule lives in `counted`, and this is the verb
-    /// reading back what it did rather than the helper being asked directly.
+    /// reading back what it did rather than `counted` being called directly.
     @Test func oneCharacterIsOneCharacter() async throws {
         let said = try await TypeCommand.type("a", on: Self.us, with: Typist(keyboard: RecordingKeyboard()))
         #expect(said == "typed 1 character on \(Self.us.name)")

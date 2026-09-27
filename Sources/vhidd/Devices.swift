@@ -90,7 +90,7 @@ final class Devices: NSObject, ServedDevices, @unchecked Sendable {
     /// key the driver believes is down is one macOS repeats into whatever comes forward
     /// next - the failure this whole epic exists to avoid. A button left down is a drag
     /// macOS continues across whatever the pointer crosses. The client cannot clean up
-    /// after itself in precisely the case that matters, so the helper does it, on every
+    /// after itself in precisely the case that matters, so vhidd does it, on every
     /// way a connection can end - and on its own way out, for the same reason. Each device
     /// is released whatever the other answered, and the lock is held across both: a
     /// report landing between them would be a key set down after the keyboard was cleared,

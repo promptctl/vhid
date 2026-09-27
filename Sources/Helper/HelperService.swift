@@ -12,10 +12,10 @@ import Foundation
 /// turns a HID usage into a character using the console user's keyboard layout, and Text
 /// Input Sources answers per process: with this Mac switched to Dvorak, the console user
 /// is told `com.apple.keylayout.Dvorak` and the same call under `sudo` is told
-/// `com.apple.keylayout.US`. A helper handed text would look up the keys with root's
+/// `com.apple.keylayout.US`. A vhidd handed text would look up the keys with root's
 /// layout and type something else entirely - measured, and every check still passed,
 /// because the daemon acknowledged every report and the screen held what had been typed.
-/// A helper that cannot be handed text cannot make that mistake.
+/// A vhidd that cannot be handed text cannot make that mistake.
 ///
 /// **It cannot express a place on the screen either, for the same shape of reason.** The
 /// device knows deltas, and macOS accelerates them: where the pointer lands after a report
@@ -27,19 +27,19 @@ import Foundation
 /// the driver then drops: twelve 500-character runs, each report awaited, six of which
 /// landed fewer keys than were acknowledged - as few as 469 of 500. The only delivery
 /// receipt is the event tap, which runs in the user's session and not here. So a method
-/// shaped `type(_ text: String)` would swallow a whole burst inside the helper, which has
+/// shaped `type(_ text: String)` would swallow a whole burst inside vhidd, which has
 /// no way to observe the loss and would answer "typed" to a client that got 608
 /// characters. The pacing lives with the process that can see what landed.
 ///
 /// **The focus check does not cross.** Which app is frontmost, and whether the operator
 /// interrupted, are facts of the user's session that a root daemon cannot read. They stay
-/// on the client, which is why this carries no "type into" argument: the helper types
+/// on the client, which is why this carries no "type into" argument: vhidd types
 /// wherever the keyboard is pointed, exactly as hardware does, and deciding that is the
 /// client's job. [LAW:one-way-deps]
 ///
 /// The integers are the wire's: a usage is the 16 bits of the report, a button is its
 /// number, a count is the signed byte the report carries. The wire admits values the
-/// device has no bit or count for - button 0 and 33 upward, and -128 - and the helper
+/// device has no bit or count for - button 0 and 33 upward, and -128 - and vhidd
 /// refuses those by name rather than folding them. [LAW:parse-dont-validate]
 @objc public protocol DeviceService {
     /// Holds `usage` down, and answers when the daemon has acknowledged the report.

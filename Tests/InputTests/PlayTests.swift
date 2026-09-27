@@ -183,7 +183,7 @@ extension Lateness {
     var ranks: [Int64] { [p50, p90, p99, max] }
 }
 
-/// A mouse whose every report takes `cost` on the clock, as a helper round trip does.
+/// A mouse whose every report takes `cost` on the clock, as a vhidd round trip does.
 struct CostlyMouse: Mouse {
     let mouse: FakeMouse
     let clock: ManualClock
