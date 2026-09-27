@@ -16,6 +16,9 @@ public enum DaemonError: Error, CustomStringConvertible, Equatable {
     /// bytes this side wrote points a maintainer at the wrong half of the module.
     case malformed(String)
     case driverVersionMismatched
+    /// The daemon never said `awaiting` held; `said` is its latest word on every status it
+    /// did send, which is the reason - an unapproved driver reads as not activated.
+    case notReady(awaiting: DaemonConnection.Status, said: [DaemonConnection.Status: Bool])
 
     public var description: String {
         switch self {
@@ -31,6 +34,9 @@ public enum DaemonError: Error, CustomStringConvertible, Equatable {
             "the wire carried \(what)"
         case .driverVersionMismatched:
             "the daemon reports the driver's version is not the one it was built for"
+        case .notReady(let awaiting, let said):
+            "the daemon never said \(awaiting.name); it last said "
+                + (said.isEmpty ? "nothing about the driver" : said.sorted { $0.key.rawValue < $1.key.rawValue }.map { "\($0.key.name): \($0.value ? "yes" : "no")" }.joined(separator: ", "))
         }
     }
 }
