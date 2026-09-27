@@ -237,8 +237,8 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
 }
 
 @Suite struct PlanTests {
-    func window(_ id: UInt32, pid: Int32 = 1, _ frame: ScreenRect) -> Window {
-        Window(id: id, owner: "App", pid: pid, frame: frame, layer: 0)
+    func window(_ id: UInt32, pid: Int32 = 1, _ frame: ScreenRect, layer: Int = 0) -> Window {
+        Window(id: id, owner: "App", pid: pid, frame: frame, layer: layer)
     }
 
     let document = ScreenRect(x: 100, y: 100, width: 600, height: 400)
@@ -267,6 +267,15 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
         let menu = window(5, pid: 3, ScreenRect(x: 150, y: 120, width: 200, height: 300))
         let (roots, unwalked) = plan([menu, window(2, document)], in: region, matched: [2: "doc"])
         #expect(roots.map(\.element) == ["doc"])
+        #expect(roots[0].covers == [menu.frame])
+        #expect(unwalked == 1)
+    }
+
+    /// The app's own context menu opens inside its window too, at the menu layer; it hangs
+    /// off the app, not the window, so it is counted and covers what is under it.
+    @Test func theAppsOwnMenuInsideItsWindowIsNoSheet() {
+        let menu = window(5, ScreenRect(x: 150, y: 120, width: 200, height: 300), layer: 101)
+        let (roots, unwalked) = plan([menu, window(2, document)], in: region, matched: [2: "doc"])
         #expect(roots[0].covers == [menu.frame])
         #expect(unwalked == 1)
     }

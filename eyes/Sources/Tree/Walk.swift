@@ -246,15 +246,18 @@ func walk<Element>(
 /// the ones with nothing to walk.
 ///
 /// `matched` holds the accessibility element found for each window id. A window with none
-/// is one of two things. Inside a matched window of its own app, it is that window's sheet
-/// or drawer: its elements are under the parent's, so it covers nothing and is not
-/// counted. Otherwise it is an open menu, a system surface, or a window whose app would
+/// is one of two things. Inside a matched window of its own app and at that window's
+/// layer, it is that window's sheet or drawer: its elements are under the parent's, so it
+/// covers nothing and is not counted. The layer is what tells it from the app's own context
+/// menu or pop-up list, which also opens inside the window but sits at the menu layer and
+/// hangs off the app, not the window. Otherwise it is an open menu, a system surface, or a window whose app would
 /// not list it: unwalked, and counted whenever any of it can be seen in the region.
 /// [LAW:no-silent-failure] Pure, so the rule is tested with windows a test wrote.
 func plan<Element>(_ windows: [Window], in region: ScreenRect, matched: [UInt32: Element]) -> (roots: [Root<Element>], unwalked: Int) {
     let attached = Set(windows.filter { window in
         matched[window.id] == nil && windows.contains {
-            $0.pid == window.pid && matched[$0.id] != nil && $0.frame.cgRect.contains(window.frame.cgRect)
+            $0.pid == window.pid && $0.layer == window.layer && matched[$0.id] != nil
+                && $0.frame.cgRect.contains(window.frame.cgRect)
         }
     }.map(\.id))
     var roots: [Root<Element>] = []
