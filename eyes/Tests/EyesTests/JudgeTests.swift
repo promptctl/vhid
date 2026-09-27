@@ -5,12 +5,12 @@ import Testing
 @Suite struct JudgeTests {
     static let region = ScreenRect(x: 0, y: 0, width: 1512, height: 982)
 
+    /// A run as a reader places it: each word at its own spot along one line.
     private func found(_ text: String, y: Double = 0) -> Found {
-        Found(
-            text: Text(text)!,
-            frame: ScreenRect(x: 10, y: y, width: 30, height: 12),
-            source: .pixels(confidence: Confidence(0.9)!)
-        )
+        let words = text.split(separator: " ").enumerated().map { i, w in
+            Word(text: Text(String(w))!, frame: ScreenRect(x: 10 + Double(i) * 40, y: y, width: 30, height: 12))
+        }
+        return Found(first: words[0], rest: Array(words.dropFirst()), source: .pixels(confidence: Confidence(0.9)!))
     }
 
     private func judge(_ texts: [String], _ match: Match?, limit: Limit = .default) -> Reading {
@@ -26,7 +26,7 @@ import Testing
     @Test func containsFindsTheQueryInsideALongerRunIgnoringCase() {
         let read = judge(["File", "Save As…", "Close"], .contains("save"))
         guard case .matched(let matches) = read.outcome else { Issue.record("\(read)"); return }
-        #expect(matches.all.map(\.text.value) == ["Save As…"])
+        #expect(matches.all.map(\.text.value) == ["Save"])
         #expect(read.scope.reach == .whole)
     }
 
@@ -104,7 +104,26 @@ import Testing
             Word(text: Text(w)!, frame: ScreenRect(x: Double(i) * 50, y: 0, width: 40, height: 20))
         }
         let run = Found(first: words[0], rest: Array(words.dropFirst()), source: .pixels(confidence: Confidence(1)!))
-        #expect(Match.contains("save as").narrowing(run).text.value == "Save As…")
-        #expect(Match.exact("Save As… Cancel").narrowing(run) == run)
+        #expect(Match.contains("save as").narrowing(run).map(\.text.value) == ["Save As…"])
+        #expect(Match.exact("Save As… Cancel").narrowing(run) == [run])
+    }
+
+    /// A near miss printed one off must match when the caller widens by one edit - inside
+    /// a longer run too, which is where Vision puts a menu item.
+    @Test func wideningByTheDistanceShownFindsTheNearMiss() {
+        let near = judge(["Terminal Shell Setlings Help"], .contains("Settings"))
+        guard case .nearest(let n) = near.outcome else { Issue.record("matched"); return }
+        #expect(n.first?.distance == 1)
+        let widened = judge(["Terminal Shell Setlings Help"], .within(edits: Edits(1)!, of: "Settings"))
+        guard case .matched(let m) = widened.outcome else { Issue.record("still nothing"); return }
+        #expect(m.all.map(\.text.value) == ["Setlings"])
+    }
+
+    /// A run holding the query twice is two matches, not one with the other dropped.
+    @Test func aRunHoldingTheQueryTwiceIsTwoMatches() {
+        guard case .matched(let m) = judge(["Save Save All Revert"], .contains("save")).outcome else {
+            Issue.record("nothing"); return
+        }
+        #expect(m.all.map(\.text.value) == ["Save", "Save"])
     }
 }

@@ -127,3 +127,13 @@ public extension ScreenRect {
         )
     }
 }
+
+/// `x,y WxH` in whole points, the one spelling every line `eyes` prints uses, so one
+/// rectangle cannot print as two places. Rounded rather than truncated: truncation moves
+/// a negative coordinate toward zero, a whole point off on a display left of the main one.
+/// [LAW:one-source-of-truth]
+extension ScreenRect: CustomStringConvertible {
+    public var description: String {
+        "\(Int(x.rounded())),\(Int(y.rounded())) \(Int(width.rounded()))x\(Int(height.rounded()))"
+    }
+}

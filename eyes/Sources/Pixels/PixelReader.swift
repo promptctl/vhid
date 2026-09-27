@@ -23,6 +23,8 @@ public struct PixelReader: Reader {
         guard CGPreflightScreenCaptureAccess() else { throw PixelsError.noGrant }
         let image = try Self.capture(region)
         // A run with no words in it is nil: examined, and counted as wordless.
+        // One piece after another, never at once: measured, recognising the pieces in a
+        // task group segfaulted inside TextRecognition in 4 runs of 15.
         var runs: [Found?] = []
         for tile in Self.tiles(of: region) {
             runs += try await Self.recognise(image, of: region, in: tile)
@@ -101,20 +103,47 @@ public struct PixelReader: Reader {
     /// exist - a display that is not attached reads as blindness, never as a blank screen.
     @MainActor
     static func resolve(_ region: Region) throws -> ScreenRect {
+        let named: ScreenRect
         switch region {
         case .rect(let rect):
-            guard !rect.isEmpty else { throw PixelsError.emptyRegion(rect) }
-            return rect
+            named = rect
         case .display(let id):
             let bounds = CGDisplayBounds(id)
             guard !bounds.isEmpty else { throw PixelsError.noSuchDisplay(id) }
-            return ScreenRect(bounds)
+            named = ScreenRect(bounds)
         case .window(let id):
             guard let window = try Geometry.onScreen().windows.first(where: { $0.id == id }) else {
                 throw PixelsError.noSuchWindow(id)
             }
-            return window.frame
+            named = window.frame
         }
+        return try onOneDisplay(named, displays: activeDisplays())
+    }
+
+    /// The part of `rect` a capture can see: on the display it overlaps most, in whole
+    /// points. The scope line prints this and not what was asked for, so a window hanging
+    /// off the edge is read as what is on screen and says so.
+    ///
+    /// [LAW:no-silent-failure] Measured, `screencapture` handed 400x300 points reaching past
+    /// the display's corner returns an image of only the on-screen 212x182, and mapping that
+    /// back across the full rectangle stretches every point. Clipping first keeps the image
+    /// and the rectangle the same shape; a rectangle on no display is refused, not read as
+    /// blank. Whole points because the capture takes whole points, and the rectangle boxes
+    /// are mapped back through must be the one that was captured.
+    nonisolated static func onOneDisplay(_ rect: ScreenRect, displays: [ScreenRect]) throws -> ScreenRect {
+        let seen = displays.map { $0.cgRect.intersection(rect.cgRect.integral) }
+            .filter { !$0.isNull && !$0.isEmpty }
+            .max { $0.width * $0.height < $1.width * $1.height }
+        guard let seen else { throw PixelsError.offScreen(rect) }
+        return ScreenRect(seen.integral)
+    }
+
+    static func activeDisplays() -> [ScreenRect] {
+        var count: UInt32 = 0
+        CGGetActiveDisplayList(0, nil, &count)
+        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        CGGetActiveDisplayList(count, &ids, &count)
+        return ids.map { ScreenRect(CGDisplayBounds($0)) }
     }
 
     /// Captures exactly `region` with `screencapture`, in points of the global space it
@@ -130,7 +159,7 @@ public struct PixelReader: Reader {
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        let r = region.cgRect.integral
+        let r = region.cgRect
         process.arguments = ["-x", "-t", "png", "-R\(Int(r.minX)),\(Int(r.minY)),\(Int(r.width)),\(Int(r.height))", path.path]
         let stderr = Pipe()
         process.standardError = stderr
@@ -147,6 +176,12 @@ public struct PixelReader: Reader {
         else {
             let said = String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
             throw PixelsError.captureWroteNothing(region, said.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        // The backstop for the clipping above: an image not the shape of the rectangle
+        // would map every box to the wrong place, so it is refused rather than read.
+        let (imageAspect, regionAspect) = (Double(image.width) / Double(image.height), region.width / region.height)
+        guard abs(imageAspect / regionAspect - 1) < 0.02 else {
+            throw PixelsError.captureWrongShape(region, width: image.width, height: image.height)
         }
         return image
     }
@@ -182,7 +217,8 @@ public struct PixelReader: Reader {
 /// nothing. Each one throws, because a returned `Reading` is taken as proof of looking.
 public enum PixelsError: Error, CustomStringConvertible {
     case noGrant
-    case emptyRegion(ScreenRect)
+    case offScreen(ScreenRect)
+    case captureWrongShape(ScreenRect, width: Int, height: Int)
     case noSuchDisplay(CGDirectDisplayID)
     case noSuchWindow(UInt32)
     case captureWroteNothing(ScreenRect, String)
@@ -193,14 +229,16 @@ public enum PixelsError: Error, CustomStringConvertible {
         case .noGrant:
             "Screen Recording is not granted to this process, so a capture would show only the wallpaper."
                 + " Grant it in System Settings > Privacy & Security > Screen Recording."
-        case .emptyRegion(let r):
-            "the region \(Int(r.x)),\(Int(r.y)) \(Int(r.width))x\(Int(r.height)) has no area to read"
+        case .offScreen(let r):
+            "\(r) is on no display, so there is nothing there to read"
+        case .captureWrongShape(let r, let width, let height):
+            "screencapture returned a \(width)x\(height) pixel image for \(r), which is not its shape"
         case .noSuchDisplay(let id):
             "no display with id \(id) is attached"
         case .noSuchWindow(let id):
             "no on-screen window has id \(id); `eyes windows` lists the ones that do"
         case .captureWroteNothing(let r, let said):
-            "screencapture wrote no image of \(Int(r.x)),\(Int(r.y)) \(Int(r.width))x\(Int(r.height))"
+            "screencapture wrote no image of \(r)"
                 + (said.isEmpty ? "" : ": \(said)")
         case .unreadableConfidence(let text):
             "Vision reported a confidence that is not a number for \"\(text)\""

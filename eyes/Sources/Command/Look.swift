@@ -25,8 +25,8 @@ struct Where: ParsableArguments {
         try rect.map { spelled in
             let parts = spelled.split(separator: ",").map { Double($0.trimmingCharacters(in: .whitespaces)) }
             guard parts.count == 4, let x = parts[0], let y = parts[1], let w = parts[2], let h = parts[3],
-                  w > 0, h > 0
-            else { throw ValidationError("--rect wants x,y,width,height with a positive size, got \(spelled)") }
+                  [x, y, w, h].allSatisfy(\.isFinite), w > 0, h > 0
+            else { throw ValidationError("--rect wants x,y,width,height in finite numbers with a positive size, got \(spelled)") }
             return ScreenRect(x: x, y: y, width: w, height: h)
         }
     }
@@ -62,7 +62,7 @@ enum Report {
             asked.map { "\($0) not found" } ?? "no text"
         }
         let clauses: [String?] = [
-            "\(head) in \(place(query.region)) \(rect(s.region))",
+            "\(head) in \(place(query.region)) \(s.region)",
             "\(s.examined) run\(s.examined == 1 ? "" : "s") read",
             s.excluded.isEmpty ? nil : s.excluded.map { "\($0.count) \($0.reason.rawValue)" }.joined(separator: ", "),
             reach(s.reach),
@@ -91,7 +91,8 @@ enum Report {
     private static func place(_ region: Region) -> String {
         switch region {
         case .display(let id): "display \(id)"
-        case .window(let id): "window \(id)"
+        // Its bounds, as pixels: a window partly under another reads what is on top.
+        case .window(let id): "what is on top over window \(id)"
         case .rect: "rect"
         }
     }
@@ -103,10 +104,6 @@ enum Report {
         case .stopped(.elementLimit(let l)): "stopped at \(l.count) elements"
         case .stopped(.timeBudget(let d)): "stopped after \(d)"
         }
-    }
-
-    private static func rect(_ r: ScreenRect) -> String {
-        "\(Int(r.x.rounded())),\(Int(r.y.rounded())) \(Int(r.width.rounded()))x\(Int(r.height.rounded()))"
     }
 
     private static func point(_ p: ScreenPoint) -> String { "\(Int(p.x.rounded())),\(Int(p.y.rounded()))" }

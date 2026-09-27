@@ -109,4 +109,9 @@ import Testing
         expect(back.width, piece.width, "width")
         expect(back.height, piece.height, "height")
     }
+
+    /// Rounded, not truncated: truncation moves a negative coordinate toward zero.
+    @Test func aRectangleIsSpelledInWholePointsRounded() {
+        #expect(ScreenRect(x: -0.6, y: 10.5, width: 99.6, height: 20).description == "-1,11 100x20")
+    }
 }

@@ -61,4 +61,26 @@ import Testing
         ])
         #expect(order.map(\.text.value) == ["File", "Edit", "Help", "below"])
     }
+
+    static let main = ScreenRect(x: 0, y: 0, width: 1512, height: 982)
+    static let left = ScreenRect(x: -2400, y: -300, width: 2400, height: 1600)
+
+    /// The measured case: 400x300 reaching past the main display's corner is captured as
+    /// only its on-screen 212x182, so that is the rectangle the boxes map back through.
+    @Test func aRectHangingOffTheDisplayIsReadAsItsOnScreenPart() throws {
+        let seen = try PixelReader.onOneDisplay(ScreenRect(x: 1300, y: 800, width: 400, height: 300), displays: [Self.main, Self.left])
+        #expect(seen == ScreenRect(x: 1300, y: 800, width: 212, height: 182))
+    }
+
+    /// Spanning two displays reads the one it mostly covers, in whole points.
+    @Test func aRectAcrossTwoDisplaysIsReadOnTheOneItMostlyCovers() throws {
+        let seen = try PixelReader.onOneDisplay(ScreenRect(x: -100.4, y: 10.6, width: 400, height: 50), displays: [Self.main, Self.left])
+        #expect(seen == ScreenRect(x: 0, y: 10, width: 300, height: 51))
+    }
+
+    @Test func aRectOnNoDisplayIsRefusedNotReadAsBlank() {
+        #expect(throws: PixelsError.self) {
+            try PixelReader.onOneDisplay(ScreenRect(x: 9000, y: 9000, width: 40, height: 30), displays: [Self.main, Self.left])
+        }
+    }
 }
