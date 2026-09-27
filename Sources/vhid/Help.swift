@@ -118,6 +118,7 @@ enum Help {
         a key name (\(KeyChord.keyNameList)), or a usage number from 4 to 231 - the physical key, never a character
           {"t_ms":0,"buttons":["left"]}           exactly these buttons held from now: left, right, middle, or 1 to 32
           {"t_ms":8.3,"move":{"dx":4,"dy":-2}}    relative motion in counts, -127 to 127, uncorrected
+          {"t_ms":8.3,"at":{"x":812.5,"y":400}}   the cursor should be here now, in the start's coordinates
           {"t_ms":16.7,"wheel":{"v":-1,"h":0}}    wheel ticks, -127 to 127; v positive rolls away from the hand
           {"t_ms":1000,"keys":[]}                 every key up; {"buttons":[]} every button
         A script is refused whole, before anything is connected, if a line is malformed, t_ms goes \
@@ -125,6 +126,14 @@ enum Help {
         ends with a key or a button held. A line that repeats the held set sends nothing and \
         prints no report line. A key held through a second with no other act is said again, which \
         keeps it held and sends no report.
+
+        A script moves the pointer with move lines or with at lines, never both. Move counts are \
+        the input, sent as written. At lines are steered: before the clock starts, reports of a few \
+        sizes are sent at the script's own pace and the cursor read back, and between clicks each at \
+        line is the report that measurement says covers the step, the cursor not read. Before every \
+        buttons line and at the end, the pointer is steered in a loop onto the last at point - or \
+        the start - so every press and release lands where the script says, and later lines wait for \
+        as long as that took. A cursor that will not get there stops the play at that line.
 
         A finished play answers {"done":{"reports":…,"start_reports":…,"late_us":{"p50":…,"p90":…,"p99":…,"max":…}}}: \
         how many reports went out, how many the pointer took to reach the start, and how late \
