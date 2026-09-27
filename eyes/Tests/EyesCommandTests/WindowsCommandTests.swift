@@ -10,7 +10,7 @@ import Testing
 /// one, so what the sentence claims is a contract and is tested like one.
 @Suite struct WindowsCommandTests {
     private func window(id: UInt32 = 1, owner: String = "Safari", layer: Int = 0) -> Window {
-        Window(id: id, owner: owner, frame: ScreenRect(x: 0, y: 33, width: 1512, height: 949), layer: layer)
+        Window(id: id, owner: owner, pid: 400, frame: ScreenRect(x: 0, y: 33, width: 1512, height: 949), layer: layer)
     }
 
     /// Nothing filtered and nothing excluded says so by saying nothing extra: the counted
@@ -92,6 +92,7 @@ import Testing
         let row = Windows.row(Window(
             id: 104,
             owner: "System Settings",
+            pid: 400,
             frame: ScreenRect(x: 160, y: 33, width: 723, height: 949),
             layer: 101
         ))
@@ -105,6 +106,7 @@ import Testing
         let row = Windows.row(Window(
             id: 7,
             owner: nil,
+            pid: 400,
             frame: ScreenRect(x: 0, y: 0, width: 100, height: 50),
             layer: 0
         ))

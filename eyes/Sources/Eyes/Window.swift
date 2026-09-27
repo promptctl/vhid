@@ -20,6 +20,9 @@ public struct Window: Sendable, Hashable {
     /// thing here a caller does not need in order to click, and refusing the window over
     /// it would be the layer rule's mistake again in miniature.
     public let owner: String?
+    /// The owning process, which is what an accessibility walk is opened on. A required
+    /// key, unlike the name, so every window has one.
+    public let pid: Int32
     public let frame: ScreenRect
     /// Where the window server composites it, which is `NSWindow.Level` by another name -
     /// measured, not assumed: a window set to `.modalPanel` comes back at 8, `.floating`
@@ -30,9 +33,10 @@ public struct Window: Sendable, Hashable {
     /// which of those a caller meant. [LAW:dataflow-not-control-flow]
     public let layer: Int
 
-    public init(id: UInt32, owner: String?, frame: ScreenRect, layer: Int) {
+    public init(id: UInt32, owner: String?, pid: Int32, frame: ScreenRect, layer: Int) {
         self.id = id
         self.owner = owner
+        self.pid = pid
         self.frame = frame
         self.layer = layer
     }
@@ -81,7 +85,7 @@ public struct WindowExclusion: Sendable, Hashable {
         case invisible
         /// Zero-sized, so there is nowhere in it to look and nothing in it to click.
         case arealess
-        /// The entry did not describe a window: no id, no owner, no layer, or bounds that
+        /// The entry did not describe a window: no id, no owning process, no layer, or bounds that
         /// would not read as four finite numbers. Kept apart from the other two because
         /// this one is an anomaly rather than an ordinary invisible surface, and a caller
         /// seeing it climb is seeing something wrong.
@@ -150,6 +154,7 @@ public enum Geometry {
             // malformed entry, and counting it as an anomaly would fire `unreadable` for
             // a documented-normal shape while dropping something a caller can click.
             guard let id = entry[kCGWindowNumber as String] as? UInt32,
+                  let pid = entry[kCGWindowOwnerPID as String] as? Int32,
                   let layer = entry[kCGWindowLayer as String] as? Int,
                   let bounds = entry[kCGWindowBounds as String] as? [String: Any],
                   let rect = Self.rect(from: bounds)
@@ -166,7 +171,7 @@ public enum Geometry {
                 counts[.arealess, default: 0] += 1
                 continue
             }
-            windows.append(Window(id: id, owner: owner, frame: rect, layer: layer))
+            windows.append(Window(id: id, owner: owner, pid: pid, frame: rect, layer: layer))
         }
 
         // Ordered by the reason's own spelling so the same screen always reports its

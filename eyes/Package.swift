@@ -33,6 +33,11 @@ let package = Package(
         .target(name: "Pixels", dependencies: ["Eyes"]),
         // How a capture is cut into pieces and put back together, with no capture at all.
         .testTarget(name: "PixelsTests", dependencies: ["Pixels", "Eyes"]),
+        // The tree reader: the accessibility grant and the element reads. Its own target
+        // for the reason Pixels is one - neither reader links the other. [LAW:one-way-deps]
+        .target(name: "Tree", dependencies: ["Eyes"]),
+        // The error mapping, the element rules and the walk, with trees a test wrote.
+        .testTarget(name: "TreeTests", dependencies: ["Tree", "Eyes"]),
         // The binary. Every line it prints describes the screen and the scope that was
         // looked at, which is what lets the reading below it be narrow and still be
         // trusted. [LAW:no-silent-failure]

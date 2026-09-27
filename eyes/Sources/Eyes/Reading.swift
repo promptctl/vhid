@@ -221,11 +221,21 @@ public struct Exclusion: Sendable, Hashable {
         case wordless
         /// Zero-sized, offscreen, or outside the region asked for.
         case unplaced
+        /// Under another window: its centre is where a click would land on something else.
+        /// The tree reports elements whether or not anything covers them, and a point a
+        /// caller cannot press is not a finding.
+        case covered
         /// The same text at the same place, already reported once. The accessibility tree
         /// produces these constantly - a cell and its own label are two elements.
         case duplicate
         /// Ranked below what the limit allowed through.
         case ranked
+        /// The app did not answer for it - busy past the messaging timeout, or the element
+        /// went away mid-walk - so neither it nor anything under it was read.
+        case unanswered
+        /// An on-screen window with no accessibility element to walk - an open menu, a
+        /// system surface, or a window its app would not list - so nothing in it was read.
+        case unwalked
     }
 }
 
@@ -247,6 +257,11 @@ public enum Stop: Sendable, Hashable {
     /// `Limit` rather than a loose `Int`, so the cap that was hit and the cap that was
     /// asked for are one value. [LAW:one-source-of-truth]
     case resultLimit(Limit)
+    /// Parts of the region went unread: elements that did not answer, or windows with
+    /// nothing to walk. How many is the scope's `unanswered` and `unwalked` exclusions; this
+    /// says only that the region was not read whole, which is what keeps a busy app or an
+    /// open menu from proving an absence.
+    case unread
 }
 
 public extension Reading {

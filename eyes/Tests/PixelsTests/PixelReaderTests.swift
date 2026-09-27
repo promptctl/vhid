@@ -56,9 +56,9 @@ import Testing
     /// Menu items that sit a few points off one another's baseline are one line, read left
     /// to right; the line below comes after all of them.
     @Test func runsComeBackTopToBottomThenLeftToRight() {
-        let order = PixelReader.readingOrder([
+        let order = [
             run("below", 10, 40, 40), run("Edit", 180, 12, 30), run("File", 100, 10, 30), run("Help", 400, 13, 30),
-        ])
+        ].inReadingOrder
         #expect(order.map(\.text.value) == ["File", "Edit", "Help", "below"])
     }
 

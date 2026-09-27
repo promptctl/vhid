@@ -39,11 +39,12 @@ public struct PixelReader: Reader {
             Exclusion(reason: .duplicate, count: readable.count - distinct.count),
         ].filter { $0.count > 0 }
         return Reading.judging(
-            Self.readingOrder(distinct),
+            distinct.inReadingOrder,
             query: query,
             region: region,
             examined: runs.count,
-            excluded: excluded
+            excluded: excluded,
+            reach: .whole
         )
     }
 
@@ -110,41 +111,11 @@ public struct PixelReader: Reader {
         return Found(first: ordered[0], rest: Array(ordered.dropFirst()), source: .pixels(confidence: confidence))
     }
 
-    /// Top to bottom, then left to right. Vision's own order is not reading order - it put
-    /// a menu's third item after the window title below it. A run belongs to the line
-    /// above it while its centre falls inside that line's first run; a fixed grid split
-    /// one menu bar in two, because its items do not share a baseline to the point.
-    nonisolated static func readingOrder(_ runs: [Found]) -> [Found] {
-        var lines: [[Found]] = []
-        for run in runs.sorted(by: { $0.frame.centre.y < $1.frame.centre.y }) {
-            if let first = lines.last?.first, run.frame.centre.y < first.frame.y + first.frame.height {
-                lines[lines.count - 1].append(run)
-            } else {
-                lines.append([run])
-            }
-        }
-        return lines.flatMap { $0.sorted { $0.frame.x < $1.frame.x } }
-    }
-
-    /// The query's region as a rectangle in screen space, or a refusal naming what does not
-    /// exist - a display that is not attached reads as blindness, never as a blank screen.
+    /// The query's region as a rectangle a capture can take: the one `Region.bounds` names,
+    /// clipped to the display it lies on.
     @MainActor
     static func resolve(_ region: Region) throws -> ScreenRect {
-        let named: ScreenRect
-        switch region {
-        case .rect(let rect):
-            named = rect
-        case .display(let id):
-            let bounds = CGDisplayBounds(id)
-            guard !bounds.isEmpty else { throw PixelsError.noSuchDisplay(id) }
-            named = ScreenRect(bounds)
-        case .window(let id):
-            guard let window = try Geometry.onScreen().windows.first(where: { $0.id == id }) else {
-                throw PixelsError.noSuchWindow(id)
-            }
-            named = window.frame
-        }
-        return try onOneDisplay(named, displays: activeDisplays())
+        try onOneDisplay(region.bounds(), displays: Geometry.displays())
     }
 
     /// The part of `rect` a capture can see, on the one display it lies on, in whole points.
@@ -165,14 +136,6 @@ public struct PixelReader: Reader {
         guard seen.count <= 1 else { throw PixelsError.spansDisplays(rect) }
         guard let only = seen.first else { throw PixelsError.offScreen(rect) }
         return ScreenRect(only.integral)
-    }
-
-    static func activeDisplays() -> [ScreenRect] {
-        var count: UInt32 = 0
-        CGGetActiveDisplayList(0, nil, &count)
-        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
-        CGGetActiveDisplayList(count, &ids, &count)
-        return ids.map { ScreenRect(CGDisplayBounds($0)) }
     }
 
     /// Captures exactly `region` with `screencapture`, in points of the global space it
@@ -270,8 +233,6 @@ public enum PixelsError: Error, CustomStringConvertible {
     case offScreen(ScreenRect)
     case spansDisplays(ScreenRect)
     case captureWrongShape(ScreenRect, width: Int, height: Int)
-    case noSuchDisplay(CGDirectDisplayID)
-    case noSuchWindow(UInt32)
     case captureWroteNothing(ScreenRect, String)
     case unreadableConfidence(String)
 
@@ -286,10 +247,6 @@ public enum PixelsError: Error, CustomStringConvertible {
             "\(r) lies across more than one display; read each display's part with its own --rect or --display"
         case .captureWrongShape(let r, let width, let height):
             "screencapture returned a \(width)x\(height) pixel image for \(r), which is not its shape"
-        case .noSuchDisplay(let id):
-            "no display with id \(id) is attached"
-        case .noSuchWindow(let id):
-            "no on-screen window has id \(id); `eyes windows` lists the ones that do"
         case .captureWroteNothing(let r, let said):
             "screencapture wrote no image of \(r)"
                 + (said.isEmpty ? "" : ": \(said)")

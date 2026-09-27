@@ -103,6 +103,7 @@ enum Report {
         case .stopped(.resultLimit(let l)): "stopped at the limit of \(l.count)"
         case .stopped(.elementLimit(let l)): "stopped at \(l.count) elements"
         case .stopped(.timeBudget(let d)): "stopped after \(d)"
+        case .stopped(.unread): "parts left unread"
         }
     }
 
