@@ -12,22 +12,30 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 binary=${1:-.build/debug/vhid}
 
-# Resolved for MCP swift-sdk targets vhid does not use. Each maps to a mangled module
-# prefix whose presence in the binary means it is linked after all.
-unlinked() {
-  case $1 in
-    https://github.com/apple/swift-nio.git) echo '7NIOCore' ;;
-    https://github.com/apple/swift-atomics.git) echo '7Atomics' ;;
-    https://github.com/apple/swift-collections.git) echo '11DequeModule|18OrderedCollections' ;;
-  esac
+# Resolved for MCP swift-sdk targets vhid does not use. A symbol of any module in one
+# of these packages - a mangled Swift name carries its module as <length><name> - means
+# vhid links it after all. The modules are read from the checkout, so a package that
+# grows one is still covered.
+unlinked=(
+  https://github.com/apple/swift-nio.git
+  https://github.com/apple/swift-atomics.git
+  https://github.com/apple/swift-collections.git
+)
+probe() {
+  local dir=.build/checkouts/$(basename "$1" .git) module probes=()
+  [[ -d $dir/Sources ]] || { echo "check-notice: no checkout at $dir; build first" >&2; exit 1; }
+  for module in "$dir"/Sources/*/; do
+    module=$(basename "$module")
+    probes+=("${#module}$module")
+  done
+  (IFS='|'; echo "${probes[*]}")
 }
 
 failed=0
 symbols=$(nm "$binary")
 while read -r url; do
-  probe=$(unlinked "$url")
-  if [[ -n $probe ]]; then
-    if grep -qE "$probe" <<<"$symbols"; then
+  if [[ " ${unlinked[*]} " == *" $url "* ]]; then
+    if grep -qE "$(probe "$url")" <<<"$symbols"; then
       echo "check-notice: $url is listed as unlinked but $binary links it; name it in NOTICE" >&2
       failed=1
     fi
