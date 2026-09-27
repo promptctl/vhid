@@ -400,7 +400,9 @@ remove_refusals() {
   case "$registered" in
     unregistered|pending-reboot) ;;
     probe-failed) die "could not read whether the extension is still registered, and deleting the Manager while it is would strand the registration with nothing able to retract it; refusing to guess" ;;
-    *) [ "$(id -u)" != 0 ] || console_user >/dev/null ;;
+    *)
+      [[ -x $MANAGER ]] || die "the extension is registered as '$registered' but $MANAGER is missing, so nothing here can withdraw it; reinstall the package, then run: $REMOVE_AGAIN"
+      [ "$(id -u)" != 0 ] || console_user >/dev/null ;;
   esac
 }
 

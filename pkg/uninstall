@@ -77,8 +77,10 @@ if $driver; then
     say "the driver removal vhid's pkg ships is not here, so neither is vhid; if the pqrs driver is, its own scripts remove it: $pqrs_scripts"
   else
     # The development daemon a build of this tree runs uses this same driver.
-    if launchctl print "system/$service.dev" >/dev/null 2>&1; then
+    if record=$(launchctl print "system/$service.dev" 2>&1); then
       fail "the development job $service.dev is loaded and uses the driver; stop it (scripts/dev-daemon remove) before removing the driver, or run without --driver"
+    elif ! grep -q "Could not find service" <<<"$record"; then
+      fail "could not read whether the development job $service.dev, which would use the driver, is loaded, so nothing was stopped or removed: $record"
     fi
     driver_step remove_refusals || fail "nothing was stopped or removed"
   fi
@@ -117,11 +119,15 @@ for uid in $(ps -axo uid=,comm= | awk '$2 ~ /(^|\/)loginwindow$/ && $1 >= 500 { 
 done
 
 if $driver && [ -n "$driver_script" ]; then
+  # Where the removal left the driver is read afresh rather than taken from its exit
+  # status: 2 is how it reports a restart pending, but a failed step under its errexit can
+  # end it with 2 as well.
   status=0
   driver_step cmd_remove || status=$?
-  case $status in
-    0|2) removed=$((removed + 1)) ;;
-    *) fail "the driver was not removed (above says why), so vhid's files were left in place; run without --driver to remove only vhid" ;;
+  verdict=$(driver_step report_state 2>/dev/null) || verdict=unknown
+  case "$status $verdict" in
+    "0 absent" | "0 pending-reboot" | "2 pending-reboot") removed=$((removed + 1)) ;;
+    *) fail "the driver's removal did not finish (above says why; it now reads '$verdict'). vhid's jobs are stopped and its files are in place: run sudo $0 --driver again once that is fixed, or sudo $0 to remove vhid alone" ;;
   esac
 fi
 

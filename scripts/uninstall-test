@@ -204,6 +204,19 @@ driver_mac yes; echo "$DEV" >>"$STUB/loaded"; before=$(left); run_driver
 check "dev job loaded: --driver refused" 1 "$status"
 check "dev job loaded: nothing stopped or removed" "$before|" "$(left)|$(grep -v '^$' "$STUB/reached")"
 
+driver_mac yes; rm "$STUB/root$MANAGER_REL"; before=$(left); run_driver
+check "registered, Manager missing: refused" 1 "$status"
+check "registered, Manager missing: vhid left running and in place" "$DAEMON|$before" "$(cat "$STUB/loaded")|$(left)"
+
+driver_mac yes; before=$(left); UNREADABLE=$DEV run_driver
+check "dev job unreadable: refused" 1 "$status"
+check "dev job unreadable: vhid left running and in place" "$DAEMON|$before" "$(cat "$STUB/loaded")|$(left)"
+
+driver_mac yes; printf '#!/bin/bash\necho "manager $*" >>"$STUB/reached"\n' >"$STUB/root$MANAGER_REL"; before=$(left); run_driver
+check "withdrawal does not take: fails" 1 "$status"
+check "withdrawal does not take: says vhid is stopped, files in place" 1 "$(grep -c "vhid's jobs are stopped and its files are in place" <<<"$out")"
+check "withdrawal does not take: vhid's files in place" "$before" "$(left)"
+
 state "" "" no; run_driver
 check "--driver on a clean Mac: exit" 0 "$status"
 check "--driver on a clean Mac: nothing to remove" 1 "$(grep -c 'nothing to remove' <<<"$out")"
