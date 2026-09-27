@@ -130,6 +130,7 @@ plutil -lint "$agent" >&2
 # fetches by: postinstall reaches the Manager through this binary's pins, and the pkg
 # carries the package the script's pins name. [LAW:single-enforcer]
 scripts/check-driver-pins "$payload/usr/local/bin/vhid" >&2
+scripts/check-notice "$payload/usr/local/bin/vhid" >&2
 
 staged="$work/scripts"
 ditto pkg/scripts "$staged"
@@ -171,6 +172,7 @@ cat >"$distribution" <<XML
 <?xml version="1.0" encoding="utf-8"?>
 <installer-gui-script minSpecVersion="2">
     <title>vhid $version</title>
+    <license file="license.txt" mime-type="text/plain"/>
     <conclusion file="conclusion.html" mime-type="text/html"/>
     <options customize="never" require-scripts="true" hostArchitectures="arm64,x86_64"/>
     <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/>
@@ -206,9 +208,15 @@ function sharedDriverWarning() {
 </installer-gui-script>
 XML
 
+# The license page is vhid's LICENSE followed by its NOTICE, which names the bundled
+# driver's terms and those of everything linked into the binaries.
+resources="$work/resources"
+ditto pkg/resources "$resources"
+{ cat LICENSE; printf '\n%s\n\n' "$(printf '%.0s-' {1..79})"; cat NOTICE; } >"$resources/license.txt"
+
 product="$out/vhid-$version.pkg"
 rm -f "$product"
-productbuild --distribution "$distribution" --resources pkg/resources --package-path "$components" \
+productbuild --distribution "$distribution" --resources "$resources" --package-path "$components" \
   --sign "$installer" --timestamp "$product" >&2
 
 # The signature a Mac that downloads this will check, read back the way it checks it.

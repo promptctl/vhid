@@ -1,0 +1,51 @@
+#!/bin/bash
+# Fails when NOTICE and what vhid links disagree: a package in Package.resolved that
+# NOTICE does not name and that is not listed below as resolved-but-unlinked, or an
+# unlinked package whose module turns up in the vhid binary after all.
+#
+#   scripts/check-notice [vhid]     defaults to the working tree's debug build
+#
+# NOTICE is hand-written, so this is what makes a new dependency, or an SDK upgrade that
+# starts linking one it only resolved before, a red build instead of a license page that
+# leaves out terms the pkg is obliged to carry.
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+binary=${1:-.build/debug/vhid}
+
+# Resolved for MCP swift-sdk targets vhid does not use. A symbol of any module in one
+# of these packages - a mangled Swift name carries its module as <length><name> - means
+# vhid links it after all. The modules are read from the checkout, so a package that
+# grows one is still covered.
+unlinked=(
+  https://github.com/apple/swift-nio.git
+  https://github.com/apple/swift-atomics.git
+  https://github.com/apple/swift-collections.git
+)
+probe() {
+  local dir=.build/checkouts/$(basename "$1" .git) module probes=()
+  for module in "$dir"/Sources/*/; do
+    module=$(basename "$module")
+    probes+=("${#module}$module")
+  done
+  # A digit before the length would make it a longer name's length: 7Atomics in 17Atomics.
+  (IFS='|'; echo "(^|[^0-9])(${probes[*]})")
+}
+
+failed=0
+symbols=$(nm "$binary")
+while read -r url; do
+  if [[ " ${unlinked[*]} " == *" $url "* ]]; then
+    checkout=.build/checkouts/$(basename "$url" .git)
+    if [[ ! -d $checkout/Sources ]]; then
+      echo "check-notice: no checkout at $checkout; build first" >&2
+      failed=1
+    elif grep -qE "$(probe "$url")" <<<"$symbols"; then
+      echo "check-notice: $url is listed as unlinked but $binary links it; name it in NOTICE" >&2
+      failed=1
+    fi
+  elif ! grep -qF "${url%.git}" NOTICE; then
+    echo "check-notice: $url is in Package.resolved but NOTICE does not name it" >&2
+    failed=1
+  fi
+done < <(sed -n 's/.*"location" : "\(.*\)".*/\1/p' Package.resolved)
+exit $failed
