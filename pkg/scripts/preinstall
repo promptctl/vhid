@@ -19,16 +19,16 @@ fail() { echo "vhid preinstall: $*" >&2; exit 1; }
 # launchd lets go of it, for as long as a clean exit could take and no longer.
 # [LAW:no-ambient-temporal-coupling] The condition waited on is launchd's own answer.
 stop() {
-  local status=0 tries=0
-  launchctl bootout "system/$service" || status=$?
+  local target=$1 status=0 tries=0
+  launchctl bootout "$target" || status=$?
   case $status in
     0) return ;;
     36) ;;
-    *) fail "launchd would not unload $service (bootout exited $status)" ;;
+    *) fail "launchd would not unload $target (bootout exited $status)" ;;
   esac
-  until ! launchctl print "system/$service" >/dev/null 2>&1; do
+  until ! launchctl print "$target" >/dev/null 2>&1; do
     tries=$((tries + 1))
-    [ $tries -le 30 ] || fail "$service was still loaded 30 s after launchd began unloading it"
+    [ $tries -le 30 ] || fail "$target was still loaded 30 s after launchd began unloading it"
     sleep 1
   done
 }
@@ -38,7 +38,7 @@ stop() {
 # [LAW:no-silent-failure]
 if record=$(launchctl print "system/$service" 2>&1); then
   echo "vhid preinstall: stopping the loaded $service job"
-  stop
+  stop "system/$service"
 elif grep -q "Could not find service" <<<"$record"; then
   echo "vhid preinstall: no $service job is loaded"
 else
@@ -56,7 +56,7 @@ case "$console" in
   *)
     domain="gui/$(id -u "$console")"
     if launchctl print "$domain/$agent" >/dev/null 2>&1; then
-      launchctl bootout "$domain/$agent" || fail "launchd would not unload $agent for $console"
+      stop "$domain/$agent"
       echo "vhid preinstall: stopped the menu bar item for $console"
     fi ;;
 esac

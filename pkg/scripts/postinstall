@@ -56,9 +56,11 @@ console=$(stat -f %Su /dev/console)
 case "$console" in
   root|loginwindow|_mbsetupuser) say "nobody is logged in, so the menu bar item starts at the next login" ;;
   *)
+    # A view of vhid, so a refusal is said and not failed on: the driver's activation
+    # below is the step this install exists to reach.
     launchctl bootstrap "gui/$(id -u "$console")" "$agent_plist" \
-      || fail "launchd would not start $agent_plist for $console; see: launchctl print gui/$(id -u "$console")/$service.menubar"
-    say "started the menu bar item for $console" ;;
+      && say "started the menu bar item for $console" \
+      || say "launchd would not start $agent_plist for $console; it starts at the next login. See: launchctl print gui/$(id -u "$console")/$service.menubar" ;;
 esac
 
 # The activation is the logged-in user's to ask for: macOS attributes the request to

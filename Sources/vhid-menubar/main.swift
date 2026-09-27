@@ -18,12 +18,26 @@ import MenuBar
 let installation = Installation.thisBuild
 
 /// How often the menu is read again. Often enough that stopping the daemon shows within a
-/// breath; each reading is a status call and a few file reads.
+/// breath; each reading is doctor's - two short subprocesses and a status call - and the
+/// last-failure call.
 let interval = DispatchTimeInterval.seconds(5)
 
 @MainActor
 final class Item: NSObject {
     private let status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    /// One menu for the item's life, its items replaced on each reading, so a reading that
+    /// lands while it is open updates it rather than swapping it out from under a click.
+    private let menu = NSMenu()
+
+    /// Shown from launch until the first reading lands, which a silent daemon delays by
+    /// doctor's whole deadline: an item with no image has no width and is not there at all.
+    override init() {
+        super.init()
+        menu.autoenablesItems = false
+        status.menu = menu
+        status.button!.image = symbol("hourglass", described: "vhid is being read")
+        status.button!.image?.isTemplate = true
+    }
 
     func show(_ glance: Glance) {
         let button = status.button!
@@ -33,8 +47,7 @@ final class Item: NSObject {
         button.title = glance.badge.map { " \($0)" } ?? ""
         button.toolTip = installation.service
 
-        let menu = NSMenu()
-        menu.autoenablesItems = false
+        menu.removeAllItems()
         for row in glance.rows {
             let item = NSMenuItem(title: row.title, action: #selector(copyRow(_:)), keyEquivalent: "")
             item.target = self
@@ -45,7 +58,6 @@ final class Item: NSObject {
         }
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
-        status.menu = menu
     }
 
     /// The row's whole text, which the menu may have cut short. The person asked for it,
@@ -83,10 +95,11 @@ final class Item: NSObject {
 
 /// One reading of this Mac, taken off the main thread: doctor's, then the daemon's last
 /// failure. In that order, because doctor's status call may be what starts the daemon.
-/// [LAW:effects-at-boundaries]
+/// The failure's deadline is short: a daemon that just answered doctor answers at once,
+/// and one that did not has already cost doctor's full deadline. [LAW:effects-at-boundaries]
 func read(_ installation: Installation) -> Glance {
     let readiness = Readiness.read(for: installation)
-    let lastFailure = Result { try HelperConnection(installation: installation).lastFailure() }
+    let lastFailure = Result { try HelperConnection(installation: installation, replyTimeout: .seconds(1)).lastFailure() }
     return Glance(installation: installation, readiness: readiness, lastFailure: lastFailure, readAt: Date())
 }
 

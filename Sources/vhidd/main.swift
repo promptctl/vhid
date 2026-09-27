@@ -138,9 +138,9 @@ do {
     // The installation is wrong and starting again will not fix it. launchd cannot be
     // told EX_CONFIG: KeepAlive restarts on anything but a successful exit, so 0 is the
     // one code that says do not start this again. The reason is in the log.
-    logFailure("will not start: \(refused)")
+    log("will not start: \(refused)")
     exit(0)
 } catch {
-    logFailure("could not start: \(error)")
+    log("could not start: \(error)")
     exit(1)
 }

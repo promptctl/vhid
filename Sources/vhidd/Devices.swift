@@ -56,10 +56,6 @@ final class Devices: NSObject, ServedDevices, @unchecked Sendable {
             try act()
             return nil
         } catch {
-            // The device failed, or was handed what it cannot carry: the daemon's own
-            // failure, so it is kept as well as answered. Not through `logFailure`, which
-            // reads the process's installation and would end a test bundle linking this.
-            lastFailure.record("\(error)")
             return refusal(error)
         }
     }
