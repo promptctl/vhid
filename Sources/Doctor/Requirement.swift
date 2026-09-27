@@ -279,9 +279,9 @@ public extension Requirement {
                 scripts/virtual-hid-driver remove
                 scripts/virtual-hid-driver install
             Without one, install vhid's pkg again, which lays the whole package
-            back down. If this row still reads residue after that, macOS is
-            holding a registration until a restart: restart the Mac, then
-            install vhid's pkg once more.
+            back down. If this row still reads residue after that, what is
+            left is something macOS lets go of only at a restart: restart the
+            Mac, then run vhid doctor again.
             """
         // A registration this build cannot name, or two at once. What was read is in the
         // fact table `vhid driver state` prints, and pointing there beats inventing a step
