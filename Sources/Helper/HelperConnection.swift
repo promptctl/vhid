@@ -27,12 +27,12 @@ public final class HelperConnection: @unchecked Sendable {
     private let service: String
 
     /// What this connection has been through, under one lock: whether anything has been
-    /// sent over it, whether the daemon has ever replied on it, and whether it was given up
+    /// sent over it, whether the daemon has ever run an act of it, and whether it was given up
     /// on after the daemon went silent. The connection is lazy, so until something is sent
     /// the daemon has never seen it and holds nothing for it.
     private let history = NSLock()
     private var hasSpoken = false
-    private var hasBeenAnswered = false
+    private var hasActed = false
     private var abandoned: Duration?
 
     /// The connection's failure, or vhidd's silence, as one thing a caller can catch.
@@ -143,22 +143,22 @@ public final class HelperConnection: @unchecked Sendable {
     /// Two failures prove it did not, and are the release having nothing to do:
     /// - the daemon turned the call away at the seat (`Installation.turnedAway`), which
     ///   it does only for a connection whose acts never reach the devices;
-    /// - the connection never got through (4099, 4097) and nothing on it was ever
-    ///   answered, so no act of its ran.
+    /// - the connection never got through (4099, 4097) and the daemon never ran an act of
+    ///   it.
     /// [LAW:single-enforcer] Read here, once, for the keyboard, the mouse and leaving.
     func release(_ body: (HelperService, @escaping (Error?) -> Void) -> Void) throws {
         do {
             try call(body)
         } catch let refused as Refused where Installation.turnedAway(domain: refused.domain, code: refused.code) {
             return
-        } catch let unreachable as Unreachable where !answered && unreachable.neverGotThrough {
+        } catch let unreachable as Unreachable where !acted && unreachable.neverGotThrough {
             return
         }
     }
 
-    private var answered: Bool {
+    private var acted: Bool {
         history.lock(); defer { history.unlock() }
-        return hasBeenAnswered
+        return hasActed
     }
 
     /// Which process holds the devices, or nil when none does.
@@ -212,7 +212,16 @@ public final class HelperConnection: @unchecked Sendable {
         history.lock()
         hasSpoken = true
         history.unlock()
-        try exchange { service, reply in body(service) { error in reply(error.map { .failed($0) } ?? .answered(())) } }
+        let outcome = Result { try exchange { service, reply in body(service) { error in reply(error.map { .failed($0) } ?? .answered(())) } } }
+        // The daemon ran this act: it acknowledged it, or reached the devices and failed
+        // there. Not a refusal at the seat, the connection's failure, or silence.
+        let ran = switch outcome {
+        case .success: true
+        case .failure(let refused as Refused): !Installation.turnedAway(domain: refused.domain, code: refused.code)
+        case .failure: false
+        }
+        history.lock(); hasActed = hasActed || ran; history.unlock()
+        try outcome.get()
     }
 
     /// One round trip, with the reply turned back into a value or a throw.
@@ -234,14 +243,6 @@ public final class HelperConnection: @unchecked Sendable {
         guard let helper = proxy as? HelperService else { throw Unreachable(service: service, cause: .notAHelper) }
         body(helper) { outcome.say($0) }
         let word = outcome.await(replyTimeout)
-        // The daemon's own word, an answer or a refusal, and not the connection's failure
-        // or nobody's silence.
-        let replied = switch word {
-        case .answered: true
-        case .failed(let error): !(error is Unreachable)
-        case nil: false
-        }
-        history.lock(); hasBeenAnswered = hasBeenAnswered || replied; history.unlock()
         switch word {
         case .answered(let answer): return answer
         case .failed(let error as Unreachable): throw error
