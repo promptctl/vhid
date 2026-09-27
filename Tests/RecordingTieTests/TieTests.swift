@@ -63,6 +63,7 @@ import Testing
         var info = siginfo_t()
         #expect(waitid(P_PID, id_t(pid), &info, WEXITED | WNOWAIT) == 0)
         #expect(kill(pid, 0) == 0)
+        #expect(CommandWatch.ended(pid))
         let ended = Ended()
         let watch = CommandWatch(pid: pid, queue: .global()) { ended.signal() }
         #expect(ended.wait(.seconds(5)))

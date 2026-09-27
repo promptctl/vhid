@@ -172,7 +172,10 @@ public final class CommandWatch: @unchecked Sendable {
         var size = MemoryLayout<kinfo_proc>.size
         var name = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
         guard sysctl(&name, 4, &info, &size, nil, 0) == 0 else { return true }
-        return size == 0 || info.kp_proc.p_stat == SZOMB
+        // A zombie has no task left, which proc_pidinfo says whatever p_stat reads.
+        var task = proc_taskinfo()
+        let hasTask = proc_pidinfo(pid, PROC_PIDTASKINFO, 0, &task, Int32(MemoryLayout<proc_taskinfo>.size)) > 0
+        return size == 0 || info.kp_proc.p_stat == SZOMB || !hasTask
     }
 
     deinit { source.cancel() }
