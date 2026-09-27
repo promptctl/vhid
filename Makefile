@@ -83,7 +83,7 @@ check-pins: build
 dev-daemon: build
 	scripts/dev-daemon install
 
-remove-dev-daemon:
+remove-dev-daemon: build
 	scripts/dev-daemon remove
 
 # Also the fix for a tree someone has built with bare `swift build`.

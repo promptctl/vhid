@@ -41,23 +41,32 @@ case "$action" in install|remove) ;; *) usage ;; esac
 service=$("$vhid" service) || fail "$vhid could not say which service it dials"
 plist="/Library/LaunchDaemons/$service.plist"
 
-# Loaded, not loaded, or unread - and unread is refused rather than taken for either,
-# because each of the other two is acted on. Only launchd's own "no such job" means
-# nothing is loaded. [LAW:no-silent-failure]
+# Loaded or not, read by `vhid service standing` - the probe postinstall and `vhid doctor`
+# read - so this script holds no idea of its own about what launchd's record says. An
+# unread record fails rather than being taken for either answer, because both are acted
+# on. [LAW:one-source-of-truth] [LAW:no-silent-failure]
 loaded() {
-  local record
-  if record=$(launchctl print "system/$service" 2>&1); then return 0; fi
-  grep -q "Could not find service" <<<"$record" && return 1
-  fail "could not read whether $service is loaded: $record"
+  local standing
+  standing=$("$vhid" service standing) || fail "$vhid could not read launchd's record of $service; see: launchctl print system/$service"
+  [ "$standing" != no-job ]
 }
 
-# A receipt's pkgid line is the pkg's claim on the file; a file no pkg installed prints
-# the path alone.
-if [ -e "$plist" ] && pkgutil --file-info "$plist" | grep -q '^pkgid:'; then
-  fail "$plist was installed by a pkg ($(pkgutil --file-info "$plist" | awk '/^pkgid:/ { print $2 }' | tr '\n' ' ')); this script registers only the jobs it writes"
+# A receipt's pkgid line is a pkg's claim on the file. Read whole before it is searched:
+# under pipefail, a grep -q that stops early can leave pkgutil on SIGPIPE and turn a
+# claim into a miss.
+if [ -e "$plist" ]; then
+  receipt=$(pkgutil --file-info "$plist")
+  if grep -q '^pkgid:' <<<"$receipt"; then
+    fail "$plist was installed by a pkg ($(awk '/^pkgid:/ { print $2 }' <<<"$receipt" | tr '\n' ' ')); this script registers only the jobs it writes"
+  fi
 fi
-if [ ! -e "$plist" ] && loaded; then
-  fail "a job for $service is loaded with no plist at $plist, so this script did not register it; see: launchctl print system/$service"
+
+# A loaded job is this script's to stop only when launchd loaded it from $plist. One
+# loaded from anywhere else - another plist, an SMAppService bundle - is refused even
+# when a stale plist of ours sits at the path.
+if loaded; then
+  origin=$(launchctl print "system/$service" | awk -F' = ' '!found && /^\tpath = / { print $2; found = 1 }')
+  [ "$origin" = "$plist" ] || fail "the $service job launchd has loaded came from ${origin:-no plist}, not $plist, so this script did not register it; see: launchctl print system/$service"
 fi
 
 # The same stop pkg/scripts/preinstall makes, for the same reason: launchd adds no second
@@ -84,17 +93,24 @@ if loaded; then
 fi
 
 if [ "$action" = remove ]; then
-  if [ -e "$plist" ]; then sudo /bin/rm -f "$plist"; fi
+  sudo /bin/rm -f "$plist"
   say "removed $service"
   exit 0
 fi
+
+# A plist left in /Library/LaunchDaemons is loaded again at every boot, so a job this
+# script could not bring up leaves no plist behind.
+abandon() {
+  sudo /bin/rm -f "$plist"
+  fail "$@"
+}
 
 [ -x "$vhidd" ] || fail "$vhidd is not built; run: make"
 "$root/scripts/launchd-plist" "$service" "$vhidd" | sudo tee "$plist" >/dev/null
 # Registering is asking for the job to run, so a `launchctl disable` left from before is
 # lifted rather than turned into a refused bootstrap that names nothing.
 sudo launchctl enable "system/$service"
-sudo launchctl bootstrap system "$plist" || fail "launchd would not load $plist; see: launchctl print system/$service"
+sudo launchctl bootstrap system "$plist" || abandon "launchd would not load $plist, so it was removed; see: launchctl print system/$service"
 
 # A job loaded without its endpoint is a root process nothing can reach, restarted
 # forever, so it is taken back down, as postinstall does. [LAW:no-silent-failure]
@@ -102,7 +118,7 @@ standing=$("$vhid" service standing) || fail "$vhid could not read launchd's rec
 case "$standing" in
   holding-the-service) say "loaded $service from $plist, running $vhidd" ;;
   loaded-without-the-service)
-    sudo launchctl bootout "system/$service" || say "and launchd would not unload it either; unload it with: sudo launchctl bootout system/$service"
-    fail "launchd loaded $plist but holds no endpoint for $service on its behalf, so it was unloaded. Another job names $service - find it with: grep -l '>$service<' /Library/LaunchDaemons/*.plist" ;;
-  *) fail "launchd has no job for $service just after loading $plist (vhid service standing said: $standing)" ;;
+    stop
+    abandon "launchd loaded $plist but holds no endpoint for $service on its behalf, so it was unloaded and removed. Another job names $service - find it with: grep -lF -- '>$service<' /Library/LaunchDaemons/*.plist" ;;
+  *) abandon "launchd has no job for $service just after loading $plist, so it was removed (vhid service standing said: $standing)" ;;
 esac
