@@ -1,6 +1,6 @@
 import ArgumentParser
 import Input
-import KeyboardLayout
+import KeyboardLayouts
 
 /// Types text on the virtual keyboard, wherever the keyboard happens to be pointed.
 struct TypeCommand: AsyncParsableCommand {

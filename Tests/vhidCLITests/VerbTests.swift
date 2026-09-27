@@ -1,5 +1,5 @@
 import Input
-import KeyboardLayout
+import KeyboardLayouts
 import Pointing
 import Testing
 @testable import vhid

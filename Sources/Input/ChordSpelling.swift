@@ -1,5 +1,5 @@
 import Carbon.HIToolbox
-import KeyboardLayout
+import KeyboardLayouts
 import Keystrokes
 
 public extension KeyChord {
