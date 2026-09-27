@@ -84,7 +84,8 @@ import Testing
         return await failure { try await Devices.using(helper, verb) }
     }
 
-    /// The words an operator and an MCP client are given for what was thrown.
+    /// The words an operator and an MCP client are given for what was thrown: the MCP
+    /// server answers a failed tool call with exactly this (`McpCommand`).
     private static func failure(_ body: () async throws -> String) async -> String {
         do {
             return "succeeded: \(try await body())"
@@ -93,13 +94,20 @@ import Testing
         }
     }
 
-    @Test func aServiceNobodyHoldsIsNamedAndNoKeyIsClaimedHeld() async throws {
-        let unreachable = "no launchd job answers \(Installation.nobody.service) (NSCocoaErrorDomain 4099): the daemon is not installed or not loaded"
-        let typed = await Self.failure { try await Tools.type.call(["text": "ab"], on: Installation.nobody) }
+    /// A service no launchd job holds. Driven through a connection that fails the way
+    /// NSXPC fails one, because what a lookup of an unregistered name does is the
+    /// machine's: this Mac answers 4099 at once, and the CI runner answered nothing until
+    /// the deadline.
+    @Test func aServiceNobodyHoldsIsNamedAndNoKeyIsClaimedHeld() async {
+        let unreachable = "no launchd job answers \(Self.far) (NSCocoaErrorDomain 4099): the daemon is not installed or not loaded"
+        func helper() -> HelperConnection { HelperConnection(connection: Unanswered(), service: Self.far, replyTimeout: .seconds(20)) }
+        let at = ScreenPoint(x: 5, y: 5)!
+        let typed = await Self.failure { try await Devices.using(helper()) { try await TypeCommand.type("ab", on: VerbTests.us, with: $0.typist) } }
+        let clicked = await Self.failure {
+            try await Devices.using(helper()) { try await ClickCommand.click(at: at, button: .left, times: .single, with: Pointer(mouse: $0.mouse, cursor: { at })) }
+        }
         #expect(typed == "\(unreachable). 0 of 2 characters had been posted and acknowledged before this, and the rest were not sent")
-        let clicked = await Self.failure { try await Tools.click.call(["x": 5, "y": 5], on: Installation.nobody) }
-        #expect(clicked.hasPrefix(unreachable), "\(clicked)")
-        #expect(!clicked.contains("held"), "\(clicked)")
+        #expect(clicked == unreachable)
     }
 
     @Test func aRefusedSignatureIsNamedAndNoKeyIsClaimedHeld() async {
@@ -124,4 +132,24 @@ import Testing
         #expect(said.typed.hasSuffix("The keyboard was not released afterwards: \(refused). A key may be left held"), "\(said.typed)")
         #expect(said.clicked == "\(refused). The mouse was not released afterwards: \(refused). A button may be left held")
     }
+}
+
+/// A connection to a service nobody holds, as NSXPC reports it: every call's error handler
+/// is told `NSXPCConnectionInvalid` and nothing is sent.
+private final class Unanswered: NSXPCConnection, HelperService, @unchecked Sendable {
+    override func remoteObjectProxyWithErrorHandler(_ handler: @escaping (any Error) -> Void) -> Any {
+        handler(NSError(domain: NSCocoaErrorDomain, code: NSXPCConnectionInvalid))
+        return self
+    }
+
+    override func resume() {}
+
+    func down(usage: UInt16, reply: @escaping (Error?) -> Void) {}
+    func releaseAll(reply: @escaping (Error?) -> Void) {}
+    func buttonDown(_ button: UInt8, reply: @escaping (Error?) -> Void) {}
+    func releaseButtons(reply: @escaping (Error?) -> Void) {}
+    func move(x: Int8, y: Int8, reply: @escaping (Error?) -> Void) {}
+    func scroll(vertical: Int8, horizontal: Int8, reply: @escaping (Error?) -> Void) {}
+    func leave(reply: @escaping (Error?) -> Void) {}
+    func status(reply: @escaping (NSNumber?, Error?) -> Void) {}
 }
