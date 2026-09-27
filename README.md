@@ -133,7 +133,7 @@ closes without conversion:
 |---|---|---|
 | where the displays are | eyes `displays` | each id and its bounds, negative left of or above the main display |
 | what is in front | eyes `windows` | each window's owner and bounds, and the frontmost application |
-| where the text is | eyes `find` `{"text": "Save", "display": 1}` | the point to click, then the run it read: `-700,604	Save` on a display left of the main one |
+| where the text is | eyes `find` `{"text": "Save", "display": 3}` | the point to click, then the run it read: `-700,604	Save` on a display left of the main one |
 | press it | vhid `click` `{"x": -700, "y": 604}` | where it clicked, or the reason it could not |
 | what changed | eyes `find` again | the run gone, or still there, with a scope line saying where it looked |
 
