@@ -19,7 +19,7 @@ import Testing
         var refusal: Error?
         seat.down(usage: 5) { refusal = $0 }
         #expect((refusal as NSError?)?.localizedDescription == "\(Seat.Ended())")
-        #expect(holder.pid == nil)
+        #expect(holder.pid(on: 1) == nil)
         #expect(devices.done == ["down 4", "a client went away"])
     }
 
@@ -29,7 +29,7 @@ import Testing
         let seat = Seat(ObjectIdentifier(one), pid: 41, holder: holder, readiness: .serving(devices))
         seat.end(because: "a client went away")
         #expect(devices.done.isEmpty)
-        #expect(holder.pid == nil)
+        #expect(holder.pid(on: 1) == nil)
     }
 
     /// While the devices are down an act is refused with why, and claims nothing: the next
@@ -43,7 +43,7 @@ import Testing
         first.down(usage: 4) { refusals.append(($0 as NSError?)?.localizedDescription) }
         second.down(usage: 4) { refusals.append(($0 as NSError?)?.localizedDescription) }
         #expect(refusals == Array(repeating: "\(Readiness.Down.starting)", count: 2))
-        #expect(holder.pid == nil)
+        #expect(holder.pid(on: 1) == nil)
     }
 
     /// Status is not the proof the devices are up when they are not: it answers why.
@@ -72,6 +72,6 @@ import Testing
         seat.down(usage: 4) { refusals.append(($0 as NSError?)?.localizedDescription) }
         #expect(refusals == ["\(Seat.Lost())", "\(Seat.Ended())"])
         #expect(fresh.done.isEmpty)
-        #expect(holder.pid == nil)
+        #expect(holder.pid(on: 1) == nil)
     }
 }

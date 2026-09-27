@@ -35,10 +35,11 @@ final class Holder: @unchecked Sendable {
         body()
     }
 
-    /// The pid of whichever client holds the devices, or nil when none does.
-    var pid: pid_t? {
+    /// The pid of whichever client holds the devices `attempt` brought up, or nil when
+    /// none does - a hold on an earlier attempt's devices holds nothing.
+    func pid(on attempt: Int) -> pid_t? {
         lock.lock(); defer { lock.unlock() }
-        return holding?.pid
+        return holding.flatMap { $0.attempt == attempt ? $0.pid : nil }
     }
 
     /// Runs `body` while `connection` holds the devices, and reports whether it did. The

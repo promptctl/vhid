@@ -85,8 +85,8 @@ final class Seat: NSObject, HelperService, @unchecked Sendable {
     /// Who holds the devices, read and not claimed, or why they are not up.
     func status(reply: @escaping (NSNumber?, Error?) -> Void) {
         do {
-            _ = try readiness.devices()
-            reply(holder.pid.map { NSNumber(value: $0) }, nil)
+            let up = try readiness.devices()
+            reply(holder.pid(on: up.attempt).map { NSNumber(value: $0) }, nil)
         } catch {
             reply(nil, refusal(error))
         }

@@ -15,14 +15,14 @@ import Testing
     /// holder and never runs, and the holder's next act is served without a new claim.
     @Test func aSecondClientsActIsRefusedNamingTheHolder() throws {
         let holder = Holder()
-        #expect(holder.pid == nil)
+        #expect(holder.pid(on: 1) == nil)
         var served: [String] = []
         try holder.serve(first, by: 41, on: 1) { served.append("first") }
         let refusal = #expect(throws: Holder.Busy.self) { try holder.serve(second, by: 42, on: 1) { served.append("second") } }
         #expect(refusal?.pid == 41)
         try holder.serve(first, by: 41, on: 1) { served.append("first again") }
         #expect(served == ["first", "first again"])
-        #expect(holder.pid == 41)
+        #expect(holder.pid(on: 1) == 41)
     }
 
     @Test func freeingRunsTheReleaseAndFreesTheDevicesForTheNextClaim() throws {
@@ -69,6 +69,7 @@ import Testing
         let (a, b) = (NSObject(), NSObject())
         try holder.serve(ObjectIdentifier(a), by: 41, on: 1) {}
         try holder.serve(ObjectIdentifier(b), by: 42, on: 2) {}
-        #expect(holder.pid == 42)
+        #expect(holder.pid(on: 2) == 42)
+        #expect(holder.pid(on: 3) == nil)
     }
 }
