@@ -27,7 +27,13 @@ import Testing
         /// withheld cannot pass as the same thing.
         private var withheld: [(Error?) -> Void] = []
 
-        init(_ answer: Answer) { self.answer = answer }
+        /// What `lastFailure` answers, as the wire's pair, so a test can hand back a half.
+        private let failure: (String?, Date?)
+
+        init(_ answer: Answer, failure: (String?, Date?) = (nil, nil)) {
+            self.answer = answer
+            self.failure = failure
+        }
 
         var asked: [UInt16] {
             lock.lock(); defer { lock.unlock() }
@@ -74,6 +80,7 @@ import Testing
             lock.lock(); pointing.append("status"); lock.unlock()
             respond { reply($0 == nil ? NSNumber(value: 41) : nil, $0) }
         }
+        func lastFailure(reply: @escaping (String?, Date?) -> Void) { reply(failure.0, failure.1) }
 
         func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
             connection.exportedInterface = NSXPCInterface(with: HelperService.self)
@@ -93,8 +100,8 @@ import Testing
 
     /// The bound ends a test whose far end is broken; it measures nothing, so it sits far
     /// above any round trip. [LAW:no-ambient-temporal-coupling]
-    private func helper(_ answer: Answer, replyTimeout: Duration = .seconds(20)) -> (HelperConnection, FarEnd) {
-        let service = Service(answer)
+    private func helper(_ answer: Answer, failure: (String?, Date?) = (nil, nil), replyTimeout: Duration = .seconds(20)) -> (HelperConnection, FarEnd) {
+        let service = Service(answer, failure: failure)
         let listener = NSXPCListener.anonymous()
         listener.delegate = service
         listener.resume()
@@ -193,5 +200,21 @@ import Testing
         // Held to the deadline: a far end gone early is unreachable for the wrong reason,
         // and a test that cannot tell the two apart proves nothing.
         withExtendedLifetime(far) {}
+    }
+
+    /// The wire's pair is one failure, or none, or a daemon this client does not
+    /// understand - never half a failure shown as a whole one. [LAW:parse-dont-validate]
+    @Test func theLastFailureIsBothHalvesOrNeither() async throws {
+        let at = Date(timeIntervalSince1970: 1_790_000_000)
+        let (both, bothFar) = helper(.acknowledge, failure: ("the keyboard would not release", at))
+        #expect(try await blocking { try both.lastFailure() } == DaemonFailure(text: "the keyboard would not release", at: at))
+
+        let (neither, neitherFar) = helper(.acknowledge)
+        #expect(try await blocking { try neither.lastFailure() } == nil)
+
+        let (half, halfFar) = helper(.acknowledge, failure: ("a text with no time", nil))
+        let garbled = await #expect(throws: HelperConnection.Unreachable.self) { try await blocking { try half.lastFailure() } }
+        #expect(garbled?.cause == .notAHelper)
+        withExtendedLifetime((bothFar, neitherFar, halfFar)) {}
     }
 }

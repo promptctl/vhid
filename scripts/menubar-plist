@@ -1,0 +1,44 @@
+#!/bin/bash
+# The launchd plist that runs one installation's menu bar item in each logged-in
+# person's session, written to stdout.
+#
+#   menubar-plist <service> <menu bar item path>
+#
+# [LAW:single-enforcer] The one place this plist's shape is written, as
+# scripts/launchd-plist is for the daemon's. The Label is the daemon's service with
+# `.menubar` after it, so the item is found beside the daemon it shows, and the item
+# needs no argument: it reads the installation it was built for, as the CLI does.
+#
+# Aqua only, because a menu bar item has nowhere to be in a session without one.
+# RunAtLoad, so it is there at login. KeepAlive after an unsuccessful exit only, so a
+# crash brings it back and Quit, which exits 0, is respected until the next login.
+#
+# Held to bash 3.2, like every script a fresh Mac might run.
+set -euo pipefail
+
+service=${1:?usage: menubar-plist <service> <menu bar item path>}
+item=${2:?usage: menubar-plist <service> <menu bar item path>}
+
+# [LAW:parse-dont-validate] Escaped as scripts/launchd-plist escapes, for the same reason.
+xml() {
+  printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g'
+}
+label=$(xml "$service.menubar")
+item=$(xml "$item")
+
+cat <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>$label</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$item</string>
+    </array>
+    <key>LimitLoadToSessionType</key><string>Aqua</string>
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+</dict>
+</plist>
+PLIST

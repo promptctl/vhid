@@ -49,6 +49,20 @@ case "$standing" in
   *) fail "launchd has no job for $service just after loading $plist (vhid service standing said: $standing)" ;;
 esac
 
+# The menu bar item, started now for whoever is logged in; launchd starts it at every
+# login after this from /Library/LaunchAgents. Nobody logged in has nowhere to show it.
+agent_plist="/Library/LaunchAgents/$service.menubar.plist"
+console=$(stat -f %Su /dev/console)
+case "$console" in
+  root|loginwindow|_mbsetupuser) say "nobody is logged in, so the menu bar item starts at the next login" ;;
+  *)
+    # A view of vhid, so a refusal is said and not failed on: the driver's activation
+    # below is the step this install exists to reach.
+    launchctl bootstrap "gui/$(id -u "$console")" "$agent_plist" \
+      && say "started the menu bar item for $console" \
+      || say "launchd would not start $agent_plist for $console; it starts at the next login. See: launchctl print gui/$(id -u "$console")/$service.menubar" ;;
+esac
+
 # The activation is the logged-in user's to ask for: macOS attributes the request to
 # whoever makes it, and the approval that person gives in System Settings answers it.
 # The path is the installed CLI's own pin, the same one scripts/virtual-hid-driver is
@@ -56,7 +70,6 @@ esac
 manager=$("$vhid" driver pins | awk -F'\t' '$1 == "manager-executable" { print $2 }')
 [ -n "$manager" ] || fail "$vhid driver pins names no manager-executable"
 
-console=$(stat -f %Su /dev/console)
 asked=no
 case "$console" in
   # The login window, and Setup Assistant's own user: nobody who could approve anything.

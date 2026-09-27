@@ -48,6 +48,7 @@ import Testing
         func scroll(vertical: Int8, horizontal: Int8, reply: @escaping (Error?) -> Void) { respond(reply) }
         func leave(reply: @escaping (Error?) -> Void) { respond(reply) }
         func status(reply: @escaping (NSNumber?, Error?) -> Void) { respond { reply(nil, $0) } }
+        func lastFailure(reply: @escaping (String?, Date?) -> Void) { reply(nil, nil) }
 
         func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
             guard case .refusing = answer else { return false }
@@ -152,4 +153,5 @@ private final class Unanswered: NSXPCConnection, HelperService, @unchecked Senda
     func scroll(vertical: Int8, horizontal: Int8, reply: @escaping (Error?) -> Void) {}
     func leave(reply: @escaping (Error?) -> Void) {}
     func status(reply: @escaping (NSNumber?, Error?) -> Void) {}
+    func lastFailure(reply: @escaping (String?, Date?) -> Void) {}
 }

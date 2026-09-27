@@ -95,4 +95,24 @@ import Foundation
     /// The answer is also the proof the devices are up: while they are down, this is
     /// refused with the reason, as every act is.
     func status(reply: @escaping (NSNumber?, Error?) -> Void)
+
+    /// The most recent failure this daemon had, as its words and when, or two nils when it
+    /// has had none since it started. Claims nothing and is answered whether or not the
+    /// devices are up, since a failure is most worth reading while they are down.
+    ///
+    /// Two values that are both there or both absent, because the wire carries no
+    /// optional pair; `HelperConnection.lastFailure` is where they become one.
+    func lastFailure(reply: @escaping (String?, Date?) -> Void)
+}
+
+/// Something that went wrong in the daemon, and when: what a person debugging a headless
+/// daemon wants and could otherwise only find in its log.
+public struct DaemonFailure: Sendable, Hashable {
+    public let text: String
+    public let at: Date
+
+    public init(text: String, at: Date) {
+        self.text = text
+        self.at = at
+    }
 }

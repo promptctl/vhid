@@ -51,6 +51,21 @@ func log(_ message: String) {
     logger.notice("\(message, privacy: .public)")
 }
 
+/// Said at info level: kept in memory and shown by `log show --info`, not persisted.
+/// For what happens routinely - vhid's menu bar item connects every few seconds - so it
+/// does not bury what `log` says.
+func logRoutine(_ message: String) {
+    logger.info("\(message, privacy: .public)")
+}
+
+/// Said as `log` says it, at error level, and kept as the daemon's last failure for a
+/// client to read. [LAW:single-enforcer] The one way a failure of the daemon's own is
+/// told, so none reaches the log without also reaching `lastFailure`.
+func logFailure(_ message: String) {
+    logger.error("\(message, privacy: .public)")
+    lastFailure.record(message)
+}
+
 do {
     let callers = try CallerIdentity.sameSignerAsThisProcess()
     log("callers must satisfy: \(callers.text)")
@@ -75,7 +90,7 @@ do {
         let filing = try KeyboardTypeAnswer.file()
         log("this keyboard's answer \(filing) with Keyboard Setup Assistant under \(VirtualKeyboardIdentity.keyboardTypeKey)")
     } catch {
-        log("\(error)")
+        logFailure("\(error)")
     }
 
     // Listening comes first, and bringing the devices up after, on a thread of its own:

@@ -169,6 +169,20 @@ public final class HelperConnection: @unchecked Sendable {
         try exchange { service, reply in service.status { holder, error in reply(error.map { .failed($0) } ?? .answered(holder?.int32Value)) } }
     }
 
+    /// The daemon's most recent failure, or nil when it has had none since it started.
+    ///
+    /// [LAW:parse-dont-validate] The wire's pair becomes one optional here, once: a text
+    /// without a time or a time without a text is a daemon this client does not
+    /// understand, and is thrown as that rather than shown as half a failure.
+    public func lastFailure() throws -> DaemonFailure? {
+        let (text, at): (String?, Date?) = try exchange { service, reply in service.lastFailure { reply(.answered(($0, $1))) } }
+        switch (text, at) {
+        case (let text?, let at?): return DaemonFailure(text: text, at: at)
+        case (nil, nil): return nil
+        default: throw Unreachable(service: service, cause: .notAHelper)
+        }
+    }
+
     /// The keyboard over this connection.
     public var keyboard: HelperKeyboard { HelperKeyboard(helper: self) }
 

@@ -23,27 +23,9 @@ struct ServiceOption: ParsableArguments {
                 + "the copy built from a working tree is \(Installation.development)."))
     var stated: String?
 
-    /// The installation a verb acts on when none is stated: the one this binary belongs to.
-    ///
-    /// **Which one that is was settled when the binary was built.** `make` builds debug,
-    /// and `.build/debug/vhid` is part of the copy built from the working tree, signed with
-    /// the dev identity beside the daemon built with it; reaching into the installed copy
-    /// from there would be the surprising direction, and the installed copy is the one a
-    /// person is least willing to have surprised. `scripts/make-pkg` builds release, and the
-    /// vhid it installs is part of the installed copy - where a default of the development
-    /// daemon would dial a service nothing on that Mac has registered, and every verb would
-    /// fail as a daemon that could not be reached.
-    ///
-    /// The build configuration decides rather than a flag passed to the release build,
-    /// because a flag is a step that can be left off, and a release binary built without it
-    /// would ship dialling the development daemon with nothing to say so.
-    /// `scripts/make-pkg` reads this value back out of the binary it packs, through
-    /// `vhid service`, and writes the launchd plist from it. [LAW:one-source-of-truth]
-    #if DEBUG
-    static let byDefault = Installation.development
-    #else
-    static let byDefault = Installation.release
-    #endif
+    /// The installation a verb acts on when none is stated: the one this binary was built
+    /// for. [LAW:one-source-of-truth]
+    static let byDefault = Installation.thisBuild
 
     /// [LAW:parse-dont-validate] The one place the flag becomes an installation. Every
     /// verb holds the value and never the string, so nothing downstream re-examines a

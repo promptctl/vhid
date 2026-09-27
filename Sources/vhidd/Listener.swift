@@ -23,7 +23,7 @@ final class Listener: NSObject, NSXPCListenerDelegate {
             guard let token = connection.callerAuditToken else { throw CallerIdentity.Refused.noAuditToken }
             try callers.check(auditToken: token)
         } catch {
-            log("refused a connection from pid \(connection.processIdentifier): \(error)")
+            logFailure("refused a connection from pid \(connection.processIdentifier): \(error)")
             return false
         }
         let id = ObjectIdentifier(connection)
@@ -48,7 +48,7 @@ final class Listener: NSObject, NSXPCListenerDelegate {
             _ = holder.whileHolding(id) { readiness.releaseEverything(because: "a client was interrupted") }
         }
         connection.resume()
-        log("accepted a connection from pid \(connection.processIdentifier)")
+        logRoutine("accepted a connection from pid \(connection.processIdentifier)")
         return true
     }
 }

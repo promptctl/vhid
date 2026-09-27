@@ -93,6 +93,8 @@ vhid ships as one signed, notarized pkg. It installs:
 | `/usr/local/bin/vhid` | the CLI |
 | `/usr/local/libexec/vhidd` | the root daemon that owns the devices |
 | `/Library/LaunchDaemons/ai.promptctl.vhid.vhidd.plist` | the daemon's launchd job, loaded as the install finishes |
+| `/usr/local/libexec/vhid-menubar` | the menu bar item |
+| `/Library/LaunchAgents/ai.promptctl.vhid.vhidd.menubar.plist` | its launchd job, started at every login |
 
 It also installs the pinned
 [Karabiner-DriverKit-VirtualHIDDevice](https://github.com/pqrs-org/Karabiner-DriverKit-VirtualHIDDevice)
@@ -121,6 +123,12 @@ admits this vhid, who holds the devices, and the Keyboard Setup Assistant answer
 with what it read on this Mac and the step left for you, and exits 1 while any row has a
 step. It fixes nothing and takes the devices from no client that holds them; a daemon
 launchd has a job for but has not started is started by its question, as by any verb.
+
+The menu bar item shows the same reading at a glance, every five seconds: a keyboard when
+doctor would print `ready`, a warning triangle when it would not. Its menu lists doctor's
+rows and the daemon's most recent failure, and clicking a row copies its full text. It
+only reads; Quit stops it until the next login. The item from a build of this tree,
+`.build/debug/vhid-menubar`, shows the development copy and says `dev` beside its icon.
 
 ## Building
 
