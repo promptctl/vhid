@@ -4,31 +4,18 @@ import Pointing
 
 /// Clicks at a place on the screen, by moving the pointer there and pressing.
 struct ClickCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
-        commandName: "click",
-        abstract: "Click at a point on the screen.",
-        discussion: """
-            Coordinates, and nothing else: there is no click-by-element here, because nothing in vhid \
-            reads the screen. What is under the point is the caller's to know.
+    static let configuration = Help.click.configuration
 
-            The device sends counts, not coordinates, and macOS accelerates them, so the pointer is \
-            steered in a loop - post a delta, read the cursor back, repeat - and the point it reports \
-            landing at is read back from the cursor rather than the point that was asked for.
-
-            A display left of or above the main one has negative coordinates, and a bare -100 reads as \
-            a flag, so those follow --, as in: vhid click -- -100 -40.
-            """)
-
-    @Argument(help: "Screen points from the top left of the main display.")
+    @Argument(help: Help.sentence(Help.x))
     var x: Double
 
-    @Argument(help: "Screen points from the top left of the main display.")
+    @Argument(help: Help.sentence(Help.y))
     var y: Double
 
-    @Option(help: "Which button: left, right, middle, or a number from 1 to 32.")
+    @Option(help: Help.sentence(Help.button))
     var button: Button = .left
 
-    @Option(help: "How many presses without moving between them.")
+    @Option(help: Help.sentence(Help.times))
     var times: Clicks = .single
 
     @OptionGroup var service: ServiceOption

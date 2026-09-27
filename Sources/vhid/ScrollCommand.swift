@@ -3,32 +3,20 @@ import Input
 
 /// Rolls the wheel at a place on the screen.
 struct ScrollCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
-        commandName: "scroll",
-        abstract: "Roll the mouse wheel at a point on the screen.",
-        discussion: """
-            The pointer is moved to the point first, because a wheel scrolls whatever is under the \
-            pointer. The ticks are the device's own, and macOS decides how far each one scrolls.
+    static let configuration = Help.scroll.configuration
 
-            --vertical positive rolls the wheel away from the hand. With macOS's Natural scrolling on, \
-            as it is by default, that moves the view toward the end of what is scrolled, so the content \
-            slides up; with it off, toward the start. --horizontal positive tilts the wheel right, which \
-            with Natural scrolling on moves the view toward the left edge, and with it off toward the \
-            right. Negative is the other way on both.
-            """)
-
-    @Argument(help: "Screen points from the top left of the main display.")
+    @Argument(help: Help.sentence(Help.x))
     var x: Double
 
-    @Argument(help: "Screen points from the top left of the main display.")
+    @Argument(help: Help.sentence(Help.y))
     var y: Double
 
     // [LAW:no-silent-failure] Unconditional, because a negative count is half of what this
     // takes and the default reads `-3` as a flag, refusing `--vertical -3` as missing.
-    @Option(parsing: .unconditional, help: "Wheel ticks: positive rolls the wheel away from the hand.")
+    @Option(parsing: .unconditional, help: Help.sentence(Help.vertical))
     var vertical: Int = 0
 
-    @Option(parsing: .unconditional, help: "Wheel ticks: positive tilts the wheel right.")
+    @Option(parsing: .unconditional, help: Help.sentence(Help.horizontal))
     var horizontal: Int = 0
 
     @OptionGroup var service: ServiceOption

@@ -3,19 +3,12 @@ import Input
 
 /// Moves the pointer to a place on the screen, and presses nothing.
 struct MoveCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
-        commandName: "move",
-        abstract: "Move the pointer to a point on the screen.",
-        discussion: """
-            Steered the way click steers it - post a delta, read the cursor back, repeat - and the \
-            point it reports is read back from the cursor. Negative coordinates follow --, as in: \
-            vhid move -- -100 -40.
-            """)
+    static let configuration = Help.move.configuration
 
-    @Argument(help: "Screen points from the top left of the main display.")
+    @Argument(help: Help.sentence(Help.x))
     var x: Double
 
-    @Argument(help: "Screen points from the top left of the main display.")
+    @Argument(help: Help.sentence(Help.y))
     var y: Double
 
     @OptionGroup var service: ServiceOption

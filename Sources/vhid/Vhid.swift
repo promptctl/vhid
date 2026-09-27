@@ -20,8 +20,7 @@ struct Vhid: AsyncParsableCommand {
 
             When a verb fails, `vhid doctor` names what is not in place and the step left.
 
-            Coordinates are screen points from the top left of the main display, the same ones the \
-            cursor is read back in.
+            Coordinates are \(Help.place).
             """,
         subcommands: [
             TypeCommand.self, PressCommand.self, ClickCommand.self, MoveCommand.self, ScrollCommand.self,

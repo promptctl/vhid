@@ -11,16 +11,7 @@ import Doctor
 /// Exit 0 when every row is met and 1 when any is not, so `vhid doctor && vhid type ...`
 /// types only on a Mac that can.
 struct DoctorCommand: ParsableCommand {
-    static let configuration = CommandConfiguration(
-        commandName: "doctor",
-        abstract: "Print every requirement a verb needs, and the step left for any that is not met.",
-        discussion: """
-            First ready or not ready, then one row per requirement, in the order they depend on \
-            each other: what it is, what was read on this Mac, and, indented under it, the step left \
-            for a person. Exits 1 when any row has a step. Nothing is fixed, and the devices are not \
-            taken from a client that holds them; a daemon launchd has a job for but has not started \
-            is started by the question, as it would be by any verb.
-            """)
+    static let configuration = Help.doctor.configuration
 
     @OptionGroup var service: ServiceOption
 

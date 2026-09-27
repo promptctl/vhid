@@ -4,30 +4,21 @@ import Pointing
 
 /// Presses a button at one place on the screen, carries it to another, and lets go.
 struct DragCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
-        commandName: "drag",
-        abstract: "Drag from one point on the screen to another.",
-        discussion: """
-            The pointer is moved to the first point, the button goes down, the pointer is moved to \
-            the second with it held, and every button comes up. Both points it reports are read \
-            back from the cursor.
+    static let configuration = Help.drag.configuration
 
-            Negative coordinates follow --, as in: vhid drag -- -100 40 200 40.
-            """)
-
-    @Argument(help: "Where the button goes down: x.")
+    @Argument(help: Help.sentence(Help.from + ": x"))
     var fromX: Double
 
-    @Argument(help: "Where the button goes down: y.")
+    @Argument(help: Help.sentence(Help.from + ": y"))
     var fromY: Double
 
-    @Argument(help: "Where it comes up: x.")
+    @Argument(help: Help.sentence(Help.to + ": x"))
     var toX: Double
 
-    @Argument(help: "Where it comes up: y.")
+    @Argument(help: Help.sentence(Help.to + ": y"))
     var toY: Double
 
-    @Option(help: "Which button: left, right, middle, or a number from 1 to 32.")
+    @Option(help: Help.sentence(Help.button))
     var button: Button = .left
 
     @OptionGroup var service: ServiceOption

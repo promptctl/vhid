@@ -76,7 +76,7 @@ extension Parameter where Taken == [String] {
 extension Parameter where Taken == ScreenPoint {
     /// A place as an object of its own, `{"x": …, "y": …}`, for a tool that takes two.
     static func place(_ name: String, _ expected: String) -> Self {
-        Self(name: name, expected: expected + ": {\"x\": …, \"y\": …} in screen points from the top left of the main display",
+        Self(name: name, expected: expected + ": {\"x\": …, \"y\": …} in " + Help.place,
              schema: ["type": "object", "properties": ["x": ["type": "number"], "y": ["type": "number"]],
                       "required": ["x", "y"], "additionalProperties": false],
              absent: nil) {
@@ -92,7 +92,7 @@ extension Parameter where Taken == Button {
     /// by too, so the two refuse the same spellings. A JSON integer is the number spelled
     /// the way JSON spells a number. [LAW:single-enforcer]
     static func button(_ name: String) -> Self {
-        Self(name: name, expected: "which button: left, right, middle, or a number from 1 to 32",
+        Self(name: name, expected: Help.button,
              schema: ["type": ["string", "integer"]], absent: nil) {
             switch $0 {
             case .string(let spelled): Button(spelled)
@@ -105,7 +105,7 @@ extension Parameter where Taken == Button {
 
 extension Parameter where Taken == Clicks {
     static func clicks(_ name: String) -> Self {
-        Self(name: name, expected: "how many presses without moving between them, at least 1",
+        Self(name: name, expected: Help.times,
              schema: ["type": "integer", "minimum": 1], absent: nil) { $0.whole.flatMap(Clicks.init(rawValue:)) }
     }
 }
