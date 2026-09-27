@@ -12,6 +12,8 @@
 # Held to bash 3.2, like every script here.
 set -euo pipefail
 pkg=${1:?usage: scripts/check-pkg <pkg>}
+[ -f "$pkg" ] || { echo "check-pkg: no pkg at $pkg" >&2; exit 1; }
+pkg=$(cd "$(dirname "$pkg")" && pwd)/$(basename "$pkg")
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 failed=0
@@ -22,8 +24,22 @@ trap 'rm -rf "$work"' EXIT
 pkgutil --expand-full "$pkg" "$work/x" >/dev/null
 x=$work/x
 
-service=$(cat "$x/vhid.pkg/Scripts/service")
-[ -n "$service" ] || fail "the pkg's scripts name no service"
+# A value the pkg lacks is reported as missing by the check that needs it, rather than
+# ending the run before the other checks have spoken.
+plist() { plutil -extract "$2" raw "$1" 2>/dev/null || echo "<no $2>"; }
+
+service=$(cat "$x/vhid.pkg/Scripts/service" 2>/dev/null) || service=
+[ -n "$service" ] || { echo "check-pkg: the pkg's scripts name no service" >&2; exit 1; }
+cli=$x/vhid.pkg/Payload/usr/local/bin/vhid
+if [ -x "$cli" ]; then
+  dials=$("$cli" service 2>&1) || dials="<vhid service failed: $dials>"
+  [ "$dials" = "$service" ] || fail "the packed vhid dials '$dials', not the '$service' the scripts load"
+fi
+for binary in usr/local/bin/vhid usr/local/libexec/vhidd usr/local/libexec/vhid-menubar; do
+  [ -f "$x/vhid.pkg/Payload/$binary" ] || continue
+  archs=$(lipo -archs "$x/vhid.pkg/Payload/$binary" 2>&1) || archs="<lipo failed: $archs>"
+  [ "$archs" = "x86_64 arm64" ] || fail "/$binary is built for '$archs', not x86_64 and arm64"
+done
 for script in preinstall postinstall; do
   [ -x "$x/vhid.pkg/Scripts/$script" ] || fail "the pkg carries no executable $script"
 done
@@ -53,24 +69,40 @@ $bom"
 # The job's three names for the service, which launchd, the daemon and the CLI must agree on.
 daemon=$x/vhid.pkg/Payload/Library/LaunchDaemons/$service.plist
 if [ -f "$daemon" ]; then
-  label=$(plutil -extract Label raw "$daemon")
+  label=$(plist "$daemon" Label)
   [ "$label" = "$service" ] || fail "the job's Label is '$label', not '$service'"
-  keys=$(plutil -extract MachServices xml1 -o - "$daemon" | sed -n 's|.*<key>\(.*\)</key>.*|\1|p')
+  keys=$(plutil -extract MachServices xml1 -o - "$daemon" 2>/dev/null | sed -n 's|.*<key>\(.*\)</key>.*|\1|p')
   [ "$keys" = "$service" ] || fail "the job's MachServices keys are '$(tr '\n' ' ' <<<"$keys")', not only '$service'"
-  count=$(plutil -extract ProgramArguments raw "$daemon")
+  count=$(plist "$daemon" ProgramArguments)
+  [[ $count =~ ^[0-9]+$ ]] || count=0
   arguments=
   for ((i = 0; i < count; i++)); do
-    arguments="$arguments $(plutil -extract "ProgramArguments.$i" raw "$daemon")"
+    arguments="$arguments $(plist "$daemon" "ProgramArguments.$i")"
   done
   [ "$arguments" = " /usr/local/libexec/vhidd --service $service" ] \
     || fail "the job runs$arguments, not /usr/local/libexec/vhidd --service $service"
 fi
 
+# The menu bar item's job, which postinstall finds by this Label in each session.
+agent=$x/vhid.pkg/Payload/Library/LaunchAgents/$service.menubar.plist
+if [ -f "$agent" ]; then
+  label=$(plist "$agent" Label)
+  [ "$label" = "$service.menubar" ] || fail "the menu bar job's Label is '$label', not '$service.menubar'"
+  arguments="$(plist "$agent" ProgramArguments) $(plist "$agent" ProgramArguments.0)"
+  [ "$arguments" = "1 /usr/local/libexec/vhid-menubar" ] \
+    || fail "the menu bar job runs '$arguments' (count, then first), not /usr/local/libexec/vhid-menubar alone"
+fi
+
 # The pinned driver package, by the pins its own script holds. [LAW:one-source-of-truth]
 # shellcheck source=virtual-hid-driver
 source scripts/virtual-hid-driver
-[ -f "$x/$PKG_FILE/Payload" ] || [ -d "$x/$PKG_FILE/Payload" ] || fail "the pkg carries no $PKG_FILE"
-grep -q "<pkg-ref id=\"$BUNDLE_ID\" version=\"$PKG_VERSION\"" "$x/Distribution" \
-  || fail "the Distribution names no $BUNDLE_ID $PKG_VERSION"
+# Read from the component's own PackageInfo, which is what installer acts on.
+info=$x/$PKG_FILE/PackageInfo
+if [ -f "$info" ] && [ -e "$x/$PKG_FILE/Payload" ]; then
+  carried=$(sed -n 's/.*<pkg-info [^>]*identifier="\([^"]*\)".* version="\([^"]*\)".*/\1 \2/p' "$info")
+  [ "$carried" = "$BUNDLE_ID $PKG_VERSION" ] || fail "the driver component is '$carried', not $BUNDLE_ID $PKG_VERSION"
+else
+  fail "the pkg carries no $PKG_FILE"
+fi
 
 exit $failed

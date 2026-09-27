@@ -8,19 +8,26 @@
 #
 # Held to bash 3.2, like every script here.
 set -uo pipefail
-cd "$(dirname "${BASH_SOURCE[0]}")/.."
-[ $# -gt 0 ] || set -- scripts/* pkg/scripts/*
 
 failed=0
+if [ $# -eq 0 ]; then
+  cd "$(dirname "${BASH_SOURCE[0]}")/.."
+  set -- scripts/* pkg/scripts/*
+fi
 for file in "$@"; do
-  [ -f "$file" ] || continue
+  [ -f "$file" ] || { echo "check-bash32: no file at $file" >&2; failed=1; continue; }
+  # env bash is bash too: on a stock Mac the first bash on PATH is this one.
   case $(head -n 1 "$file") in
-    '#!/bin/bash'*) shell=/bin/bash ;;
-    '#!/bin/sh'*) shell=/bin/sh ;;
+    '#!/bin/bash'* | '#!/usr/bin/env bash'*) shell=/bin/bash ;;
+    '#!/bin/sh'* | '#!/usr/bin/env sh'*) shell=/bin/sh ;;
+    '#!'*) echo "check-bash32: $file has a shebang this does not know: $(head -n 1 "$file")" >&2; failed=1; continue ;;
     *) continue ;;
   esac
   "$shell" -n "$file" || { echo "check-bash32: $file does not parse under $shell" >&2; failed=1; }
-  newer=$(grep -nE '(^|[;&|[:space:]])(declare|local|typeset) +-[a-zA-Z]*A|(^|[;&|[:space:]])(mapfile|readarray|coproc)([[:space:]]|$)|\$\{[a-zA-Z_][a-zA-Z0-9_]*(,,?|\^\^?)[^}]*\}' "$file") \
+  # bash 4+: associative, nameref, global and case-folding declarations; mapfile,
+  # readarray, coproc and wait -n; [[ -v ]]; case modification and @ transformations;
+  # negative subscripts; stepped brace ranges; the EPOCH variables.
+  newer=$(grep -nE '(^|[;&|[:space:]])(declare|local|typeset) +-[a-zA-Z]*[Anglu]|(^|[;&|[:space:]])(mapfile|readarray|coproc)([[:space:]]|$)|wait +-n|\[\[ +-v |\$\{[#!]?[a-zA-Z_0-9@*]+(\[[^]]*\])?(,,?|\^\^?|@[QEPAaKUuL])|\[-[0-9]+\]\}|\{[0-9]+\.\.[0-9]+\.\.[0-9]+\}|\$\{?EPOCH(SECONDS|REALTIME)' "$file" | grep -vE '^[0-9]+:[[:space:]]*#') \
     && { echo "check-bash32: $file uses what bash 3.2 lacks:" >&2; echo "$newer" >&2; failed=1; }
 done
 exit $failed
