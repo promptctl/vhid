@@ -22,9 +22,8 @@ public struct Player<C: Clock> where C.Duration == Duration {
     /// wall-clock adjustment mid-run moves none of them. [LAW:one-source-of-truth]
     public let wall: () -> Int64
     /// How long before a deadline the sleep ends and the clock is watched instead, until
-    /// the deadline comes: a sleep resumes late by the hop back onto the caller's actor -
-    /// measured at 1.6 to 2.1 ms on this Mac, whatever the timer was asked for - and a
-    /// watch that is already there does not pay it.
+    /// the deadline comes: a sleep resumes late, by more the longer it slept, and a watch
+    /// that is already there does not pay it.
     public let lead: Duration
     /// The longest a wait goes without asking whether the play may go on.
     static var slice: Duration { .milliseconds(50) }
@@ -49,7 +48,7 @@ public struct Player<C: Clock> where C.Duration == Duration {
                 // A wait of any length is slices, each asking whether the run was
                 // cancelled, so a cancelled play ends a long hold within a slice and not at
                 // the next report. A deadline already inside the lead sleeps not at all,
-                // since even a sleep that returns at once pays the hop back.
+                // since even a sleep that returns at once returns late.
                 // [LAW:single-enforcer]
                 while clock.now < wake {
                     try Task.checkCancellation()
@@ -63,7 +62,7 @@ public struct Player<C: Clock> where C.Duration == Duration {
                 //
                 // And it watches a clock that may not be moving. Yielding until the
                 // deadline is the whole point under a real clock - it is what keeps a
-                // report inside the lead rather than the hop's millisecond or two past it -
+                // report inside the lead rather than the sleep's oversleep past it -
                 // but a clock that only moves when something sleeps on it never reaches the
                 // deadline, and the yield loop is then forever. So the watch measures
                 // whether the clock is moving and sleeps when it is not, which needs
