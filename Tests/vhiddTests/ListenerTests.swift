@@ -122,7 +122,9 @@ import Testing
         let keyboard = first.helper.keyboard
         try await blocking { try keyboard.down(.leftShift) }
         first.connection.invalidate()
-        #expect(try await blocking { [devices = served.devices] in devices.awaitRelease() })
+        let devices = served.devices
+        let released = try await blocking { devices.awaitRelease() }
+        #expect(released)
         #expect(served.devices.releasedBecause.first == "a client went away")
 
         let deadline = ContinuousClock.now + .seconds(10)
