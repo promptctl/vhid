@@ -115,7 +115,7 @@ public struct PixelReader: Reader {
     /// clipped to the display it lies on.
     @MainActor
     static func resolve(_ region: Region) throws -> ScreenRect {
-        try onOneDisplay(region.bounds(), displays: Geometry.displays())
+        try onOneDisplay(region.bounds(), displays: Geometry.displays().map(\.frame))
     }
 
     /// The part of `rect` a capture can see, on the one display it lies on, in whole points.

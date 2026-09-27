@@ -81,9 +81,30 @@ struct ArgumentRefused: Error, CustomStringConvertible {
 enum EyesTools {
     typealias Listing = @Sendable () async throws -> WindowListing
 
-    static func all(windows listing: @escaping Listing = { try await Geometry.onScreen() }) -> [EyesTool] {
-        [windows(listing)]
+    typealias DisplayList = @Sendable () async -> [Display]
+
+    static func all(
+        windows listing: @escaping Listing = { try await Geometry.onScreen() },
+        displays: @escaping DisplayList = { Geometry.displays() }
+    ) -> [EyesTool] {
+        [windows(listing), Self.displays(displays)]
     }
+
+    static func displays(_ list: @escaping DisplayList) -> EyesTool { EyesTool(
+        tool: Tool(
+            name: "displays",
+            description: Displays.configuration.abstract
+                + " Bounds are the screen points vhid click takes. Needs no grant.",
+            inputSchema: .object([
+                "type": "object",
+                "properties": .object([:]),
+                "additionalProperties": false,
+            ]),
+            annotations: .init(readOnlyHint: true, openWorldHint: true)),
+        call: { given in
+            try refuseStray(given, taken: [])
+            return Displays.report(await list())
+        }) }
 
     static func windows(_ listing: @escaping Listing) -> EyesTool { EyesTool(
         tool: Tool(
@@ -110,14 +131,19 @@ enum EyesTools {
     /// The one optional string argument `name`, refusing any argument not in `taken` and
     /// a value of any other type, rather than ignoring either. [LAW:parse-dont-validate]
     static func string(_ name: String, in given: [String: Value], only taken: [String]) throws -> String? {
-        if let stray = given.keys.sorted().first(where: { !taken.contains($0) }) {
-            throw ArgumentRefused(description: "\(stray) is not an argument this tool takes: it takes \(taken.joined(separator: ", "))")
-        }
+        try refuseStray(given, taken: taken)
         // An explicit null is how many clients leave an optional argument unset.
         guard let value = given[name], !value.isNull else { return nil }
         guard let text = value.stringValue else {
             throw ArgumentRefused(description: "\(name) is \(value), and it takes a string")
         }
         return text
+    }
+
+    /// Any argument not in `taken` is refused by name rather than ignored.
+    static func refuseStray(_ given: [String: Value], taken: [String]) throws {
+        guard let stray = given.keys.sorted().first(where: { !taken.contains($0) }) else { return }
+        throw ArgumentRefused(description: "\(stray) is not an argument this tool takes: "
+            + (taken.isEmpty ? "it takes none" : "it takes \(taken.joined(separator: ", "))"))
     }
 }

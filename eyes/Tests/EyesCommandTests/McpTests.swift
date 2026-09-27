@@ -16,7 +16,7 @@ import Testing
     /// A client connected to a server over `listing`, both torn down before this returns.
     private func connected<T>(_ body: (Client) async throws -> T) async throws -> T {
         let (clientSide, serverSide) = await InMemoryTransport.createConnectedPair()
-        let server = await Mcp.server(EyesTools.all(windows: { Self.listing }))
+        let server = await Mcp.server(EyesTools.all(windows: { Self.listing }, displays: { DisplaysCommandTests.desk }))
         try await server.start(transport: serverSide)
         let client = Client(name: "test", version: "0")
         let result: Result<T, any Error>
@@ -31,15 +31,15 @@ import Testing
         return try result.get()
     }
 
-    private func call(_ arguments: [String: Value]) async throws -> (String, Bool?) {
-        let (content, isError) = try await connected { try await $0.callTool(name: "windows", arguments: arguments) }
+    private func call(_ arguments: [String: Value], tool: String = "windows") async throws -> (String, Bool?) {
+        let (content, isError) = try await connected { try await $0.callTool(name: tool, arguments: arguments) }
         guard case .text(let said, _, _) = content.first else { return ("no text: \(content)", isError) }
         return (said, isError)
     }
 
     @Test func theToolsAreListedAndReadOnly() async throws {
         let tools = try await connected { try await $0.listTools().tools }
-        #expect(tools.map(\.name) == ["windows"])
+        #expect(tools.map(\.name) == ["windows", "displays"])
         #expect(tools.allSatisfy { $0.annotations.readOnlyHint == true })
     }
 
@@ -64,5 +64,14 @@ import Testing
             #expect(isError == true)
             #expect(said == expected)
         }
+    }
+
+    @Test func displaysAnswersWithTheVerbsReportAndTakesNoArguments() async throws {
+        let (said, isError) = try await call([:], tool: "displays")
+        #expect(isError != true)
+        #expect(said == Displays.report(DisplaysCommandTests.desk))
+        let (refused, refusedIsError) = try await call(["display": 1], tool: "displays")
+        #expect(refusedIsError == true)
+        #expect(refused == "display is not an argument this tool takes: it takes none")
     }
 }
