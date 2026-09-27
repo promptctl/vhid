@@ -161,21 +161,26 @@ import Testing
         #expect(await gauge.most == 1)
     }
 
-    /// A call withdrawn while it waits its turn never reads.
+    /// A call withdrawn while it waits its turn never reads. The first read is held open
+    /// by the test, not by a sleep, so a slow machine cannot finish it early.
     @Test func aWithdrawnCallLeavesTheQueueWithoutReading() async throws {
-        actor Count { var n = 0; func add() { n += 1 } }
+        actor Count { var n = 0; func add() -> Int { n += 1; return n } }
         let count = Count()
+        let (started, starting) = AsyncStream.makeStream(of: Void.self)
+        let (gate, open) = AsyncStream.makeStream(of: Void.self)
         let serial = OneAtATime { _ in
-            await count.add()
-            try await Task.sleep(for: .milliseconds(50))
+            if await count.add() == 1 {
+                starting.yield()
+                for await _ in gate { break }
+            }
             return Reading(outcome: .nearest([]), scope: Scope(region: ScreenRect(x: 0, y: 0, width: 1, height: 1), examined: 0, reach: .whole))
         }
         let query = Query(match: nil, region: .display(1))
         let first = Task { try await serial.read(query) }
-        try await Task.sleep(for: .milliseconds(10))
+        for await _ in started { break }
         let second = Task { try await serial.read(query) }
-        try await Task.sleep(for: .milliseconds(10))
         second.cancel()
+        open.yield()
         _ = try await first.value
         await #expect(throws: CancellationError.self) { try await second.value }
         #expect(await count.n == 1)
