@@ -46,11 +46,11 @@ public extension KeyChord {
         self.init(modifiers: modifiers, key: key)!
     }
 
+    // [LAW:one-source-of-truth] the help and the chord error both list these names from here.
     /// The keys named by a word, from Carbon's own key code constants, in the order a person
     /// reads them: f2 before f10. Only keys that type no character a shell can pass as an
     /// argument are here; a key that types one is spelled by that character, on the layout.
-    // [LAW:one-source-of-truth] the help and the chord error both list these names from here.
-    static let keyNames: [(name: String, key: Key)] = {
+    private static let keyNames: [(name: String, key: Key)] = {
         let named: [(String, Int)] = [
             ("return", kVK_Return), ("tab", kVK_Tab), ("space", kVK_Space), ("delete", kVK_Delete),
             ("forwardDelete", kVK_ForwardDelete), ("escape", kVK_Escape), ("help", kVK_Help),

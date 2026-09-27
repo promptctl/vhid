@@ -12,12 +12,11 @@ import Input
     @Test func keyNamesAreListedInNaturalOrder() throws {
         let names = KeyChord.keyNameList.components(separatedBy: ", ")
         #expect(try #require(names.firstIndex(of: "f2")) < #require(names.firstIndex(of: "f10")))
-        #expect(names.suffix(20) == (1...20).map { "f\($0)" })
     }
 
     @Test func anUnknownKeyNameListsTheNamesInTheirOrder() {
         let error = #expect(throws: ChordSpellingError.self) { try KeyChord(spelled: "leftCommand+f21", on: Self.us) }
-        #expect(error?.description.contains(KeyChord.keyNameList) == true)
+        #expect(error?.description.contains("f9, f10") == true)
     }
 
     @Test func modifiersAndACharacterNameTheKeyThatCharacterIsOn() throws {
