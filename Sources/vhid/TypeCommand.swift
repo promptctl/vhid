@@ -4,22 +4,9 @@ import KeyboardLayouts
 
 /// Types text on the virtual keyboard, wherever the keyboard happens to be pointed.
 struct TypeCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
-        commandName: "type",
-        abstract: "Type text on the virtual keyboard.",
-        discussion: """
-            The text is typed wherever keys would go if they were pressed on hardware. Nothing here \
-            chooses or checks what is in front.
+    static let configuration = Help.type.configuration
 
-            The console user's own keyboard layout decides which keys make which characters, and it \
-            is read in this process rather than in the daemon: macOS answers that question per \
-            process, and a root daemon asking it is told the US layout whatever the user is typing on. \
-            Text it has no keys for is refused whole.
-
-            Text starting with - follows --, as in: vhid type -- "-5 degrees".
-            """)
-
-    @Argument(help: "The text to type: anything the layout has keys for, dead-key sequences and line breaks included.")
+    @Argument(help: Help.sentence(Help.text))
     var text: String
 
     @OptionGroup var service: ServiceOption

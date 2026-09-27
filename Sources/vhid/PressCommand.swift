@@ -4,21 +4,9 @@ import KeyboardLayouts
 
 /// Presses chords on the virtual keyboard, in the order they were given.
 struct PressCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
-        commandName: "press",
-        abstract: "Press chords on the virtual keyboard.",
-        discussion: """
-            A chord is modifier names and one key joined by +, e.g. leftCommand+s or \
-            leftShift+leftCommand+left. A key is a name (\(KeyChord.namedKeys.keys.sorted().joined(separator: ", "))), \
-            the character the layout types with it (with Command held first, in a chord that holds Command), or a key code written key 0x24.
+    static let configuration = Help.press.configuration
 
-            Which key a letter is on is the layout's to say - s is key code 1 on US and 41 on Dvorak - so \
-            a chord is read against the console user's layout, in this process rather than in the daemon.
-
-            Every chord is proven pressable before the first one goes down.
-            """)
-
-    @Argument(help: "The chords, pressed in order.")
+    @Argument(help: Help.sentence(Help.chords))
     var chords: [String]
 
     @OptionGroup var service: ServiceOption
