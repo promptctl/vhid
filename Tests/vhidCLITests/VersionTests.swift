@@ -20,6 +20,9 @@ import Version
         process.executableURL = URL(filePath: executable)
         process.arguments = arguments
         process.currentDirectoryURL = directory
+        // The scratch repos are this suite's own: no global hooks, signing or identity.
+        process.environment = ProcessInfo.processInfo.environment.merging(
+            ["GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"]) { $1 }
         let out = Pipe()
         process.standardOutput = out
         process.standardError = FileHandle.nullDevice
@@ -30,8 +33,14 @@ import Version
         return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    @Test func theBuildReportsWhatTheScriptDerivesForThisTree() throws {
-        #expect(Version.current == (try Self.script(in: Self.root)))
+    /// Read against VERSION rather than against the tree's git state now, which can have
+    /// moved on since the build stamped it.
+    @Test func theBuildReportsVersionsValueOrADevBuildOfIt() throws {
+        let base = try Self.run(Self.root.appending(path: "scripts/version").path(), ["--base"], in: Self.root)
+        let commit = Version.current.split(separator: "-dev+", maxSplits: 1).dropFirst().first
+        #expect(
+            Version.current == base || Version.current == "\(base)-dev"
+                || (Version.current.hasPrefix("\(base)-dev+") && commit?.allSatisfy(\.isHexDigit) == true))
     }
 
     @Test func dashDashVersionPrintsIt() {
@@ -42,7 +51,13 @@ import Version
         let (clientSide, serverSide) = await InMemoryTransport.createConnectedPair()
         let server = McpCommand.server()
         try await server.start(transport: serverSide)
-        let result = try await Client(name: "test", version: "0").connect(transport: clientSide)
+        let result: Initialize.Result
+        do {
+            result = try await Client(name: "test", version: "0").connect(transport: clientSide)
+        } catch {
+            await server.stop()
+            throw error
+        }
         await server.stop()
         #expect(result.serverInfo.name == "vhid")
         #expect(result.serverInfo.version == Version.current)
@@ -55,7 +70,7 @@ import Version
         try "1.2.3\n".write(to: repo.appending(path: "VERSION"), atomically: true, encoding: .utf8)
         for arguments in [
             ["init", "-q"], ["add", "VERSION"],
-            ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-qm", "v"],
+            ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "v"],
         ] {
             try Self.run("/usr/bin/git", arguments, in: repo)
         }
@@ -69,8 +84,32 @@ import Version
         #expect(try Self.script(in: repo) == "1.2.3-dev+\(commit)")
         try Self.run("/usr/bin/git", ["tag", "v1.2.3"], in: repo)
         #expect(try Self.script(in: repo) == "1.2.3")
+        try "".write(to: repo.appending(path: "untracked.swift"), atomically: true, encoding: .utf8)
+        #expect(try Self.script(in: repo) == "1.2.3-dev+\(commit)")
+        try FileManager.default.removeItem(at: repo.appending(path: "untracked.swift"))
         try "1.2.3 \n".write(to: repo.appending(path: "VERSION"), atomically: true, encoding: .utf8)
         #expect(try Self.script(in: repo) == "1.2.3-dev+\(commit)")
+    }
+
+    @Test func aTagThatOnlyLooksLikeItIsNotTheRelease() throws {
+        let repo = try Self.repo()
+        defer { try? FileManager.default.removeItem(at: repo) }
+        try Self.run("/usr/bin/git", ["tag", "v1-2-3"], in: repo)
+        #expect(try Self.script(in: repo).hasPrefix("1.2.3-dev+"))
+    }
+
+    @Test func aVersionThatIsNotDottedNumbersBuildsNothing() throws {
+        let repo = try Self.repo()
+        defer { try? FileManager.default.removeItem(at: repo) }
+        try "0.1\"0\n".write(to: repo.appending(path: "VERSION"), atomically: true, encoding: .utf8)
+        let process = Process()
+        process.executableURL = Self.root.appending(path: "scripts/version")
+        process.arguments = [repo.path()]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        #expect(process.terminationStatus != 0)
     }
 
     @Test func withNoGitItIsADevBuild() throws {

@@ -198,7 +198,7 @@ NOTARY_PROFILE=<profile> scripts/release dist    # dist/vhid-<version>.pkg
 ```
 
 The version is the one in `VERSION`, and a release is built from the commit tagged
-`v<version>` with no tracked file changed: any other build reports `<version>-dev+<commit>`
+`v<version>` with `git status` clean: any other build reports `<version>-dev+<commit>`
 from `vhid --version`, and `scripts/make-pkg` refuses to package it.
 
 That runs two scripts, and each can also be run on its own:

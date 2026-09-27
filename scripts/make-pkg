@@ -38,22 +38,22 @@ TEAM=6R988MUU27
 # The receipt this pkg leaves, which `pkgutil --pkgs` lists and `pkgutil --forget` takes.
 IDENTIFIER=ai.promptctl.vhid
 
-out=${1:?usage: scripts/make-pkg <output directory>}
-
 fail() { echo "make-pkg: $*" >&2; exit 1; }
+
+[ $# -eq 1 ] || fail "usage: scripts/make-pkg <output directory>; the version is VERSION's"
+out=$1
 
 mkdir -p "$out"
 out=$(cd "$out" && pwd)
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$root"
 
-# [LAW:one-source-of-truth] The version is VERSION's, the one the binaries are stamped
-# with. [LAW:parse-dont-validate] It is written into XML, into pkgbuild's --version and
-# into a file name, so it is held to dotted numbers with an optional pre-release tag
-# before minutes of building rather than failing productbuild after them.
-version=$(tr -d '[:space:]' <VERSION)
-[[ $version =~ ^[0-9]+(\.[0-9]+)*(-[0-9A-Za-z.]+)?$ ]] \
-  || fail "VERSION '$version' is not dotted numbers with an optional -tag, such as 0.1.0 or 0.2.0-rc.1"
+# [LAW:one-source-of-truth] The version is VERSION's, as scripts/version reads and checks
+# it. A tree the binaries would stamp with anything else - untagged, or changed since the
+# tag - is refused here, before minutes of building; the packed binary is asked again below.
+version=$(scripts/version --base) || exit 1
+[ "$(scripts/version)" = "$version" ] \
+  || fail "this tree builds $(scripts/version), not $version; build from the commit tagged v$version with git status clean"
 
 # The SHA-1 of the one valid identity of this kind for the team. None and several are
 # both refusals: signing by name would have codesign pick among several on its own, and
@@ -119,12 +119,11 @@ sign "$payload/usr/local/libexec/vhid-menubar" "$IDENTIFIER.menubar"
 service=$("$payload/usr/local/bin/vhid" service)
 [ -n "$service" ] || fail "the packed vhid names no service"
 
-# The version the packed CLI reports, which is the one a bug report will quote. A build
-# of anything but the commit tagged v$version, with no tracked file changed, reports a
-# -dev value, so this is also what refuses to package an untagged or edited tree.
+# The version the packed CLI reports, which is the one a bug report will quote, held to
+# the one this tree was checked for above.
 packed=$("$payload/usr/local/bin/vhid" --version)
 [ "$packed" = "$version" ] \
-  || fail "the packed vhid reports version '$packed', not '$version'; build from the commit tagged v$version with no tracked changes"
+  || fail "the packed vhid reports version '$packed', not '$version'; build from the commit tagged v$version with git status clean"
 
 plist="$payload/Library/LaunchDaemons/$service.plist"
 scripts/launchd-plist "$service" /usr/local/libexec/vhidd >"$plist"
