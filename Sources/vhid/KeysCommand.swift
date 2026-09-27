@@ -1,6 +1,6 @@
 import ArgumentParser
 import Input
-import KeyboardLayout
+import KeyboardLayouts
 
 /// Presses chords on the virtual keyboard, in the order they were given.
 struct KeysCommand: AsyncParsableCommand {

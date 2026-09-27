@@ -1,4 +1,4 @@
-import KeyboardLayout
+import KeyboardLayouts
 import Keystrokes
 
 /// The one typist: text and chords, lowered to keystrokes and pressed on a keyboard,

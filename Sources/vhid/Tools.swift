@@ -2,7 +2,7 @@ import Dispatch
 import Doctor
 import Input
 import Installations
-import KeyboardLayout
+import KeyboardLayouts
 import MCP
 import Pointing
 

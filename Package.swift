@@ -9,7 +9,7 @@ let package = Package(
         .library(name: "Pointing", targets: ["Pointing"]),
         .library(name: "Signals", targets: ["Signals"]),
         .library(name: "DriverExtension", targets: ["DriverExtension"]),
-        .library(name: "KeyboardLayout", targets: ["KeyboardLayout"]),
+        .library(name: "KeyboardLayouts", targets: ["KeyboardLayouts"]),
         .library(name: "Installations", targets: ["Installations"]),
         .library(name: "VirtualHID", targets: ["VirtualHID"]),
         .library(name: "Helper", targets: ["Helper"]),
@@ -65,11 +65,11 @@ let package = Package(
         .testTarget(name: "DriverExtensionTests", dependencies: ["DriverExtension"]),
         // Carbon lives here and not in the device layer, so the privileged side that owns
         // the device never links a window server API. [LAW:one-way-deps]
-        .target(name: "KeyboardLayout", dependencies: ["Keystrokes"]),
+        .target(name: "KeyboardLayouts", dependencies: ["Keystrokes"]),
         // The reverse map is built from a real layout's own data, so these read the
         // installed US and Dvorak layouts rather than a fixture that could agree with a
         // wrong reading of them.
-        .testTarget(name: "KeyboardLayoutTests", dependencies: ["KeyboardLayout", "Keystrokes"]),
+        .testTarget(name: "KeyboardLayoutsTests", dependencies: ["KeyboardLayouts", "Keystrokes"]),
         // Which installation this is, as the one name every other name is built from -
         // an open set, so anything linking this package can run a daemon of its own
         // without a case being added here. It depends on nothing, so the root daemon and
@@ -95,11 +95,11 @@ let package = Package(
         // vocabularies and the layout, and deliberately not Helper or VirtualHID: which
         // device answers is the caller's to pick, so this holds the protocols and the
         // caller supplies a conformance. [LAW:one-way-deps] [LAW:effects-at-boundaries]
-        .target(name: "Input", dependencies: ["KeyboardLayout", "Keystrokes", "Pointing"]),
+        .target(name: "Input", dependencies: ["KeyboardLayouts", "Keystrokes", "Pointing"]),
         // The pointer's loop against a fake screen with an acceleration curve of its own,
         // and the typist against a keyboard that can be made to fail at the third keystroke
         // of four: no device, no window server, no grant.
-        .testTarget(name: "InputTests", dependencies: ["Input", "KeyboardLayout", "Keystrokes", "Pointing"]),
+        .testTarget(name: "InputTests", dependencies: ["Input", "KeyboardLayouts", "Keystrokes", "Pointing"]),
         // What must hold before a verb can reach the devices, as a table from readings of
         // this Mac to a step for a person. The table reads nothing: every requirement is a
         // pure function of readings, so every combination is exercised in its tests,
@@ -113,7 +113,7 @@ let package = Package(
         .testTarget(name: "DoctorTests", dependencies: ["Doctor", "DriverExtension", "Installations", "Helper"]),
         // The root daemon that owns the devices. It links DriverExtension for the identity
         // the keyboard files its Keyboard Setup Assistant answer under, and deliberately
-        // not KeyboardLayout: text never reaches this process. [LAW:one-way-deps]
+        // not KeyboardLayouts: text never reaches this process. [LAW:one-way-deps]
         .executableTarget(
             name: "vhidd",
             dependencies: ["Helper", "VirtualHID", "DriverExtension", "Keystrokes", "Pointing", "Signals", "Installations"]
@@ -128,7 +128,7 @@ let package = Package(
         .executableTarget(
             name: "vhid",
             dependencies: [
-                "Input", "Helper", "Installations", "KeyboardLayout", "Keystrokes", "Pointing", "DriverExtension", "Doctor",
+                "Input", "Helper", "Installations", "KeyboardLayouts", "Keystrokes", "Pointing", "DriverExtension", "Doctor",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "MCP", package: "swift-sdk"),
                 .product(name: "Logging", package: "swift-log"),

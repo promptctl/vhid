@@ -44,7 +44,7 @@ import Input
 /// was transcribed separately, from Carbon's own `kVK_*` constants. Neither is derived
 /// from the other, so where they overlap they are two witnesses rather than one repeated
 /// - and `Modifier.usage` is that overlap, used. [LAW:one-source-of-truth] The character
-/// rows are checked against the driver-proven table in KeyboardLayoutTests; this is the
+/// rows are checked against the driver-proven table in KeyboardLayoutsTests; this is the
 /// modifier row, which types no character and so appears in no layout map at all.
 @Suite struct ModifierUsageTests {
     @Test func theModifierRowAgreesWithCarbonsOwnKeyCodes() {

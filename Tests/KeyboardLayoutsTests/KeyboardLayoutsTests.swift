@@ -1,14 +1,14 @@
 import Foundation
 import Keystrokes
 import Testing
-@testable import KeyboardLayout
+@testable import KeyboardLayouts
 
 /// The reverse map, read off the layouts this Mac has installed rather than a fixture.
 ///
 /// A fixture would be a second copy of what a layout says, written by the same reading of
 /// UCKeyTranslate that the code under test uses, and would agree with it however wrong
 /// both were. The installed layouts are the territory. [FRAMING:representation]
-@Suite struct KeyboardLayoutTests {
+@Suite struct KeyboardLayoutsTests {
     static let us = try! KeyboardLayout.named("com.apple.keylayout.US")
     static let dvorak = try! KeyboardLayout.named("com.apple.keylayout.Dvorak")
     /// The layout with the most dead keys macOS ships, and so the one that exercises the
