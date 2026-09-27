@@ -1,0 +1,108 @@
+#!/bin/bash
+# Fails, naming what is wrong, when a pkg built by scripts/make-pkg does not install what
+# make-pkg says it installs: exactly these paths, owned root:wheel, with these modes;
+# a launchd job whose Label, only MachServices key and --service argument are the one
+# service name the pkg's scripts load; and the pinned driver package beside it.
+#
+#   scripts/check-pkg <pkg>
+#
+# Read from the pkg itself rather than from make-pkg's working files, because the pkg is
+# what a Mac installs. [LAW:behavior-not-structure]
+#
+# Held to bash 3.2, like every script here.
+set -euo pipefail
+pkg=${1:?usage: scripts/check-pkg <pkg>}
+[ -f "$pkg" ] || { echo "check-pkg: no pkg at $pkg" >&2; exit 1; }
+pkg=$(cd "$(dirname "$pkg")" && pwd)/$(basename "$pkg")
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+failed=0
+fail() { echo "check-pkg: $*" >&2; failed=1; }
+
+work=$(mktemp -d "${TMPDIR:-/tmp}/vhid-check-pkg.XXXXXX")
+trap 'rm -rf "$work"' EXIT
+pkgutil --expand-full "$pkg" "$work/x" >/dev/null
+x=$work/x
+
+# A value the pkg lacks is reported as missing by the check that needs it, rather than
+# ending the run before the other checks have spoken.
+plist() { plutil -extract "$2" raw "$1" 2>/dev/null || echo "<no $2>"; }
+
+service=$(cat "$x/vhid.pkg/Scripts/service" 2>/dev/null) || service=
+[ -n "$service" ] || { echo "check-pkg: the pkg's scripts name no service" >&2; exit 1; }
+cli=$x/vhid.pkg/Payload/usr/local/bin/vhid
+if [ -x "$cli" ]; then
+  dials=$("$cli" service 2>&1) || dials="<vhid service failed: $dials>"
+  [ "$dials" = "$service" ] || fail "the packed vhid dials '$dials', not the '$service' the scripts load"
+fi
+for binary in usr/local/bin/vhid usr/local/libexec/vhidd usr/local/libexec/vhid-menubar; do
+  [ -f "$x/vhid.pkg/Payload/$binary" ] || continue
+  archs=$(lipo -archs "$x/vhid.pkg/Payload/$binary" 2>&1) || archs="<lipo failed: $archs>"
+  [ "$archs" = "x86_64 arm64" ] || fail "/$binary is built for '$archs', not x86_64 and arm64"
+done
+for script in preinstall postinstall; do
+  [ -x "$x/vhid.pkg/Scripts/$script" ] || fail "the pkg carries no executable $script"
+done
+
+# Every path, its mode and its owner, as the receipt will record them: an extra file, a
+# missing one, a mode or an owner that differs is named by the diff.
+expected=$(cat <<BOM
+drwxr-xr-x root wheel .
+drwxr-xr-x root wheel ./Library
+drwxr-xr-x root wheel ./Library/LaunchAgents
+-rw-r--r-- root wheel ./Library/LaunchAgents/$service.menubar.plist
+drwxr-xr-x root wheel ./Library/LaunchDaemons
+-rw-r--r-- root wheel ./Library/LaunchDaemons/$service.plist
+drwxr-xr-x root wheel ./usr
+drwxr-xr-x root wheel ./usr/local
+drwxr-xr-x root wheel ./usr/local/bin
+-rwxr-xr-x root wheel ./usr/local/bin/vhid
+drwxr-xr-x root wheel ./usr/local/libexec
+-rwxr-xr-x root wheel ./usr/local/libexec/vhid-menubar
+-rwxr-xr-x root wheel ./usr/local/libexec/vhidd
+BOM
+)
+actual=$(lsbom -p MUGf "$x/vhid.pkg/Bom" | awk '{ print $1, $2, $3, $4 }')
+bom=$(diff <(echo "$expected") <(echo "$actual")) || fail "the payload differs from what make-pkg states (< stated, > packed):
+$bom"
+
+# The job's three names for the service, which launchd, the daemon and the CLI must agree on.
+daemon=$x/vhid.pkg/Payload/Library/LaunchDaemons/$service.plist
+if [ -f "$daemon" ]; then
+  label=$(plist "$daemon" Label)
+  [ "$label" = "$service" ] || fail "the job's Label is '$label', not '$service'"
+  keys=$(plutil -extract MachServices xml1 -o - "$daemon" 2>/dev/null | sed -n 's|.*<key>\(.*\)</key>.*|\1|p' || true)
+  [ "$keys" = "$service" ] || fail "the job's MachServices keys are '$(tr '\n' ' ' <<<"$keys")', not only '$service'"
+  count=$(plist "$daemon" ProgramArguments)
+  [[ $count =~ ^[0-9]+$ ]] || count=0
+  arguments=
+  for ((i = 0; i < count; i++)); do
+    arguments="$arguments $(plist "$daemon" "ProgramArguments.$i")"
+  done
+  [ "$arguments" = " /usr/local/libexec/vhidd --service $service" ] \
+    || fail "the job runs$arguments, not /usr/local/libexec/vhidd --service $service"
+fi
+
+# The menu bar item's job, which postinstall finds by this Label in each session.
+agent=$x/vhid.pkg/Payload/Library/LaunchAgents/$service.menubar.plist
+if [ -f "$agent" ]; then
+  label=$(plist "$agent" Label)
+  [ "$label" = "$service.menubar" ] || fail "the menu bar job's Label is '$label', not '$service.menubar'"
+  arguments="$(plist "$agent" ProgramArguments) $(plist "$agent" ProgramArguments.0)"
+  [ "$arguments" = "1 /usr/local/libexec/vhid-menubar" ] \
+    || fail "the menu bar job runs '$arguments' (count, then first), not /usr/local/libexec/vhid-menubar alone"
+fi
+
+# The pinned driver package, by the pins its own script holds. [LAW:one-source-of-truth]
+# shellcheck source=virtual-hid-driver
+source scripts/virtual-hid-driver
+# Read from the component's own PackageInfo, which is what installer acts on.
+info=$x/$PKG_FILE/PackageInfo
+if [ -f "$info" ] && [ -e "$x/$PKG_FILE/Payload" ]; then
+  carried=$(sed -n 's/.*<pkg-info [^>]*identifier="\([^"]*\)".* version="\([^"]*\)".*/\1 \2/p' "$info")
+  [ "$carried" = "$BUNDLE_ID $PKG_VERSION" ] || fail "the driver component is '$carried', not $BUNDLE_ID $PKG_VERSION"
+else
+  fail "the pkg carries no $PKG_FILE"
+fi
+
+exit $failed

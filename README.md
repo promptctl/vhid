@@ -208,6 +208,10 @@ scripts/make-pkg dist                                   # built and signed
 NOTARY_PROFILE=<profile> scripts/notarize dist/vhid-<version>.pkg   # notarized and stapled
 ```
 
+`scripts/make-pkg --unsigned dist` does all of it but the signing, from any tree, and
+names the result `vhid-<version>-unsigned.pkg`; `scripts/check-pkg` then holds what it
+installs to what make-pkg states. CI's `pkg` job runs both on every PR.
+
 `scripts/make-pkg` builds for arm64 and x86_64 in a scratch directory of its own. It signs
 both binaries with the team's **Developer ID Application** certificate, with Hardened
 Runtime and a secure timestamp, and signs the pkg with its **Developer ID Installer**
