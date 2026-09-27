@@ -68,7 +68,7 @@ jobs:
       - run: scripts/check-bash32
       # The release is built with the toolchain CI tests with, and the workflows cannot
       # share an env, so the two copies are held equal here.
-      - run: diff <(grep 'DEVELOPER_DIR:' .github/workflows/test.yml) <(grep 'DEVELOPER_DIR:' .github/workflows/release.yml)
+      - run: diff <(grep '^  DEVELOPER_DIR:' .github/workflows/test.yml) <(grep '^  DEVELOPER_DIR:' .github/workflows/release.yml)
       # Two lines, so the step fails with make-pkg: an echo of a failed substitution would
       # succeed and leave the failure to be blamed on the next step.
       - run: |
