@@ -41,7 +41,9 @@ struct Windows: AsyncParsableCommand {
 
     @MainActor
     func run() async throws {
-        print(Self.report(try Geometry.onScreen(), owner: owner, frontmost: Frontmost.now()))
+        // Frontmost first: an activation lands before the listing that reflects it.
+        let frontmost = Frontmost.now()
+        print(Self.report(try Geometry.onScreen(), owner: owner, frontmost: frontmost))
     }
 
     /// The scope line and a row per window: what the verb prints and what the MCP tool
@@ -56,8 +58,13 @@ struct Windows: AsyncParsableCommand {
         let shown = listing.windows.filter { window in
             owner.map { window.owner?.localizedCaseInsensitiveContains($0) ?? false } ?? true
         }
-        let rows = shown.map { row($0) + ($0.pid == frontmost?.pid ? "\tfront" : "") }
-        let front = frontmost.map { app in (app, shown.contains { $0.pid == app.pid }) }
+        let rows = shown.map { row($0, front: $0.pid == frontmost?.pid) }
+        // Judged against the whole listing too, so a window the owner filter hid is not
+        // reported as a window that is not on screen.
+        let front = frontmost.map { app -> (Frontmost, FrontRows) in
+            let owns = { (w: Window) in w.pid == app.pid }
+            return (app, shown.contains(where: owns) ? .shown : listing.windows.contains(where: owns) ? .filtered : .none)
+        }
         return ([scope(shown: shown.count, listing: listing, frontmost: front)] + rows).joined(separator: "\n")
     }
 
@@ -76,7 +83,7 @@ struct Windows: AsyncParsableCommand {
     ///
     /// It names the frontmost application whether or not a row of it is shown, because
     /// that is where keystrokes go, and says so when nothing is frontmost.
-    static func scope(shown: Int, listing: WindowListing, frontmost: (app: Frontmost, shown: Bool)?) -> String {
+    static func scope(shown: Int, listing: WindowListing, frontmost: (app: Frontmost, rows: FrontRows)?) -> String {
         let filtered = listing.windows.count - shown
         let clauses: [String?] = [
             "\(shown) window\(shown == 1 ? "" : "s"), front to back",
@@ -89,22 +96,34 @@ struct Windows: AsyncParsableCommand {
         return clauses.compactMap { $0 }.joined(separator: "; ")
             + ". On screen only: minimized, hidden and other-Space windows were never looked at."
             + " Owner, layer and bounds; titles need Screen Recording."
-            + (frontmost.map { " Keys go to \($0.app), " + ($0.shown ? "its rows marked front." : "which has no row here.") }
+            + (frontmost.map { " Frontmost: \($0.app), \($0.rows.rawValue)." }
                 ?? " No application is frontmost.")
+            // Frontmost is not the same as holding the keys, and the line says so rather
+            // than promising where `vhid type` lands. [LAW:no-silent-failure]
+            + " A panel of another process over it (Spotlight, a Save dialog) can hold the keys instead."
     }
 
     /// One window as a row: id, owner, layer, then the rectangle in the coordinates vhid
     /// clicks. Tab-separated because the owner is the one field that can hold a space.
-    static func row(_ window: Window) -> String {
+    /// The frontmost application's rows end in a fifth column, `front`.
+    static func row(_ window: Window, front: Bool = false) -> String {
         // A window whose owning process has no application name is still a window with a
         // place to click; it is named as unnamed rather than left blank, so the column
         // cannot be mistaken for an empty field.
         return "\(window.id)\t\(window.owner ?? "(unnamed)")\tL\(window.layer)"
-            + "\t\(window.frame)"
+            + "\t\(window.frame)" + (front ? "\tfront" : "")
+    }
+
+    /// Where the frontmost application's windows are, of the three things a scope line
+    /// has to tell apart.
+    enum FrontRows: String {
+        case shown = "its rows marked front"
+        case filtered = "its rows hidden by the owner filter"
+        case none = "with no window on screen"
     }
 }
 
-/// The application keystrokes go to: what `vhid type` reaches, and nothing eyes chooses.
+/// The frontmost application: usually where keystrokes go, and nothing eyes chooses.
 struct Frontmost: Sendable, Hashable, CustomStringConvertible {
     let pid: Int32
     let name: String?

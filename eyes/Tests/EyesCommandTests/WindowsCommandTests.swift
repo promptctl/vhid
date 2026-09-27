@@ -21,7 +21,8 @@ import Testing
         #expect(line == "2 windows, front to back."
             + " On screen only: minimized, hidden and other-Space windows were never looked at."
             + " Owner, layer and bounds; titles need Screen Recording."
-            + " No application is frontmost.")
+            + " No application is frontmost."
+            + " A panel of another process over it (Spotlight, a Save dialog) can hold the keys instead.")
     }
 
     /// The frontmost application is found by pid, not by row order: its menu at layer 101
@@ -36,17 +37,20 @@ import Testing
         ]
         let lines = Windows.report(WindowListing(windows: rows, excluded: []), owner: nil,
                                    frontmost: Frontmost(pid: 400, name: "Safari")).split(separator: "\n")
-        #expect(lines[0].hasSuffix(" Keys go to Safari (pid 400), its rows marked front."))
+        #expect(lines[0].contains(" Frontmost: Safari (pid 400), its rows marked front."))
         #expect(lines.dropFirst().map { $0.hasSuffix("\tfront") } == [true, false, false, false, true])
     }
 
-    /// Keys go to the frontmost application even when the owner filter hides all of it, so
-    /// it is named anyway and the scope says none of its rows are shown.
+    /// The frontmost application is named even with no row shown, and the scope tells a
+    /// window the owner filter hid from an application with no window on screen.
     @Test func aFrontmostApplicationWithNoRowShownIsStillNamed() {
-        let listing = WindowListing(windows: [window(id: 1, owner: "Safari")], excluded: [])
-        let report = Windows.report(listing, owner: "safari", frontmost: Frontmost(pid: 77, name: "Terminal"))
-        #expect(report.split(separator: "\n")[0].hasSuffix(" Keys go to Terminal (pid 77), which has no row here."))
-        #expect(!report.contains("\tfront"))
+        let listing = WindowListing(windows: [window(id: 1, owner: "Safari"), window(id: 2, owner: "Terminal")], excluded: [])
+        let absent = Windows.report(listing, owner: nil, frontmost: Frontmost(pid: 77, name: "Float"))
+        #expect(Windows.report(listing, owner: "terminal", frontmost: Frontmost(pid: 999, name: "X")).contains("X (pid 999), with no window on screen."))
+        #expect(Windows.report(WindowListing(windows: [window(id: 1)], excluded: []), owner: "zzz", frontmost: Frontmost(pid: 400, name: "Safari"))
+            .contains("Frontmost: Safari (pid 400), its rows hidden by the owner filter."))
+        #expect(absent.contains("Frontmost: Float (pid 77), with no window on screen."))
+        #expect(!absent.contains("\tfront"))
     }
 
     /// The narrowing no count can reach, and so the one that has to be said in words: the

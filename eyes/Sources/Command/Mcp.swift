@@ -128,7 +128,8 @@ enum EyesTools {
         call: { given in
             let owner = try string("owner", in: given, only: ["owner"])
             try Windows.refuseEmpty(owner, named: "owner")
-            return Windows.report(try await listing(), owner: owner, frontmost: await frontmost())
+            let front = await frontmost()
+            return Windows.report(try await listing(), owner: owner, frontmost: front)
         }) }
 
     /// The one optional string argument `name`, refusing any argument not in `taken` and
