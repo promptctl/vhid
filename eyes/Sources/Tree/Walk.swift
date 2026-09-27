@@ -121,8 +121,10 @@ func visible(_ frame: ScreenRect, in clip: ScreenRect, under covers: [ScreenRect
 /// the area - a window's title, a list's label - and the centre of the area is on whatever
 /// sits there, never on the words: measured, a window's title came back at the middle of
 /// its document. The words themselves, where they are drawn, are an element of their own.
+/// Not a group: on a web page a labelled group is as often a control - an icon button
+/// whose only child is its image - pressed at its centre.
 let areas: Set<Role> = Set([
-    kAXApplicationRole, kAXWindowRole, kAXSheetRole, kAXDrawerRole, kAXGroupRole, kAXScrollAreaRole,
+    kAXApplicationRole, kAXWindowRole, kAXSheetRole, kAXDrawerRole, kAXScrollAreaRole,
     kAXSplitGroupRole, kAXTabGroupRole, kAXToolbarRole, kAXListRole, kAXOutlineRole, kAXTableRole,
     kAXColumnRole, kAXBrowserRole, kAXLayoutAreaRole, kAXGridRole, kAXRadioGroupRole, kAXMenuRole,
     kAXMenuBarRole, kAXPopoverRole, "AXWebArea",
@@ -133,9 +135,8 @@ extension Node {
     /// is not an area, and the centre of that frame - the point a click lands on - is
     /// inside `clip` and under none of the windows in front of this one.
     ///
-    /// An area is known by its role and children together: a group with nothing under it -
-    /// a web page's labelled icon - is the thing its label names, and its centre is where
-    /// it is pressed. It is decided first, from reads that arrive with the role, so an area
+    /// An area is known by its role and children together: a list with nothing under it is
+    /// the thing its label names, and its centre is where it is pressed. It is decided first, from reads that arrive with the role, so an area
     /// whose text would not answer never leaves the region unread over words that could
     /// not have been a finding. Placement is decided before text, so an element that could
     /// never be a finding here is unplaced or covered whatever its text reads did - a busy
@@ -165,10 +166,11 @@ extension Facts {
     /// Only a scroll area cuts the clip down to its frame: a row scrolled out of its list
     /// is hidden by it, so no click reaches the row, and its centre lies under the toolbar.
     /// Any other element may draw its children outside its own frame - a web page's
-    /// dropdown hangs below its header - so they keep the clip it was given. Measured, the
-    /// pruning is also what lets a walk reach a window at all: a full-screen terminal in
-    /// front held four thousand elements, every one off the region, and walking them spent
-    /// the whole element bound. An element with no frame, or an empty one, says nothing
+    /// dropdown hangs below its header - so they keep the clip it was given, but only while
+    /// some of that element can be seen: one wholly off the clip or covered is not
+    /// descended into, whatever hangs off it. That bet is what lets a walk reach a window at
+    /// all: measured, a full-screen terminal in front held four thousand elements, every
+    /// one off the region, and walking them spent the whole element bound. An element with no frame, or an empty one, says nothing
     /// about where its children are, so the walk goes on into it.
     func inner(_ clip: ScreenRect, under covers: [ScreenRect]) -> ScreenRect? {
         guard case .answered(let placed?) = frame, !placed.isEmpty else { return clip }

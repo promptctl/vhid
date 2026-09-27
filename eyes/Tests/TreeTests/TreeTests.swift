@@ -54,11 +54,17 @@ extension Facts {
 }
 
 @Suite struct CandidateTests {
-    /// A labelled group with nothing under it - a web page's icon button - is the thing.
-    @Test func aGroupWithNothingUnderItIsFoundAndOneHoldingSomethingIsAnArea() {
-        let group = facts([.answered("Close")], role: "AXGroup")
-        #expect(group.candidate(in: region, under: []) != .excluded(.area))
-        #expect(Node(facts: group, children: .answered(["icon"])).candidate(in: region, under: []) == .excluded(.area))
+    /// An area with nothing under it is the thing its label names; one holding something is not.
+    @Test func aListWithNothingUnderItIsFoundAndOneHoldingSomethingIsAnArea() {
+        let list = facts([.answered("Inbox")], role: "AXList")
+        #expect(list.candidate(in: region, under: []) != .excluded(.area))
+        #expect(Node(facts: list, children: .answered(["row"])).candidate(in: region, under: []) == .excluded(.area))
+    }
+
+    /// A web page's labelled icon button is a group holding its image, pressed at its centre.
+    @Test func aLabelledGroupHoldingAnIconIsFound() {
+        let group = facts([.answered("Settings")], role: "AXGroup")
+        #expect(Node(facts: group, children: .answered(["icon"])).candidate(in: region, under: []) != .excluded(.area))
     }
 
     /// An area's words could never be a finding, so a text read it failed leaves nothing unread.
