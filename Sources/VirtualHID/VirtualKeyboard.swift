@@ -59,12 +59,23 @@ public final class VirtualKeyboard: KeyPress {
 
     private let daemon: DaemonConnection
     private let reportTimeout: Duration
-    /// The keys the device is holding. Nothing outside this type may set it, and every
-    /// report is a reading of it - taken under the lock the report is posted under, so a
-    /// press made from one thread reads what a press from another left.
-    private let held = Mutex<Set<Usage>>([])
+    /// What the device is holding, and whether the driver acknowledged exactly that.
+    ///
+    /// `keysDown` may say a key is held that is not, for the reason `post` gives, so alone
+    /// it cannot say whether a report would repeat what the driver already has. `settled`
+    /// is false whenever a request is outstanding or threw, since the driver may then hold
+    /// the old set or the new one. [LAW:one-source-of-truth] One set, and one fact about it.
+    private struct Held {
+        var keysDown: Set<Usage> = []
+        var settled = false
+    }
 
-    public var keysDown: Set<Usage> { held.withLock { $0 } }
+    /// Nothing outside this type may set it, and every report is a reading of it - taken
+    /// under the lock the report is posted under, so a press made from one thread reads
+    /// what a press from another left.
+    private let held = Mutex(Held())
+
+    public var keysDown: Set<Usage> { held.withLock { $0.keysDown } }
 
     /// Connects to the daemon and takes nothing else on faith. The device is not up until
     /// `start` says so.
@@ -114,13 +125,30 @@ public final class VirtualKeyboard: KeyPress {
         try post { _ in [] }
     }
 
+    /// Holds exactly `keys`, releasing whatever else is down.
+    ///
+    /// A non-empty set equal to the one the driver last acknowledged posts nothing: it is
+    /// a player saying it is still alive while a key stays down, and a repeated report
+    /// would reach macOS as nothing at best. The client was marked alive by the call
+    /// before it got here, which is what keeps the keys past the daemon's limit. An empty
+    /// set always posts, as `releaseAll` does. The skip needs the set settled, which a
+    /// failed request unsettles, so the retry of a `hold` that threw always posts.
+    public func hold(_ keys: HeldKeys) throws {
+        try held.withLock { held in
+            if keys.usages.isEmpty || !held.settled || held.keysDown != keys.usages {
+                try post(&held) { _ in keys.usages }
+            }
+        }
+    }
+
     /// Clears the device's own state as well as this side's. `keyboardReset` is what the
     /// daemon offers for the case where the two might have drifted apart. The record is
     /// emptied on the daemon's answer and not before, for the reason `post` gives.
     public func reset() throws {
-        try held.withLock { keysDown in
+        try held.withLock { held in
+            held.settled = false
             try daemon.request(.keyboardReset, by: .now + reportTimeout)
-            keysDown.removeAll()
+            held = Held(keysDown: [], settled: true)
         }
     }
 
@@ -141,12 +169,16 @@ public final class VirtualKeyboard: KeyPress {
     /// has yet to settle would be a report missing that post's key, which the driver reads
     /// as a release nobody sent.
     private func post(_ change: (Set<Usage>) -> Set<Usage>) throws {
-        try held.withLock { keysDown in
-            let next = change(keysDown)
-            let report = try KeyboardReport(held: next)
-            keysDown.formUnion(next)
-            try daemon.request(.postKeyboardInputReport, report.bytes, by: .now + reportTimeout)
-            keysDown = next
-        }
+        try held.withLock { try post(&$0, change) }
+    }
+
+    /// The post itself, under a lock the caller already holds.
+    private func post(_ held: inout Held, _ change: (Set<Usage>) -> Set<Usage>) throws {
+        let next = change(held.keysDown)
+        let report = try KeyboardReport(held: next)
+        held.keysDown.formUnion(next)
+        held.settled = false
+        try daemon.request(.postKeyboardInputReport, report.bytes, by: .now + reportTimeout)
+        held = Held(keysDown: next, settled: true)
     }
 }

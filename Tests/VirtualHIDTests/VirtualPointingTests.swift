@@ -84,6 +84,27 @@ private func pointingReports(_ fake: FakeDaemon) -> [[UInt8]] {
         ])
     }
 
+    /// A hold replaces the buttons down: left and right held, then left alone, keeps the
+    /// left drag going, and motion after it carries only the left.
+    @Test func aHoldReplacesTheButtonsDown() throws {
+        let fake = FakeDaemon(handling: daemonWhoseMouseComesUp)
+        let device = try mouse(on: fake)
+        try device.start(within: .seconds(2))
+        try device.hold([.left, .right])
+        try device.hold([.left])
+        try device.hold([.left])
+        try device.move(by: Move(x: Count(clamping: 1), y: .zero))
+        try device.hold([])
+        #expect(device.buttonsDown.isEmpty)
+        #expect(pointingReports(fake) == [
+            [3, 0, 0, 0, 0, 0, 0, 0],
+            [1, 0, 0, 0, 0, 0, 0, 0],
+            [1, 0, 0, 0, 0, 0, 0, 0],
+            [1, 0, 0, 0, 1, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0],
+        ])
+    }
+
     /// The record may over-report what the device holds and may never under-report: a
     /// button it has already forgotten is one nothing will lift. Presses are answered and
     /// releases are not, which is the mid-drag timeout this is about.

@@ -24,6 +24,17 @@ public struct Button: RawRepresentable, Hashable, Comparable, Sendable {
     /// usage derives its bit. [LAW:one-source-of-truth]
     public var bit: UInt32 { 1 << UInt32(rawValue - 1) }
 
+    /// A report's button field: the bits of `buttons` set and no others.
+    public static func field(_ buttons: Set<Button>) -> UInt32 {
+        buttons.reduce(0) { $0 | $1.bit }
+    }
+
+    /// The buttons whose bits are set in a report's button field, the inverse of `field`.
+    /// Every bit of the field names a button, so no field is refused.
+    public static func buttons(in field: UInt32) -> Set<Button> {
+        Set((1...32).map { Button(rawValue: $0)! }.filter { field & $0.bit != 0 })
+    }
+
     public static func < (a: Button, b: Button) -> Bool { a.rawValue < b.rawValue }
 }
 

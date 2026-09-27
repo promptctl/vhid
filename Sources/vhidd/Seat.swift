@@ -61,8 +61,10 @@ final class Seat: NSObject, HelperService, @unchecked Sendable {
 
     func down(usage: UInt16, reply: @escaping (Error?) -> Void) { serve(reply) { $0.down(usage: usage, reply: reply) } }
     func releaseAll(reply: @escaping (Error?) -> Void) { serve(reply) { $0.releaseAll(reply: reply) } }
+    func hold(usages: [UInt16], reply: @escaping (Error?) -> Void) { serve(reply) { $0.hold(usages: usages, reply: reply) } }
     func buttonDown(_ button: UInt8, reply: @escaping (Error?) -> Void) { serve(reply) { $0.buttonDown(button, reply: reply) } }
     func releaseButtons(reply: @escaping (Error?) -> Void) { serve(reply) { $0.releaseButtons(reply: reply) } }
+    func holdButtons(_ buttons: UInt32, reply: @escaping (Error?) -> Void) { serve(reply) { $0.holdButtons(buttons, reply: reply) } }
     func move(x: Int8, y: Int8, reply: @escaping (Error?) -> Void) { serve(reply) { $0.move(x: x, y: y, reply: reply) } }
     func scroll(vertical: Int8, horizontal: Int8, reply: @escaping (Error?) -> Void) {
         serve(reply) { $0.scroll(vertical: vertical, horizontal: horizontal, reply: reply) }

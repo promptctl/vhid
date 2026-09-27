@@ -15,7 +15,7 @@ struct PointingReport {
     let scroll: Scroll
 
     init(held: Set<Button>, move: Move, scroll: Scroll) {
-        buttons = held.reduce(0) { $0 | $1.bit }
+        buttons = Button.field(held)
         self.move = move
         self.scroll = scroll
     }
@@ -71,6 +71,13 @@ public final class VirtualPointing: PointingDevice {
     /// pointer crosses next.
     public func releaseAll() throws {
         try post(move: .none, scroll: .none) { _ in [] }
+    }
+
+    /// Holds exactly `buttons`, releasing whatever else is down: left and right held to
+    /// left alone without ending the left drag. Always posts, for the reason `releaseAll`
+    /// does.
+    public func hold(_ buttons: Set<Button>) throws {
+        try post(move: .none, scroll: .none) { _ in buttons }
     }
 
     /// Moves by `delta`, with whatever is held still held.

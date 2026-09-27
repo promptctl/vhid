@@ -42,8 +42,10 @@ import Testing
 
         func down(usage: UInt16, reply: @escaping (Error?) -> Void) { respond(reply) }
         func releaseAll(reply: @escaping (Error?) -> Void) { respond(reply) }
+        func hold(usages: [UInt16], reply: @escaping (Error?) -> Void) { respond(reply) }
         func buttonDown(_ button: UInt8, reply: @escaping (Error?) -> Void) { respond(reply) }
         func releaseButtons(reply: @escaping (Error?) -> Void) { respond(reply) }
+        func holdButtons(_ buttons: UInt32, reply: @escaping (Error?) -> Void) { respond(reply) }
         func move(x: Int8, y: Int8, reply: @escaping (Error?) -> Void) { respond(reply) }
         func scroll(vertical: Int8, horizontal: Int8, reply: @escaping (Error?) -> Void) { respond(reply) }
         func leave(reply: @escaping (Error?) -> Void) { respond(reply) }
@@ -147,8 +149,10 @@ private final class Unanswered: NSXPCConnection, HelperService, @unchecked Senda
 
     func down(usage: UInt16, reply: @escaping (Error?) -> Void) {}
     func releaseAll(reply: @escaping (Error?) -> Void) {}
+    func hold(usages: [UInt16], reply: @escaping (Error?) -> Void) {}
     func buttonDown(_ button: UInt8, reply: @escaping (Error?) -> Void) {}
     func releaseButtons(reply: @escaping (Error?) -> Void) {}
+    func holdButtons(_ buttons: UInt32, reply: @escaping (Error?) -> Void) {}
     func move(x: Int8, y: Int8, reply: @escaping (Error?) -> Void) {}
     func scroll(vertical: Int8, horizontal: Int8, reply: @escaping (Error?) -> Void) {}
     func leave(reply: @escaping (Error?) -> Void) {}

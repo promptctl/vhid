@@ -54,8 +54,10 @@ import Testing
         // A status call is all doctor sends; any device act reaching here is a failure.
         func down(usage: UInt16, reply: @escaping (Error?) -> Void) { Issue.record("doctor pressed a key"); reply(nil) }
         func releaseAll(reply: @escaping (Error?) -> Void) { Issue.record("doctor released keys"); reply(nil) }
+        func hold(usages: [UInt16], reply: @escaping (Error?) -> Void) { Issue.record("doctor held keys"); reply(nil) }
         func buttonDown(_ button: UInt8, reply: @escaping (Error?) -> Void) { Issue.record("doctor pressed a button"); reply(nil) }
         func releaseButtons(reply: @escaping (Error?) -> Void) { Issue.record("doctor released buttons"); reply(nil) }
+        func holdButtons(_ buttons: UInt32, reply: @escaping (Error?) -> Void) { Issue.record("doctor held buttons"); reply(nil) }
         func move(x: Int8, y: Int8, reply: @escaping (Error?) -> Void) { Issue.record("doctor moved the pointer"); reply(nil) }
         func scroll(vertical: Int8, horizontal: Int8, reply: @escaping (Error?) -> Void) { Issue.record("doctor scrolled"); reply(nil) }
         func leave(reply: @escaping (Error?) -> Void) { Issue.record("doctor left"); reply(nil) }

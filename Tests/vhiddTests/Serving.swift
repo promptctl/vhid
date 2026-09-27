@@ -19,8 +19,10 @@ final class RecordingDevices: NSObject, ServedDevices, @unchecked Sendable {
     private func note(_ act: String, _ reply: (Error?) -> Void) { lock.lock(); acts.append(act); lock.unlock(); reply(nil) }
     func down(usage: UInt16, reply: @escaping (Error?) -> Void) { note("down \(usage)", reply) }
     func releaseAll(reply: @escaping (Error?) -> Void) { note("release keys", reply) }
+    func hold(usages: [UInt16], reply: @escaping (Error?) -> Void) { note("hold \(usages)", reply) }
     func buttonDown(_ button: UInt8, reply: @escaping (Error?) -> Void) { note("button \(button)", reply) }
     func releaseButtons(reply: @escaping (Error?) -> Void) { note("release buttons", reply) }
+    func holdButtons(_ buttons: UInt32, reply: @escaping (Error?) -> Void) { note("hold buttons \(buttons)", reply) }
     func move(x: Int8, y: Int8, reply: @escaping (Error?) -> Void) { note("move", reply) }
     func scroll(vertical: Int8, horizontal: Int8, reply: @escaping (Error?) -> Void) { note("scroll", reply) }
     func releaseKeysHeldPastLimit() -> KeysLetGo? { nil }

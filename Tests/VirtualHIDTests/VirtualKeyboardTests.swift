@@ -1,5 +1,6 @@
 import Foundation
 import Keystrokes
+import Synchronization
 import Testing
 @testable import VirtualHID
 
@@ -281,3 +282,97 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
         #expect(sent.last?.bytes.isEmpty == true)
     }
 }
+
+/// A player's held sets: each `hold` is the report of exactly that set, a repeat of the set
+/// the driver acknowledged is a keep-alive that posts nothing, and none may be skipped that
+/// the driver has not acknowledged.
+@Suite struct HoldTests {
+    private let post = DaemonConnection.Request.postKeyboardInputReport.rawValue
+
+    /// Whether the fake answers keyboard reports, turned by the test between calls.
+    final class Answering: Sendable {
+        private let on = Mutex(true)
+        var isOn: Bool { on.withLock { $0 } }
+        func set(_ value: Bool) { on.withLock { $0 = value } }
+    }
+
+    /// A hold replaces what is down rather than adding to it, and every one is a report.
+    @Test func aHoldIsTheReportOfExactlyThatSet() throws {
+        let fake = FakeDaemon(handling: daemonThatComesUp)
+        let device = try keyboard(on: fake)
+        try device.start(within: .seconds(2))
+        try device.down(Usage(rawValue: 0x04))
+        try device.hold(HeldKeys([.leftShift, Usage(rawValue: 0x05)]))
+        #expect(device.keysDown == [.leftShift, Usage(rawValue: 0x05)])
+        try device.hold(HeldKeys([.leftShift]))
+        #expect(reports(fake) == [
+            report(modifiers: 0, [0x04]),
+            report(modifiers: 0x02, [0x05]),
+            report(modifiers: 0x02),
+        ])
+    }
+
+    /// A non-empty set the driver already acknowledged posts nothing, however often it is
+    /// repeated; an empty one posts every time, because a final all-up report is the line
+    /// between a run that ends and a key macOS repeats.
+    @Test func aRepeatedSetPostsNothingAndAnEmptyOneAlwaysPosts() throws {
+        let fake = FakeDaemon(handling: daemonThatComesUp)
+        let device = try keyboard(on: fake)
+        try device.start(within: .seconds(2))
+        let shift = try HeldKeys([.leftShift])
+        try device.hold(shift)
+        try device.hold(shift)
+        try device.hold(shift)
+        try device.hold(.none)
+        try device.hold(.none)
+        #expect(reports(fake) == [report(modifiers: 0x02), report(modifiers: 0), report(modifiers: 0)])
+    }
+
+    /// The set a key was pressed by through `down` is acknowledged as well: a hold of it
+    /// is a keep-alive, as it is after a hold.
+    @Test func aSetReachedByDownIsAcknowledgedToo() throws {
+        let fake = FakeDaemon(handling: daemonThatComesUp)
+        let device = try keyboard(on: fake)
+        try device.start(within: .seconds(2))
+        try device.down(.leftShift)
+        try device.hold(HeldKeys([.leftShift]))
+        #expect(reports(fake) == [report(modifiers: 0x02)])
+    }
+
+    /// A hold that threw leaves nothing acknowledged, so its retry posts. Compared against
+    /// `keysDown` instead, which took on the failed set before the request, the retry would
+    /// be skipped and its key never pressed.
+    @Test func theRetryOfAHoldThatThrewPosts() throws {
+        let answering = Answering()
+        let post = post
+        let fake = FakeDaemon { frame, fake in
+            guard case .request(let id, let payload) = frame else { return }
+            guard requestSent(payload).request != post || answering.isOn else { return }
+            try fake.send(.response(id: id, payload: []))
+        }
+        let device = try keyboard(on: fake, reportTimeout: .milliseconds(200))
+        let shift = try HeldKeys([.leftShift])
+        let shiftB = try HeldKeys([.leftShift, Usage(rawValue: 0x05)])
+        try device.hold(shift)
+        answering.set(false)
+        #expect(throws: DaemonError.silent) { try device.hold(shiftB) }
+        #expect(device.keysDown == shiftB.usages)
+        answering.set(true)
+        try device.hold(shiftB)
+        try device.hold(shiftB)
+        #expect(reports(fake) == [report(modifiers: 0x02), report(modifiers: 0x02, [0x05]), report(modifiers: 0x02, [0x05])])
+    }
+
+    /// A reset leaves the driver holding nothing, and a hold after it posts.
+    @Test func aHoldAfterAResetPosts() throws {
+        let fake = FakeDaemon(handling: daemonThatComesUp)
+        let device = try keyboard(on: fake)
+        try device.start(within: .seconds(2))
+        let shift = try HeldKeys([.leftShift])
+        try device.hold(shift)
+        try device.reset()
+        try device.hold(shift)
+        #expect(reports(fake) == [report(modifiers: 0x02), report(modifiers: 0x02)])
+    }
+}
+

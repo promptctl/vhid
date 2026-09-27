@@ -73,6 +73,8 @@ import Testing
 
         func buttonDown(_ button: UInt8, reply: @escaping (Error?) -> Void) { note("button \(button)", reply) }
         func releaseButtons(reply: @escaping (Error?) -> Void) { note("release", reply) }
+        func holdButtons(_ buttons: UInt32, reply: @escaping (Error?) -> Void) { note("hold buttons \(buttons)", reply) }
+        func hold(usages: [UInt16], reply: @escaping (Error?) -> Void) { note("hold \(usages.sorted())", reply) }
         func move(x: Int8, y: Int8, reply: @escaping (Error?) -> Void) { note("move \(x) \(y)", reply) }
         func scroll(vertical: Int8, horizontal: Int8, reply: @escaping (Error?) -> Void) { note("scroll \(vertical) \(horizontal)", reply) }
         func leave(reply: @escaping (Error?) -> Void) { note("leave", reply) }
@@ -146,6 +148,19 @@ import Testing
             try mouse.releaseAll()
         }
         #expect(far.service.pointed == ["button 1", "move -3 127", "scroll 2 -1", "release"])
+    }
+
+    /// A held set crosses as its usages, and a held button set as the report's bit field.
+    @Test func heldSetsCrossAsTheWiresIntegers() async throws {
+        let (helper, far) = helper(.acknowledge)
+        let (keyboard, mouse) = (helper.keyboard, helper.mouse)
+        try await blocking {
+            try keyboard.hold(HeldKeys([.leftShift, .space]))
+            try keyboard.hold(.none)
+            try mouse.hold([.left, .middle])
+            try mouse.hold([])
+        }
+        #expect(far.service.pointed == ["hold [44, 225]", "hold []", "hold buttons 5", "hold buttons 0"])
     }
 
     /// vhidd's refusal reaches the caller as the error vhidd sent, not as a
