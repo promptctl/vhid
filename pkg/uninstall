@@ -4,6 +4,7 @@
 # pqrs driver the pkg also installed is left in place: Karabiner-Elements may be using it.
 #
 #   sudo /usr/local/libexec/vhid-uninstall
+#   sudo /usr/local/libexec/vhid-uninstall --driver    # and the pqrs driver after vhid's jobs stop
 #   /usr/local/libexec/vhid-uninstall --paths    # what it removes, one per line, and nothing else
 #
 # Running it again finds nothing and says so. It touches the one service it was packed for
@@ -33,12 +34,15 @@ paths() {
 /usr/local/libexec/vhidd
 /usr/local/libexec/vhid-menubar
 /usr/local/libexec/vhid-uninstall
+/usr/local/libexec/vhid-virtual-hid-driver
 /Library/LaunchDaemons/$service.plist
 /Library/LaunchAgents/$service.menubar.plist
 PATHS
 }
 if [ "${1:-}" = --paths ]; then paths; exit 0; fi
-[ $# -eq 0 ] || { echo "usage: sudo $0 [--paths]" >&2; exit 64; }
+driver=false
+[ "${1:-}" = --driver ] && { driver=true; shift; }
+[ $# -eq 0 ] || { echo "usage: sudo $0 [--driver] | $0 --paths" >&2; exit 64; }
 
 say() { echo "vhid-uninstall: $*"; }
 fail() { echo "vhid-uninstall: $*" >&2; exit 1; }
@@ -52,6 +56,35 @@ fi
 # @STOP_JOB@
 
 removed=0
+pqrs_scripts="/Library/Application Support/org.pqrs/Karabiner-DriverKit-VirtualHIDDevice/scripts/uninstall"
+
+# The driver, when asked for, by the removal scripts/virtual-hid-driver makes - the copy
+# the pkg ships beside this script - read through the installed vhid. [LAW:one-source-of-truth]
+# It runs as a bash of its own: its steps count on stopping at the first failure, which a
+# function called on the left of || here would not do. Its refusals - Karabiner-Elements
+# installed, a registration it cannot read, nobody logged in to withdraw it - are asked
+# before any job is stopped, so a refused --driver leaves vhid running as it found it; the
+# removal itself goes after vhid's jobs let go of the driver and before the files it needs.
+driver_script=$root/usr/local/libexec/vhid-virtual-hid-driver
+[ -f "$driver_script" ] || driver_script=
+driver_step() {
+  VHID_DRIVER_ROOT=$root REMOVE_AGAIN="sudo $0 --driver" \
+    CONFIRM_ABSENT="systemextensionsctl list, which should list no org.pqrs extension" \
+    /bin/bash -c 'source "$1"; VHID=$2; "$3"' _ "$driver_script" "$root/usr/local/bin/vhid" "$1"
+}
+if $driver; then
+  if [ -z "$driver_script" ]; then
+    say "the driver removal vhid's pkg ships is not here, so neither is vhid; if the pqrs driver is, its own scripts remove it: $pqrs_scripts"
+  else
+    # The development daemon a build of this tree runs uses this same driver.
+    if record=$(launchctl print "system/$service.dev" 2>&1); then
+      fail "the development job $service.dev is loaded and uses the driver; stop it (scripts/dev-daemon remove) before removing the driver, or run without --driver"
+    elif ! grep -q "Could not find service" <<<"$record"; then
+      fail "could not read whether the development job $service.dev, which would use the driver, is loaded, so nothing was stopped or removed: $record"
+    fi
+    driver_step remove_refusals || fail "nothing was stopped or removed"
+  fi
+fi
 
 # The daemon first: its record is the one whose reading decides whether anything is
 # removed. Only launchd's "no such job" means nothing is loaded; a record it could not
@@ -85,6 +118,23 @@ for uid in $(ps -axo uid=,comm= | awk '$2 ~ /(^|\/)loginwindow$/ && $1 >= 500 { 
   fi
 done
 
+if $driver && [ -n "$driver_script" ]; then
+  # Where the removal left the driver is read afresh rather than taken from its exit
+  # status: 2 is how it reports a restart pending, but a failed step under its errexit can
+  # end it with 2 as well.
+  # A driver already gone is nothing removed, so a second run can say so.
+  if [ "$(driver_step report_state 2>/dev/null)" = absent ]; then status=0 verdict=already-absent; else
+    status=0
+    driver_step cmd_remove || status=$?
+    verdict=$(driver_step report_state 2>/dev/null) || verdict=unknown
+  fi
+  case "$status $verdict" in
+    "0 already-absent") ;;
+    "0 absent" | "0 pending-reboot" | "2 pending-reboot") removed=$((removed + 1)) ;;
+    *) fail "the driver's removal did not finish (above says why; it now reads '$verdict'). vhid's jobs are stopped and its files are in place: run sudo $0 --driver again once that is fixed, or sudo $0 to remove vhid alone" ;;
+  esac
+fi
+
 while IFS= read -r path; do
   if [ -e "$root$path" ] || [ -L "$root$path" ]; then
     rm -f "$root$path"
@@ -102,5 +152,9 @@ fi
 if [ $removed -eq 0 ]; then
   say "nothing to remove: no vhid job, file or receipt is here"
 else
-  say "done. The pqrs driver the pkg installed stays: Karabiner-Elements may use it too"
+  if $driver; then
+    say "done"
+  else
+    say "done. The pqrs driver the pkg installed stays, since Karabiner-Elements may use it too; its own scripts remove it: $pqrs_scripts"
+  fi
 fi
