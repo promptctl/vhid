@@ -106,6 +106,7 @@ vhid ships as one signed, notarized pkg. It installs:
 | path | what it is |
 |---|---|
 | `/usr/local/bin/vhid` | the CLI |
+| `/usr/local/bin/eyes` | the screen reader: `windows` and `displays` need no grant; `find` and `read` need Screen Recording, which macOS asks of the process responsible for eyes - the terminal, or for `eyes mcp` the MCP host app |
 | `/usr/local/libexec/vhidd` | the root daemon that owns the devices |
 | `/Library/LaunchDaemons/ai.promptctl.vhid.vhidd.plist` | the daemon's launchd job, loaded as the install finishes |
 | `/usr/local/libexec/vhid-menubar` | the menu bar item |

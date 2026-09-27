@@ -31,6 +31,7 @@ root=${VHID_UNINSTALL_ROOT:-}
 paths() {
   cat <<PATHS
 /usr/local/bin/vhid
+/usr/local/bin/eyes
 /usr/local/libexec/vhidd
 /usr/local/libexec/vhid-menubar
 /usr/local/libexec/vhid-uninstall

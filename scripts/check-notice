@@ -1,10 +1,11 @@
 #!/bin/bash
-# Fails when NOTICE and what vhid links disagree: a package in Package.resolved that
-# NOTICE does not name and that is not listed below as resolved-but-unlinked, or an
-# unlinked package whose module turns up in the vhid binary after all.
+# Fails when NOTICE and what a shipped binary links disagree: a package in its package's
+# Package.resolved that NOTICE does not name and that is not listed below as
+# resolved-but-unlinked, or an unlinked package whose module turns up in the binary after all.
 #
-#   scripts/check-notice [vhid [scratch path]]
-#     # the working tree's debug build and .build by default; make-pkg names its own
+#   scripts/check-notice [binary [scratch path [package directory]]]
+#     # vhid's debug build, .build and the root by default; make-pkg names its own,
+#     # and eyes/ for eyes, whose dependencies are its own package's
 #
 # NOTICE is hand-written, so this is what makes a new dependency, or an SDK upgrade that
 # starts linking one it only resolved before, a red build instead of a license page that
@@ -12,12 +13,13 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 binary=${1:-.build/debug/vhid}
+resolved=${3:-.}/Package.resolved
 # The package checkouts are the build's, so a scratch path of its own has its own.
 checkouts=${2:-.build}/checkouts
 
-# Resolved for MCP swift-sdk targets vhid does not use. A symbol of any module in one
+# Resolved for MCP swift-sdk targets neither vhid nor eyes uses. A symbol of any module in one
 # of these packages - a mangled Swift name carries its module as <length><name> - means
-# vhid links it after all. The modules are read from the checkout, so a package that
+# the binary links it after all. The modules are read from the checkout, so a package that
 # grows one is still covered.
 unlinked=(
   https://github.com/apple/swift-nio.git
@@ -47,8 +49,8 @@ while read -r url; do
       failed=1
     fi
   elif ! grep -qF "${url%.git}" NOTICE; then
-    echo "check-notice: $url is in Package.resolved but NOTICE does not name it" >&2
+    echo "check-notice: $url is in $resolved but NOTICE does not name it" >&2
     failed=1
   fi
-done < <(sed -n 's/.*"location" : "\(.*\)".*/\1/p' Package.resolved)
+done < <(sed -n 's/.*"location" : "\(.*\)".*/\1/p' "$resolved")
 exit $failed

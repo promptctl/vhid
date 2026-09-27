@@ -14,8 +14,8 @@ package, unmodified, as a separate component:
   Its daemon contains spdlog (MIT License below; Copyright (c) 2016 Gabi Melman)
   and asio (Boost Software License 1.0; Copyright (c) Christopher M. Kohlhoff).
 
-The vhid command-line tool statically links the components below. vhidd and
-vhid-menubar link none of them.
+The vhid and eyes command-line tools statically link the components below.
+vhidd and vhid-menubar link none of them.
 
 * swift-argument-parser (Apple Inc.) - Apache License 2.0
   https://github.com/apple/swift-argument-parser
