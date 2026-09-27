@@ -51,18 +51,9 @@ func log(_ message: String) {
     logger.notice("\(message, privacy: .public)")
 }
 
-/// Ends the process, saying why. The way out for every reason this process ends on
-/// purpose, reached only by whoever claimed the departure, once it has stopped whatever
-/// daemon of its own it knows of. [LAW:single-enforcer]
-func leave(because reason: String, status: Int32) -> Never {
-    log("\(reason); exiting \(status)")
-    exit(status)
-}
-
 do {
     let callers = try CallerIdentity.sameSignerAsThisProcess()
     log("callers must satisfy: \(callers.text)")
-    let departure = Departure()
 
     // Before the devices come up, and that ordering is the whole point: macOS raises
     // Keyboard Setup Assistant when the keyboard ENUMERATES, so an answer filed after
@@ -92,51 +83,42 @@ do {
     // `readiness`, rather than finding no service at all. [LAW:no-silent-failure]
     let readiness = Readiness()
     let listener = NSXPCListener(machServiceName: installation.service)
-    let delegate = Listener(devices: readiness, callers: callers)
+    let delegate = Listener(readiness: readiness, callers: callers)
     listener.delegate = delegate
     listener.resume()
     log("listening on \(installation.service)")
 
-    // launchd stops a job with SIGTERM. The departure is claimed before the keys are
-    // released: the release is a request, and a request that finds the daemon gone
-    // reports the loss on this thread, into the handler below, which must find the
-    // departure already taken. [LAW:no-ambient-temporal-coupling]
+    let children = Children()
+
+    // launchd stops a job with SIGTERM. Whatever is held is released first, then every
+    // daemon this process started is stopped - one an attempt started a moment ago as
+    // much as one serving - and a daemon somebody else runs stays theirs.
     let termination = SignalWatch(on: [SIGTERM], answeringOn: .main) { _ in
-        guard departure.claim() else { return }
         readiness.releaseEverything(because: "asked to stop")
-        readiness.stop(with: DaemonProcess.real)
-        leave(because: "asked to stop", status: 0)
+        children.stopAll(DaemonProcess.real)
+        log("asked to stop; exiting 0")
+        exit(0)
     }
 
     Thread.detachNewThread {
-        // The connection is lost on the reading thread, and no key can be released over a
-        // connection that is gone. What can be done is to stop the daemon vhidd
-        // started, which takes the device and whatever it held down with it; a daemon
-        // somebody else runs stays theirs. Then end: launchd restarts this job after an
-        // unsuccessful exit, and the next start reaches or restarts the daemon.
-        // [LAW:no-silent-failure] A loss found while already leaving is that departure's to
-        // finish, with the status it chose.
-        let reached = DaemonProcess.real.reachEventually(
+        children.tracking(DaemonProcess.real).keepUp(
             within: .seconds(10),
             backoff: Backoff(first: .seconds(2), most: .seconds(60)),
-            pause: { Thread.sleep(forTimeInterval: Double($0.components.seconds) + Double($0.components.attoseconds) / 1e18) },
-            whenDown: { readiness.become(.down(.failed($0))) }
-        ) { lost, daemon in
-            guard departure.claim() else { return }
-            DaemonProcess.real.stop(daemon)
-            leave(because: "the daemon's connection was lost (\(lost)); exiting for launchd to start this again", status: 1)
-        }
-        log("the keyboard is up: the daemon answered in \(reached.startup.keyboard.answered), ready after \(reached.startup.keyboard.ready)")
-        log("the mouse is up: the daemon answered in \(reached.startup.mouse.answered), ready after \(reached.startup.mouse.ready)")
-        let devices = Devices(keyboard: reached.devices.keyboard, mouse: reached.devices.mouse)
-        // Whatever the daemon was holding for its last occupant - a vhidd that exited on a
-        // lost connection while the daemon lived on, or a hand-run session - is up before
-        // any client is served: the devices are handed to `readiness` only after.
-        // Unconditionally: the daemon's origin says who started it, not what it holds.
-        // [LAW:dataflow-not-control-flow] [LAW:no-ambient-temporal-coupling]
-        devices.releaseEverything(because: "starting")
-        readiness.become(.up(devices, daemon: reached.daemon))
-        log("serving")
+            readiness: readiness,
+            serve: { reached in
+                log("the keyboard is up: the daemon answered in \(reached.startup.keyboard.answered), ready after \(reached.startup.keyboard.ready)")
+                log("the mouse is up: the daemon answered in \(reached.startup.mouse.answered), ready after \(reached.startup.mouse.ready)")
+                let devices = Devices(keyboard: reached.devices.keyboard, mouse: reached.devices.mouse)
+                // Whatever the daemon was holding for its last occupant - a vhidd that
+                // exited while the daemon lived on, or a hand-run session - is up before
+                // any client is served: the devices are handed over only after.
+                // Unconditionally: the daemon's origin says who started it, not what it
+                // holds. [LAW:dataflow-not-control-flow] [LAW:no-ambient-temporal-coupling]
+                devices.releaseEverything(because: "starting")
+                return devices
+            },
+            pause: { Thread.sleep(forTimeInterval: $0.seconds) }
+        )
     }
 
     // Held so the delegate and the watch outlive this scope; `resume` retains neither

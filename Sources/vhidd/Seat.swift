@@ -20,39 +20,42 @@ final class Seat: NSObject, HelperService, @unchecked Sendable {
     private let connection: ObjectIdentifier
     private let pid: pid_t
     private let holder: Holder
-    private let devices: any ServedDevices
+    private let readiness: Readiness
     /// Whether this seat has ended. Under its own lock across each act's claim, so an act
     /// cannot pass the check and then claim after `end` has freed the devices. Taken
     /// before the holder's lock and never after it.
     private let seat = NSLock()
     private var ended = false
 
-    init(_ connection: ObjectIdentifier, pid: pid_t, holder: Holder, devices: any ServedDevices) {
+    init(_ connection: ObjectIdentifier, pid: pid_t, holder: Holder, readiness: Readiness) {
         self.connection = connection
         self.pid = pid
         self.holder = holder
-        self.devices = devices
+        self.readiness = readiness
     }
 
     /// [LAW:dataflow-not-control-flow] Every act is the same act: the devices, claimed for
-    /// this seat if nobody holds them, and the refusal otherwise.
-    private func serve(_ reply: @escaping (Error?) -> Void, _ act: () -> Void) {
+    /// this seat if they are up and nobody holds them, and the refusal otherwise. Up is
+    /// asked first, so a client turned away while they are down holds nothing and the next
+    /// is told why too, not that the first one is in the way.
+    private func serve(_ reply: @escaping (Error?) -> Void, _ act: (any ServedDevices) -> Void) {
         seat.lock(); defer { seat.unlock() }
         do {
             guard !ended else { throw Ended() }
-            try holder.serve(connection, by: pid, act)
+            let devices = try readiness.devices()
+            try holder.serve(connection, by: pid) { act(devices) }
         } catch {
             reply(refusal(error))
         }
     }
 
-    func down(usage: UInt16, reply: @escaping (Error?) -> Void) { serve(reply) { devices.down(usage: usage, reply: reply) } }
-    func releaseAll(reply: @escaping (Error?) -> Void) { serve(reply) { devices.releaseAll(reply: reply) } }
-    func buttonDown(_ button: UInt8, reply: @escaping (Error?) -> Void) { serve(reply) { devices.buttonDown(button, reply: reply) } }
-    func releaseButtons(reply: @escaping (Error?) -> Void) { serve(reply) { devices.releaseButtons(reply: reply) } }
-    func move(x: Int8, y: Int8, reply: @escaping (Error?) -> Void) { serve(reply) { devices.move(x: x, y: y, reply: reply) } }
+    func down(usage: UInt16, reply: @escaping (Error?) -> Void) { serve(reply) { $0.down(usage: usage, reply: reply) } }
+    func releaseAll(reply: @escaping (Error?) -> Void) { serve(reply) { $0.releaseAll(reply: reply) } }
+    func buttonDown(_ button: UInt8, reply: @escaping (Error?) -> Void) { serve(reply) { $0.buttonDown(button, reply: reply) } }
+    func releaseButtons(reply: @escaping (Error?) -> Void) { serve(reply) { $0.releaseButtons(reply: reply) } }
+    func move(x: Int8, y: Int8, reply: @escaping (Error?) -> Void) { serve(reply) { $0.move(x: x, y: y, reply: reply) } }
     func scroll(vertical: Int8, horizontal: Int8, reply: @escaping (Error?) -> Void) {
-        serve(reply) { devices.scroll(vertical: vertical, horizontal: horizontal, reply: reply) }
+        serve(reply) { $0.scroll(vertical: vertical, horizontal: horizontal, reply: reply) }
     }
 
     /// Answered only once the devices are free, which is the whole point of asking.
@@ -66,12 +69,17 @@ final class Seat: NSObject, HelperService, @unchecked Sendable {
     func end(because reason: String) {
         seat.lock(); defer { seat.unlock() }
         ended = true
-        holder.free(connection) { devices.releaseEverything(because: reason) }
+        holder.free(connection) { readiness.releaseEverything(because: reason) }
     }
 
-    /// Who holds the devices, read and not claimed.
+    /// Who holds the devices, read and not claimed, or why they are not up.
     func status(reply: @escaping (NSNumber?, Error?) -> Void) {
-        reply(holder.pid.map { NSNumber(value: $0) }, nil)
+        do {
+            _ = try readiness.devices()
+            reply(holder.pid.map { NSNumber(value: $0) }, nil)
+        } catch {
+            reply(nil, refusal(error))
+        }
     }
 
     /// A call on a seat that has ended.

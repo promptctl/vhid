@@ -389,8 +389,8 @@ public extension Requirement {
 // MARK: - the daemon's answer
 
 public extension Requirement {
-    /// Whether a daemon is listening on the service, which is also whether its devices are
-    /// up: it listens only once both are.
+    /// Whether a daemon is listening on the service with its devices up: while they are
+    /// down it refuses the call with the reason, which this reads as a failed call.
     ///
     /// A refusal is an answer here. The daemon that refused this binary's signature was
     /// listening to refuse it, so its devices are up and the one thing wrong is the
@@ -423,9 +423,7 @@ public extension Requirement {
         case .silent(let reason):
             """
             launchd holds \(installation.service) and the daemon did not answer
-            (\(reason)). It listens only once both devices are up, and exits
-            and is started again while they cannot come up - an unmet
-            \(Row.driverExtension.rawValue) row above is the usual reason. Its log says:
+            (\(reason)). Its log says:
                 \(daemonLog(installation, last: "10m"))
             """
         case .failed(let reason):

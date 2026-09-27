@@ -1,26 +1,23 @@
 import Foundation
 
-/// The devices as served while vhidd is bringing them up: refused by reason until they
-/// are up, and served as they are from then on.
+/// Whether the devices are up, and the devices when they are: what every seat asks before
+/// it acts, and what the bring-up loop tells as it goes.
 ///
 /// A daemon that cannot bring the devices up used to exit, and launchd started it again,
 /// so the reason lived only in a log nobody reading a client's error would think to look
 /// in. Now the reason is the answer every act gets, straight away, from a listener that is
 /// already up. [LAW:no-silent-failure]
 ///
-/// [LAW:types-are-the-program] Down carries why, up carries the devices, and there is no
-/// third state: an act is either refused with a reason or served.
-final class Readiness: NSObject, ServedDevices, @unchecked Sendable {
-    enum State {
-        case down(Down)
-        case up(any ServedDevices, daemon: DaemonProcess.Origin)
-    }
-
+/// [LAW:parse-dont-validate] `devices()` is the one crossing: it hands back devices that
+/// are up or throws why not, so a seat asks before it claims the holder, and a client
+/// turned away while the devices are down holds nothing.
+final class Readiness: @unchecked Sendable {
     /// Why the devices are not up, as a client is told it.
     enum Down: Error, CustomStringConvertible {
         /// The first attempt has not finished.
         case starting
-        /// The last attempt failed, and another is scheduled.
+        /// The last attempt failed, or the devices it brought up were lost, and another is
+        /// scheduled.
         case failed(any Error)
 
         var description: String {
@@ -31,54 +28,82 @@ final class Readiness: NSObject, ServedDevices, @unchecked Sendable {
         }
     }
 
-    /// Under its own lock and never the devices', so a refusal is answered at once however
-    /// long an attempt at bringing them up is taking. [LAW:no-shared-mutable-globals]
-    private let lock = NSLock()
+    /// [LAW:types-are-the-program] Down carries why and up carries the devices: an act is
+    /// either refused with a reason or served.
+    private enum State {
+        case down(Down)
+        case up(any ServedDevices)
+    }
+
+    /// Its own lock and never the devices', so a refusal is answered at once however long
+    /// an attempt is taking. A condition, because the bring-up loop waits on it for the
+    /// devices to be lost. [LAW:no-shared-mutable-globals]
+    private let condition = NSCondition()
     private var state = State.down(.starting)
+    /// Counts attempts, so a connection is known by the attempt that opened it.
+    private var attempt = 0
+    /// Whether the current attempt's connection has been lost, which can happen before its
+    /// devices are handed over as well as after.
+    private var lostThisAttempt = false
 
-    func become(_ next: State) {
-        lock.lock(); defer { lock.unlock() }
-        state = next
-    }
-
-    private var current: State {
-        lock.lock(); defer { lock.unlock() }
-        return state
-    }
-
-    /// [LAW:dataflow-not-control-flow] Every act is the same act: the devices when they are
-    /// up, the reason when they are not.
-    private func serve(_ reply: @escaping (Error?) -> Void, _ act: (any ServedDevices) -> Void) {
-        switch current {
-        case .down(let why): reply(refusal(why))
-        case .up(let devices, _): act(devices)
+    /// The devices, or why they are not up.
+    func devices() throws -> any ServedDevices {
+        condition.lock(); defer { condition.unlock() }
+        switch state {
+        case .down(let why): throw why
+        case .up(let devices): return devices
         }
-    }
-
-    func down(usage: UInt16, reply: @escaping (Error?) -> Void) { serve(reply) { $0.down(usage: usage, reply: reply) } }
-    func releaseAll(reply: @escaping (Error?) -> Void) { serve(reply) { $0.releaseAll(reply: reply) } }
-    func buttonDown(_ button: UInt8, reply: @escaping (Error?) -> Void) { serve(reply) { $0.buttonDown(button, reply: reply) } }
-    func releaseButtons(reply: @escaping (Error?) -> Void) { serve(reply) { $0.releaseButtons(reply: reply) } }
-    func move(x: Int8, y: Int8, reply: @escaping (Error?) -> Void) { serve(reply) { $0.move(x: x, y: y, reply: reply) } }
-    func scroll(vertical: Int8, horizontal: Int8, reply: @escaping (Error?) -> Void) {
-        serve(reply) { $0.scroll(vertical: vertical, horizontal: horizontal, reply: reply) }
     }
 
     /// Devices that are not up hold nothing, so there is nothing to release.
     func releaseEverything(because reason: String) {
-        switch current {
-        case .down(let why): log("\(reason); nothing is held: \(why)")
-        case .up(let devices, _): devices.releaseEverything(because: reason)
+        do {
+            try devices().releaseEverything(because: reason)
+        } catch {
+            log("\(reason); nothing is held: \(error)")
         }
     }
 
-    /// Stops the daemon behind the devices when vhidd started it. Devices that are not up
-    /// have no daemon of vhidd's behind them: an attempt that fails stops what it started
-    /// before it says so.
-    func stop<Device>(with effects: DaemonProcess.Effects<Device>) {
-        switch current {
-        case .down: log("no daemon of this helper's is running")
-        case .up(_, let daemon): effects.stop(daemon)
+    /// Starts an attempt, returning the number its connection's loss is reported under.
+    func begin() -> Int {
+        condition.lock(); defer { condition.unlock() }
+        attempt += 1
+        lostThisAttempt = false
+        return attempt
+    }
+
+    func failed(_ error: any Error) {
+        condition.lock(); defer { condition.unlock() }
+        state = .down(.failed(error))
+    }
+
+    /// Serves `devices` from the next act on, unless the current attempt's connection was
+    /// lost before they were handed over, in which case they stay down on that loss.
+    func up(_ devices: any ServedDevices) {
+        condition.lock(); defer { condition.unlock() }
+        guard !lostThisAttempt else { return }
+        state = .up(devices)
+    }
+
+    /// Takes the devices down when `attempt` is the current one, and says whether it was.
+    /// A loss from an earlier attempt's connection is that attempt's, already answered.
+    func lost(_ error: any Error, in attempt: Int) -> Bool {
+        condition.lock(); defer { condition.unlock() }
+        guard attempt == self.attempt else { return false }
+        lostThisAttempt = true
+        state = .down(.failed(error))
+        condition.broadcast()
+        return true
+    }
+
+    /// Returns once the devices are down, with why.
+    func whileUp() -> Down {
+        condition.lock(); defer { condition.unlock() }
+        while true {
+            switch state {
+            case .down(let why): return why
+            case .up: condition.wait()
+            }
         }
     }
 }

@@ -153,38 +153,86 @@ struct Backoff: Equatable {
 
     /// The wait after the `failures`th failure in a row, counting from one.
     func after(_ failures: Int) -> Duration {
-        // Doubled at most 32 times: past that the cap has long since won, and a shift any
-        // wider than a Duration's count would trap.
-        min(first * (1 << min(max(failures - 1, 0), 32)), most)
+        // Doubled at most 20 times, which is past any cap worth having: `<<` on Int does not
+        // trap but gives 0 from a shift of 64, and a zero wait would start and stop the
+        // daemon as fast as it can.
+        min(first * (1 << min(max(failures - 1, 0), 20)), most)
+    }
+}
+
+/// The daemons this process started and has not yet stopped.
+///
+/// [LAW:one-source-of-truth] Recorded by the launch itself, not reported by whoever
+/// launched, so SIGTERM mid-attempt - with the pid still inside `reach` - stops it all the
+/// same, and a pid stopped once is never signalled again, whatever has since taken it.
+final class Children: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pids: Set<pid_t> = []
+
+    /// `effects` with every launch recorded and every termination limited to what is.
+    func tracking<Device>(_ effects: DaemonProcess.Effects<Device>) -> DaemonProcess.Effects<Device> {
+        DaemonProcess.Effects(
+            connect: effects.connect,
+            bringUp: effects.bringUp,
+            launch: {
+                self.lock.lock(); defer { self.lock.unlock() }
+                let pid = try effects.launch()
+                self.pids.insert(pid)
+                return pid
+            },
+            terminate: { pid in
+                self.lock.lock(); defer { self.lock.unlock() }
+                guard self.pids.remove(pid) != nil else { return }
+                effects.terminate(pid)
+            }
+        )
+    }
+
+    /// Stops every daemon still recorded.
+    func stopAll(_ effects: DaemonProcess.Effects<some Any>) {
+        let running = { lock.lock(); defer { lock.unlock() }; return pids }()
+        running.forEach(effects.terminate)
     }
 }
 
 extension DaemonProcess.Effects {
-    /// Reaches the devices however long it takes, telling `whenDown` why after every
-    /// attempt that fails and waiting out `backoff` before the next.
+    /// Keeps the devices up for as long as this process runs: reaches them, hands them to
+    /// `readiness` through `serve`, and when an attempt fails or its devices are lost, says
+    /// why through `readiness`, waits out `backoff`, and reaches them again.
     ///
-    /// [LAW:no-ambient-temporal-coupling] `reach` stops any daemon it started before it
-    /// throws, so every start of the daemon is separated from the one before by a whole
-    /// backoff window: a driver awaiting approval costs one spawn per window, not one per
-    /// launchd restart.
-    func reachEventually(
+    /// [LAW:dataflow-not-control-flow] A failed start and a lost connection are one path:
+    /// both take the devices down with a reason and retry, so neither ends the process and
+    /// neither is the spawn loop launchd's restarts used to make. `reach` stops any daemon
+    /// it started before it throws, and a loss stops the one behind it, so every start is
+    /// separated from the one before by a whole wait. [LAW:no-ambient-temporal-coupling]
+    ///
+    /// Returns only by `pause` throwing, which the daemon's never does.
+    func keepUp(
         within limit: Duration,
         backoff: Backoff,
-        pause: (Duration) -> Void,
-        whenDown: (any Error) -> Void,
-        whenLost: @escaping @Sendable (DaemonError, DaemonProcess.Origin) -> Void
-    ) -> DaemonProcess.Reached<Device> {
+        readiness: Readiness,
+        serve: (DaemonProcess.Reached<Device>) -> any ServedDevices,
+        pause: (Duration) throws -> Void
+    ) rethrows -> Never {
         var failures = 0
         while true {
+            let attempt = readiness.begin()
             do {
-                return try reach(within: limit, whenLost: whenLost)
+                let reached = try reach(within: limit) { lost, _ in _ = readiness.lost(lost, in: attempt) }
+                readiness.up(serve(reached))
+                log("serving")
+                let why = readiness.whileUp()
+                // Lost, so whatever the daemon held for vhidd went with the connection; a
+                // daemon started here is stopped so the next attempt starts it afresh.
+                stop(reached.daemon)
+                failures = 1
+                log("the devices went down (\(why)); bringing them up again in \(backoff.after(failures))")
             } catch {
                 failures += 1
-                whenDown(error)
-                let wait = backoff.after(failures)
-                log("could not bring the devices up (\(error)); trying again in \(wait)")
-                pause(wait)
+                readiness.failed(error)
+                log("could not bring the devices up (\(error)); trying again in \(backoff.after(failures))")
             }
+            try pause(backoff.after(failures))
         }
     }
 }

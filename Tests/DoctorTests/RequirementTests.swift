@@ -156,13 +156,6 @@ import Testing
         }
     }
 
-    /// A daemon that is held and silent is, usually, one whose devices cannot come up, and
-    /// the step says which row that is.
-    @Test func aSilentDaemonPointsAtTheDriverRow() throws {
-        let step = try #require(Requirement.daemon(.silent(reason: "x"), installation: Self.installation).step)
-        #expect(step.contains(Requirement.Row.driverExtension.rawValue))
-    }
-
     // MARK: - the signature
 
     @Test func theSignatureRowIsMetOnlyByAnAnswer() {

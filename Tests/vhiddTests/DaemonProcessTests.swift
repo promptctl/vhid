@@ -127,39 +127,59 @@ import VirtualHID
         #expect(world.terminated == [World.pid])
     }
 
+    private struct Stop: Error {}
+
     /// A daemon started for devices that will not come up is stopped before each wait, and
     /// not started again until the whole wait has passed: one spawn per backoff window.
-    @Test func eachFailedAttemptStopsTheDaemonAndWaitsOutTheBackoffBeforeTheNext() {
-        let device = Device()
-        let world = World(connections: [.failure(.noSocket(path: "nowhere")), .success(device)], bringUp: .failure(.silent))
+    /// Every failure is told to readiness as the reason acts are refused.
+    @Test func eachFailedAttemptStopsTheDaemonItStartedAndWaitsOutTheBackoff() {
+        let world = World(connections: [.failure(.noSocket(path: "nowhere"))])
         var events: [String] = []
-        var failures = 0
-        let backoff = Backoff(first: .seconds(2), most: .seconds(5))
         let effects = world.effects
-        let paced = DaemonProcess.Effects<Device>(
+        let logged = DaemonProcess.Effects<Device>(
             connect: effects.connect,
-            bringUp: { device, limit in
-                failures += 1
-                if failures == 4 { world.bringUp = .success(World.up) }
-                return try effects.bringUp(device, limit)
-            },
+            bringUp: effects.bringUp,
             launch: { events.append("launch"); return try effects.launch() },
             terminate: { events.append("stop"); effects.terminate($0) }
         )
-        var told: [String] = []
-        let reached = paced.reachEventually(
-            within: .milliseconds(100), backoff: backoff,
-            pause: { events.append("wait \($0)") },
-            whenDown: { told.append("\($0)") }
-        ) { _, _ in }
-        #expect(reached.devices === device)
-        #expect(told == Array(repeating: "\(DaemonError.silent)", count: 3))
-        #expect(events.filter { $0.hasPrefix("wait") } == ["wait 2.0 seconds", "wait 4.0 seconds", "wait 5.0 seconds"])
-        // Every start after the first follows a stop and then a wait.
-        for (index, event) in events.enumerated() where event == "launch" && index > 0 {
-            #expect(events[index - 1].hasPrefix("wait"))
-            #expect(events[index - 2] == "stop")
+        let readiness = Readiness()
+        var downWhileWaiting: [Bool] = []
+        #expect(throws: Stop.self) {
+            try logged.keepUp(within: .milliseconds(20), backoff: Backoff(first: .seconds(2), most: .seconds(5)), readiness: readiness, serve: { _ in RecordingDevices() }) { wait in
+                events.append("wait \(wait)")
+                downWhileWaiting.append((try? readiness.devices()) == nil)
+                if events.filter({ $0.hasPrefix("wait") }).count == 3 { throw Stop() }
+            }
         }
+        #expect(events == ["launch", "stop", "wait 2.0 seconds", "launch", "stop", "wait 4.0 seconds", "launch", "stop", "wait 5.0 seconds"])
+        #expect(downWhileWaiting == [true, true, true])
+    }
+
+    /// Devices whose connection is lost are taken down, the daemon started for them is
+    /// stopped, and after the first wait they are reached and served again - the process
+    /// never ends over it.
+    @Test func lostDevicesAreStoppedAndBroughtUpAgain() {
+        let world = World(connections: [.failure(.noSocket(path: "nowhere")), .success(Device())])
+        let readiness = Readiness()
+        var served = 0
+        var downWhileWaiting: [Bool] = []
+        var waits: [Duration] = []
+        #expect(throws: Stop.self) {
+            try world.effects.keepUp(within: .seconds(1), backoff: Backoff(first: .seconds(2), most: .seconds(60)), readiness: readiness, serve: { _ in
+                served += 1
+                let lose = world.lost!
+                DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(20)) { lose(.closed) }
+                return RecordingDevices()
+            }) { wait in
+                waits.append(wait)
+                downWhileWaiting.append((try? readiness.devices()) == nil)
+                if waits.count == 2 { throw Stop() }
+            }
+        }
+        #expect(served == 2)
+        #expect(waits == [.seconds(2), .seconds(2)])
+        #expect(downWhileWaiting == [true, true])
+        #expect(world.terminated == [World.pid])
     }
 
     @Test func theBackoffDoublesToItsCap() {
