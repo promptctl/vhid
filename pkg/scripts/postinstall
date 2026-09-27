@@ -63,16 +63,24 @@ case "$console" in
     say "nobody is logged in, so the driver extension was not activated. Once someone is, they run: $manager activate" ;;
   *)
     # The Manager exits 0 whatever it made of the request, so its status is no report.
-    # The state read below is.
-    launchctl asuser "$(id -u "$console")" sudo -u "$console" "$manager" activate
+    # The state read below is. It also does not exit until the request is answered, and
+    # on a Mac that never approved the driver that answer is the switch this script opens
+    # below: waited on, the install would hang there until someone found the switch
+    # unaided. So it is left running, its output to the log, and not waited for.
+    launchctl asuser "$(id -u "$console")" sudo -u "$console" "$manager" activate >>/var/log/install.log 2>&1 </dev/null &
     say "asked macOS to activate the driver extension for $console" ;;
 esac
 
 # Where the driver stands now, in the words `vhid driver state` uses anywhere else. A
 # verdict of awaiting-approval is the expected answer on a Mac that never had it: the
 # daemon is loaded and keeps retrying until the switch is turned on, and nothing here
-# can turn it on. So it is reported, not failed on.
-state=$("$vhid" driver state 2>&1) && status=0 || status=$?
+# can turn it on. So it is reported, not failed on. The request just made lands a moment
+# later, so installed-inactive is read again for up to ten seconds.
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  state=$("$vhid" driver state 2>&1) && status=0 || status=$?
+  [ "${state##*$'\n'}" = installed-inactive ] || break
+  sleep 1
+done
 say "driver (vhid driver state exited $status): $(tr '\n' ' ' <<<"$state")"
 
 # The switch is the one step left, so the person is put in front of it rather than told

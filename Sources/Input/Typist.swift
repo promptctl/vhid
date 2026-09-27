@@ -125,7 +125,11 @@ public struct TypingStopped: StoppedPartWay, CustomStringConvertible {
         // which no reset here can clear and which silently changes the next character
         // that app receives. [LAW:no-silent-failure]
         let pending = halfTyped.map { ", and \(String($0).debugDescription) was left half typed: its accent is pending in the app and will combine with whatever it receives next" } ?? ""
-        return "\(cause.reported). \(progress)\(pending)\(Self.unreleased(unreleased))"
+        // A cause that is already a sentence - the daemon's refusal ends on the driver's
+        // step - is not given a second full stop.
+        let reported = cause.reported
+        let stop = reported.hasSuffix(".") ? "" : "."
+        return "\(reported)\(stop) \(progress)\(pending)\(Self.unreleased(unreleased))"
     }
 
     /// The same sentence a stopped chord ends with. [LAW:one-source-of-truth]

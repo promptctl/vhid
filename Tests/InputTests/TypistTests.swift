@@ -54,6 +54,13 @@ import Testing
         #expect(!"\(stopped)".contains("not released"))
     }
 
+    /// A cause that already ends a sentence - the daemon's refusal ends on the driver's
+    /// step - gets no second full stop.
+    @Test func aCauseEndingInAFullStopIsNotGivenAnother() {
+        struct Sentence: Error, CustomStringConvertible { var description: String { "turn on the switch." } }
+        #expect("\(TypingStopped(typed: 0, of: 1, cause: Sentence()))".hasPrefix("turn on the switch. 0 of 1"))
+    }
+
     /// A release that fails after the stop is said beside the stop, not instead of it:
     /// the operator is told the count and that a key may be held.
     @Test func aReleaseThatFailsAfterTheStopIsReported() async throws {
