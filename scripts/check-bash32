@@ -1,0 +1,26 @@
+#!/bin/bash
+# Fails, naming the file, when a script here would not run under the bash 3.2 macOS ships
+# as /bin/bash, which is what runs them on a Mac installing the pkg: every bash script
+# is parsed by /bin/bash itself, every sh script by /bin/sh, and the bash 4+ features
+# 3.2 only refuses when it reaches them are looked for by name.
+#
+#   scripts/check-bash32 [file...]     defaults to scripts/* and pkg/scripts/*
+#
+# Held to bash 3.2, like every script here.
+set -uo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+[ $# -gt 0 ] || set -- scripts/* pkg/scripts/*
+
+failed=0
+for file in "$@"; do
+  [ -f "$file" ] || continue
+  case $(head -n 1 "$file") in
+    '#!/bin/bash'*) shell=/bin/bash ;;
+    '#!/bin/sh'*) shell=/bin/sh ;;
+    *) continue ;;
+  esac
+  "$shell" -n "$file" || { echo "check-bash32: $file does not parse under $shell" >&2; failed=1; }
+  newer=$(grep -nE '(^|[;&|[:space:]])(declare|local|typeset) +-[a-zA-Z]*A|(^|[;&|[:space:]])(mapfile|readarray|coproc)([[:space:]]|$)|\$\{[a-zA-Z_][a-zA-Z0-9_]*(,,?|\^\^?)[^}]*\}' "$file") \
+    && { echo "check-bash32: $file uses what bash 3.2 lacks:" >&2; echo "$newer" >&2; failed=1; }
+done
+exit $failed

@@ -3,6 +3,13 @@
 # daemon's launchd job, and the pinned Karabiner-DriverKit-VirtualHIDDevice package.
 #
 #   scripts/make-pkg <output directory>    # prints <output directory>/vhid-<version>.pkg, <version> from VERSION
+#   scripts/make-pkg --unsigned <output directory>
+#     # prints <output directory>/vhid-<version>-unsigned.pkg, <version> whatever this tree builds
+#
+# --unsigned is everything but the signing, for CI, which holds no certificate: no
+# identity is looked up, nothing is codesigned, the pkg is not signed, and the tree need
+# not be a tagged release. Its name says unsigned and so does its last line on stderr, so
+# it cannot pass for a release; Gatekeeper refuses it anyway.
 #
 # What installing it does:
 #
@@ -40,7 +47,9 @@ IDENTIFIER=ai.promptctl.vhid
 
 fail() { echo "make-pkg: $*" >&2; exit 1; }
 
-[ $# -eq 1 ] || fail "usage: scripts/make-pkg <output directory>; the version is VERSION's"
+signed=true
+[ "${1:-}" = --unsigned ] && { signed=false; shift; }
+[ $# -eq 1 ] || fail "usage: scripts/make-pkg [--unsigned] <output directory>; the version is VERSION's"
 out=$1
 
 mkdir -p "$out"
@@ -51,9 +60,13 @@ cd "$root"
 # [LAW:one-source-of-truth] The version is VERSION's, as scripts/version reads and checks
 # it. A tree the binaries would stamp with anything else - untagged, or changed since the
 # tag - is refused here, before minutes of building; the packed binary is asked again below.
-version=$(scripts/version --base) || exit 1
-[ "$(scripts/version)" = "$version" ] \
-  || fail "this tree builds $(scripts/version), not $version; build from the commit tagged v$version with git status clean"
+if $signed; then
+  version=$(scripts/version --base) || exit 1
+  [ "$(scripts/version)" = "$version" ] \
+    || fail "this tree builds $(scripts/version), not $version; build from the commit tagged v$version with git status clean"
+else
+  version=$(scripts/version) || exit 1
+fi
 
 # The SHA-1 of the one valid identity of this kind for the team. None and several are
 # both refusals: signing by name would have codesign pick among several on its own, and
@@ -68,8 +81,10 @@ identity() {
     *) fail "$count valid '$kind' identities for team $TEAM; delete the ones that should not sign: $(tr '\n' ' ' <<<"$found")" ;;
   esac
 }
-application=$(identity "Developer ID Application")
-installer=$(identity "Developer ID Installer")
+if $signed; then
+  application=$(identity "Developer ID Application")
+  installer=$(identity "Developer ID Installer")
+fi
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/vhid-pkg.XXXXXX")
 trap 'rm -rf "$work"' EXIT
@@ -108,9 +123,11 @@ sign() {
   ! grep -q 'com.apple.security.get-task-allow' <<<"$entitlements" \
     || fail "$binary carries com.apple.security.get-task-allow"
 }
-sign "$payload/usr/local/bin/vhid" "$IDENTIFIER"
-sign "$payload/usr/local/libexec/vhidd" "$IDENTIFIER.vhidd"
-sign "$payload/usr/local/libexec/vhid-menubar" "$IDENTIFIER.menubar"
+if $signed; then
+  sign "$payload/usr/local/bin/vhid" "$IDENTIFIER"
+  sign "$payload/usr/local/libexec/vhidd" "$IDENTIFIER.vhidd"
+  sign "$payload/usr/local/libexec/vhid-menubar" "$IDENTIFIER.menubar"
+fi
 
 # The service the packed CLI dials when told nothing, asked of the CLI itself, and every
 # other name the install carries is written from this answer: the plist's Label, its
@@ -123,7 +140,7 @@ service=$("$payload/usr/local/bin/vhid" service)
 # the one this tree was checked for above.
 packed=$("$payload/usr/local/bin/vhid" --version)
 [ "$packed" = "$version" ] \
-  || fail "the packed vhid reports version '$packed', not '$version'; build from the commit tagged v$version with git status clean"
+  || fail "the packed vhid reports version '$packed', not '$version'"
 
 plist="$payload/Library/LaunchDaemons/$service.plist"
 scripts/launchd-plist "$service" /usr/local/libexec/vhidd >"$plist"
@@ -139,7 +156,7 @@ plutil -lint "$agent" >&2
 # fetches by: postinstall reaches the Manager through this binary's pins, and the pkg
 # carries the package the script's pins name. [LAW:single-enforcer]
 scripts/check-driver-pins "$payload/usr/local/bin/vhid" >&2
-scripts/check-notice "$payload/usr/local/bin/vhid" >&2
+scripts/check-notice "$payload/usr/local/bin/vhid" "$work/build" >&2
 
 staged="$work/scripts"
 ditto pkg/scripts "$staged"
@@ -223,10 +240,22 @@ resources="$work/resources"
 ditto pkg/resources "$resources"
 { cat LICENSE; printf '\n%s\n\n' "$(printf '%.0s-' {1..79})"; cat NOTICE; } >"$resources/license.txt"
 
-product="$out/vhid-$version.pkg"
+if $signed; then
+  product="$out/vhid-$version.pkg"
+  signing=(--sign "$installer" --timestamp)
+else
+  product="$out/vhid-$version-unsigned.pkg"
+  signing=()
+fi
 rm -f "$product"
 productbuild --distribution "$distribution" --resources "$resources" --package-path "$components" \
-  --sign "$installer" --timestamp "$product" >&2
+  ${signing[@]+"${signing[@]}"} "$product" >&2
+
+if ! $signed; then
+  echo "make-pkg: UNSIGNED - not a release; Gatekeeper refuses it" >&2
+  echo "$product"
+  exit 0
+fi
 
 # The signature a Mac that downloads this will check, read back the way it checks it.
 # The status line catches an untrusted chain and the authority catches the wrong signer.

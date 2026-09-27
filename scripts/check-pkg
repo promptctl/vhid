@@ -1,0 +1,76 @@
+#!/bin/bash
+# Fails, naming what is wrong, when a pkg built by scripts/make-pkg does not install what
+# make-pkg says it installs: exactly these paths, owned root:wheel, with these modes;
+# a launchd job whose Label, only MachServices key and --service argument are the one
+# service name the pkg's scripts load; and the pinned driver package beside it.
+#
+#   scripts/check-pkg <pkg>
+#
+# Read from the pkg itself rather than from make-pkg's working files, because the pkg is
+# what a Mac installs. [LAW:behavior-not-structure]
+#
+# Held to bash 3.2, like every script here.
+set -euo pipefail
+pkg=${1:?usage: scripts/check-pkg <pkg>}
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+failed=0
+fail() { echo "check-pkg: $*" >&2; failed=1; }
+
+work=$(mktemp -d "${TMPDIR:-/tmp}/vhid-check-pkg.XXXXXX")
+trap 'rm -rf "$work"' EXIT
+pkgutil --expand-full "$pkg" "$work/x" >/dev/null
+x=$work/x
+
+service=$(cat "$x/vhid.pkg/Scripts/service")
+[ -n "$service" ] || fail "the pkg's scripts name no service"
+for script in preinstall postinstall; do
+  [ -x "$x/vhid.pkg/Scripts/$script" ] || fail "the pkg carries no executable $script"
+done
+
+# Every path, its mode and its owner, as the receipt will record them: an extra file, a
+# missing one, a mode or an owner that differs is named by the diff.
+expected=$(cat <<BOM
+drwxr-xr-x root wheel .
+drwxr-xr-x root wheel ./Library
+drwxr-xr-x root wheel ./Library/LaunchAgents
+-rw-r--r-- root wheel ./Library/LaunchAgents/$service.menubar.plist
+drwxr-xr-x root wheel ./Library/LaunchDaemons
+-rw-r--r-- root wheel ./Library/LaunchDaemons/$service.plist
+drwxr-xr-x root wheel ./usr
+drwxr-xr-x root wheel ./usr/local
+drwxr-xr-x root wheel ./usr/local/bin
+-rwxr-xr-x root wheel ./usr/local/bin/vhid
+drwxr-xr-x root wheel ./usr/local/libexec
+-rwxr-xr-x root wheel ./usr/local/libexec/vhid-menubar
+-rwxr-xr-x root wheel ./usr/local/libexec/vhidd
+BOM
+)
+actual=$(lsbom -p MUGf "$x/vhid.pkg/Bom" | awk '{ print $1, $2, $3, $4 }')
+bom=$(diff <(echo "$expected") <(echo "$actual")) || fail "the payload differs from what make-pkg states (< stated, > packed):
+$bom"
+
+# The job's three names for the service, which launchd, the daemon and the CLI must agree on.
+daemon=$x/vhid.pkg/Payload/Library/LaunchDaemons/$service.plist
+if [ -f "$daemon" ]; then
+  label=$(plutil -extract Label raw "$daemon")
+  [ "$label" = "$service" ] || fail "the job's Label is '$label', not '$service'"
+  keys=$(plutil -extract MachServices xml1 -o - "$daemon" | sed -n 's|.*<key>\(.*\)</key>.*|\1|p')
+  [ "$keys" = "$service" ] || fail "the job's MachServices keys are '$(tr '\n' ' ' <<<"$keys")', not only '$service'"
+  count=$(plutil -extract ProgramArguments raw "$daemon")
+  arguments=
+  for ((i = 0; i < count; i++)); do
+    arguments="$arguments $(plutil -extract "ProgramArguments.$i" raw "$daemon")"
+  done
+  [ "$arguments" = " /usr/local/libexec/vhidd --service $service" ] \
+    || fail "the job runs$arguments, not /usr/local/libexec/vhidd --service $service"
+fi
+
+# The pinned driver package, by the pins its own script holds. [LAW:one-source-of-truth]
+# shellcheck source=virtual-hid-driver
+source scripts/virtual-hid-driver
+[ -f "$x/$PKG_FILE/Payload" ] || [ -d "$x/$PKG_FILE/Payload" ] || fail "the pkg carries no $PKG_FILE"
+grep -q "<pkg-ref id=\"$BUNDLE_ID\" version=\"$PKG_VERSION\"" "$x/Distribution" \
+  || fail "the Distribution names no $BUNDLE_ID $PKG_VERSION"
+
+exit $failed

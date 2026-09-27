@@ -55,3 +55,19 @@ jobs:
       - run: swift --version
       - run: swift build
       - run: swift test
+
+  # The installer, built as a release builds it but unsigned, since CI holds no Developer
+  # ID certificate, and then read back from the pkg: its paths, modes and service names
+  # and the driver beside it. Without this the pkg is exercised only when someone
+  # releases. Every script is also held to the bash 3.2 a Mac runs it with.
+  pkg:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - run: scripts/check-bash32
+      - run: echo "pkg=$(scripts/make-pkg --unsigned "$RUNNER_TEMP/dist")" >>"$GITHUB_OUTPUT"
+        id: make
+      - run: scripts/check-pkg "$PKG"
+        env:
+          PKG: ${{ steps.make.outputs.pkg }}
