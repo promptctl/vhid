@@ -22,7 +22,9 @@ $base && { echo "$version"; exit 0; }
 git() { command git --no-optional-locks -C "$root" "$@"; }
 commit=$(git rev-parse --short HEAD 2>/dev/null) || { echo "$version-dev"; exit 0; }
 # Untracked files count: SwiftPM compiles an untracked source as readily as a tracked one.
-if git tag --points-at HEAD | grep -qxF "v$version" && [ -z "$(git status --porcelain)" ]; then
+# A status git could not give is not a clean one.
+status=$(git status --porcelain 2>/dev/null) || status=unknown
+if git tag --points-at HEAD | grep -qxF "v$version" && [ -z "$status" ]; then
   echo "$version"
 else
   echo "$version-dev+$commit"
