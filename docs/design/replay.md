@@ -67,10 +67,7 @@ The recorder therefore drops any event whose field 87 is the registry ID of one 
 
 ## The grant recording needs
 
-A listen-only tap that sees key events needs Input Monitoring (`kTCCServiceListenEvent`), and macOS gives that grant to the responsible process, not to the binary that asks:
-
-- **A bare binary run from a shell** never got a usable prompt. Measured: a probe run in a tmux pane asked with `IOHIDRequestAccess`, and the dialog vanished with the process, while `IOHIDCheckAccess` answered "granted". The TCC database held no Input Monitoring entry for that probe or for its host. So `IOHIDCheckAccess` is not proof of a grant, and `vhid record` must not start on its word alone.
-- **A signed app bundle** gets its own entry. HIDProbe, launched with `open`, was listed under its bundle ID, granted once, and recorded as described above.
+A listen-only tap that sees key events needs Input Monitoring (`kTCCServiceListenEvent`), and macOS gives that grant to the responsible process, not to the binary that asks. A signed app bundle gets its own entry: HIDProbe, launched with `open`, was listed under its bundle ID, granted once, and recorded as described above.
 
 So `vhid record` runs its tap in a small signed app bundle shipped in the pkg next to `vhid`. The `vhid record` command launches it with `open` and receives the script back over a pipe. The person grants Input Monitoring once, to that bundle, whatever launched `vhid`: a terminal, tmux, or an MCP host. That removes the question of whom TCC blames for an MCP host, because the host is never the responsible process.
 
@@ -111,5 +108,5 @@ It keeps every guarantee the daemon gives today:
 The probes were throwaway Swift files; each is a few lines around one API:
 
 - **Counts against deltas:** an `IOHIDManager` input-value callback on generic-desktop usages 0x30/0x31, next to a listen-only `CGEvent.tapCreate` on `mouseMoved` printing `mouseEventDeltaX` and `location`, while `vhid pointer play` sends known counts.
-- **Trackpad on HID:** the same, filtered to devices other than vendor 0x16c0, in a signed `.app` that is listed and switched on under Input Monitoring before it runs. Check the grant in the TCC database, not with `IOHIDCheckAccess`.
+- **Trackpad on HID:** the same, filtered to devices other than vendor 0x16c0, in a signed `.app` that is listed and switched on under Input Monitoring before it runs. Check the grant in the TCC database.
 - **Sender field:** a listen-only tap printing every non-zero integer field 0 to 255, while `vhid pointer play` runs and then a person moves the trackpad; for keys, `vhid press f16`, filtered to key code 106.
