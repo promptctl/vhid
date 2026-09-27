@@ -46,7 +46,27 @@ func facts(_ texts: [Heard<String?>] = [.answered("OK")], frame: Heard<ScreenRec
     Facts(role: Role(rawValue: role), texts: texts, frame: frame)
 }
 
+/// The facts of an element with nothing under it, which is most of what a candidate rule asks.
+extension Facts {
+    func candidate(in clip: ScreenRect, under covers: [ScreenRect]) -> Candidate {
+        Node<String>(facts: self, children: .answered([])).candidate(in: clip, under: covers)
+    }
+}
+
 @Suite struct CandidateTests {
+    /// A labelled group with nothing under it - a web page's icon button - is the thing.
+    @Test func aGroupWithNothingUnderItIsFoundAndOneHoldingSomethingIsAnArea() {
+        let group = facts([.answered("Close")], role: "AXGroup")
+        #expect(group.candidate(in: region, under: []) != .excluded(.area))
+        #expect(Node(facts: group, children: .answered(["icon"])).candidate(in: region, under: []) == .excluded(.area))
+    }
+
+    /// An area's words could never be a finding, so a text read it failed leaves nothing unread.
+    @Test func anAreaWhoseTextWouldNotAnswerIsAnAreaNotUnanswered() {
+        let window = facts([.unanswered], frame: .unanswered, role: "AXWindow")
+        #expect(Node(facts: window, children: .answered(["title"])).candidate(in: region, under: []) == .excluded(.area))
+    }
+
     @Test func anElementWithTextInTheRegionIsFoundAtItsFrameWithItsRole() {
         #expect(facts().candidate(in: region, under: []) == .found(Found(text: Text("OK")!, frame: button, source: .tree(role: Role(rawValue: "AXButton")))))
     }
@@ -112,8 +132,14 @@ func facts(_ texts: [Heard<String?>] = [.answered("OK")], frame: Heard<ScreenRec
     @Test func theVisiblePartUnderOneWindowInFrontHoldsNothing() {
         let wide = ScreenRect(x: -500, y: 0, width: 800, height: 400)
         #expect(facts(frame: .answered(wide)).inner(region, under: [ScreenRect(x: 0, y: 0, width: 300, height: 400)]) == nil)
-        #expect(facts(frame: .answered(wide)).inner(region, under: [ScreenRect(x: 0, y: 0, width: 200, height: 400)])
-            == ScreenRect(x: 0, y: 0, width: 300, height: 400))
+        #expect(facts(frame: .answered(wide)).inner(region, under: [ScreenRect(x: 0, y: 0, width: 200, height: 400)]) == region)
+    }
+
+    /// A scroll area hides what lies outside it; anything else hands on the clip it was given.
+    @Test func onlyAScrollAreaCutsTheClipToItsFrame() {
+        let list = ScreenRect(x: 100, y: 100, width: 300, height: 200)
+        #expect(facts(frame: .answered(list), role: "AXScrollArea").inner(region, under: []) == list)
+        #expect(facts(frame: .answered(list), role: "AXGroup").inner(region, under: []) == region)
     }
 
     /// No frame says nothing about where the children are, so they keep the clip given.
@@ -242,7 +268,7 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
         let tree = FakeTree(nodes: [
             "window": node(nil, region, children: .answered(["toolbar", "list"]), role: "AXWindow"),
             "toolbar": node("Back", ScreenRect(x: 0, y: 0, width: 80, height: 40)),
-            "list": node(nil, list, children: .answered(["shown", "scrolled"]), role: "AXList"),
+            "list": node(nil, list, children: .answered(["shown", "scrolled"]), role: "AXScrollArea"),
             "shown": node("Kept", ScreenRect(x: 0, y: 150, width: 400, height: 20), role: "AXRow"),
             "scrolled": node("Gone", ScreenRect(x: 0, y: 10, width: 400, height: 20), children: .answered(["cell"]), role: "AXRow"),
             "cell": node("Gone", ScreenRect(x: 0, y: 10, width: 400, height: 20), role: "AXStaticText"),
@@ -251,6 +277,17 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
         #expect(w.found.map(\.text.value) == ["Back", "Kept"])
         #expect(w.examined == 5)
         #expect(w.excluded.contains(Exclusion(reason: .unplaced, count: 1)))
+    }
+
+    /// Only a scroll area clips: a dropdown hanging below the header that holds it is on
+    /// screen and pressed where it is.
+    @Test func aChildDrawnOutsideAGroupIsStillFound() {
+        let tree = FakeTree(nodes: [
+            "window": node(nil, region, children: .answered(["header"]), role: "AXWindow"),
+            "header": node(nil, ScreenRect(x: 0, y: 0, width: 400, height: 50), children: .answered(["item"]), role: "AXGroup"),
+            "item": node("Sign out", ScreenRect(x: 0, y: 60, width: 120, height: 24), role: "AXMenuItem"),
+        ])
+        #expect(tree.walked().found.map(\.text.value) == ["Sign out"])
     }
 
     /// A window's title is where its title bar draws it, not the middle of its document.
@@ -301,9 +338,10 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
 
     @Test func eachMatchedWindowIsARootCoveredByTheOnesInFront() {
         let front = window(1, pid: 2, ScreenRect(x: 0, y: 0, width: 300, height: 300))
-        let (roots, unwalked) = plan(seen([front, window(2, document)], in: region), matched: [1: "front", 2: "doc"], in: region)
+        let (roots, unwalked) = plan(seen([front, window(2, document)], in: region), matched: [1: "front", 2: "doc"])
         #expect(roots.map(\.element) == ["front", "doc"])
         #expect(roots.map(\.covers) == [[], [front.frame]])
+        #expect(roots.map(\.clip) == [front.frame, document])
         #expect(unwalked == 0)
     }
 
@@ -311,7 +349,7 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
     /// it read, and it says so - it also covers what is under it.
     @Test func aVisibleWindowWithNothingToWalkIsCountedAndCovers() {
         let menu = window(5, ScreenRect(x: 150, y: 120, width: 200, height: 300))
-        let (roots, unwalked) = plan(seen([menu, window(2, document)], in: region), matched: [2: "doc"], in: region)
+        let (roots, unwalked) = plan(seen([menu, window(2, document)], in: region), matched: [2: "doc"])
         #expect(roots.map(\.element) == ["doc"])
         #expect(roots[0].covers == [menu.frame])
         #expect(unwalked == 1)
@@ -322,7 +360,7 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
         let full = window(1, pid: 2, region)
         let visible = seen([full, window(2, document), window(3, pid: 4, ScreenRect(x: 2000, y: 0, width: 10, height: 10))], in: region)
         #expect(visible.map(\.window.id) == [1])
-        let (roots, unwalked) = plan(visible, matched: [1: "full"], in: region)
+        let (roots, unwalked) = plan(visible, matched: [1: "full"])
         #expect(roots.map(\.element) == ["full"])
         #expect(unwalked == 0)
     }

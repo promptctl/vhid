@@ -41,7 +41,7 @@ public struct TreeReader: Reader {
         let clock = ContinuousClock()
         let start = clock.now
         let visible = seen(windows, in: region)
-        let (roots, unwalked) = plan(visible, matched: try Self.match(visible.map(\.window)), in: region)
+        let (roots, unwalked) = plan(visible, matched: try Self.match(visible.map(\.window)))
         let walked = try walk(
             from: roots,
             unwalked: unwalked,
