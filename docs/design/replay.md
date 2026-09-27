@@ -44,7 +44,7 @@ A script moves the pointer with `move` lines or with `at` lines, never both. `mo
 
 vhidd releases any key that has been down for two seconds with no report from the client (`Devices.keyLimit`, `Sources/vhidd/Devices.swift`). A recording that holds Shift for three seconds with nothing else happening would be cut.
 
-The player answers this, not the format: while a key is held, it calls `hold(usages:)` again with the current set whenever a second has passed since its last call to either device. The daemon marks the client alive on every call, before the act runs (`Devices.attempt` sets `lastReport`), so the repeat keeps the key down. The repeat does not reach macOS as a new key press, because the keyboard skips posting a non-empty set equal to the one it holds. That skip lives in the daemon's `VirtualKeyboard`, under the device lock and after the call has marked the client alive; a client that skipped the call instead would lose its keys at two seconds. A stopped player still loses its keys after two seconds, which is what the limit exists for.
+The player answers this, not the format: while a key is held, it calls `hold(usages:)` again with the current set whenever a second has passed since its last call to either device. The daemon marks the client alive on every call, before the act runs (`Devices.attempt` sets `lastReport`), so the repeat keeps the key down. The repeat does not reach macOS as a new key press, because the keyboard skips posting a non-empty set equal to the last set the driver acknowledged. The comparison is against that acknowledged set and not against `keysDown`, which takes on a set before the request and keeps it if the request throws (`VirtualKeyboard.post`); compared against `keysDown`, the retry of a failed `hold` would be skipped and its key never pressed. That skip lives in the daemon's `VirtualKeyboard`, under the device lock and after the call has marked the client alive; a client that skipped the call instead would lose its keys at two seconds. A stopped player still loses its keys after two seconds, which is what the limit exists for.
 
 ## Replaying `at` lines
 
@@ -66,7 +66,7 @@ Keys come from the tap's `keyDown`, `keyUp` and `flagsChanged` events. `Usage(vi
 
 Three kinds of key need rules of their own:
 
-- **Modifiers.** A `flagsChanged` event names the key that changed in its key code (left Shift 56, right Shift 60), so the recorder toggles that one usage. It does not read the shared Shift flag, which cannot tell the two Shifts apart.
+- **Modifiers.** Every event's flags carry a bit per side of each modifier (`NX_DEVICELSHIFTKEYMASK`, `NX_DEVICERSHIFTKEYMASK` and their Control, Option and Command siblings), so the recorder reads which modifiers are down from those bits on each `flagsChanged` event rather than toggling on it. Toggling would turn a modifier that was already down when recording started, such as one from the shortcut that launched it, into one held forever once it is released. The modifiers down at the start, read from `CGEventSource.flagsState(.combinedSessionState)`, are the script's first `keys` line at `t_ms` 0.
 - **Caps Lock** sends `flagsChanged` when it toggles and never a release. The recorder writes it as a press: the set with Caps Lock, then the set without it on the next line.
 - **A key with no usage**, fn above all, is left out of the recording, and `vhid record` says on stderr how many such presses it left out.
 
@@ -82,7 +82,7 @@ Karabiner-Elements posts through the same pqrs driver. With its grabber running,
 
 A listen-only tap that sees key events needs Input Monitoring (`kTCCServiceListenEvent`), and macOS gives that grant to the responsible process, not to the binary that asks. A signed app bundle gets its own entry: HIDProbe, launched with `open`, was listed under its bundle ID, granted once, and recorded as described above.
 
-So `vhid record` runs its tap in a small signed app bundle shipped in the pkg next to `vhid`. The `vhid record` command launches it with `open`, which goes through LaunchServices, so the app is not its child: it inherits no pipe and gets none of the command's signals. The two are tied together explicitly:
+So `vhid record` runs its tap in a small signed app bundle shipped in the pkg next to `vhid`. The `vhid record` command launches it with `open -n`, so every recording gets a fresh instance that receives its own arguments rather than an already-running one brought forward, which goes through LaunchServices, so the app is not its child: it inherits no pipe and gets none of the command's signals. The two are tied together explicitly:
 
 - `vhid record` makes a Unix socket in a directory only its user can read, and passes the socket's path and its own pid to the app as arguments.
 - The app sends every line over that socket, and exits when the socket closes or when a process source (`DispatchSource.makeProcessSource`, `.exit`) says that pid has ended. A `vhid record` killed with SIGKILL therefore leaves no tap running.
@@ -95,8 +95,8 @@ A recording made from a terminal ends with Control-C, and the tap sees Control a
 On SIGINT, `vhid record` tells the app to stop, and the app:
 
 1. keeps reading for up to half a second, or until no key is held, so the stop chord's own events have arrived whichever order they came in;
-2. drops the trailing `keys` lines back to the last line whose set was empty, if every key they hold is Control or C; any other key in that run is kept, because it was not the stop;
-3. writes a final `"keys":[]` and `"buttons":[]` at the stop time, so the script ends with nothing held, as the parser requires.
+2. drops the trailing `keys` lines back to the last line whose set was empty, if every key they hold is a Control key or the key that types `c` on the current layout, found through the layout the way `ChordSpelling` finds a character's key; any other key in that run is kept, because it was not the stop;
+3. writes a final `"keys":[]` and `"buttons":[]` at the stop time or the last kept line's time, whichever is later, so the script ends with nothing held and its times never go backwards, both of which the parser requires.
 
 Pointer lines in that window are kept; they are the person's. A recording ended any other way (SIGTERM, a duration limit) drops nothing.
 
