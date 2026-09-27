@@ -64,14 +64,14 @@ import Testing
         stopped.take(event(100, .flagsChanged(keyCode: 59, flags: 0x40001)))
         stopped.take(event(101, .keyDown(keyCode: 8, autorepeat: false)))
         expect(try replayed(stopped, stoppedAt: 150), [
-            (0, keys()), (10, keys(0x04)), (20, keys()), (150, keys()), (150, .buttons([])),
+            (0, keys()), (10, keys(0x04)), (20, keys()), (100, keys()), (101, keys()), (150, keys()), (150, .buttons([])),
         ])
 
         // Let go before the stop took effect: the releases are the chord's too.
         stopped.take(event(110, .keyUp(keyCode: 8)))
         stopped.take(event(112, .flagsChanged(keyCode: 59, flags: 0)))
         expect(try replayed(stopped, stoppedAt: 150), [
-            (0, keys()), (10, keys(0x04)), (20, keys()), (150, keys()), (150, .buttons([])),
+            (0, keys()), (10, keys(0x04)), (20, keys()), (100, keys()), (101, keys()), (110, keys()), (112, keys()), (150, keys()), (150, .buttons([])),
         ])
 
         var cut = Recorder(start: Self.start, flags: 0, vhid: []) { _ in false }
@@ -97,6 +97,32 @@ import Testing
             (0, keys()), (20, .at(point(110, 102))), (40, keys(0x04)), (70, keys()), (80, keys()), (80, .buttons([])),
         ])
         #expect(recorder.vhidAtEdge == 1)
+    }
+
+    /// An earlier Control-C, and a Control-A whose A came up inside the stop chord, are the
+    /// person's: only the stop's own presses come out.
+    @Test func onlyTheStopsOwnPressesComeOut() throws {
+        var earlier = Recorder(start: Self.start, flags: 0, vhid: []) { _ in false }
+        earlier.take(event(10, .flagsChanged(keyCode: 59, flags: 0x40001)))
+        earlier.take(event(11, .keyDown(keyCode: 8, autorepeat: false)))
+        earlier.take(event(12, .keyUp(keyCode: 8)))
+        earlier.take(event(13, .flagsChanged(keyCode: 59, flags: 0)))
+        earlier.take(event(20, .motion, at: point(101, 100)))
+        earlier.take(event(30, .flagsChanged(keyCode: 59, flags: 0x40001)))
+        earlier.take(event(31, .keyDown(keyCode: 8, autorepeat: false)))
+        expect(try replayed(earlier, stoppedAt: 40), [
+            (0, keys()), (10, keys(0xE0)), (11, keys(0x06, 0xE0)), (12, keys(0xE0)), (13, keys()),
+            (20, .at(point(101, 100))), (30, keys()), (31, keys()), (40, keys()), (40, .buttons([])),
+        ])
+
+        var controlA = Recorder(start: Self.start, flags: 0, vhid: []) { _ in false }
+        controlA.take(event(5, .flagsChanged(keyCode: 59, flags: 0x40001)))
+        controlA.take(event(10, .keyDown(keyCode: 0, autorepeat: false)))
+        controlA.take(event(20, .keyUp(keyCode: 0)))
+        controlA.take(event(30, .keyDown(keyCode: 8, autorepeat: false)))
+        expect(try replayed(controlA, stoppedAt: 40), [
+            (0, keys()), (5, keys(0xE0)), (10, keys(0x04, 0xE0)), (20, keys()), (30, keys()), (40, keys()), (40, .buttons([])),
+        ])
     }
 
     /// vhid letting go of a modifier the person also holds leaves it the person's: once it

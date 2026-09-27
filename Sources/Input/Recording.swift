@@ -165,29 +165,31 @@ public struct Recorder {
     /// The script, stopped at `stop`.
     ///
     /// The keys lines at the end that hold nothing but `stopKeys` - the Control keys and the
-    /// key that types `c` - are dropped, since they are the chord that stopped the
-    /// recording, pressed and let go. A line holding any other key was not the stop, and
-    /// the run ends there. Then every key and button comes up, at the stop or the last line,
+    /// key that types `c` - are the chord that stopped the recording, and the stop keys
+    /// come out of them. A line holding nothing or any other key was not the stop, and the
+    /// chord ends there. Then every key and button comes up, at the stop or the last line,
     /// whichever is later, as a script has to end.
     public func script(stoppedAt stop: Duration, stopKeys: Set<Usage>) -> String {
-        // The stop chord is the run of keys lines at the end holding nothing but stop keys,
-        // its releases included, back to the last buttons line or keys line holding
-        // anything else. Pointer lines inside it are the person's and stay.
-        let chord = lines.indices.reversed().prefix { index in
+        // The stop chord is the keys lines at the end - past its own releases - holding stop
+        // keys and nothing else, back to the last line holding nothing, holding any other
+        // key, or setting the buttons. Pointer lines inside it are the person's and stay.
+        // Its lines lose the stop keys rather than being dropped, so what the person held
+        // before it is still let go where they let go of it.
+        let released = lines.indices.reversed().prefix { index in
+            guard case .keys(_, let held) = lines[index] else { return false }
+            return held.isEmpty
+        }
+        let chord = lines.indices.reversed().dropFirst(released.count).prefix { index in
             switch lines[index] {
-            case .keys(_, let held): held.isSubset(of: stopKeys)
+            case .keys(_, let held): !held.isEmpty && held.isSubset(of: stopKeys)
             case .at: true
             case .buttons: false
             }
         }
-        // The run's first keys line, when it holds nothing, is the release before the chord
-        // began, not part of it: dropped, the key before it would stay held to the stop.
-        let before = chord.last { index in if case .keys = lines[index] { true } else { false } }
-        let released = before.flatMap { index in if case .keys(_, let held) = lines[index], held.isEmpty { index } else { nil } }
-        let kept = lines.enumerated().filter { index, line in
-            guard chord.contains(index), case .keys = line else { return true }
-            return index == 0 || index == released
-        }.map(\.element)
+        let kept = lines.enumerated().map { index, line in
+            guard chord.contains(index), case .keys(let at, let held) = line else { return line }
+            return .keys(at, held.subtracting(stopKeys))
+        }
         let end = max(stop, kept.last?.at ?? .zero)
         let written = kept + [.keys(end, []), .buttons(end, [])]
         return ([#"{"to":\#(Self.point(start))}"#] + written.map(Self.render)).joined(separator: "\n") + "\n"
