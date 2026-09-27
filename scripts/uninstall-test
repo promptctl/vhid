@@ -43,14 +43,18 @@ case $1 in
 esac
 exit 97
 S
+# Two receipts: vhid's, and the driver's for the --driver cases.
 cat >"$STUB/bin/pkgutil" <<'S'
 #!/bin/bash
+file=$STUB/receipt; [ "${2:-}" = org.pqrs.Karabiner-DriverKit-VirtualHIDDevice ] && file=$STUB/driver-receipt
 case $1 in
-  --pkg-info) [ -f "$STUB/receipt" ] ;;
-  --forget) echo "forget $2" >>"$STUB/reached"; rm -f "$STUB/receipt" ;;
+  --pkg-info) [ -f "$file" ] ;;
+  --forget) echo "forget $2" >>"$STUB/reached"; [ -f "$file" ] && rm -f "$file" ;;
   *) exit 97 ;;
 esac
 S
+# sudo runs what it is given, as this user, and says it was asked.
+printf '#!/bin/bash\necho "sudo $*" >>"$STUB/reached"\nexec "$@"\n' >"$STUB/bin/sudo"
 # The sessions someone is logged into, as loginwindow processes owned by each uid.
 printf '#!/bin/bash\nfor u in ${SESSIONS-501}; do echo "$u /System/Library/CoreServices/loginwindow.app/Contents/MacOS/loginwindow"; done\necho "0 /sbin/launchd"\n' >"$STUB/bin/ps"
 printf '#!/bin/bash\necho "${STUB_UID:-501}"\n' >"$STUB/bin/id"
@@ -85,7 +89,7 @@ check "fully installed: exit" 0 "$status"
 check "fully installed: files left" "" "$(left)"
 check "fully installed: jobs left" "" "$(cat "$STUB/loaded")"
 check "fully installed: receipt forgotten" no "$([ -f "$STUB/receipt" ] && echo yes || echo no)"
-check "fully installed: said what it removed" 9 "$(grep -c '^vhid-uninstall: \(stopped\|removed\|forgot\)' <<<"$out")"
+check "fully installed: said what it removed" 10 "$(grep -c '^vhid-uninstall: \(stopped\|removed\|forgot\)' <<<"$out")"
 
 state "" "/usr/local/bin/vhid /Library/LaunchDaemons/$SERVICE.plist" no; run
 check "partly installed: exit" 0 "$status"
@@ -138,6 +142,58 @@ check "agent will not stop: the rest removed" "" "$(left)"
 state "$DAEMON" "$ALL" yes; before=$(left); STUB_UID=0 run
 check "root with the test's root set: refused" 1 "$status"
 check "root with the test's root set: touches nothing" "$before|" "$(left)|$(cat "$STUB/reached")"
+
+# --driver: the installed vhid answers the driver readings from the scratch Mac, and the
+# Manager's deactivate withdraws the registration, as the real ones do.
+MANAGER_REL="/Applications/.Karabiner-VirtualHIDDevice-Manager.app/Contents/MacOS/Karabiner-VirtualHIDDevice-Manager"
+SUPPORT_REL="/Library/Application Support/org.pqrs/Karabiner-DriverKit-VirtualHIDDevice"
+driver_mac() {  # <driver installed: yes|no>
+  state "$DAEMON" "$ALL" yes
+  cp scripts/virtual-hid-driver "$STUB/root/usr/local/libexec/vhid-virtual-hid-driver"
+  cat >"$STUB/root/usr/local/bin/vhid" <<'S'
+#!/bin/bash
+root=$VHID_UNINSTALL_ROOT
+case "$2" in
+  state) [ -e "$root/Applications/.Karabiner-VirtualHIDDevice-Manager.app" ] && echo running || echo absent ;;
+  registration) cat "$STUB/registration" ;;
+  receipt)
+    case "$3" in
+      org.pqrs.Karabiner-Elements) [ -n "${ELEMENTS:-}" ] && echo "$ELEMENTS" ;;
+      *) [ -f "$STUB/driver-receipt" ] && echo 8.4.0 ;;
+    esac ;;
+esac
+exit 0
+S
+  chmod +x "$STUB/root/usr/local/bin/vhid"
+  rm -f "$STUB/driver-receipt"
+  if [ "$1" = yes ]; then
+    echo enabled >"$STUB/registration"; : >"$STUB/driver-receipt"
+    mkdir -p "$STUB/root$(dirname "$MANAGER_REL")" "$STUB/root$SUPPORT_REL"
+    printf '#!/bin/bash\necho "manager $*" >>"$STUB/reached"\necho unregistered >"$STUB/registration"\n' >"$STUB/root$MANAGER_REL"
+    chmod +x "$STUB/root$MANAGER_REL"
+  else
+    echo unregistered >"$STUB/registration"
+  fi
+}
+run_driver() { out=$("$STUB/vhid-uninstall" --driver 2>&1); status=$?; }
+
+driver_mac yes; run_driver
+check "driver present: exit" 0 "$status"
+check "driver present: withdrawn before its files went" "manager deactivate" "$(grep -m1 '^manager\|^sudo rm' "$STUB/reached")"
+check "driver present: its files gone" no "$([ -e "$STUB/root/Applications/.Karabiner-VirtualHIDDevice-Manager.app" ] || [ -e "$STUB/root$SUPPORT_REL" ] && echo yes || echo no)"
+check "driver present: its receipt forgotten" no "$([ -f "$STUB/driver-receipt" ] && echo yes || echo no)"
+check "driver present: vhid gone too" "" "$(left)"
+
+driver_mac no; run_driver
+check "driver absent: exit" 0 "$status"
+check "driver absent: nothing withdrawn" "" "$(grep '^manager' "$STUB/reached")"
+check "driver absent: vhid gone" "" "$(left)"
+
+driver_mac yes; before=$(left); ELEMENTS=15.5.0 run_driver
+check "Karabiner-Elements present: refused" 1 "$status"
+check "Karabiner-Elements present: says why" 1 "$(grep -c 'Karabiner-Elements 15.5.0 is installed and shares' <<<"$out")"
+check "Karabiner-Elements present: driver untouched" "" "$(grep '^manager\|^sudo rm' "$STUB/reached")"
+check "Karabiner-Elements present: vhid's files left" "$before" "$(left)"
 
 echo "uninstall-test: $pass passed, $failed failed"
 [ $failed -eq 0 ]

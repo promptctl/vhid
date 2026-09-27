@@ -4,6 +4,7 @@
 # pqrs driver the pkg also installed is left in place: Karabiner-Elements may be using it.
 #
 #   sudo /usr/local/libexec/vhid-uninstall
+#   sudo /usr/local/libexec/vhid-uninstall --driver    # and the pqrs driver after vhid's jobs stop
 #   /usr/local/libexec/vhid-uninstall --paths    # what it removes, one per line, and nothing else
 #
 # Running it again finds nothing and says so. It touches the one service it was packed for
@@ -33,12 +34,15 @@ paths() {
 /usr/local/libexec/vhidd
 /usr/local/libexec/vhid-menubar
 /usr/local/libexec/vhid-uninstall
+/usr/local/libexec/vhid-virtual-hid-driver
 /Library/LaunchDaemons/$service.plist
 /Library/LaunchAgents/$service.menubar.plist
 PATHS
 }
 if [ "${1:-}" = --paths ]; then paths; exit 0; fi
-[ $# -eq 0 ] || { echo "usage: sudo $0 [--paths]" >&2; exit 64; }
+driver=false
+[ "${1:-}" = --driver ] && { driver=true; shift; }
+[ $# -eq 0 ] || { echo "usage: sudo $0 [--driver] | $0 --paths" >&2; exit 64; }
 
 say() { echo "vhid-uninstall: $*"; }
 fail() { echo "vhid-uninstall: $*" >&2; exit 1; }
@@ -85,6 +89,30 @@ for uid in $(ps -axo uid=,comm= | awk '$2 ~ /(^|\/)loginwindow$/ && $1 >= 500 { 
   fi
 done
 
+# The driver, when asked for, by the removal scripts/virtual-hid-driver makes - the copy the
+# pkg ships beside this script - read through the installed vhid, so it goes after vhid's
+# jobs let go of it and before the files that removal needs are deleted. The removal ends
+# its run itself, so it has a subshell of its own: 0 is gone and 2 is gone once the Mac
+# restarts, which it has said; anything else, including a Karabiner-Elements receipt it
+# refuses to break, stops here with vhid's files still in place.
+# [LAW:one-source-of-truth]
+if $driver; then
+  driver_script=$root/usr/local/libexec/vhid-virtual-hid-driver
+  [ -f "$driver_script" ] || fail "--driver needs $driver_script, which is gone; reinstall the pkg to remove the driver with it"
+  status=0
+  (
+    # shellcheck source=../scripts/virtual-hid-driver
+    source "$driver_script"
+    VHID=$root/usr/local/bin/vhid
+    MANAGER_APP=$root$MANAGER_APP MANAGER=$root$MANAGER SUPPORT_DIR=$root$SUPPORT_DIR
+    cmd_remove
+  ) || status=$?
+  case $status in
+    0|2) removed=$((removed + 1)) ;;
+    *) fail "the driver was not removed (above says why), so vhid's files were left in place; run without --driver to remove only vhid" ;;
+  esac
+fi
+
 while IFS= read -r path; do
   if [ -e "$root$path" ] || [ -L "$root$path" ]; then
     rm -f "$root$path"
@@ -102,5 +130,9 @@ fi
 if [ $removed -eq 0 ]; then
   say "nothing to remove: no vhid job, file or receipt is here"
 else
-  say "done. The pqrs driver the pkg installed stays: Karabiner-Elements may use it too"
+  if $driver; then
+    say "done"
+  else
+    say "done. The pqrs driver the pkg installed stays, since Karabiner-Elements may use it too; remove it with: sudo $0 --driver"
+  fi
 fi

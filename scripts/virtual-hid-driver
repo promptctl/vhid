@@ -410,7 +410,7 @@ cmd_remove() {
     *)
       echo "==> deactivating the driver extension" >&2
       [[ -x $MANAGER ]] || die "the extension is registered as '$registered' but $MANAGER is missing, so nothing here can withdraw it; reinstall the package, then run 'remove'"
-      "$MANAGER" deactivate
+      as_console_user "$MANAGER" deactivate
 
       # The Manager prints "request ... is failed" and still exits 0, so the withdrawal
       # is confirmed against the registration itself and never against that exit
@@ -446,6 +446,20 @@ cmd_remove() {
   done
 
   remove_outcome "$(report_state)"
+}
+
+# The Manager's withdrawal is the logged-in person's to make, as its activation was. Run as
+# them, it is simply run; run as root - vhid-uninstall --driver, which sources this file
+# from the pkg - it is made on their behalf in their session, the way postinstall asks
+# for the activation, and refused when nobody is logged in to make it.
+as_console_user() {
+  [ "$(id -u)" = 0 ] || { "$@"; return; }
+  local console
+  console=$(stat -f %Su /dev/console)
+  case "$console" in
+    root|loginwindow|_mbsetupuser) die "nobody is logged in, and withdrawing the driver extension is the logged-in person's request to make; log in, then run this again" ;;
+  esac
+  launchctl asuser "$(id -u "$console")" sudo -u "$console" "$@"
 }
 
 # Refused for every verb, not only the two that activate and withdraw: a root `state`

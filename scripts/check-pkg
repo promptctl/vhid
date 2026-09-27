@@ -60,6 +60,7 @@ drwxr-xr-x root wheel ./usr/local/bin
 drwxr-xr-x root wheel ./usr/local/libexec
 -rwxr-xr-x root wheel ./usr/local/libexec/vhid-menubar
 -rwxr-xr-x root wheel ./usr/local/libexec/vhid-uninstall
+-rwxr-xr-x root wheel ./usr/local/libexec/vhid-virtual-hid-driver
 -rwxr-xr-x root wheel ./usr/local/libexec/vhidd
 BOM
 )

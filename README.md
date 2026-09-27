@@ -108,6 +108,7 @@ vhid ships as one signed, notarized pkg. It installs:
 | `/usr/local/libexec/vhid-menubar` | the menu bar item |
 | `/Library/LaunchAgents/ai.promptctl.vhid.vhidd.menubar.plist` | its launchd job, started at every login |
 | `/usr/local/libexec/vhid-uninstall` | removes everything above |
+| `/usr/local/libexec/vhid-virtual-hid-driver` | the driver removal `vhid-uninstall --driver` runs |
 
 It also installs the pinned
 [Karabiner-DriverKit-VirtualHIDDevice](https://github.com/pqrs-org/Karabiner-DriverKit-VirtualHIDDevice)
@@ -130,7 +131,10 @@ next attempt brings the devices up with no restart.
 `sudo /usr/local/libexec/vhid-uninstall` stops the daemon and the menu bar item, removes
 every file in the table and forgets the pkg's receipt; run again, it says there is
 nothing to remove. It leaves the pqrs driver installed, since Karabiner-Elements may use
-it, and never touches the development job a build of this tree registers.
+it, and never touches the development job a build of this tree registers. With
+`--driver` it also withdraws the driver extension, as whoever is logged in, and removes
+the driver package; it refuses while Karabiner-Elements is installed, since that shares
+the driver, and removes nothing of vhid's until the driver is gone.
 
 The installed CLI talks to the installed daemon by default. A build from this tree talks
 to the development copy, `ai.promptctl.vhid.vhidd.dev`, so the two can run side by side.
