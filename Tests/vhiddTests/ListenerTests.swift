@@ -71,7 +71,7 @@ import Testing
     /// going away does.
     private func client(of served: Served) -> (helper: HelperConnection, connection: NSXPCConnection) {
         let connection = NSXPCConnection(listenerEndpoint: served.listener.endpoint)
-        return (HelperConnection(connection: connection, replyTimeout: .seconds(20)), connection)
+        return (HelperConnection(connection: connection, service: "ai.promptctl.vhid.tests.far", replyTimeout: .seconds(20)), connection)
     }
 
     /// Runs `body` on a thread of the test's own and awaits what it returned or threw:
@@ -91,7 +91,7 @@ import Testing
         do {
             try await blocking { try keyboard.down(usage) }
             return true
-        } catch let refused as NSError where refused.domain == Installation.refusalDomain {
+        } catch let refused as HelperConnection.Refused where refused.domain == Installation.refusalDomain {
             return false
         }
     }
@@ -187,9 +187,9 @@ import Testing
         let (leaver, keyboard) = (first.helper, first.helper.keyboard)
         try await blocking { try keyboard.down(.leftShift) }
         try await blocking { try leaver.leave() }
-        let refused = await #expect(throws: NSError.self) { try await blocking { try keyboard.down(.tab) } }
+        let refused = await #expect(throws: HelperConnection.Refused.self) { try await blocking { try keyboard.down(.tab) } }
         #expect(refused?.domain == Installation.refusalDomain)
-        #expect(refused?.localizedDescription == "\(Seat.Ended())")
+        #expect(refused?.reason == "\(Seat.Ended())")
         #expect(try await blocking { try leaver.status() } == nil)
         #expect(served.devices.asked == [Usage.leftShift.rawValue])
         withExtendedLifetime((served, first)) {}

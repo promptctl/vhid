@@ -67,7 +67,7 @@ import Testing
         listener.delegate = far
         listener.resume()
         if invalidated { listener.invalidate() }
-        let helper = { HelperConnection(connection: NSXPCConnection(listenerEndpoint: listener.endpoint), replyTimeout: replyTimeout) }
+        let helper = { HelperConnection(connection: NSXPCConnection(listenerEndpoint: listener.endpoint), service: "ai.promptctl.vhid.tests.far", replyTimeout: replyTimeout) }
         // On a thread of its own: the call blocks until the far end answers, and a wait on
         // the cooperative pool can starve the reply. [LAW:no-ambient-temporal-coupling]
         let read = await withCheckedContinuation { continuation in
@@ -125,7 +125,7 @@ import Testing
                 var asked = 0
                 continuation.resume(returning: DaemonProbe.reading {
                     defer { asked += 1 }
-                    return HelperConnection(connection: NSXPCConnection(listenerEndpoint: endpoints[asked]), replyTimeout: .seconds(20))
+                    return HelperConnection(connection: NSXPCConnection(listenerEndpoint: endpoints[asked]), service: "ai.promptctl.vhid.tests.far", replyTimeout: .seconds(20))
                 })
             }.start()
         }

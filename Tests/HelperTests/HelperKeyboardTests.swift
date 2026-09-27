@@ -99,7 +99,7 @@ import Testing
         listener.delegate = service
         listener.resume()
         let connection = NSXPCConnection(listenerEndpoint: listener.endpoint)
-        return (HelperConnection(connection: connection, replyTimeout: replyTimeout), FarEnd(listener: listener, service: service))
+        return (HelperConnection(connection: connection, service: "ai.promptctl.vhid.tests.far", replyTimeout: replyTimeout), FarEnd(listener: listener, service: service))
     }
 
     /// Runs `body` on a thread of the test's own and awaits what it returned or threw.
@@ -146,7 +146,7 @@ import Testing
     @Test func theHelpersRefusalIsThrown() async throws {
         let (helper, far) = helper(.refuse(domain: "fake", code: 7))
         let keyboard = helper.keyboard
-        let refusal = await #expect(throws: NSError.self) { try await blocking { try keyboard.down(.space) } }
+        let refusal = await #expect(throws: HelperConnection.Refused.self) { try await blocking { try keyboard.down(.space) } }
         // The error itself when it is not the fake's, so a connection failure in its place
         // is read by its reason and not just by its domain.
         let heard = Comment(rawValue: refusal.map { "\($0 as Error)" } ?? "nothing was thrown")

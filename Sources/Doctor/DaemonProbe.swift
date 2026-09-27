@@ -45,15 +45,15 @@ public enum DaemonProbe {
     /// is an invalid one (4099). Anything else is shown as what it said.
     /// [LAW:no-silent-failure]
     ///
-    /// A failure that is not the connection's is the daemon's own reply, which crosses as
-    /// a plain `NSError` carrying its words as the localized description - so those words
-    /// are what is shown, not the error's debug rendering.
+    /// A failure that is not the connection's is the daemon's own refusal, shown in the
+    /// daemon's words.
     static func reading(failure error: any Error) -> DaemonReading {
-        let refused = error as NSError
-        if refused.domain == Installation.refusalDomain, refused.code == Installation.devicesDownCode {
-            return .devicesDown(reason: refused.localizedDescription)
+        if let refused = error as? HelperConnection.Refused {
+            return refused.domain == Installation.refusalDomain && refused.code == Installation.devicesDownCode
+                ? .devicesDown(reason: refused.reason)
+                : .failed(reason: refused.reason)
         }
-        guard let unreachable = error as? HelperConnection.Unreachable else { return .failed(reason: (error as NSError).localizedDescription) }
+        guard let unreachable = error as? HelperConnection.Unreachable else { return .failed(reason: "\(error)") }
         switch unreachable.cause {
         case .connection(domain: NSCocoaErrorDomain, code: NSXPCConnectionInterrupted, description: _): return .refusedThisVhid
         case .connection(domain: NSCocoaErrorDomain, code: NSXPCConnectionInvalid, description: _): return .unreachable(reason: unreachable.description)

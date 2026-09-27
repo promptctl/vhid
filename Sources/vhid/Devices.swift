@@ -33,7 +33,12 @@ struct Devices {
     /// daemon that is not installed is discovered when the first report goes out rather
     /// than at construction. Nothing is claimed about it before then. [LAW:no-silent-failure]
     static func using<T>(_ installation: Installation, _ body: (Devices) async throws -> T) async throws -> T {
-        let helper = HelperConnection(installation: installation)
+        try await using(HelperConnection(installation: installation), body)
+    }
+
+    /// Over a connection someone else made, which is how a test puts a daemon of its own on
+    /// the far end. [LAW:decomposition]
+    static func using<T>(_ helper: HelperConnection, _ body: (Devices) async throws -> T) async throws -> T {
         let queue = DeviceQueue()
         let devices = Devices(keyboard: QueuedKeyboard(keyboard: helper.keyboard, queue: queue),
                               mouse: QueuedMouse(pointing: helper.mouse, queue: queue))
