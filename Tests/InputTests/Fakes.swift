@@ -89,7 +89,8 @@ final class FakeMouse: Mouse {
 
     private struct State {
         var log: [String] = []
-        var allow = Int.max
+        /// The calls refused, counted from zero.
+        var refused: Range<Int> = .max ..< .max
         var position: ScreenPoint
         var stuck = false
     }
@@ -101,8 +102,15 @@ final class FakeMouse: Mouse {
 
     /// How many calls to accept before every one after is logged and refused.
     var allow: Int {
-        get { state.withLock { $0.allow } }
-        set { state.withLock { $0.allow = newValue } }
+        get { state.withLock { $0.refused.lowerBound } }
+        set { state.withLock { $0.refused = newValue ..< .max } }
+    }
+
+    /// Which calls are logged and refused, counted from zero: `allow` is the range that
+    /// never ends, and one call alone is a stop the releases after it still answer.
+    var refused: Range<Int> {
+        get { state.withLock { $0.refused } }
+        set { state.withLock { $0.refused = newValue } }
     }
 
     /// A cursor pinned in place: every report is posted and moves nothing.
@@ -113,7 +121,7 @@ final class FakeMouse: Mouse {
 
     private func record(_ state: inout State, _ what: String) throws {
         state.log.append(what)
-        guard state.log.count <= state.allow else { throw Refused() }
+        guard !state.refused.contains(state.log.count - 1) else { throw Refused() }
     }
 
     func down(_ button: Button) throws { try state.withLock { try record(&$0, "down \(button.rawValue)") } }
@@ -139,6 +147,17 @@ final class FakeMouse: Mouse {
 
     /// The pointer over this mouse, reading this screen.
     var pointer: Pointer { Pointer(mouse: self, cursor: cursor) }
+
+    /// A keyboard beside this mouse, posting into the same log under the same `allow`, so
+    /// a run over both devices reads back as one sequence and can be refused at any report
+    /// of it by one number. [LAW:no-mode-explosion]
+    var keyboard: any Keyboard { Keys(mouse: self) }
+
+    private struct Keys: Keyboard {
+        let mouse: FakeMouse
+        func down(_ usage: Usage) throws { try mouse.state.withLock { try mouse.record(&$0, "key down \(String(usage.rawValue, radix: 16))") } }
+        func releaseAll() throws { try mouse.state.withLock { try mouse.record(&$0, "keys up") } }
+    }
 }
 
 /// A keyboard that cancels the run it is part of once `afterKeys` keys have gone down, so

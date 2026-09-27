@@ -1,0 +1,94 @@
+import Pointing
+import Testing
+@testable import Input
+
+/// Modifiers held around a pointer act: the reports the keyboard and mouse make together,
+/// and what a stop anywhere among them leaves held.
+@Suite @MainActor struct HoldingTests {
+    static let target = ScreenPoint(x: 5, y: 0)!
+    static let shiftCommand = try! HeldModifiers([.leftCommand, .leftShift])
+
+    /// Every key and button the log leaves down after its last report: a key down is held
+    /// until `keys up`, a button until `up`.
+    static func held(after log: [String]) -> [String] {
+        log.reduce(into: [String]()) { held, report in
+            switch report {
+            case "keys up": held.removeAll { $0.hasPrefix("key down") }
+            case "up": held.removeAll { $0.hasPrefix("down") }
+            case let down where down.hasPrefix("key down") || down.hasPrefix("down"): held.append(down)
+            default: break
+            }
+        }
+    }
+
+    /// Modifiers down in a fixed order, then the click with them held, then the mouse and
+    /// then the keyboard let go.
+    @Test func aModifiedClickIsModifiersDownThenTheClickThenEverythingUp() async throws {
+        let mouse = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
+        let click = try await mouse.pointer.holding(Self.shiftCommand, on: mouse.keyboard) {
+            try await $0.click(at: Self.target, button: .left, times: .single)
+        }
+        #expect(click.at == Self.target)
+        #expect(mouse.log == ["key down e1", "key down e3", "move 5 0", "down 1", "up", "keys up"])
+    }
+
+    /// No modifiers is the same run with no key downs, not a path of its own.
+    @Test func noModifiersIsTheSameRunWithNothingHeld() async throws {
+        let mouse = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
+        try await mouse.pointer.holding(.none, on: mouse.keyboard) {
+            try await $0.scroll(at: Self.target, vertical: 3, horizontal: 0)
+        }
+        #expect(mouse.log == ["move 5 0", "scroll 3 0", "keys up"])
+    }
+
+    /// A drag carries the modifiers from the press to the release.
+    @Test func aModifiedDragHoldsTheModifiersAcrossTheCarry() async throws {
+        let mouse = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
+        let option = try HeldModifiers([.leftOption])
+        try await mouse.pointer.holding(option, on: mouse.keyboard) {
+            try await $0.drag(from: Self.target, to: ScreenPoint(x: 8, y: 0)!, button: .left)
+        }
+        #expect(mouse.log == ["key down e2", "move 5 0", "down 1", "move 3 0", "up", "keys up"])
+    }
+
+    /// Refuse any one report of the run and it stops as `HoldingStopped`, with the refusal
+    /// as its cause, releases that answered, and nothing left held.
+    @Test func aFailureAtEachStepLeavesNothingHeld() async throws {
+        let whole = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
+        _ = try await whole.pointer.holding(Self.shiftCommand, on: whole.keyboard) {
+            try await $0.click(at: Self.target, button: .left, times: .single)
+        }
+        for step in whole.log.indices {
+            let mouse = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
+            mouse.refused = step ..< step + 1
+            let stop = await #expect(throws: HoldingStopped.self) {
+                try await mouse.pointer.holding(Self.shiftCommand, on: mouse.keyboard) {
+                    try await $0.click(at: Self.target, button: .left, times: .single)
+                }
+            }
+            #expect(stop?.causes.last is Refused, "step \(step): \(whole.log[step])")
+            #expect(stop?.unreleased.isEmpty == true, "step \(step): \(whole.log[step])")
+            #expect(Self.held(after: mouse.log).isEmpty, "step \(step): \(mouse.log)")
+            #expect(Array(mouse.log.prefix(step + 1)) == Array(whole.log.prefix(step + 1)), "step \(step)")
+        }
+    }
+
+    /// A release that fails too is reported beside the stop, and the report says what may
+    /// still be down.
+    @Test func aReleaseThatFailsIsReportedBesideTheStop() async throws {
+        let mouse = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
+        mouse.allow = 1
+        let stop = await #expect(throws: HoldingStopped.self) {
+            try await mouse.pointer.holding(Self.shiftCommand, on: mouse.keyboard) {
+                try await $0.click(at: Self.target, button: .left, times: .single)
+            }
+        }
+        #expect(stop?.unreleased.count == 2)
+        #expect(stop?.description.hasSuffix("A button, or one of leftShift+leftCommand, may be left held") == true)
+    }
+
+    /// Fn is no key to the device, so a set naming it does not parse.
+    @Test func fnCannotBeHeld() {
+        #expect(throws: UnholdableModifiers(modifiers: [.function])) { try HeldModifiers([.leftShift, .function]) }
+    }
+}
