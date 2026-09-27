@@ -115,7 +115,7 @@ public struct PixelReader: Reader {
     /// clipped to the display it lies on.
     @MainActor
     static func resolve(_ region: Region) throws -> ScreenRect {
-        try onOneDisplay(region.bounds(), displays: activeDisplays())
+        try onOneDisplay(region.bounds(), displays: Geometry.displays())
     }
 
     /// The part of `rect` a capture can see, on the one display it lies on, in whole points.
@@ -136,14 +136,6 @@ public struct PixelReader: Reader {
         guard seen.count <= 1 else { throw PixelsError.spansDisplays(rect) }
         guard let only = seen.first else { throw PixelsError.offScreen(rect) }
         return ScreenRect(only.integral)
-    }
-
-    static func activeDisplays() -> [ScreenRect] {
-        var count: UInt32 = 0
-        CGGetActiveDisplayList(0, nil, &count)
-        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
-        CGGetActiveDisplayList(count, &ids, &count)
-        return ids.map { ScreenRect(CGDisplayBounds($0)) }
     }
 
     /// Captures exactly `region` with `screencapture`, in points of the global space it

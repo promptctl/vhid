@@ -26,8 +26,8 @@ enum Part {
 }
 
 extension Answer {
-    /// Every `AXError` a read can return, decided one value at a time: either this part
-    /// went unread and the walk goes on, or the reader could not look at all and throws.
+    /// Every `AXError` a read can return, decided one value at a time: this part went unread
+    /// and the walk goes on, or - with no grant - the reader could not look at all and throws.
     /// [LAW:no-silent-failure] Nothing is folded into absence except the codes that mean it.
     init(_ error: AXError, for part: Part) throws(TreeError) {
         switch error {
@@ -43,15 +43,16 @@ extension Answer {
         // the app does not implement the API. Each is a fact about this element, and the
         // rest of the tree may answer.
         case .cannotComplete, .invalidUIElement, .notImplemented: self = .unanswered
-        // No grant: no element anywhere will answer, and waiting will not change that.
-        case .apiDisabled: throw .noGrant
-        // Codes a plain attribute read cannot produce unless this code asked wrongly, so
-        // they are a bug in the reader, never a fact about the screen.
+        // Codes a well-behaved app never returns for an attribute read. Another app's
+        // implementation is not bound by that, and one odd element must not fail the read
+        // of every window, so they too are this part unread.
         case .illegalArgument, .invalidUIElementObserver, .actionUnsupported,
              .notificationUnsupported, .notificationAlreadyRegistered, .notificationNotRegistered,
              .parameterizedAttributeUnsupported, .notEnoughPrecision:
-            throw .unexpected(error.rawValue)
-        @unknown default: throw .unexpected(error.rawValue)
+            self = .unanswered
+        // No grant: no element anywhere will answer, and waiting will not change that.
+        case .apiDisabled: throw .noGrant
+        @unknown default: self = .unanswered
         }
     }
 }
@@ -242,36 +243,22 @@ func walk<Element>(
     return Walked(found: found, examined: examined, excluded: excluded, reach: reach)
 }
 
-/// The on-screen windows meeting `region`, front to back, as roots to walk and a count of
-/// the ones with nothing to walk.
-///
-/// `matched` holds the accessibility element found for each window id. A window with none
-/// is one of two things. Inside a matched window of its own app and at that window's
-/// layer, it is that window's sheet or drawer: its elements are under the parent's, so it
-/// covers nothing and is not counted. The layer is what tells it from the app's own context
-/// menu or pop-up list, which also opens inside the window but sits at the menu layer and
-/// hangs off the app, not the window. Otherwise it is an open menu, a system surface, or a window whose app would
-/// not list it: unwalked, and counted whenever any of it can be seen in the region.
-/// [LAW:no-silent-failure] Pure, so the rule is tested with windows a test wrote.
-func plan<Element>(_ windows: [Window], in region: ScreenRect, matched: [UInt32: Element]) -> (roots: [Root<Element>], unwalked: Int) {
-    let attached = Set(windows.filter { window in
-        matched[window.id] == nil && windows.contains {
-            $0.pid == window.pid && $0.layer == window.layer && matched[$0.id] != nil
-                && $0.frame.cgRect.contains(window.frame.cgRect)
-        }
-    }.map(\.id))
-    var roots: [Root<Element>] = []
-    var unwalked = 0
-    for (index, window) in windows.enumerated() where !attached.contains(window.id) {
-        let covers = windows[..<index].filter { !attached.contains($0.id) }.map(\.frame)
-        guard !hidden(window.frame, in: region, under: covers) else { continue }
-        if let element = matched[window.id] {
-            roots.append(Root(element: element, covers: covers))
-        } else {
-            unwalked += 1
-        }
-    }
-    return (roots, unwalked)
+/// The on-screen windows any of which can be seen in `region`, front to back, each with
+/// the frames of every window in front of it - every layer, so the menu bar and the Dock
+/// cover what they cover. A window off the region or wholly behind one in front holds
+/// nothing to read, so it is never matched, walked or counted. Pure, so the rule is tested
+/// with windows a test wrote.
+func seen(_ windows: [Window], in region: ScreenRect) -> [(window: Window, covers: [ScreenRect])] {
+    windows.enumerated().map { (window: $1, covers: windows[..<$0].map(\.frame)) }
+        .filter { !hidden($0.window.frame, in: region, under: $0.covers) }
+}
+
+/// Seen windows as roots to walk, and a count of the ones with no element to start from -
+/// an open menu, a system surface, a window whose app would not list it. Those were on
+/// screen and never read. [LAW:no-silent-failure]
+func plan<Element>(_ seen: [(window: Window, covers: [ScreenRect])], matched: [UInt32: Element]) -> (roots: [Root<Element>], unwalked: Int) {
+    let roots = seen.compactMap { entry in matched[entry.window.id].map { Root(element: $0, covers: entry.covers) } }
+    return (roots, seen.count - roots.count)
 }
 
 /// Everything that means the tree reader could not look, as opposed to having looked and
@@ -279,15 +266,12 @@ func plan<Element>(_ windows: [Window], in region: ScreenRect, matched: [UInt32:
 /// looking.
 public enum TreeError: Error, CustomStringConvertible {
     case noGrant
-    case unexpected(Int32)
 
     public var description: String {
         switch self {
         case .noGrant:
             "Accessibility is not granted to this process, so no app's elements can be read."
                 + " Grant it in System Settings > Privacy & Security > Accessibility."
-        case .unexpected(let code):
-            "an accessibility read failed with AXError \(code), which a read of an attribute should never return"
         }
     }
 }

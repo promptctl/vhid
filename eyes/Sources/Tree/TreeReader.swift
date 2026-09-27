@@ -40,7 +40,8 @@ public struct TreeReader: Reader {
         // Started before the windows are matched, because matching is reads too.
         let clock = ContinuousClock()
         let start = clock.now
-        let (roots, unwalked) = plan(windows, in: region, matched: try Self.match(windows.filter { $0.frame.intersects(region) }))
+        let visible = seen(windows, in: region)
+        let (roots, unwalked) = plan(visible, matched: try Self.match(visible.map(\.window)))
         let walked = try walk(
             from: roots,
             unwalked: unwalked,
@@ -65,8 +66,11 @@ public struct TreeReader: Reader {
     /// both answer in the same points. Frames repeat - measured, a terminal listed three
     /// accessibility windows at one full-screen frame, two of them tabs on no screen - so
     /// each accessibility window is claimed once, by the frontmost on-screen window it
-    /// matches; an app lists its windows front to back. A window left unmatched is `plan`'s
-    /// to count.
+    /// matches; an app lists its windows front to back, which is assumed and not proven for
+    /// tabs sharing one frame. A sheet is its own window to the window server and a child
+    /// of its window to the tree, so each window's sheets are listed beside it: a sheet is
+    /// then a root of its own, walked before the window behind it, which reaches the same
+    /// sheet again only to find it covered. A window left unmatched is `plan`'s to count.
     static func match(_ windows: [Window]) throws(TreeError) -> [UInt32: AXUIElement] {
         var listed: [Int32: [(element: AXUIElement, frame: ScreenRect)]] = [:]
         var matched: [UInt32: AXUIElement] = [:]
@@ -83,20 +87,34 @@ public struct TreeReader: Reader {
         abs(a.x - b.x) < 1 && abs(a.y - b.y) < 1 && abs(a.width - b.width) < 1 && abs(a.height - b.height) < 1
     }
 
-    /// An app's windows that said where they are. An app that will not list them, or a
-    /// window that will not say where it is, matches nothing and is counted by `plan` as
+    /// An app's windows and their sheets that said where they are, minimized windows left
+    /// out - they keep their frame and are on no screen. An app that will not list them, or
+    /// a window that will not say where it is, matches nothing and is counted by `plan` as
     /// unwalked - never dropped. [LAW:no-silent-failure]
     private static func windows(of pid: Int32) throws(TreeError) -> [(element: AXUIElement, frame: ScreenRect)] {
         let app = bounded(AXUIElementCreateApplication(pid))
         guard case .answered(let value?) = try read([kAXWindowsAttribute], of: app, as: [.structure])[0] else { return [] }
         var windows: [(element: AXUIElement, frame: ScreenRect)] = []
-        for window in (value as? [CFTypeRef] ?? []).compactMap(element).map(bounded) {
-            let reads = try read([kAXPositionAttribute, kAXSizeAttribute], of: window, as: [.structure, .structure])
+        for window in elements(value) {
+            let reads = try read([kAXPositionAttribute, kAXSizeAttribute, kAXMinimizedAttribute, kAXChildrenAttribute],
+                                 of: window, as: [.structure, .structure, .structure, .structure])
             guard case .answered(let position) = reads[0], case .answered(let size) = reads[1],
+                  reads[2].answer.flatMap({ $0 as? Bool }) != true,
                   let frame = frame(position, size) else { continue }
             windows.append((window, frame))
+            for child in elements(reads[3].answer ?? nil) {
+                let sheet = try read([kAXRoleAttribute, kAXPositionAttribute, kAXSizeAttribute], of: child, as: [.structure, .structure, .structure])
+                guard sheet[0].answer.flatMap({ $0 as? String }) == kAXSheetRole,
+                      case .answered(let position) = sheet[1], case .answered(let size) = sheet[2],
+                      let frame = Self.frame(position, size) else { continue }
+                windows.append((child, frame))
+            }
         }
         return windows
+    }
+
+    private static func elements(_ value: CFTypeRef?) -> [AXUIElement] {
+        (value as? [CFTypeRef] ?? []).compactMap(element).map(bounded)
     }
 
     private static let attributes = [
@@ -118,7 +136,7 @@ public struct TreeReader: Reader {
                 texts: reads[1...3].map { $0.map { $0 as? String } },
                 frame: frame
             ),
-            children: reads[6].map { value in (value as? [CFTypeRef] ?? []).compactMap(Self.element).map(bounded) }
+            children: reads[6].map(elements)
         )
     }
 

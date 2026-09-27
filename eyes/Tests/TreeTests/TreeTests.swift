@@ -28,14 +28,14 @@ import Eyes
         #expect { try Answer(.apiDisabled, for: .structure) } throws: { ($0 as? TreeError).map { if case .noGrant = $0 { true } else { false } } ?? false }
     }
 
+    /// Another app's implementation is not bound by Apple's list of codes, so one odd
+    /// element is that element unread - never the whole reading thrown away.
     @Test(arguments: [
         AXError.illegalArgument, .invalidUIElementObserver, .actionUnsupported, .notificationUnsupported,
         .notificationAlreadyRegistered, .notificationNotRegistered, .parameterizedAttributeUnsupported, .notEnoughPrecision,
     ])
-    func aCodeNoAttributeReadReturnsIsABugNotAFact(error: AXError) {
-        #expect { try Answer(error, for: .text) } throws: {
-            ($0 as? TreeError).map { if case .unexpected(error.rawValue) = $0 { true } else { false } } ?? false
-        }
+    func aCodeNoAttributeReadShouldReturnIsThatPartUnread(error: AXError) throws {
+        #expect(try Answer(error, for: .text) == .unanswered)
     }
 }
 
@@ -237,45 +237,26 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
 }
 
 @Suite struct PlanTests {
-    func window(_ id: UInt32, pid: Int32 = 1, _ frame: ScreenRect, layer: Int = 0) -> Window {
-        Window(id: id, owner: "App", pid: pid, frame: frame, layer: layer)
+    func window(_ id: UInt32, pid: Int32 = 1, _ frame: ScreenRect) -> Window {
+        Window(id: id, owner: "App", pid: pid, frame: frame, layer: 0)
     }
 
     let document = ScreenRect(x: 100, y: 100, width: 600, height: 400)
 
     @Test func eachMatchedWindowIsARootCoveredByTheOnesInFront() {
         let front = window(1, pid: 2, ScreenRect(x: 0, y: 0, width: 300, height: 300))
-        let (roots, unwalked) = plan([front, window(2, document)], in: region, matched: [1: "front", 2: "doc"])
+        let (roots, unwalked) = plan(seen([front, window(2, document)], in: region), matched: [1: "front", 2: "doc"])
         #expect(roots.map(\.element) == ["front", "doc"])
         #expect(roots.map(\.covers) == [[], [front.frame]])
         #expect(unwalked == 0)
     }
 
-    /// A sheet is its own window to the window server and a child of its window to the
-    /// tree: walked there, and covering nothing - else its own buttons read as covered.
-    @Test func aSheetInsideItsWindowIsWalkedThroughItAndCoversNothing() {
-        let sheet = window(9, ScreenRect(x: 200, y: 100, width: 300, height: 150))
-        let (roots, unwalked) = plan([sheet, window(2, document)], in: region, matched: [2: "doc"])
+    /// An open menu, a status item, a window its app would not list: on screen, nothing in
+    /// it read, and it says so - it also covers what is under it.
+    @Test func aVisibleWindowWithNothingToWalkIsCountedAndCovers() {
+        let menu = window(5, ScreenRect(x: 150, y: 120, width: 200, height: 300))
+        let (roots, unwalked) = plan(seen([menu, window(2, document)], in: region), matched: [2: "doc"])
         #expect(roots.map(\.element) == ["doc"])
-        #expect(roots[0].covers == [])
-        #expect(unwalked == 0)
-    }
-
-    /// An open menu is another app's surface, or this app's with no window element: it is
-    /// on screen, nothing in it is read, and it says so.
-    @Test func aVisibleWindowWithNothingToWalkIsCounted() {
-        let menu = window(5, pid: 3, ScreenRect(x: 150, y: 120, width: 200, height: 300))
-        let (roots, unwalked) = plan([menu, window(2, document)], in: region, matched: [2: "doc"])
-        #expect(roots.map(\.element) == ["doc"])
-        #expect(roots[0].covers == [menu.frame])
-        #expect(unwalked == 1)
-    }
-
-    /// The app's own context menu opens inside its window too, at the menu layer; it hangs
-    /// off the app, not the window, so it is counted and covers what is under it.
-    @Test func theAppsOwnMenuInsideItsWindowIsNoSheet() {
-        let menu = window(5, ScreenRect(x: 150, y: 120, width: 200, height: 300), layer: 101)
-        let (roots, unwalked) = plan([menu, window(2, document)], in: region, matched: [2: "doc"])
         #expect(roots[0].covers == [menu.frame])
         #expect(unwalked == 1)
     }
@@ -283,8 +264,9 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
     /// Off the region or wholly behind a window in front, a window holds nothing to read.
     @Test func aWindowNothingOfWhichCanBeSeenIsNeitherWalkedNorCounted() {
         let full = window(1, pid: 2, region)
-        let (roots, unwalked) = plan([full, window(2, document), window(3, pid: 4, ScreenRect(x: 2000, y: 0, width: 10, height: 10))],
-                                     in: region, matched: [1: "full", 2: "doc"])
+        let visible = seen([full, window(2, document), window(3, pid: 4, ScreenRect(x: 2000, y: 0, width: 10, height: 10))], in: region)
+        #expect(visible.map(\.window.id) == [1])
+        let (roots, unwalked) = plan(visible, matched: [1: "full"])
         #expect(roots.map(\.element) == ["full"])
         #expect(unwalked == 0)
     }

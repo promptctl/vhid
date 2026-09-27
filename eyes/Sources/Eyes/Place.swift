@@ -12,6 +12,9 @@ public extension Region {
     func bounds() throws -> ScreenRect {
         switch self {
         case .rect(let rect):
+            // A rectangle on no display has nothing in it to read, and a reader that walked
+            // it would report a blank screen. [LAW:no-silent-failure]
+            guard Geometry.displays().contains(where: { $0.intersects(rect) }) else { throw NoSuchPlace.offScreen(rect) }
             return rect
         case .display(let id):
             let bounds = CGDisplayBounds(id)
@@ -26,13 +29,26 @@ public extension Region {
     }
 }
 
+public extension Geometry {
+    /// Every active display's bounds, in the one screen space.
+    static func displays() -> [ScreenRect] {
+        var count: UInt32 = 0
+        CGGetActiveDisplayList(0, nil, &count)
+        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        CGGetActiveDisplayList(count, &ids, &count)
+        return ids.map { ScreenRect(CGDisplayBounds($0)) }
+    }
+}
+
 /// A region naming something that is not on screen.
 public enum NoSuchPlace: Error, CustomStringConvertible {
     case display(CGDirectDisplayID)
     case window(UInt32)
+    case offScreen(ScreenRect)
 
     public var description: String {
         switch self {
+        case .offScreen(let r): "\(r) is on no display, so there is nothing there to read"
         case .display(let id): "no display with id \(id) is attached"
         case .window(let id): "no on-screen window has id \(id); `eyes windows` lists the ones that do"
         }
