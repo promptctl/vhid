@@ -77,11 +77,10 @@ struct Windows: AsyncParsableCommand {
     /// One window as a row: id, owner, layer, then the rectangle in the coordinates vhid
     /// clicks. Tab-separated because the owner is the one field that can hold a space.
     static func row(_ window: Window) -> String {
-        let f = window.frame
         // A window whose owning process has no application name is still a window with a
         // place to click; it is named as unnamed rather than left blank, so the column
         // cannot be mistaken for an empty field.
         return "\(window.id)\t\(window.owner ?? "(unnamed)")\tL\(window.layer)"
-            + "\t\(Int(f.x)),\(Int(f.y)) \(Int(f.width))x\(Int(f.height))"
+            + "\t\(window.frame)"
     }
 }

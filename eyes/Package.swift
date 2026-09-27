@@ -27,6 +27,12 @@ let package = Package(
         // Every type here is a value, so the whole vocabulary is exercised with no
         // display, no capture and no accessibility grant. [LAW:effects-at-boundaries]
         .testTarget(name: "EyesTests", dependencies: ["Eyes"]),
+        // The pixel reader: the grant, the capture and Vision. Its own target so the
+        // vocabulary above stays linking nothing, and the accessibility reader can sit
+        // beside it without either linking the other. [LAW:one-way-deps]
+        .target(name: "Pixels", dependencies: ["Eyes"]),
+        // How a capture is cut into pieces and put back together, with no capture at all.
+        .testTarget(name: "PixelsTests", dependencies: ["Pixels", "Eyes"]),
         // The binary. Every line it prints describes the screen and the scope that was
         // looked at, which is what lets the reading below it be narrow and still be
         // trusted. [LAW:no-silent-failure]
@@ -35,7 +41,7 @@ let package = Package(
         // a case-insensitive filesystem, which is what macOS gives you by default.
         .executableTarget(
             name: "EyesCommand",
-            dependencies: ["Eyes", .product(name: "ArgumentParser", package: "swift-argument-parser")],
+            dependencies: ["Eyes", "Pixels", .product(name: "ArgumentParser", package: "swift-argument-parser")],
             path: "Sources/Command"
         ),
         // The scope line is the sentence that licenses every narrow answer under it, so it

@@ -112,3 +112,39 @@ public extension ScreenRect {
         )
     }
 }
+
+public extension ScreenRect {
+    /// The inverse of `fromImageSpace`: where this rectangle sits in an image of `display`,
+    /// as a unit rectangle with the origin at the bottom-left - the space Vision's region
+    /// of interest is given in. Beside its inverse so the flip is written in one file and
+    /// tested as a round trip. [LAW:single-enforcer]
+    func normalized(in display: ScreenRect) -> CGRect {
+        CGRect(
+            x: (x - display.x) / display.width,
+            y: 1 - (y - display.y + height) / display.height,
+            width: width / display.width,
+            height: height / display.height
+        )
+    }
+}
+
+/// `x,y WxH` in whole points, the one spelling every line `eyes` prints uses, so one
+/// rectangle cannot print as two places. Rounded rather than truncated: truncation moves
+/// a negative coordinate toward zero, a whole point off on a display left of the main one.
+/// [LAW:one-source-of-truth]
+extension ScreenRect: CustomStringConvertible {
+    public var description: String {
+        "\(Int(x.rounded())),\(Int(y.rounded())) \(Int(width.rounded()))x\(Int(height.rounded()))"
+    }
+}
+
+public extension ScreenRect {
+    var area: Double { width * height }
+
+    /// The area two rectangles share, zero when they do not meet - beside `intersects`, so
+    /// the two cannot disagree about what touching means.
+    func overlap(_ other: ScreenRect) -> Double {
+        guard intersects(other) else { return 0 }
+        return cgRect.intersection(other.cgRect).width * cgRect.intersection(other.cgRect).height
+    }
+}

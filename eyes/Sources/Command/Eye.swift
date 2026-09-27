@@ -10,6 +10,6 @@ struct Eye: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "eyes",
         abstract: "Say what is on screen and where, in the coordinates vhid clicks.",
-        subcommands: [Windows.self]
+        subcommands: [Windows.self, Find.self, Read.self]
     )
 }

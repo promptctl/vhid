@@ -94,4 +94,24 @@ import Testing
         #expect(!left.intersects(ScreenRect(x: 10, y: 0, width: 10, height: 10)))
         #expect(left.intersects(ScreenRect(x: 9, y: 0, width: 10, height: 10)))
     }
+
+    /// A piece of a display, taken to Vision's space and back, is the same piece - on a
+    /// display at a negative origin, where a missed offset shows. And the top of the screen
+    /// is the top of the image, so its normalized box sits high.
+    @Test func aPieceOfTheDisplayRoundTripsThroughImageSpace() {
+        let display = ScreenRect(x: -2400, y: -300, width: 2400, height: 1600)
+        let piece = ScreenRect(x: -2000, y: -300, width: 800, height: 400)
+        let normalized = piece.normalized(in: display)
+        expect(normalized.maxY, 1, "a piece at the top of the display sits at the top of the image")
+        let back = ScreenRect.fromImageSpace(normalized: normalized, on: display)
+        expect(back.x, piece.x, "x")
+        expect(back.y, piece.y, "y")
+        expect(back.width, piece.width, "width")
+        expect(back.height, piece.height, "height")
+    }
+
+    /// Rounded, not truncated: truncation moves a negative coordinate toward zero.
+    @Test func aRectangleIsSpelledInWholePointsRounded() {
+        #expect(ScreenRect(x: -0.6, y: 10.5, width: 99.6, height: 20).description == "-1,11 100x20")
+    }
 }
