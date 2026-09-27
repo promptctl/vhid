@@ -14,7 +14,7 @@ public extension Region {
         case .rect(let rect):
             // A rectangle on no display has nothing in it to read, and a reader that walked
             // it would report a blank screen. [LAW:no-silent-failure]
-            guard Geometry.displays().contains(where: { $0.intersects(rect) }) else { throw NoSuchPlace.offScreen(rect) }
+            guard Geometry.displays().contains(where: { $0.frame.intersects(rect) }) else { throw NoSuchPlace.offScreen(rect) }
             return rect
         case .display(let id):
             let bounds = CGDisplayBounds(id)
@@ -29,14 +29,41 @@ public extension Region {
     }
 }
 
+/// One attached display, as a caller needs it to aim: the id `Region.display` names, and
+/// where it sits in the one screen space.
+public struct Display: Sendable, Hashable {
+    public let id: CGDirectDisplayID
+    /// Global top-left screen points: negative on a display left of or above the main one.
+    public let frame: ScreenRect
+    /// The display whose top-left corner is the origin of that space.
+    public let isMain: Bool
+    /// Backing pixels per point, which is what a capture of it is sized by.
+    public let scale: Double
+
+    public init(id: CGDirectDisplayID, frame: ScreenRect, isMain: Bool, scale: Double) {
+        self.id = id
+        self.frame = frame
+        self.isMain = isMain
+        self.scale = scale
+    }
+}
+
 public extension Geometry {
-    /// Every active display's bounds, in the one screen space.
-    static func displays() -> [ScreenRect] {
+    /// Every active display, main first - the order the display list is documented to
+    /// return. One reading for every caller, so the displays `eyes displays` lists are the
+    /// ones a region is checked against. [LAW:one-source-of-truth]
+    static func displays() -> [Display] {
         var count: UInt32 = 0
         CGGetActiveDisplayList(0, nil, &count)
         var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
         CGGetActiveDisplayList(count, &ids, &count)
-        return ids.map { ScreenRect(CGDisplayBounds($0)) }
+        return ids.prefix(Int(count)).map { id in
+            let bounds = CGDisplayBounds(id)
+            let pixels = CGDisplayCopyDisplayMode(id).map { Double($0.pixelWidth) } ?? bounds.width
+            return Display(
+                id: id, frame: ScreenRect(bounds), isMain: CGDisplayIsMain(id) != 0,
+                scale: bounds.width > 0 ? pixels / bounds.width : 1)
+        }
     }
 }
 
