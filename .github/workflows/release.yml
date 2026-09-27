@@ -19,6 +19,7 @@ permissions:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
 
+# The toolchain test.yml names; its pkg job fails when the two differ.
 env:
   DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
 
@@ -28,10 +29,12 @@ jobs:
     timeout-minutes: 60
     env:
       TAG: ${{ github.ref_name }}
-      KEYCHAIN: ${{ runner.temp }}/release.keychain-db
+      NOTARY_KEYCHAIN: ${{ runner.temp }}/release.keychain-db
       NOTARY_PROFILE: vhid-release
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       # [LAW:one-source-of-truth] The tag names the version VERSION already holds, or
       # nothing is built: a tag that disagrees would publish a pkg under a name its
@@ -42,45 +45,44 @@ jobs:
           [ "$TAG" = "v$version" ] || { echo "::error::tag $TAG is not v$version, the version in VERSION"; exit 1; }
           echo "VERSION_NUMBER=$version" >>"$GITHUB_ENV"
 
+      # What is published is what master holds and CI passed: a tag on a branch, or on a
+      # commit whose required checks are not all green, is refused. A pre-release may
+      # come from any branch, so a release candidate can be tried before it lands.
+      - name: The tagged commit is master's and tested
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ $VERSION_NUMBER != *-* ]]; then
+            git merge-base --is-ancestor "$GITHUB_SHA" origin/master \
+              || { echo "::error::$TAG is not on master"; exit 1; }
+          fi
+          for check in vhid eyes pkg; do
+            conclusion=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?check_name=$check" \
+              --jq '[.check_runs[].conclusion] | if index("success") then "success" else (first // "none") end')
+            [ "$conclusion" = success ] || { echo "::error::check $check on $GITHUB_SHA is $conclusion, not success"; exit 1; }
+          done
+
       # The notes, read before minutes of building, so a version with no changelog
       # section fails here. A section is everything from its "## [<version>]" heading
-      # to the next "## " heading.
+      # to the next "## " heading or the link definitions that close the file.
       - name: The changelog has this version
         run: |
+          [ -f CHANGELOG.md ] || { echo "::error::there is no CHANGELOG.md to take the notes from"; exit 1; }
           awk -v v="$VERSION_NUMBER" '
             /^## / { inside = index($0, "## [" v "]") == 1; next }
+            /^\[[^]]+\]: / { inside = 0 }
             inside' CHANGELOG.md >"$RUNNER_TEMP/notes.md"
           grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md" \
             || { echo "::error::CHANGELOG.md has no section headed ## [$VERSION_NUMBER]"; exit 1; }
 
-      # A keychain of this job's own, with a password made here and gone with the job:
-      # the two Developer ID identities, their private keys opened to codesign and
-      # productbuild without a dialog, and the notary credentials as the profile
-      # scripts/notarize names. It is put on the search list because make-pkg finds the
-      # identities with `security find-identity`, which reads that list.
       - name: A keychain holding the release identities
         env:
-          APPLICATION_P12: ${{ secrets.DEVELOPER_ID_APPLICATION_P12 }}
-          INSTALLER_P12: ${{ secrets.DEVELOPER_ID_INSTALLER_P12 }}
-          P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          DEVELOPER_ID_APPLICATION_P12: ${{ secrets.DEVELOPER_ID_APPLICATION_P12 }}
+          DEVELOPER_ID_INSTALLER_P12: ${{ secrets.DEVELOPER_ID_INSTALLER_P12 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
           NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
           NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
-        run: |
-          password=$(uuidgen)
-          security create-keychain -p "$password" "$KEYCHAIN"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN"
-          security unlock-keychain -p "$password" "$KEYCHAIN"
-          for p12 in "$APPLICATION_P12" "$INSTALLER_P12"; do
-            base64 --decode <<<"$p12" >"$RUNNER_TEMP/identity.p12"
-            security import "$RUNNER_TEMP/identity.p12" -k "$KEYCHAIN" -P "$P12_PASSWORD" \
-              -T /usr/bin/codesign -T /usr/bin/productbuild -T /usr/bin/pkgbuild
-            rm -f "$RUNNER_TEMP/identity.p12"
-          done
-          security set-key-partition-list -S apple-tool:,apple: -k "$password" "$KEYCHAIN" >/dev/null
-          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
-          team=$(sed -n 's/^TEAM=//p' scripts/make-pkg)   # the one place the team is written
-          xcrun notarytool store-credentials "$NOTARY_PROFILE" --keychain "$KEYCHAIN" \
-            --apple-id "$NOTARY_APPLE_ID" --team-id "$team" --password "$NOTARY_PASSWORD"
+        run: scripts/release-keychain create "$NOTARY_KEYCHAIN" "$NOTARY_PROFILE"
 
       - name: Built, signed, notarized and stapled
         run: |
@@ -99,4 +101,4 @@ jobs:
       # Whatever happened above, the keys leave with the job.
       - name: The keychain is deleted
         if: always()
-        run: security delete-keychain "$KEYCHAIN" 2>/dev/null || true
+        run: scripts/release-keychain delete "$NOTARY_KEYCHAIN"

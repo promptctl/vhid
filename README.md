@@ -199,11 +199,13 @@ A release is published by pushing its tag:
 git tag v$(scripts/version --base) && git push origin v$(scripts/version --base)
 ```
 
-`.github/workflows/release.yml` checks that the tag is `VERSION`'s and that
-`CHANGELOG.md` has a `## [<version>]` section, then runs `scripts/release` in a
-keychain of its own, which it deletes at the end, and attaches the notarized pkg to a
-GitHub Release whose notes are that section. A version with a `-tag` is marked a
-pre-release. It reads five repository secrets:
+`.github/workflows/release.yml` checks that the tag is `VERSION`'s, that the tagged
+commit is on master (a `-tag` pre-release may come from any branch) with its `vhid`,
+`eyes` and `pkg` checks green, and that `CHANGELOG.md` has a `## [<version>]` section.
+It then runs `scripts/release` in a keychain `scripts/release-keychain` makes for the
+job and deletes at its end, and attaches the notarized pkg to a GitHub Release whose
+notes are that section, marked a pre-release when the version has a `-tag`. It reads
+five repository secrets:
 
 | Secret | What it holds |
 | --- | --- |

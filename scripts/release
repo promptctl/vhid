@@ -9,9 +9,15 @@
 # Held to bash 3.2, like every script here.
 set -euo pipefail
 
+# NOTARY_KEYCHAIN names the keychain holding the profile when it is not the login one, as
+# in the release workflow, whose keychain is its own. notarytool reads the profile from
+# the one keychain it is given, not from the search list.
+notary_keychain=()
+[ -n "${NOTARY_KEYCHAIN:-}" ] && notary_keychain=(--keychain "$NOTARY_KEYCHAIN")
+
 profile=${NOTARY_PROFILE:?NOTARY_PROFILE names the notarytool keychain profile; make one with xcrun notarytool store-credentials}
 # Asked before the build, which takes minutes, rather than after it.
-xcrun notarytool history --keychain-profile "$profile" >/dev/null \
+xcrun notarytool history --keychain-profile "$profile" ${notary_keychain[@]+"${notary_keychain[@]}"} >/dev/null \
   || { echo "release: the notarytool profile '$profile' does not answer" >&2; exit 1; }
 
 scripts=$(dirname "$0")

@@ -1,0 +1,70 @@
+#!/bin/bash
+# The release workflow's keychain: made with the two Developer ID identities and the
+# notary profile in it, and deleted with everything decoded for it.
+#
+#   scripts/release-keychain create <keychain> <notary profile>
+#   scripts/release-keychain delete <keychain>
+#
+# create reads the secrets from the environment - DEVELOPER_ID_APPLICATION_P12 and
+# DEVELOPER_ID_INSTALLER_P12 (base64 .p12), DEVELOPER_ID_P12_PASSWORD, NOTARY_APPLE_ID,
+# NOTARY_PASSWORD - and names any that is empty before touching a keychain.
+#
+# The keychain's password is made here and never kept: the keychain lives as long as the
+# job. The private keys are opened to codesign, productbuild and pkgbuild when imported,
+# so no build stops at a dialog nobody can click. It is appended to the search list,
+# because make-pkg finds the identities with `security find-identity`, which reads it.
+#
+# Held to bash 3.2, like every script here.
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+fail() { echo "release-keychain: $*" >&2; exit 1; }
+verb=${1:?usage: scripts/release-keychain create <keychain> <notary profile> | delete <keychain>}
+keychain=${2:?usage: scripts/release-keychain $verb <keychain> ...}
+decoded=$keychain.p12
+
+case $verb in
+  delete)
+    rm -f "$decoded"
+    security delete-keychain "$keychain" 2>/dev/null || true
+    exit 0
+    ;;
+  create) profile=${3:?usage: scripts/release-keychain create <keychain> <notary profile>} ;;
+  *) fail "no verb '$verb'; create or delete" ;;
+esac
+
+missing=
+for name in DEVELOPER_ID_APPLICATION_P12 DEVELOPER_ID_INSTALLER_P12 DEVELOPER_ID_P12_PASSWORD NOTARY_APPLE_ID NOTARY_PASSWORD; do
+  [ -n "$(printenv "$name" || true)" ] || missing="$missing $name"
+done
+[ -z "$missing" ] || fail "these secrets are not set:$missing (README \"Releasing\" says how to make them)"
+
+# A decoded key is removed however this ends, and delete removes it too.
+trap 'rm -f "$decoded"' EXIT
+
+password=$(uuidgen)
+security create-keychain -p "$password" "$keychain"
+security set-keychain-settings -lut 21600 "$keychain"
+security unlock-keychain -p "$password" "$keychain"
+for secret in DEVELOPER_ID_APPLICATION_P12 DEVELOPER_ID_INSTALLER_P12; do
+  printenv "$secret" | base64 --decode >"$decoded" || fail "$secret is not base64"
+  security import "$decoded" -k "$keychain" -P "$DEVELOPER_ID_P12_PASSWORD" \
+    -T /usr/bin/codesign -T /usr/bin/productbuild -T /usr/bin/pkgbuild >&2 \
+    || fail "$secret would not import with DEVELOPER_ID_P12_PASSWORD"
+  rm -f "$decoded"
+done
+security set-key-partition-list -S apple-tool:,apple: -k "$password" "$keychain" >/dev/null
+
+# Appended, never substituted: `list-keychains -s` replaces the whole list. Read into a
+# variable first so a failing `security` stops here instead of arriving as an empty list,
+# and read line by line so a path with spaces stays one path.
+listing=$(security list-keychains -d user)
+searched=()
+while IFS= read -r line; do
+  [ -n "$line" ] && searched+=("$line")
+done <<<"$(sed 's/^[[:space:]]*"//;s/"$//' <<<"$listing")"
+[ ${#searched[@]} -gt 0 ] || fail "the keychain search list read as empty; not rewriting it"
+security list-keychains -d user -s "$keychain" "${searched[@]}"
+
+xcrun notarytool store-credentials "$profile" --keychain "$keychain" \
+  --apple-id "$NOTARY_APPLE_ID" --team-id "$(scripts/make-pkg --team)" --password "$NOTARY_PASSWORD" >&2

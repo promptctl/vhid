@@ -3,6 +3,7 @@
 # daemon's launchd job, and the pinned Karabiner-DriverKit-VirtualHIDDevice package.
 #
 #   scripts/make-pkg <output directory>    # prints <output directory>/vhid-<version>.pkg, <version> from VERSION
+#   scripts/make-pkg --team    # prints the team whose Developer ID signs a release
 #   scripts/make-pkg --unsigned <output directory>
 #     # prints <output directory>/vhid-<version>-unsigned.pkg, <version> whatever this tree builds
 #
@@ -46,6 +47,10 @@ TEAM=6R988MUU27
 IDENTIFIER=ai.promptctl.vhid
 
 fail() { echo "make-pkg: $*" >&2; exit 1; }
+
+# The team, for the release workflow's notary credentials, read from here rather than
+# written a second time.
+[ "${1:-}" = --team ] && { echo "$TEAM"; exit 0; }
 
 signed=true
 [ "${1:-}" = --unsigned ] && { signed=false; shift; }
