@@ -46,10 +46,10 @@ import Testing
     @Test func aFrontmostApplicationWithNoRowShownIsStillNamed() {
         let listing = WindowListing(windows: [window(id: 1, owner: "Safari"), window(id: 2, owner: "Terminal")], excluded: [])
         let absent = Windows.report(listing, owner: nil, frontmost: Frontmost(pid: 77, name: "Float"))
-        #expect(Windows.report(listing, owner: "terminal", frontmost: Frontmost(pid: 999, name: "X")).contains("X (pid 999), with no window on screen."))
+        #expect(Windows.report(listing, owner: "terminal", frontmost: Frontmost(pid: 999, name: "X")).contains("X (pid 999), with no window listed."))
         #expect(Windows.report(WindowListing(windows: [window(id: 1)], excluded: []), owner: "zzz", frontmost: Frontmost(pid: 400, name: "Safari"))
             .contains("Frontmost: Safari (pid 400), its rows hidden by the owner filter."))
-        #expect(absent.contains("Frontmost: Float (pid 77), with no window on screen."))
+        #expect(absent.contains("Frontmost: Float (pid 77), with no window listed."))
         #expect(!absent.contains("\tfront"))
     }
 

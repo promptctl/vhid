@@ -13,7 +13,7 @@ import Foundation
 struct Windows: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "windows",
-        abstract: "List the on-screen windows, front to back, with their layer and bounds, and the application keys go to."
+        abstract: "List the on-screen windows, front to back, with their layer and bounds, and the frontmost application."
     )
 
     @Option(help: "Only windows owned by applications whose name contains this.")
@@ -119,7 +119,7 @@ struct Windows: AsyncParsableCommand {
     enum FrontRows: String {
         case shown = "its rows marked front"
         case filtered = "its rows hidden by the owner filter"
-        case none = "with no window on screen"
+        case none = "with no window listed"
     }
 }
 
