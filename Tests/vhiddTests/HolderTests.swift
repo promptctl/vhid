@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import vhidd
 
-/// One keyboard, one client at a time, and the refusal names who has it.
+/// One client at a time holds the devices, and the refusal names who has them.
 /// [LAW:behavior-not-structure]
 @Suite struct HolderTests {
     /// Held for the test's life: an identifier taken from an object that is gone names
@@ -20,12 +20,13 @@ import Testing
         try holder.serve(first, by: 41) { served.append("first") }
         let refusal = #expect(throws: Holder.Busy.self) { try holder.serve(second, by: 42) { served.append("second") } }
         #expect(refusal?.pid == 41)
+        #expect(refusal?.description == "pid 41 holds the devices")
         try holder.serve(first, by: 41) { served.append("first again") }
         #expect(served == ["first", "first again"])
         #expect(holder.pid == 41)
     }
 
-    @Test func freeingRunsTheReleaseAndFreesTheKeyboardForTheNextClaim() throws {
+    @Test func freeingRunsTheReleaseAndFreesTheDevicesForTheNextClaim() throws {
         let holder = Holder()
         try holder.serve(first, by: 41) {}
         var released = false
@@ -34,8 +35,8 @@ import Testing
         try holder.serve(second, by: 42) {}
     }
 
-    /// A refused connection never held the keyboard, and a connection that left no longer
-    /// does. Either one ending must neither free the keyboard from under the holder nor
+    /// A refused connection never held the devices, and a connection that left no longer
+    /// does. Either one ending must neither free the devices from under the holder nor
     /// release the holder's keys.
     @Test func freeingByOneThatDoesNotHoldItChangesNothingAndReleasesNothing() throws {
         let holder = Holder()

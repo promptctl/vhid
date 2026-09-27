@@ -1,8 +1,9 @@
 import Foundation
 
-/// Which connection has the keyboard. One at a time, because there is one keyboard: two
-/// clients typing through the same set of held keys would each post reports missing the
-/// other's, and the first to leave would release the keys the other was holding.
+/// Which connection has the devices - the keyboard and the mouse together, whichever one
+/// its verbs use. One at a time, because each device has one set of held keys and
+/// buttons: two clients acting through it would each post reports missing the other's,
+/// and the first to leave would release what the other was holding.
 /// [LAW:types-are-the-program] Refusal is the truthful answer to a second client, and a
 /// client that wants to share can connect per insert - the connection is lazy, and the
 /// helper paid for readiness once.
