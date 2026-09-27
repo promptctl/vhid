@@ -19,6 +19,7 @@
 #   /Library/LaunchDaemons/<service>.plist         its job, loaded by postinstall
 #   /usr/local/libexec/vhid-menubar                the menu bar item
 #   /Library/LaunchAgents/<service>.menubar.plist  its job, in each logged-in session
+#   /usr/local/libexec/vhid-uninstall              removes all of the above
 #
 # and the driver package, installed first, whose extension postinstall asks macOS to
 # activate for the logged-in user. Approving that activation is the one step left to a
@@ -147,6 +148,8 @@ packed=$("$payload/usr/local/bin/vhid" --version)
 [ "$packed" = "$version" ] \
   || fail "the packed vhid reports version '$packed', not '$version'"
 
+scripts/stage-uninstall "$service" >"$payload/usr/local/libexec/vhid-uninstall"
+
 plist="$payload/Library/LaunchDaemons/$service.plist"
 scripts/launchd-plist "$service" /usr/local/libexec/vhidd >"$plist"
 plutil -lint "$plist" >&2
@@ -175,7 +178,8 @@ mkdir -p "$components"
 # root:wheel; the modes are this. The plist is 0644 because launchd refuses a job file
 # anyone but root can write.
 find "$payload" -type d -exec chmod 755 {} +
-chmod 755 "$payload/usr/local/bin/vhid" "$payload/usr/local/libexec/vhidd" "$payload/usr/local/libexec/vhid-menubar"
+chmod 755 "$payload/usr/local/bin/vhid" "$payload/usr/local/libexec/vhidd" "$payload/usr/local/libexec/vhid-menubar" \
+  "$payload/usr/local/libexec/vhid-uninstall"
 chmod 644 "$plist" "$agent"
 pkgbuild --root "$payload" --scripts "$staged" --identifier "$IDENTIFIER" --version "$version" \
   --install-location / --ownership recommended "$components/vhid.pkg" >&2

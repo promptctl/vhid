@@ -1,0 +1,17 @@
+#!/bin/bash
+# Writes pkg/uninstall to stdout with the service it stops written in: the one step
+# between the source and what the pkg ships, taken by scripts/make-pkg and by
+# scripts/uninstall-test alike, so the test runs what ships.
+#
+#   scripts/stage-uninstall <service>
+#
+# Held to bash 3.2, like every script here.
+set -euo pipefail
+service=${1:?usage: scripts/stage-uninstall <service>}
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+# A launchd label, which is what gets written into the script unquoted: nothing that could
+# be read as shell.
+[[ $service =~ ^[A-Za-z0-9._-]+$ ]] || { echo "stage-uninstall: '$service' is not a launchd label" >&2; exit 1; }
+[ "$(grep -c '^service=@SERVICE@$' pkg/uninstall)" = 1 ] \
+  || { echo "stage-uninstall: pkg/uninstall has no single service=@SERVICE@ line to fill" >&2; exit 1; }
+sed "s/^service=@SERVICE@\$/service=$service/" pkg/uninstall

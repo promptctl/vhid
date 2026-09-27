@@ -1,0 +1,103 @@
+#!/bin/bash
+# vhid-uninstall, as the pkg ships it, run against stubs: launchctl, pkgutil, stat and id
+# answer from files in a scratch directory, and every path is under a scratch root, so
+# nothing here can stop a job or delete a file on this Mac.
+#
+# [LAW:behavior-not-structure] What is checked is what is left behind - jobs, files,
+# receipt - and what the script said and exited with.
+#
+# Held to bash 3.2, like every script here.
+set -uo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+SERVICE=ai.promptctl.vhid.vhidd
+STUB=$(mktemp -d) || exit 1
+trap 'rm -rf "$STUB"' EXIT
+scripts/stage-uninstall "$SERVICE" >"$STUB/vhid-uninstall" && chmod +x "$STUB/vhid-uninstall" || exit 1
+
+mkdir "$STUB/bin"
+# Loaded jobs are lines of $STUB/loaded; LAUNCHCTL_UNREADABLE makes print fail the way a
+# broken launchd would, and BOOTOUT_STATUS makes bootout answer as told.
+cat >"$STUB/bin/launchctl" <<'S'
+#!/bin/bash
+case $1 in
+  print)
+    [ -n "${LAUNCHCTL_UNREADABLE:-}" ] && { echo "launchctl: something else went wrong"; exit 1; }
+    grep -qxF "$2" "$STUB/loaded" && exit 0
+    echo "Could not find service \"$2\" in domain"; exit 113 ;;
+  bootout)
+    echo "bootout $2" >>"$STUB/reached"
+    grep -vxF "$2" "$STUB/loaded" >"$STUB/loaded.new"; mv "$STUB/loaded.new" "$STUB/loaded"
+    exit "${BOOTOUT_STATUS:-0}" ;;
+esac
+exit 97
+S
+cat >"$STUB/bin/pkgutil" <<'S'
+#!/bin/bash
+case $1 in
+  --pkg-info) [ -f "$STUB/receipt" ] ;;
+  --forget) echo "forget $2" >>"$STUB/reached"; rm -f "$STUB/receipt" ;;
+  *) exit 97 ;;
+esac
+S
+printf '#!/bin/bash\necho "${CONSOLE_USER:-brandon}"\n' >"$STUB/bin/stat"
+printf '#!/bin/bash\necho 501\n' >"$STUB/bin/id"
+chmod +x "$STUB/bin/"*
+export STUB PATH="$STUB/bin:$PATH" VHID_UNINSTALL_ROOT="$STUB/root"
+
+pass=0 failed=0
+check() {
+  if [ "$3" = "$2" ]; then pass=$((pass + 1)); else
+    failed=$((failed + 1)); printf 'uninstall-test: %s\n  want: %s\n  got:  %s\n' "$1" "$2" "$3" >&2
+  fi
+}
+
+# A Mac in the given state: the jobs named loaded, the files named present, the receipt
+# there or not.
+state() {
+  rm -rf "$STUB/root" "$STUB/reached" "$STUB/receipt"; : >"$STUB/loaded"; : >"$STUB/reached"
+  local jobs=$1 files=$2 receipt=$3 job path
+  for job in $jobs; do echo "$job" >>"$STUB/loaded"; done
+  for path in $files; do mkdir -p "$STUB/root$(dirname "$path")"; : >"$STUB/root$path"; done
+  [ "$receipt" = yes ] && : >"$STUB/receipt"
+  return 0
+}
+left() { (cd "$STUB/root" 2>/dev/null && find . -type f | sort | tr '\n' ' '); }
+run() { out=$("$STUB/vhid-uninstall" 2>&1); status=$?; }
+
+ALL=$("$STUB/vhid-uninstall" --paths | tr '\n' ' ')
+DAEMON=system/$SERVICE AGENT=gui/501/$SERVICE.menubar DEV=system/$SERVICE.dev
+
+state "$DAEMON $AGENT" "$ALL" yes; run
+check "fully installed: exit" 0 "$status"
+check "fully installed: files left" "" "$(left)"
+check "fully installed: jobs left" "" "$(cat "$STUB/loaded")"
+check "fully installed: receipt forgotten" no "$([ -f "$STUB/receipt" ] && echo yes || echo no)"
+check "fully installed: said what it removed" 9 "$(grep -c '^vhid-uninstall: \(stopped\|removed\|forgot\)' <<<"$out")"
+
+state "" "/usr/local/bin/vhid /Library/LaunchDaemons/$SERVICE.plist" no; run
+check "partly installed: exit" 0 "$status"
+check "partly installed: files left" "" "$(left)"
+check "partly installed: nothing stopped that was not loaded" "" "$(cat "$STUB/reached")"
+
+state "" "" no; run
+check "nothing installed: exit" 0 "$status"
+check "nothing installed: says so" "vhid-uninstall: nothing to remove: no vhid job, file or receipt is here" "$out"
+
+state "$DEV" "/usr/local/bin/vhid" yes; run
+check "dev job: exit" 0 "$status"
+check "dev job: left loaded" "$DEV" "$(cat "$STUB/loaded")"
+check "dev job: never booted out" "forget ai.promptctl.vhid" "$(cat "$STUB/reached")"
+
+state "$DAEMON" "$ALL" yes; before=$(left); LAUNCHCTL_UNREADABLE=1 run
+check "unreadable launchd: fails" 1 "$status"
+check "unreadable launchd: removes nothing" "$before" "$(left)"
+check "unreadable launchd: forgets nothing" "" "$(cat "$STUB/reached")"
+
+CONSOLE_USER=loginwindow; export CONSOLE_USER
+state "$DAEMON" "" no; run
+check "nobody logged in: daemon still stopped" "" "$(cat "$STUB/loaded")"
+unset CONSOLE_USER
+
+echo "uninstall-test: $pass passed, $failed failed"
+[ $failed -eq 0 ]

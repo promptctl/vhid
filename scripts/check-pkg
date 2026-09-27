@@ -59,12 +59,24 @@ drwxr-xr-x root wheel ./usr/local/bin
 -rwxr-xr-x root wheel ./usr/local/bin/vhid
 drwxr-xr-x root wheel ./usr/local/libexec
 -rwxr-xr-x root wheel ./usr/local/libexec/vhid-menubar
+-rwxr-xr-x root wheel ./usr/local/libexec/vhid-uninstall
 -rwxr-xr-x root wheel ./usr/local/libexec/vhidd
 BOM
 )
 actual=$(lsbom -p MUGf "$x/vhid.pkg/Bom" | awk '{ print $1, $2, $3, $4 }')
 bom=$(diff <(echo "$expected") <(echo "$actual")) || fail "the payload differs from what make-pkg states (< stated, > packed):
 $bom"
+
+# What the uninstaller removes is every file the pkg installs, read from the one it
+# ships; a file the pkg gains is then one it leaves behind until its list says so.
+uninstaller=$x/vhid.pkg/Payload/usr/local/libexec/vhid-uninstall
+if [ -x "$uninstaller" ]; then
+  files=$(lsbom -f -p f "$x/vhid.pkg/Bom" | sed 's|^\.||' | sort)
+  removes=$("$uninstaller" --paths | sort)
+  drift=$(diff <(echo "$files") <(echo "$removes")) \
+    || fail "vhid-uninstall does not remove exactly what the pkg installs (< installed, > removed):
+$drift"
+fi
 
 # The job's three names for the service, which launchd, the daemon and the CLI must agree on.
 daemon=$x/vhid.pkg/Payload/Library/LaunchDaemons/$service.plist
