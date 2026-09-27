@@ -1,18 +1,18 @@
 import Installations
 import Foundation
 
-/// One connection to the daemon, and the two devices reached over it.
+/// One connection to vhidd, and the two devices reached over it.
 ///
 /// [LAW:effects-at-boundaries] The XPC connection is the effect, and it is the whole of
 /// what this type adds. Everything above it - which character, which keys, where the
 /// pointer should end up, whether the target app is still in front - is decided in the
 /// user's own process against types that know nothing about privilege.
 ///
-/// One connection and not one per device, because the daemon serves one client at a time
+/// One connection and not one per device, because vhidd serves one client at a time
 /// and a keyboard and a mouse in one process are one client: two connections would have
 /// the second refused as busy by the first. [LAW:one-source-of-truth]
 ///
-/// Synchronous on purpose. Each call waits for the daemon's acknowledgement before the
+/// Synchronous on purpose. Each call waits for vhidd's acknowledgement before the
 /// next report goes out, because reports posted back to back are lost in the driver and a
 /// lost key-up leaves a key held for macOS to repeat. The waiting is not a sleep: the
 /// daemon answers every request, and the answer is what the pacing is built on.
@@ -28,7 +28,7 @@ public final class HelperConnection: @unchecked Sendable {
     private let spoken = NSLock()
     private var hasSpoken = false
 
-    /// The connection's failure, or the daemon's silence, as one thing a caller can catch.
+    /// The connection's failure, or vhidd's silence, as one thing a caller can catch.
     ///
     /// [LAW:types-are-the-program] The cause is a value and the words are made from it, so
     /// a reader that has to tell a refused signature from a service nobody holds reads
@@ -40,7 +40,7 @@ public final class HelperConnection: @unchecked Sendable {
             case connection(domain: String, code: Int, description: String)
             /// Nothing came back before the deadline.
             case silence(Duration)
-            /// The far end is something other than a daemon.
+            /// The far end is something other than vhidd's service.
             case notAHelper
         }
 
@@ -55,11 +55,11 @@ public final class HelperConnection: @unchecked Sendable {
         }
     }
 
-    /// Connects to the daemon's Mach service. The connection is lazy - launchd starts the
-    /// job on the first call, not here - so a daemon that is not installed is discovered
+    /// Connects to vhidd's Mach service. The connection is lazy - launchd starts the
+    /// job on the first call, not here - so a vhidd that is not installed is discovered
     /// when a key is first pressed rather than at construction.
     ///
-    /// `replyTimeout` bounds each call: a daemon that neither answers nor drops the
+    /// `replyTimeout` bounds each call: a vhidd that neither answers nor drops the
     /// connection is unreachable at the deadline rather than a caller blocked for good.
     /// `installation` says whose daemon this reaches. It has no default: installations run
     /// side by side, and a connection that guessed would type through another copy's
@@ -133,7 +133,7 @@ public final class HelperConnection: @unchecked Sendable {
         }
     }
 
-    /// What the daemon said back about one call.
+    /// What vhidd said back about one call.
     enum Word<Answer> {
         case answered(Answer)
         case failed(Error)
@@ -151,7 +151,7 @@ public final class HelperConnection: @unchecked Sendable {
     /// One round trip, with the reply turned back into a value or a throw.
     ///
     /// [LAW:no-silent-failure] An XPC call can fail in three ways that look nothing alike -
-    /// the daemon refused, the connection did, or nobody said anything - and a client that
+    /// vhidd refused, the connection did, or nobody said anything - and a client that
     /// only reads the first types into a dead service forever. All three arrive here, and
     /// all three throw.
     private func exchange<Answer>(_ body: (HelperService, @escaping (Word<Answer>) -> Void) -> Void) throws -> Answer {
@@ -166,7 +166,7 @@ public final class HelperConnection: @unchecked Sendable {
         case .answered(let answer): return answer
         case .failed(let error): throw error
         case nil:
-            // A daemon silent this long is taken as gone, and the connection with it: every
+            // A vhidd silent this long is taken as gone, and the connection with it: every
             // call after this one, the leave included, fails at once rather than waiting out
             // a deadline of its own. The daemon releases what it held when it sees this.
             connection.invalidate()

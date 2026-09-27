@@ -15,7 +15,7 @@ private final class Journal: Sendable {
 }
 
 /// A device that holds the thread a key-down is made on until the test acknowledges it,
-/// as the daemon's round trip holds it until the report is posted.
+/// as vhidd's round trip holds it until the report is posted.
 private final class BlockingKeyPress: KeyPress {
     struct Unacknowledged: Error {}
 

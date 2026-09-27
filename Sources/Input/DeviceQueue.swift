@@ -14,7 +14,7 @@ import Dispatch
 /// is the one place the wait holds up nobody. [LAW:no-ambient-temporal-coupling]
 ///
 /// Serial, and one shared by the keyboard and the mouse a client posts through, because
-/// the daemon takes their reports as one sequence: two in flight at once would be ordered
+/// vhidd takes their reports as one sequence: two in flight at once would be ordered
 /// by its lock rather than by the order they were asked in. A value handed to both rather
 /// than a static, so one client never waits on another's. [LAW:no-shared-mutable-globals]
 public final class DeviceQueue: Sendable {

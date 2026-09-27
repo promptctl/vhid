@@ -256,7 +256,7 @@ import Testing
     /// and doctor has no root to reach - which is why it names the driver install to a
     /// reader instead of taking it. If this ever stops being true, the ticket's account
     /// of what blocks a self-installing driver row stops being true with it.
-    @Test func theDaemonTheHelperNeedsIsInsideThePackageItCouldNotInstall() {
+    @Test func theDaemonVhiddNeedsIsInsideThePackageItCouldNotInstall() {
         #expect(DaemonProcess.executable.hasPrefix(DriverProbe.supportDirectory))
     }
 }

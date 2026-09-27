@@ -46,7 +46,7 @@ public final class VirtualPointing: PointingDevice {
     public var buttonsDown: Set<Button> { held.withLock { $0 } }
 
     /// Over a connection the keyboard may share: pqrs's daemon keeps one keyboard and one
-    /// pointing device per client connection, so the two devices of one vhidd ride one
+    /// pointing device per client connection, so the two devices of one client ride one
     /// socket, and the daemon's `erase_client` takes both when it closes.
     public init(daemon: DaemonConnection, reportTimeout: Duration = .seconds(2)) {
         self.daemon = daemon
