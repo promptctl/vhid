@@ -73,6 +73,12 @@ private struct JournalPointing: Pointing {
 
     /// A key and then a move, asked for on one queue, arrive in that order however long the
     /// key's answer takes. On a queue of its own the move would land while the key waits.
+    ///
+    /// The move is asked for once the key is on the device, and the key is acknowledged
+    /// once the move is in line. A call is in line the moment it is asked for: the move's
+    /// task marks that it has asked and calls the mouse in one stretch on this actor, with
+    /// nothing between them that could suspend - so a mark that can be seen is a move that
+    /// is queued.
     @Test func aKeyAndAMoveOnOneQueueArriveInTheOrderAsked() async throws {
         let journal = Journal()
         let device = BlockingKeyPress(journal: journal)
@@ -80,8 +86,13 @@ private struct JournalPointing: Pointing {
         let keyboard = QueuedKeyboard(keyboard: device, queue: queue)
         let mouse = QueuedMouse(pointing: JournalPointing(journal: journal), queue: queue)
         let pressed = Task { try await keyboard.down(Usage(rawValue: 0x04)) }
-        let moved = Task { try await mouse.move(by: Move(x: Count(clamping: 3), y: Count(clamping: 4))) }
         #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { device.blocking })
+        var asked = false
+        let moved = Task {
+            asked = true
+            try await mouse.move(by: Move(x: Count(clamping: 3), y: Count(clamping: 4)))
+        }
+        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { asked })
         device.acknowledge()
         try await pressed.value
         try await moved.value

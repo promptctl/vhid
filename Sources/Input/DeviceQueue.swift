@@ -23,8 +23,10 @@ public final class DeviceQueue: Sendable {
     public init() {}
 
     /// Runs `call` on the queue and resumes with what it threw, if anything. Handed over
-    /// on the caller's actor, so calls made there run in the order they were made.
-    public func run(isolation: isolated (any Actor)? = #isolation, _ call: @escaping @Sendable () throws -> Void) async throws {
+    /// on the caller's executor before anything suspends - every async function here runs
+    /// where its caller does (Package.swift) - so calls asked for in order are in line in
+    /// that order. [LAW:no-ambient-temporal-coupling]
+    public func run(_ call: @escaping @Sendable () throws -> Void) async throws {
         try await withCheckedThrowingContinuation { continuation in
             queue.async { continuation.resume(with: Result(catching: call)) }
         }
