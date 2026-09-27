@@ -53,12 +53,12 @@ public enum DaemonProbe {
                 ? .devicesDown(reason: refused.reason)
                 : .failed(reason: refused.reason)
         }
-        guard let unreachable = error as? HelperConnection.Unreachable else { return .failed(reason: "\(error)") }
+        guard let unreachable = error as? HelperConnection.Unreachable else { return .failed(reason: (error as NSError).localizedDescription) }
         switch unreachable.cause {
         case .connection(domain: NSCocoaErrorDomain, code: NSXPCConnectionInterrupted, description: _): return .refusedThisVhid
-        case .connection(domain: NSCocoaErrorDomain, code: NSXPCConnectionInvalid, description: _): return .unreachable(reason: unreachable.description)
-        case .silence: return .silent(reason: unreachable.description)
-        case .connection, .notAHelper: return .failed(reason: unreachable.description)
+        case .connection(domain: NSCocoaErrorDomain, code: NSXPCConnectionInvalid, description: _): return .unreachable(reason: "\(NSCocoaErrorDomain) \(NSXPCConnectionInvalid)")
+        case .silence(let deadline): return .silent(reason: "no answer in \(deadline)")
+        case .connection, .notAHelper, .abandoned: return .failed(reason: unreachable.description)
         }
     }
 }

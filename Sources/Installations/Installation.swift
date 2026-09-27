@@ -124,4 +124,16 @@ public extension Installation {
     /// The code a refusal crosses under when the devices are not up, so a client reads that
     /// by its code and not its words. Every other refusal is code 1.
     static let devicesDownCode = 2
+
+    /// The code a refusal crosses under when this connection's seat turned the act away
+    /// before it reached the devices: another client holds them, this connection already
+    /// handed them back, or the devices it held were lost and everything released.
+    static let seatRefusedCode = 3
+
+    /// Whether a refusal says the act never reached the devices, so nothing is held for
+    /// the connection it refused: the devices are down, or the seat turned it away.
+    /// [LAW:single-enforcer] The one reading of the codes a client makes this decision by.
+    public static func turnedAway(domain: String, code: Int) -> Bool {
+        domain == refusalDomain && [devicesDownCode, seatRefusedCode].contains(code)
+    }
 }

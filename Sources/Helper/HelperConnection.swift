@@ -26,12 +26,14 @@ public final class HelperConnection: @unchecked Sendable {
     /// side, and "the helper" does not say which one did not answer.
     private let service: String
 
-    /// Whether the daemon may hold anything for this connection: an act it acknowledged,
-    /// or one that went unanswered and may have landed. An act refused, or one the
-    /// connection never delivered, left nothing behind - so until one of the first two
-    /// happens there is nothing to release and nothing to leave, and no key can be held.
-    private let admission = NSLock()
-    private var admitted = false
+    /// What this connection has been through, under one lock: whether anything has been
+    /// sent over it, whether the daemon has ever replied on it, and whether it was given up
+    /// on after the daemon went silent. The connection is lazy, so until something is sent
+    /// the daemon has never seen it and holds nothing for it.
+    private let history = NSLock()
+    private var hasSpoken = false
+    private var hasBeenAnswered = false
+    private var abandoned: Duration?
 
     /// The connection's failure, or vhidd's silence, as one thing a caller can catch.
     ///
@@ -47,10 +49,23 @@ public final class HelperConnection: @unchecked Sendable {
             case silence(Duration)
             /// The far end is something other than vhidd's service.
             case notAHelper
+            /// This connection was given up on after the daemon was silent this long, so
+            /// nothing more crosses it.
+            case abandoned(Duration)
         }
 
         public let service: String
         public let cause: Cause
+
+        /// Whether the connection failed before reaching the daemon: nobody holds the
+        /// service, or the daemon refused the connection as it opened. Either also ends a
+        /// connection the daemon already served, which is why this alone proves nothing.
+        var neverGotThrough: Bool {
+            switch cause {
+            case .connection(NSCocoaErrorDomain, NSXPCConnectionInvalid, _), .connection(NSCocoaErrorDomain, NSXPCConnectionInterrupted, _): true
+            case .connection, .silence, .notAHelper, .abandoned: false
+            }
+        }
 
         /// Which link failed, in the words of what to do about it. The two codes NSXPC
         /// gives a client that never got through are named for what they mean here; any
@@ -64,6 +79,7 @@ public final class HelperConnection: @unchecked Sendable {
             case .connection(let domain, let code, let description): "\(service) could not be reached: \(description) (\(domain) \(code))"
             case .silence(let deadline): "\(service) did not answer in \(deadline)"
             case .notAHelper: "\(service) answered with something that is not vhidd's service"
+            case .abandoned(let deadline): "the connection to \(service) was dropped after it did not answer in \(deadline)"
             }
         }
     }
@@ -107,32 +123,48 @@ public final class HelperConnection: @unchecked Sendable {
 
     /// Hands the devices back to the daemon, and returns once they are free.
     ///
+    /// A connection that never spoke never reached the daemon, so there is nothing to hand
+    /// back, and asking would only add a failure to the one that stopped the caller.
+    /// [LAW:dataflow-not-control-flow] Whether it spoke is a fact of the connection,
+    /// recorded by `call`, not a guess about which verbs send reports.
     public func leave() throws {
+        history.lock()
+        let reached = hasSpoken
+        history.unlock()
+        guard reached else { return }
         try release { service, reply in service.leave(reply: reply) }
     }
 
-    /// A call that frees what the daemon holds for this connection, sent only when it may
-    /// hold something.
+    /// A call that frees what the daemon holds for this connection, which succeeds when
+    /// its failure proves nothing is held.
     ///
-    /// A connection the daemon never admitted has nothing to hand back. Asking anyway would
-    /// be the connection's first act: it would claim the devices only to free them, fail as
-    /// busy while someone else holds them - and when the call before it failed because the
-    /// daemon was unreachable or refusing, fail the same way and report a key "not
-    /// released" that never went down. [LAW:dataflow-not-control-flow] Whether it was
-    /// admitted is a fact of the connection, recorded by `call`, not a guess about which
-    /// verbs send reports.
+    /// A release is always sent. What its failure means is the question: "a key may be
+    /// held" is only true when the daemon could have set one down for this connection.
+    /// Two failures prove it did not, and are the release having nothing to do:
+    /// - the daemon turned the call away at the seat (`Installation.turnedAway`), which
+    ///   it does only for a connection whose acts never reach the devices;
+    /// - the connection never got through (4099, 4097) and nothing on it was ever
+    ///   answered, so no act of its ran.
+    /// [LAW:single-enforcer] Read here, once, for the keyboard, the mouse and leaving.
     func release(_ body: (HelperService, @escaping (Error?) -> Void) -> Void) throws {
-        admission.lock()
-        let holding = admitted
-        admission.unlock()
-        guard holding else { return }
-        try call(body)
+        do {
+            try call(body)
+        } catch let refused as Refused where Installation.turnedAway(domain: refused.domain, code: refused.code) {
+            return
+        } catch let unreachable as Unreachable where !answered && unreachable.neverGotThrough {
+            return
+        }
+    }
+
+    private var answered: Bool {
+        history.lock(); defer { history.unlock() }
+        return hasBeenAnswered
     }
 
     /// Which process holds the devices, or nil when none does.
     ///
-    /// Not a word on the devices, so it leaves this connection as unadmitted as it found
-    /// it: a `leave` after it still has nothing to hand back. [LAW:dataflow-not-control-flow]
+    /// Not a word on the devices, so it leaves this connection as unspoken as it found it:
+    /// a `leave` after it still has nothing to hand back. [LAW:dataflow-not-control-flow]
     public func status() throws -> Int32? {
         try exchange { service, reply in service.status { holder, error in reply(error.map { .failed($0) } ?? .answered(holder?.int32Value)) } }
     }
@@ -174,20 +206,13 @@ public final class HelperConnection: @unchecked Sendable {
         case failed(Error)
     }
 
-    /// One act on the devices, answered by an acknowledgement or a refusal. An act
-    /// acknowledged, or one that went unanswered and so may have landed, admits the
-    /// connection; one refused or never delivered leaves it as it was.
+    /// One act on the devices: the connection has spoken from here on, and the reply is an
+    /// acknowledgement or a refusal.
     func call(_ body: (HelperService, @escaping (Error?) -> Void) -> Void) throws {
-        let outcome = Result { try exchange { service, reply in body(service) { error in reply(error.map { .failed($0) } ?? .answered(())) } } }
-        let landed = switch outcome {
-        case .success: true
-        case .failure(let unreachable as Unreachable): unreachable.cause == .silence(replyTimeout)
-        case .failure: false
-        }
-        admission.lock()
-        admitted = admitted || landed
-        admission.unlock()
-        try outcome.get()
+        history.lock()
+        hasSpoken = true
+        history.unlock()
+        try exchange { service, reply in body(service) { error in reply(error.map { .failed($0) } ?? .answered(())) } }
     }
 
     /// One round trip, with the reply turned back into a value or a throw.
@@ -197,6 +222,10 @@ public final class HelperConnection: @unchecked Sendable {
     /// only reads the first types into a dead service forever. All three arrive here, and
     /// all three throw.
     private func exchange<Answer>(_ body: (HelperService, @escaping (Word<Answer>) -> Void) -> Void) throws -> Answer {
+        history.lock()
+        let gaveUp = abandoned
+        history.unlock()
+        if let gaveUp { throw Unreachable(service: service, cause: .abandoned(gaveUp)) }
         let outcome = Outcome<Answer>()
         let proxy = connection.remoteObjectProxyWithErrorHandler { error in
             let failed = error as NSError
@@ -204,7 +233,16 @@ public final class HelperConnection: @unchecked Sendable {
         }
         guard let helper = proxy as? HelperService else { throw Unreachable(service: service, cause: .notAHelper) }
         body(helper) { outcome.say($0) }
-        switch outcome.await(replyTimeout) {
+        let word = outcome.await(replyTimeout)
+        // The daemon's own word, an answer or a refusal, and not the connection's failure
+        // or nobody's silence.
+        let replied = switch word {
+        case .answered: true
+        case .failed(let error): !(error is Unreachable)
+        case nil: false
+        }
+        history.lock(); hasBeenAnswered = hasBeenAnswered || replied; history.unlock()
+        switch word {
         case .answered(let answer): return answer
         case .failed(let error as Unreachable): throw error
         case .failed(let error):
@@ -216,6 +254,7 @@ public final class HelperConnection: @unchecked Sendable {
             // A vhidd silent this long is taken as gone, and the connection with it: every
             // call after this one, the leave included, fails at once rather than waiting out
             // a deadline of its own. The daemon releases what it held when it sees this.
+            history.lock(); abandoned = replyTimeout; history.unlock()
             connection.invalidate()
             throw Unreachable(service: service, cause: .silence(replyTimeout))
         }

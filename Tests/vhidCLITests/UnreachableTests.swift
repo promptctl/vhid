@@ -116,11 +116,11 @@ import Testing
         #expect(said.clicked == refused)
     }
 
-    /// Once the daemon has acknowledged an act, a failure after it may leave that key or
-    /// button down, and the release that failed with it says so.
+    /// Once the daemon has acknowledged an act, a failure of the devices after it may leave
+    /// that key or button down, and the release that failed with it says so.
     @Test func aFailureAfterTheDaemonActedKeepsTheHeldWarning() async {
-        let said = await Self.said(.refusing(after: 1, refusal: Self.devicesDown))
-        let refused = "\(Self.far) refused: devices not up: the driver extension is awaiting approval"
+        let said = await Self.said(.refusing(after: 1, refusal: NSError(domain: Installation.refusalDomain, code: 1, userInfo: [NSLocalizedDescriptionKey: "the driver would not take the report"])))
+        let refused = "\(Self.far) refused: the driver would not take the report"
         #expect(said.typed.hasSuffix("The keyboard was not released afterwards: \(refused). A key may be left held"), "\(said.typed)")
         #expect(said.clicked == "\(refused). The mouse was not released afterwards: \(refused). A button may be left held")
     }

@@ -92,6 +92,7 @@ import Testing
             try await blocking { try keyboard.down(usage) }
             return true
         } catch let refused as HelperConnection.Refused where refused.domain == Installation.refusalDomain {
+            #expect(refused.code == Installation.seatRefusedCode)
             return false
         }
     }
