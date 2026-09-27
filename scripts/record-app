@@ -24,7 +24,8 @@ identifier=${4:?usage: scripts/record-app <vhid-record binary> <output directory
 [ -f "$binary" ] || { echo "record-app: $binary was not built" >&2; exit 1; }
 
 app=$out/vhid-record.app
-rm -rf "$app"
+# Updated in place rather than removed and made again, so the bundle a person has granted
+# Input Monitoring to is never missing while a build runs.
 mkdir -p "$app/Contents/MacOS"
 ditto "$binary" "$app/Contents/MacOS/vhid-record"
 cat >"$app/Contents/Info.plist" <<PLIST
