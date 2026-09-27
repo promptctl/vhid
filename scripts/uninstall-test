@@ -193,6 +193,9 @@ check "driver absent: exit" 0 "$status"
 check "driver absent: nothing withdrawn" "" "$(grep '^manager' "$STUB/reached")"
 check "driver absent: vhid gone" "" "$(left)"
 
+driver_mac no; run_driver
+check "driver already absent: its removal is not run" 0 "$(grep -c '^virtual-hid-driver:' <<<"$out")"
+
 driver_mac yes; before=$(left); ELEMENTS=15.5.0 run_driver
 check "Karabiner-Elements present: refused" 1 "$status"
 check "Karabiner-Elements present: says why" 1 "$(grep -c 'Karabiner-Elements 15.5.0 is installed and shares' <<<"$out")"

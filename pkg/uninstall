@@ -122,10 +122,14 @@ if $driver && [ -n "$driver_script" ]; then
   # Where the removal left the driver is read afresh rather than taken from its exit
   # status: 2 is how it reports a restart pending, but a failed step under its errexit can
   # end it with 2 as well.
-  status=0
-  driver_step cmd_remove || status=$?
-  verdict=$(driver_step report_state 2>/dev/null) || verdict=unknown
+  # A driver already gone is nothing removed, so a second run can say so.
+  if [ "$(driver_step report_state 2>/dev/null)" = absent ]; then status=0 verdict=already-absent; else
+    status=0
+    driver_step cmd_remove || status=$?
+    verdict=$(driver_step report_state 2>/dev/null) || verdict=unknown
+  fi
   case "$status $verdict" in
+    "0 already-absent") ;;
     "0 absent" | "0 pending-reboot" | "2 pending-reboot") removed=$((removed + 1)) ;;
     *) fail "the driver's removal did not finish (above says why; it now reads '$verdict'). vhid's jobs are stopped and its files are in place: run sudo $0 --driver again once that is fixed, or sudo $0 to remove vhid alone" ;;
   esac
