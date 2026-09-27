@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds the installer: one signed distribution pkg carrying vhid, its daemon, the
+# Builds the installer: one signed distribution pkg carrying vhid, eyes, vhid's daemon, the
 # daemon's launchd job, and the pinned Karabiner-DriverKit-VirtualHIDDevice package.
 #
 #   scripts/make-pkg <output directory>    # prints <output directory>/vhid-<version>.pkg, <version> from VERSION
@@ -16,6 +16,7 @@
 # What installing it does:
 #
 #   /usr/local/bin/vhid                            the CLI
+#   /usr/local/bin/eyes                            the screen reader, its own package in eyes/
 #   /usr/local/libexec/vhidd                       the root daemon
 #   /Library/LaunchDaemons/<service>.plist         its job, loaded by postinstall
 #   /usr/local/libexec/vhid-menubar                the menu bar item
@@ -108,12 +109,23 @@ trap 'rm -rf "$work"' EXIT
 build() { swift build -c release --arch arm64 --arch x86_64 --build-system swiftbuild --scratch-path "$work/build" "$@"; }
 build >&2
 bin=$(build --show-bin-path)
+# eyes is a package of its own (README "Two packages"), built once per architecture and
+# joined: swiftbuild links its executable with no _main (the entry point of a target not
+# named for its product, measured with Swift 6.3), and it needs none of swiftbuild's
+# plugin support.
+eyes_build() { (cd eyes && swift build -c release --triple "$1-apple-macosx15.0" --scratch-path "$work/eyes-$1" "${@:2}"); }
+eyes_build arm64 >&2
+eyes_build x86_64 >&2
+eyes_bin=$work/eyes-universal
+mkdir -p "$eyes_bin"
+lipo -create -output "$eyes_bin/eyes" "$(eyes_build arm64 --show-bin-path)/eyes" "$(eyes_build x86_64 --show-bin-path)/eyes"
 
 payload="$work/root"
 mkdir -p "$payload/usr/local/bin" "$payload/usr/local/libexec" "$payload/Library/LaunchDaemons" "$payload/Library/LaunchAgents"
 ditto "$bin/vhid" "$payload/usr/local/bin/vhid"
 ditto "$bin/vhidd" "$payload/usr/local/libexec/vhidd"
 ditto "$bin/vhid-menubar" "$payload/usr/local/libexec/vhid-menubar"
+ditto "$eyes_bin/eyes" "$payload/usr/local/bin/eyes"
 
 # What the notary service refuses, asked of one binary after signing it: no Developer
 # ID signature from the team, no Hardened Runtime, no secure timestamp, or the
@@ -138,6 +150,7 @@ if $signed; then
   sign "$payload/usr/local/bin/vhid" "$IDENTIFIER"
   sign "$payload/usr/local/libexec/vhidd" "$IDENTIFIER.vhidd"
   sign "$payload/usr/local/libexec/vhid-menubar" "$IDENTIFIER.menubar"
+  sign "$payload/usr/local/bin/eyes" "$IDENTIFIER.eyes"
 fi
 
 # The service the packed CLI dials when told nothing, asked of the CLI itself, and every
@@ -171,6 +184,7 @@ plutil -lint "$agent" >&2
 # carries the package the script's pins name. [LAW:single-enforcer]
 scripts/check-driver-pins "$payload/usr/local/bin/vhid" >&2
 scripts/check-notice "$payload/usr/local/bin/vhid" "$work/build" >&2
+scripts/check-notice "$payload/usr/local/bin/eyes" "$work/eyes-arm64" >&2
 
 staged="$work/scripts"
 ditto pkg/scripts "$staged"
@@ -184,7 +198,7 @@ mkdir -p "$components"
 # root:wheel; the modes are this. The plist is 0644 because launchd refuses a job file
 # anyone but root can write.
 find "$payload" -type d -exec chmod 755 {} +
-chmod 755 "$payload/usr/local/bin/vhid" "$payload/usr/local/libexec/vhidd" "$payload/usr/local/libexec/vhid-menubar" \
+chmod 755 "$payload/usr/local/bin/vhid" "$payload/usr/local/bin/eyes" "$payload/usr/local/libexec/vhidd" "$payload/usr/local/libexec/vhid-menubar" \
   "$payload/usr/local/libexec/vhid-uninstall" "$payload/usr/local/libexec/vhid-virtual-hid-driver"
 chmod 644 "$plist" "$agent"
 pkgbuild --root "$payload" --scripts "$staged" --identifier "$IDENTIFIER" --version "$version" \
