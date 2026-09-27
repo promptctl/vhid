@@ -76,16 +76,22 @@ state=$("$vhid" driver state 2>&1) && status=0 || status=$?
 say "driver (vhid driver state exited $status): $(tr '\n' ' ' <<<"$state")"
 
 # The switch is the one step left, so the person is put in front of it rather than told
-# where it is: this URL opens the Driver Extensions sheet itself. Unless the driver is
-# already on, since the registration the activation asked for can land a moment after the
-# state above was read; and only for someone logged in - a window for nobody is nothing.
-# Opening is a courtesy the closing page and vhid doctor both back up, so a refusal is
-# said, not failed on.
-case "$console:$state" in
-  root:*|loginwindow:*|_mbsetupuser:*) ;;
-  *:enabled|*:running) ;;
+# where it is: this URL opens the Driver Extensions sheet itself. Only for the states that
+# switch answers - installed-inactive among them, since the registration the activation
+# asked for can land a moment after the state above was read - and only for someone
+# logged in. Opening is a courtesy the closing page and vhid doctor both back up, so a
+# refusal is said, not failed on.
+#
+# The verdict is the last line: `vhid driver state` writes its fact table to stderr
+# first, and both went into $state for the log.
+verdict=${state##*$'\n'}
+case "$console" in
+  root|loginwindow|_mbsetupuser) ;;
   *)
-    launchctl asuser "$(id -u "$console")" sudo -u "$console" /usr/bin/open "$driver_extensions" \
-      && say "opened Driver Extensions in System Settings for $console" \
-      || say "could not open Driver Extensions in System Settings for $console" ;;
+    case "$verdict" in
+      installed-inactive|awaiting-approval|disabled)
+        launchctl asuser "$(id -u "$console")" sudo -u "$console" /usr/bin/open "$driver_extensions" \
+          && say "opened Driver Extensions in System Settings for $console" \
+          || say "could not open Driver Extensions in System Settings for $console" ;;
+    esac ;;
 esac

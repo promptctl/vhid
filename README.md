@@ -105,10 +105,11 @@ One step is left to you, because macOS attributes a driver extension to the pers
 the Mac and no installer can approve it: turn on
 `org.pqrs.Karabiner-DriverKit-VirtualHIDDevice` under **System Settings > General > Login
 Items & Extensions > Driver Extensions (i)**. An install made while you are logged in
-ends with that sheet open. `vhid doctor` prints `ready` once it is on. Until then the
+ends with that sheet open. `vhid driver state` prints `enabled` or `running` once it is
+on, and `vhid doctor` prints `ready` once everything vhid needs is met. Until then the
 daemon is loaded but cannot bring the devices up: it keeps trying, backing off to once a
 minute, and refuses every verb with `devices not up:` and the reason, which names the
-switch while the driver is off. Once the driver is on, the
+driver's step while the driver is off. Once the driver is on, the
 next attempt brings the devices up with no restart.
 
 The installed CLI talks to the installed daemon by default. A build from this tree talks

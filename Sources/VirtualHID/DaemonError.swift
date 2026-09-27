@@ -1,4 +1,3 @@
-import DriverExtension
 import Foundation
 
 /// What went wrong with the daemon, in the words of what it did or did not say.
@@ -18,9 +17,7 @@ public enum DaemonError: Error, CustomStringConvertible, Equatable {
     case malformed(String)
     case driverVersionMismatched
     /// The daemon never said `awaiting` held; `said` is its latest word on every status it
-    /// did send, which is the reason - an unapproved driver reads as not activated, and
-    /// then the switch that activates it is named too, so a person who skipped the
-    /// installer's last page learns the step from their first vhid call.
+    /// did send, which is the reason - an unapproved driver reads as not activated.
     case notReady(awaiting: DaemonConnection.Status, said: [DaemonConnection.Status: Bool])
 
     public var description: String {
@@ -40,7 +37,6 @@ public enum DaemonError: Error, CustomStringConvertible, Equatable {
         case .notReady(let awaiting, let said):
             "the daemon never said \(awaiting.name); it last said "
                 + (said.isEmpty ? "nothing about the driver" : said.sorted { $0.key.rawValue < $1.key.rawValue }.map { "\($0.key.name): \($0.value ? "yes" : "no")" }.joined(separator: ", "))
-                + (said[.driverActivated] == false ? ". The driver extension is not switched on. \(DriverProbe.switchStep)" : "")
         }
     }
 }

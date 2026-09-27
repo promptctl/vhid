@@ -145,7 +145,7 @@ import VirtualHID
         let readiness = Readiness()
         var downWhileWaiting: [Bool] = []
         #expect(throws: Stop.self) {
-            try logged.keepUp(within: .milliseconds(20), backoff: Backoff(first: .seconds(2), most: .seconds(5)), readiness: readiness, serve: { _ in RecordingDevices() }, now: { .now }) { wait in
+            try logged.keepUp(within: .milliseconds(20), backoff: Backoff(first: .seconds(2), most: .seconds(5)), readiness: readiness, serve: { _ in RecordingDevices() }, driver: { nil }, now: { .now }) { wait in
                 events.append("wait \(wait)")
                 downWhileWaiting.append((try? readiness.devices()) == nil)
                 if events.filter({ $0.hasPrefix("wait") }).count == 3 { throw Stop() }
@@ -171,7 +171,7 @@ import VirtualHID
                 let lose = world.lost!
                 DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(20)) { lose(.closed) }
                 return RecordingDevices()
-            }, now: { .now }) { wait in
+            }, driver: { nil }, now: { .now }) { wait in
                 waits.append(wait)
                 downWhileWaiting.append((try? readiness.devices()) == nil)
                 if waits.count == 2 { throw Stop() }
