@@ -11,7 +11,7 @@ public struct Usage: RawRepresentable, Hashable, Comparable, Sendable {
     /// The bit this usage carries in a report's modifier byte, when it is one of the
     /// eight that do. Derived from the usage rather than tabulated beside it: the eight
     /// modifier usages run in the same order as their bits, so the bit IS the usage seen
-    /// another way. [LAW:one-source-of-truth] The spike kept the two as separate
+    /// another way. [LAW:one-source-of-truth] low-talker's spike kept the two as separate
     /// constants, which is one edit away from a shift key that types a control character.
     public var modifierBit: UInt8? {
         guard (0xE0...0xE7).contains(rawValue) else { return nil }

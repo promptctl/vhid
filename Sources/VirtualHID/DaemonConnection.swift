@@ -156,9 +156,9 @@ public final class DaemonConnection: Sendable {
         let deadline = began + limit
         try self.request(request, payload, by: deadline)
         // Taken here because `request` returns on the daemon's answer to it. Timing the
-        // first frame of the readiness wait instead - as this did, and the spike before
-        // it - reports the first status push under a name that says the daemon had not
-        // spoken yet, when answering the request is exactly what it just did.
+        // first frame of the readiness wait instead - as this did, and low-talker's spike
+        // before it - reports the first status push under a name that says the daemon had
+        // not spoken yet, when answering the request is exactly what it just did.
         let answered = ContinuousClock.now
         try wait(for: ready, by: deadline)
         return Startup(answered: answered - began, ready: ContinuousClock.now - began)

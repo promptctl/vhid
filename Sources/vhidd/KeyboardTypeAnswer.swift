@@ -23,8 +23,8 @@ enum KeyboardTypeAnswer {
     ///
     /// [LAW:effects-at-boundaries] Pure, so the one thing the merge must never do - drop
     /// another device's entry - is asserted without root and without a file. The cache on
-    /// this Mac already held an entry from an unrelated country-33 device, and
-    /// low-talker's 3ti.7 spike's other temptation was to initialise this keyboard as
+    /// this Mac already held an entry from an unrelated country-33 device, and a
+    /// shortcut tempting in low-talker's 3ti.7 spike was to initialise this keyboard as
     /// country 33 so it would collide with that entry: that would make the device declare
     /// something untrue about itself, and would work only until the unrelated entry was
     /// cleared. We write our own key and aim at nobody else's.

@@ -21,8 +21,8 @@ import Testing
     }
 
     /// The one thing this must never do. The Mac this was written on already held an
-    /// entry from an unrelated country-33 device, and the tempting shortcut in the 3ti.7
-    /// notes was to make this keyboard claim country 33 so it would collide with that
+    /// entry from an unrelated country-33 device, and the tempting shortcut in low-talker's
+    /// 3ti.7 notes was to make this keyboard claim country 33 so it would collide with that
     /// entry - a device declaring something untrue about itself, and only until the
     /// unrelated entry was cleared. We add ours and touch nobody else's.
     @Test func everyOtherDevicesAnswerSurvives() {

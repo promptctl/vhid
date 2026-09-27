@@ -15,14 +15,14 @@ import Testing
     /// composed half of the walk properly rather than through US's five accents.
     static let extended = try! KeyboardLayout.named("com.apple.keylayout.USExtended")
 
-    /// The alphabet the 3ti.2 spike typed, with the usages it typed them as.
+    /// The alphabet low-talker's 3ti.2 spike typed, with the usages it typed them as.
     ///
-    /// This is the hand-written table that PR #26 drove a real driver with - 500
-    /// characters into TextEdit, counted at the event tap and read back off the screen -
-    /// so it is the one statement of these usages that was checked against hardware rather
-    /// than against another reading of the same API. The reverse map is built by asking
-    /// macOS, and nothing in that construction would notice a key code transcribed into
-    /// the wrong HID usage; this notices. [LAW:one-source-of-truth]
+    /// This is the hand-written table that low-talker's PR #26 drove a real driver with -
+    /// 500 characters into TextEdit, counted at the event tap and read back off the
+    /// screen - so it is the one statement of these usages that was checked against
+    /// hardware rather than against another reading of the same API. The reverse map is
+    /// built by asking macOS, and nothing in that construction would notice a key code
+    /// transcribed into the wrong HID usage; this notices. [LAW:one-source-of-truth]
     static let spikesAlphabet: [(Character, UInt16, Bool)] = {
         func run(from usage: UInt16, _ plain: String, _ shifted: String) -> [(Character, UInt16, Bool)] {
             zip(plain, shifted).enumerated().flatMap { index, pair in
