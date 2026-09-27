@@ -100,14 +100,9 @@ final class FakeMouse: Mouse {
     var log: [String] { state.withLock { $0.log } }
     var position: ScreenPoint { state.withLock { $0.position } }
 
-    /// How many calls to accept before every one after is logged and refused.
-    var allow: Int {
-        get { state.withLock { $0.refused.lowerBound } }
-        set { state.withLock { $0.refused = newValue ..< .max } }
-    }
-
-    /// Which calls are logged and refused, counted from zero: `allow` is the range that
-    /// never ends, and one call alone is a stop the releases after it still answer.
+    /// Which calls are logged and refused, counted from zero: `n ..< .max` accepts n and
+    /// refuses every one after, and one call alone is a stop the releases after it still
+    /// answer.
     var refused: Range<Int> {
         get { state.withLock { $0.refused } }
         set { state.withLock { $0.refused = newValue } }
@@ -148,7 +143,7 @@ final class FakeMouse: Mouse {
     /// The pointer over this mouse, reading this screen.
     var pointer: Pointer { Pointer(mouse: self, cursor: cursor) }
 
-    /// A keyboard beside this mouse, posting into the same log under the same `allow`, so
+    /// A keyboard beside this mouse, posting into the same log under the same `refused`, so
     /// a run over both devices reads back as one sequence and can be refused at any report
     /// of it by one number. [LAW:no-mode-explosion]
     var keyboard: any Keyboard { Keys(mouse: self) }

@@ -67,7 +67,8 @@ import Testing
                 }
             }
             #expect(stop?.causes.last is Refused, "step \(step): \(whole.log[step])")
-            #expect(stop?.unreleased.isEmpty == true, "step \(step): \(whole.log[step])")
+            #expect(stop?.unreleased == nil, "step \(step): \(whole.log[step])")
+            #expect(stop?.stage == (step < 2 ? .pressing : step < 5 ? .acting : .releasing), "step \(step)")
             #expect(Self.held(after: mouse.log).isEmpty, "step \(step): \(mouse.log)")
             #expect(Array(mouse.log.prefix(step + 1)) == Array(whole.log.prefix(step + 1)), "step \(step)")
         }
@@ -77,14 +78,32 @@ import Testing
     /// still be down.
     @Test func aReleaseThatFailsIsReportedBesideTheStop() async throws {
         let mouse = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
-        mouse.allow = 1
+        mouse.refused = 1 ..< .max
         let stop = await #expect(throws: HoldingStopped.self) {
             try await mouse.pointer.holding(Self.shiftCommand, on: mouse.keyboard) {
                 try await $0.click(at: Self.target, button: .left, times: .single)
             }
         }
-        #expect(stop?.unreleased.count == 2)
-        #expect(stop?.description.hasSuffix("A button, or one of leftShift+leftCommand, may be left held") == true)
+        #expect(stop?.unreleased != nil)
+        #expect(stop?.description.hasSuffix("leftShift+leftCommand may be left held") == true)
+    }
+
+    /// A run cancelled between two modifiers stops before the pointer moves, with the key
+    /// that went down let go again.
+    @Test func aCancelledRunReleasesTheKeysItHeld() async throws {
+        let mouse = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
+        let keyboard = CancellingKeyboard(afterKeys: 1)
+        let run = Task { @MainActor in
+            _ = try await mouse.pointer.holding(Self.shiftCommand, on: keyboard) {
+                try await $0.click(at: Self.target, button: .left, times: .single)
+            }
+        }
+        keyboard.aim(at: run)
+        let stop = await #expect(throws: HoldingStopped.self) { try await run.value }
+        #expect(stop?.stage == .pressing)
+        #expect(stop?.cause is CancellationError)
+        #expect(keyboard.log == ["down e1", "up"])
+        #expect(mouse.log.isEmpty)
     }
 
     /// Fn is no key to the device, so a set naming it does not parse.

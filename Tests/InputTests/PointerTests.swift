@@ -79,7 +79,7 @@ import Testing
     /// the release was refused too. [LAW:no-silent-failure]
     @Test func aClickThatStopsReleasesAndReportsARefusedRelease() async throws {
         let mouse = FakeMouse(at: Self.origin)
-        mouse.allow = 1
+        mouse.refused = 1 ..< .max
         let stopped = try await #require(throws: PointingStopped.self) { try await mouse.pointer.click(at: Self.origin, button: .left, times: .single) }
         #expect(stopped.cause is Refused)
         #expect(stopped.unreleased != nil)

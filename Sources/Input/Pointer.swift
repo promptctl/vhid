@@ -298,12 +298,7 @@ public struct Pointer: Sendable {
     /// release gives: a button the driver believes is down is a drag that continues.
     /// [LAW:no-silent-failure] A release that fails is reported beside the stop.
     func release(isolation: isolated (any Actor)? = #isolation) async -> (any Error)? {
-        do {
-            try await mouse.releaseAll()
-            return nil
-        } catch {
-            return error
-        }
+        await failure(of: mouse.releaseAll)
     }
 }
 

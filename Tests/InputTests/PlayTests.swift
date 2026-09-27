@@ -160,7 +160,7 @@ import Testing
     @Test func aStopSaysHowFarThePlayGotAndReleases() async throws {
         let clock = ManualClock()
         let fake = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
-        fake.allow = 1
+        fake.refused = 1 ..< .max
         let play = try Play.parse("""
             {"to":{"x":0,"y":0}}
             {"t_ms":0,"down":"left"}

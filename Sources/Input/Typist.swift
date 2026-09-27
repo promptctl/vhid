@@ -78,12 +78,7 @@ public struct Typist {
     /// [LAW:no-silent-failure] A release that fails is reported beside the stop rather
     /// than thrown over it, so the operator is told both.
     private func release(isolation: isolated (any Actor)? = #isolation) async -> (any Error)? {
-        do {
-            try await keyboard.releaseAll()
-            return nil
-        } catch {
-            return error
-        }
+        await failure(of: keyboard.releaseAll)
     }
 
 }
