@@ -47,7 +47,7 @@ import Testing
         let again = run("Save As…", 100.5, 10, 60)
         let cut = run("Save", 100, 10, 28)
         let beside = run("Cancel", 170, 10, 50)
-        let kept = PixelReader.distinct([cut, whole, again, beside])
+        let kept = PixelReader.distinct([Piece(tile: 0, run: cut), Piece(tile: 1, run: whole), Piece(tile: 2, run: again), Piece(tile: 3, run: beside)])
         #expect(kept.count == 2)
         #expect(kept.contains(beside))
         #expect(kept.contains { $0.text.value == "Save As…" })
@@ -72,10 +72,12 @@ import Testing
         #expect(seen == ScreenRect(x: 1300, y: 800, width: 212, height: 182))
     }
 
-    /// Spanning two displays reads the one it mostly covers, in whole points.
-    @Test func aRectAcrossTwoDisplaysIsReadOnTheOneItMostlyCovers() throws {
-        let seen = try PixelReader.onOneDisplay(ScreenRect(x: -100.4, y: 10.6, width: 400, height: 50), displays: [Self.main, Self.left])
-        #expect(seen == ScreenRect(x: 0, y: 10, width: 300, height: 51))
+    /// Across two displays, the part on the other one is on screen and would go unread
+    /// while the reading claimed the whole region, so the rectangle is refused.
+    @Test func aRectAcrossTwoDisplaysIsRefused() {
+        #expect(throws: PixelsError.self) {
+            try PixelReader.onOneDisplay(ScreenRect(x: -100, y: 10, width: 400, height: 50), displays: [Self.main, Self.left])
+        }
     }
 
     @Test func aRectOnNoDisplayIsRefusedNotReadAsBlank() {
@@ -102,7 +104,7 @@ import Testing
             line(Array(all[2..<14]), from: 400),  // tile 400-1200
             line(Array(all[10..<14]), from: 800), // tile 800-1600
         ]
-        let kept = PixelReader.distinct(pieces)
+        let kept = PixelReader.distinct(pieces.enumerated().map { Piece(tile: $0, run: $1) })
         #expect(kept.count == 1)
         #expect(kept.first?.words.map(\.text.value) == all)
     }
@@ -111,7 +113,7 @@ import Testing
     /// every shared word. Joined, none is doubled.
     @Test func overlappingPiecesOfOneLineDoNotDoubleItsWords() {
         let all = (0..<20).map { "w\($0)" }
-        let kept = PixelReader.distinct([line(Array(all[0..<14]), from: 100), line(Array(all[6..<20]), from: 400)])
+        let kept = PixelReader.distinct([Piece(tile: 0, run: line(Array(all[0..<14]), from: 100)), Piece(tile: 1, run: line(Array(all[6..<20]), from: 400))])
         #expect(kept.map { $0.words.map(\.text.value) } == [all])
     }
 
@@ -120,11 +122,33 @@ import Testing
         let whole = line(["Open", "Settings"], from: 100)
         let fragment = Found(text: Text("Sett")!, frame: ScreenRect(x: 150, y: 100, width: 24, height: 14),
                              source: .pixels(confidence: Confidence(0.5)!))
-        #expect(PixelReader.distinct([whole, fragment]).map(\.text.value) == ["Open Settings"])
+        #expect(PixelReader.distinct([Piece(tile: 0, run: whole), Piece(tile: 1, run: fragment)]).map(\.text.value) == ["Open Settings"])
     }
 
     /// Two lines stacked do not join, however they overlap sideways.
     @Test func linesAboveOneAnotherStayApart() {
-        #expect(PixelReader.distinct([line(["a", "b"], from: 0, y: 0), line(["c", "d"], from: 0, y: 16)]).count == 2)
+        #expect(PixelReader.distinct([Piece(tile: 0, run: line(["a", "b"], from: 0, y: 0)), Piece(tile: 1, run: line(["c", "d"], from: 0, y: 16))]).count == 2)
+    }
+
+    /// Words of one run are never weighed against each other, even when a padded box
+    /// covers its neighbour: only another tile's reading of the same spot can drop one.
+    @Test func theWordsOfOneRunAreNeverDroppedAgainstEachOther() {
+        let wide = Word(text: Text("Shell")!, frame: ScreenRect(x: 0, y: 0, width: 200, height: 14))
+        let inside = Word(text: Text("Edit")!, frame: ScreenRect(x: 60, y: 0, width: 30, height: 14))
+        let run = Found(first: wide, rest: [inside], source: .pixels(confidence: Confidence(1)!))
+        #expect(PixelReader.distinct([Piece(tile: 0, run: run)]).first?.text.value == "Shell Edit")
+    }
+
+    /// Two runs one tile read side by side are two runs, however their boxes brush.
+    @Test func runsFromOneTileAreNeverJoined() {
+        let name = run("Name:", 0, 0, 41), value = run("Brandon", 40, 0, 60)
+        #expect(PixelReader.distinct([Piece(tile: 0, run: name), Piece(tile: 0, run: value)]).count == 2)
+    }
+
+    /// A half-height misread from a tile whose edge cut the line gives way to the whole
+    /// reading, even when it came first and is just as wide.
+    @Test func aCutMisreadGivesWayToTheWholeReading() {
+        let cut = run("Sove", 100, 100, 40, 7), whole = run("Save", 100, 100, 40, 14)
+        #expect(PixelReader.distinct([Piece(tile: 0, run: cut), Piece(tile: 1, run: whole)]).map(\.text.value) == ["Save"])
     }
 }

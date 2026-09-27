@@ -25,8 +25,8 @@ struct Where: ParsableArguments {
         try rect.map { spelled in
             let parts = spelled.split(separator: ",").map { Double($0.trimmingCharacters(in: .whitespaces)) }
             guard parts.count == 4, let x = parts[0], let y = parts[1], let w = parts[2], let h = parts[3],
-                  [x, y, w, h].allSatisfy(\.isFinite), w > 0, h > 0
-            else { throw ValidationError("--rect wants x,y,width,height in finite numbers with a positive size, got \(spelled)") }
+                  [x, y, w, h].allSatisfy({ abs($0) <= 1_000_000 }), w > 0, h > 0
+            else { throw ValidationError("--rect wants x,y,width,height in points - a positive size, nothing past a million - got \(spelled)") }
             return ScreenRect(x: x, y: y, width: w, height: h)
         }
     }
@@ -66,7 +66,7 @@ enum Report {
             "\(s.examined) run\(s.examined == 1 ? "" : "s") read",
             s.excluded.isEmpty ? nil : s.excluded.map { "\($0.count) \($0.reason.rawValue)" }.joined(separator: ", "),
             reach(s.reach),
-            reading.outcome.isNearest && !rows(reading.outcome).isEmpty ? "nearest follow" : nil,
+            reading.outcome == .nearest([]) || reading.outcome.isMatched ? nil : "nearest follow",
         ]
         return clauses.compactMap { $0 }.joined(separator: "; ") + ". Points are centres, vhid click coordinates."
     }
@@ -110,7 +110,7 @@ enum Report {
 }
 
 private extension Outcome {
-    var isNearest: Bool { if case .nearest = self { true } else { false } }
+    var isMatched: Bool { if case .matched = self { true } else { false } }
 }
 
 /// Reads with the pixel reader and prints. The one place the verbs meet the screen.

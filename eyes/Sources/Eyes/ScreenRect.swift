@@ -137,3 +137,14 @@ extension ScreenRect: CustomStringConvertible {
         "\(Int(x.rounded())),\(Int(y.rounded())) \(Int(width.rounded()))x\(Int(height.rounded()))"
     }
 }
+
+public extension ScreenRect {
+    var area: Double { width * height }
+
+    /// The area two rectangles share, zero when they do not meet - beside `intersects`, so
+    /// the two cannot disagree about what touching means.
+    func overlap(_ other: ScreenRect) -> Double {
+        guard intersects(other) else { return 0 }
+        return cgRect.intersection(other.cgRect).width * cgRect.intersection(other.cgRect).height
+    }
+}

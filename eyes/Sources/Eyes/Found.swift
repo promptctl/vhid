@@ -59,19 +59,19 @@ public struct Found: Sendable, Hashable {
         self.first = first
         self.rest = rest
         self.source = source
+        self.frame = ScreenRect(rest.reduce(first.frame.cgRect) { $0.union($1.frame.cgRect) })
     }
 
     public var words: [Word] { [first] + rest }
 
-    /// The words read as one line. Derived, like the frame, so neither can disagree with
-    /// the words. [LAW:one-source-of-truth]
+    /// The words read as one line, derived so it cannot disagree with them.
     public var text: Text { Text(joining: words.map(\.text)) }
 
     /// Global screen coordinates, top-left origin, points. Its centre is a click target
-    /// with no conversion.
-    public var frame: ScreenRect {
-        ScreenRect(rest.reduce(first.frame.cgRect) { $0.union($1.frame.cgRect) })
-    }
+    /// with no conversion. Computed from the words once, in the init - the words cannot
+    /// change after it, so it cannot disagree with them, and merging and sorting read it
+    /// many times. [LAW:one-source-of-truth]
+    public let frame: ScreenRect
 }
 
 /// Which reader found it, carrying what only that reader can know.
