@@ -1,0 +1,118 @@
+# Publishes a release: a pushed v<version> tag is built, signed with the team's Developer
+# ID certificates, notarized, stapled, and attached to a GitHub Release whose notes are
+# that version's section of CHANGELOG.md. scripts/release does the building, signing and
+# notarizing, exactly as it does on a Mac that holds the certificates; this workflow only
+# gives it a keychain that holds them. The secrets it reads are listed in README
+# "Releasing".
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+# The Release is written with the workflow's own token.
+permissions:
+  contents: write
+
+# One run per tag at a time: a second push of a tag waits behind the running one (and
+# replaces any run still pending), then finds the Release the first made and fails
+# rather than replacing it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+# The toolchain test.yml names; its pkg job fails when the two differ.
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+
+jobs:
+  # The secrets are the release environment's, not the repository's, and the environment
+  # waits for a maintainer's approval before any run gets them: a tag pushed from a
+  # branch runs that branch's copy of this file, so the gates below cannot be what
+  # protects the Developer ID keys - they would be the first thing such a copy drops.
+  release:
+    runs-on: macos-26
+    environment: release
+    timeout-minutes: 60
+    env:
+      TAG: ${{ github.ref_name }}
+      NOTARY_PROFILE: vhid-release
+    steps:
+      # runner.temp is not available to a job's env, so the path is made here.
+      - run: echo "NOTARY_KEYCHAIN=$RUNNER_TEMP/release.keychain-db" >>"$GITHUB_ENV"
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # [LAW:one-source-of-truth] The tag names the version VERSION already holds, or
+      # nothing is built: a tag that disagrees would publish a pkg under a name its
+      # binaries contradict. make-pkg asks again, of the tree and of the packed CLI.
+      - name: The tag is VERSION's
+        run: |
+          version=$(scripts/version --base)
+          [ "$TAG" = "v$version" ] || { echo "::error::tag $TAG is not v$version, the version in VERSION"; exit 1; }
+          echo "VERSION_NUMBER=$version" >>"$GITHUB_ENV"
+
+      # What is published is what master holds and CI passed: a tag on a branch, or on a
+      # commit whose required checks are not all green, is refused. A pre-release may
+      # come from any branch, so a release candidate can be tried before it lands.
+      - name: The tagged commit is master's and tested
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ $VERSION_NUMBER != *-* ]]; then
+            git merge-base --is-ancestor "$GITHUB_SHA" origin/master \
+              || { echo "::error::$TAG is not on master"; exit 1; }
+          fi
+          # Every job test.yml runs, by its own list, and each one's latest run: a check
+          # still running is waited for, up to half an hour, since a tag is often pushed
+          # moments after the merge that started them.
+          checks=$(ruby -ryaml -e 'puts YAML.load_file(".github/workflows/test.yml")["jobs"].keys')
+          for check in $checks; do
+            for attempt in $(seq 60); do
+              latest=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?check_name=$check" \
+                --jq '.check_runs | sort_by(.started_at) | last | if . == null then "none" else (.conclusion // .status) end')
+              case $latest in queued | in_progress | pending | waiting | requested) sleep 30 ;; *) break ;; esac
+            done
+            [ "$latest" = success ] || { echo "::error::check $check on $GITHUB_SHA is $latest, not success"; exit 1; }
+          done
+
+      # The notes, read before minutes of building, so a version with no changelog
+      # section fails here. A section is everything from its "## [<version>]" heading
+      # to the next "## " heading or the link definitions that close the file.
+      - name: The changelog has this version
+        run: |
+          [ -f CHANGELOG.md ] || { echo "::error::there is no CHANGELOG.md to take the notes from"; exit 1; }
+          awk -v v="$VERSION_NUMBER" '
+            /^## / { inside = index($0, "## [" v "]") == 1; next }
+            /^\[[^]]+\]: / { inside = 0 }
+            inside' CHANGELOG.md >"$RUNNER_TEMP/notes.md"
+          grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md" \
+            || { echo "::error::CHANGELOG.md has no section headed ## [$VERSION_NUMBER]"; exit 1; }
+
+      - name: A keychain holding the release identities
+        env:
+          DEVELOPER_ID_APPLICATION_P12: ${{ secrets.DEVELOPER_ID_APPLICATION_P12 }}
+          DEVELOPER_ID_INSTALLER_P12: ${{ secrets.DEVELOPER_ID_INSTALLER_P12 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+        run: scripts/release-keychain create "$NOTARY_KEYCHAIN" "$NOTARY_PROFILE"
+
+      - name: Built, signed, notarized and stapled
+        run: |
+          pkg=$(scripts/release dist)
+          echo "PKG=$pkg" >>"$GITHUB_ENV"
+
+      - name: Published
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=()
+          [[ $VERSION_NUMBER == *-* ]] && prerelease=(--prerelease)
+          gh release create "$TAG" "$PKG" --verify-tag --title "vhid $VERSION_NUMBER" \
+            --notes-file "$RUNNER_TEMP/notes.md" "${prerelease[@]}"
+
+      # Whatever happened above, the keys leave with the job.
+      - name: The keychain is deleted
+        if: always()
+        run: scripts/release-keychain delete "$NOTARY_KEYCHAIN"

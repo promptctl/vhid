@@ -9,9 +9,12 @@
 # Held to bash 3.2, like every script here.
 set -euo pipefail
 
+# shellcheck source=notary-keychain
+source "$(dirname "${BASH_SOURCE[0]}")/notary-keychain"
+
 profile=${NOTARY_PROFILE:?NOTARY_PROFILE names the notarytool keychain profile; make one with xcrun notarytool store-credentials}
 # Asked before the build, which takes minutes, rather than after it.
-xcrun notarytool history --keychain-profile "$profile" >/dev/null \
+xcrun notarytool history --keychain-profile "$profile" ${notary_keychain[@]+"${notary_keychain[@]}"} >/dev/null \
   || { echo "release: the notarytool profile '$profile' does not answer" >&2; exit 1; }
 
 scripts=$(dirname "$0")

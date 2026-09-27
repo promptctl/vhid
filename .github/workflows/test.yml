@@ -4,6 +4,7 @@
 # The job names are the check names ruleset 23733334 requires before a PR can merge
 # into master. Renaming a job renames its check, and the ruleset then waits for a check
 # that will never report, which blocks every PR. Change both together or neither.
+# release.yml reads this file's job names too, and requires each to be green on the tag.
 name: test
 
 on:
@@ -66,6 +67,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: scripts/check-bash32
+      # The release is built with the toolchain CI tests with, and the workflows cannot
+      # share an env, so the two copies are held equal here.
+      - run: diff <(grep '^  DEVELOPER_DIR:' .github/workflows/test.yml) <(grep '^  DEVELOPER_DIR:' .github/workflows/release.yml)
       # Two lines, so the step fails with make-pkg: an echo of a failed substitution would
       # succeed and leave the failure to be blamed on the next step.
       - run: |

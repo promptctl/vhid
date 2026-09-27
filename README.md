@@ -193,6 +193,38 @@ ships something nobody can run, and the build stays green while it happens.
 
 ## Releasing
 
+A release is published by pushing its tag, once `CHANGELOG.md` has its section:
+
+```sh
+git tag v$(scripts/version --base) && git push origin v$(scripts/version --base)
+```
+
+`.github/workflows/release.yml` checks that the tag is `VERSION`'s, that the tagged
+commit is on master (a `-tag` pre-release may come from any branch) with its `vhid`,
+`eyes` and `pkg` checks green, and that `CHANGELOG.md` has a `## [<version>]` section.
+It then runs `scripts/release` in a keychain `scripts/release-keychain` makes for the
+job and deletes at its end, and attaches the notarized pkg to a GitHub Release whose
+notes are that section, marked a pre-release when the version has a `-tag`. It reads
+five secrets of the `release` environment, which admits only `v*` tags and waits for a
+maintainer to approve each run in the Actions tab before handing them over:
+
+| Secret | What it holds |
+| --- | --- |
+| `DEVELOPER_ID_APPLICATION_P12` | the Developer ID Application certificate and private key, as a base64 .p12 |
+| `DEVELOPER_ID_INSTALLER_P12` | the Developer ID Installer certificate and private key, as a base64 .p12 |
+| `DEVELOPER_ID_P12_PASSWORD` | the password both .p12 files were exported with |
+| `NOTARY_APPLE_ID` | the Apple ID notarytool submits as |
+| `NOTARY_PASSWORD` | an app-specific password for that Apple ID, made at account.apple.com |
+
+Export each identity from Keychain Access (the certificate with its private key, as
+.p12) on the Mac that holds it, then set the secret from the file:
+
+```sh
+base64 -i application.p12 | gh secret set DEVELOPER_ID_APPLICATION_P12 --env release
+```
+
+The same release can be made on that Mac directly:
+
 ```sh
 NOTARY_PROFILE=<profile> scripts/release dist    # dist/vhid-<version>.pkg
 ```
