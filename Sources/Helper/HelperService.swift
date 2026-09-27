@@ -73,9 +73,9 @@ import Foundation
 /// every key and button. A client that invalidates and reconnects at once - the next
 /// `vhid` in a shell script, the next call of an MCP session - arrives while that is still
 /// running and is refused as busy by its own previous connection. Measured: seven of sixty
-/// back-to-back MCP tool calls, each refused as busy by a pid that was its own
-/// pid. `leave` answers only once the devices are free, so the next connection is served
-/// on the answer rather than on a race. [LAW:no-ambient-temporal-coupling]
+/// back-to-back MCP tool calls, each refused as busy by its own pid. `leave` answers
+/// only once the devices are free, so the next connection is served on the answer
+/// rather than on a race. [LAW:no-ambient-temporal-coupling]
 ///
 /// Disconnecting without leaving still releases everything, because a client that
 /// crashes cannot leave; `leave` is how a client that can goes without racing.

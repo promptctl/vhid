@@ -20,7 +20,6 @@ import Testing
         try holder.serve(first, by: 41) { served.append("first") }
         let refusal = #expect(throws: Holder.Busy.self) { try holder.serve(second, by: 42) { served.append("second") } }
         #expect(refusal?.pid == 41)
-        #expect(refusal?.description == "pid 41 holds the devices")
         try holder.serve(first, by: 41) { served.append("first again") }
         #expect(served == ["first", "first again"])
         #expect(holder.pid == 41)
@@ -37,7 +36,7 @@ import Testing
 
     /// A refused connection never held the devices, and a connection that left no longer
     /// does. Either one ending must neither free the devices from under the holder nor
-    /// release the holder's keys.
+    /// release the holder's keys and buttons.
     @Test func freeingByOneThatDoesNotHoldItChangesNothingAndReleasesNothing() throws {
         let holder = Holder()
         try holder.serve(first, by: 41) {}
@@ -55,5 +54,11 @@ import Testing
         #expect(holder.whileHolding(first) { served.append("first") })
         #expect(!holder.whileHolding(second) { served.append("second") })
         #expect(served == ["first"])
+    }
+
+    /// What a refused client reads is the refusal as the reply carries it, so that is
+    /// what is pinned: it names the devices, both of them, whichever its verbs use.
+    @Test func aClientRefusedAsBusyReadsThatAPidHoldsTheDevices() {
+        #expect(refusal(Holder.Busy(pid: 41)).localizedDescription == "pid 41 holds the devices")
     }
 }

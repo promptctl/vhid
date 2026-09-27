@@ -1,11 +1,11 @@
 import Foundation
 
-/// Which connection has the devices - the keyboard and the mouse together, whichever one
-/// its verbs use. One at a time, because each device has one set of held keys and
-/// buttons: two clients acting through it would each post reports missing the other's,
-/// and the first to leave would release what the other was holding.
+/// Which connection has the devices: both of them, the keyboard and the mouse, whichever
+/// of them its verbs use. One holder for both, because a release frees both as one act
+/// (see `Devices`): two clients acting at once would each post reports missing the
+/// other's, and the first to leave would release the keys and buttons the other held.
 /// [LAW:types-are-the-program] Refusal is the truthful answer to a second client, and a
-/// client that wants to share can connect per insert - the connection is lazy, and the
+/// client that wants to share can connect per act - the connection is lazy, and the
 /// helper paid for readiness once.
 ///
 /// Connections are named by identifier and not held: a holder that kept the connection
@@ -57,8 +57,8 @@ final class Holder: @unchecked Sendable {
     ///
     /// A connection that does not hold the devices runs nothing here, and that is what
     /// keeps its ending harmless. It may have been refused and never held them. Or it may
-    /// have left already, and the devices may now be another client's. Releasing keys on
-    /// its behalf would release the new holder's. [LAW:single-enforcer]
+    /// have left already, and the devices may now be another client's. Releasing keys and
+    /// buttons on its behalf would release the new holder's. [LAW:single-enforcer]
     func free(_ connection: ObjectIdentifier, after body: () -> Void) {
         lock.lock(); defer { lock.unlock() }
         guard holding?.connection == connection else { return }
