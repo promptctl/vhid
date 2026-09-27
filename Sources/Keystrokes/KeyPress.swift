@@ -14,7 +14,8 @@
 ///
 /// Sendable, because a press blocks the thread it is made on until the far side answers,
 /// so it is made on a thread kept for waiting: the daemon presses from the thread a
-/// client's call arrived on, and a client's typist from its `DeviceQueue`.
+/// client's call arrived on, and a client from the `DeviceQueue` its `QueuedKeyboard`
+/// runs every call on.
 public protocol KeyPress: Sendable {
     func down(_ usage: Usage) throws
     func releaseAll() throws
