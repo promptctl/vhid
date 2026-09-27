@@ -1,3 +1,4 @@
+import DriverExtension
 import Foundation
 import Testing
 import VirtualHID
@@ -22,6 +23,24 @@ import VirtualHID
         _ = readiness.begin()
         readiness.failed(failure)
         #expect(refusal(readiness) == "devices not up: \(failure)")
+    }
+
+    /// pqrs says "not activated" for several driver states alike, so the refusal carries
+    /// the step for the state read on this Mac - the switch only when the switch is it.
+    @Test(arguments: [DriverState.awaitingApproval, .installedInactive, .pendingReboot])
+    func aFailureWhileTheDriverIsOffNamesItsStep(state: DriverState) throws {
+        let readiness = Readiness()
+        let failure = DaemonError.notReady(awaiting: .keyboardReady, said: [.driverActivated: false])
+        _ = readiness.begin()
+        readiness.failed(BringUpFailure(failure, driver: state))
+        let step = try #require(state.step)
+        #expect(refusal(readiness) == "devices not up: \(failure)\nThe driver extension reads \(state.rawValue):\n\(step)")
+    }
+
+    /// A driver that is on, or a state that could not be read, adds nothing.
+    @Test(arguments: [DriverState.enabled, .running, nil])
+    func aFailureWithTheDriverOnIsTheFailureAlone(state: DriverState?) {
+        #expect("\(BringUpFailure(DaemonError.closed, driver: state))" == "\(DaemonError.closed)")
     }
 
     @Test func devicesThatComeUpAreHandedOut() throws {

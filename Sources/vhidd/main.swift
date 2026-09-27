@@ -117,6 +117,7 @@ do {
                 devices.releaseEverything(because: "starting")
                 return devices
             },
+            driver: { try? DriverState(DriverProbe.facts()) },
             now: { .now },
             pause: { Thread.sleep(forTimeInterval: Double($0.components.seconds) + Double($0.components.attoseconds) / 1e18) }
         )

@@ -1,3 +1,4 @@
+import DriverExtension
 import Foundation
 import VirtualHID
 
@@ -249,6 +250,7 @@ extension DaemonProcess.Effects {
         backoff: Backoff,
         readiness: Readiness,
         serve: (DaemonProcess.Reached<Device>) -> any ServedDevices,
+        driver: () -> DriverState?,
         now: () -> ContinuousClock.Instant,
         pause: (Duration) throws -> Void
     ) rethrows -> Never {
@@ -268,10 +270,33 @@ extension DaemonProcess.Effects {
                 log("the devices went down (\(why)); bringing them up again in \(backoff.after(failures))")
             } catch {
                 failures += 1
-                readiness.failed(error)
+                readiness.failed(BringUpFailure(error, driver: driver()))
                 log("could not bring the devices up (\(error)); trying again in \(backoff.after(failures))")
             }
             try pause(backoff.after(failures))
         }
+    }
+}
+
+/// A failed bring-up, and the driver extension's step when the driver is not on.
+///
+/// pqrs's status says only "not activated" for an extension awaiting approval, one whose
+/// activation never landed and one half removed alike, so the state is read from this Mac
+/// at the failure and its step is the one named: a person who skipped the installer's
+/// last page learns it from their first refused call. Read at each failure, since the
+/// state is what the person changes between attempts. Nothing is added when the state
+/// could not be read or the driver is on. [LAW:one-source-of-truth] with `vhid doctor`.
+struct BringUpFailure: Error, CustomStringConvertible {
+    let error: any Error
+    let driver: DriverState?
+
+    init(_ error: any Error, driver: DriverState?) {
+        self.error = error
+        self.driver = driver
+    }
+
+    var description: String {
+        guard let driver, let step = driver.step else { return "\(error)" }
+        return "\(error)\nThe driver extension reads \(driver.rawValue):\n\(step)"
     }
 }
