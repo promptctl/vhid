@@ -64,9 +64,8 @@ enum DaemonProcess {
         let terminate: (pid_t) -> Void
     }
 
-    /// The effects done for real. The daemon outlives this process on purpose: a vhidd
-    /// that exits because the connection dropped is restarted by launchd and finds the
-    /// daemon where it left it, and only `stop` ends it.
+    /// The effects done for real. The daemon outlives any one connection on purpose, and
+    /// only `stop` ends it.
     static var real: Effects<HID> {
         Effects(
             connect: { whenLost in
@@ -75,17 +74,41 @@ enum DaemonProcess {
             },
             bringUp: { Startups(keyboard: try $0.keyboard.start(within: $1), mouse: try $0.mouse.start(within: $1)) },
             launch: spawn,
-            terminate: { kill($0, SIGTERM) }
+            terminate: end
         )
     }
 
+    /// Started with SIGTERM at its default: vhidd ignores SIGTERM to answer it on a queue,
+    /// and an ignored signal is inherited across exec, which would leave `end`'s SIGTERM
+    /// nothing to stop.
     private static func spawn() throws -> pid_t {
         var pid: pid_t = 0
         let arguments: [UnsafeMutablePointer<CChar>?] = [strdup(executable), nil]
         defer { arguments.forEach { free($0) } }
-        let spawned = posix_spawn(&pid, executable, nil, nil, arguments, environ)
+        var attributes: posix_spawnattr_t?
+        posix_spawnattr_init(&attributes)
+        defer { posix_spawnattr_destroy(&attributes) }
+        var defaults = sigset_t()
+        sigemptyset(&defaults)
+        sigaddset(&defaults, SIGTERM)
+        posix_spawnattr_setsigdefault(&attributes, &defaults)
+        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSIGDEF))
+        let spawned = posix_spawn(&pid, executable, nil, &attributes, arguments, environ)
         guard spawned == 0 else { throw CouldNotStart(code: spawned) }
         return pid
+    }
+
+    /// Stops a daemon this process started and reaps it, so it is gone - not a zombie, and
+    /// not a dying daemon the next attempt connects to as somebody else's - when this
+    /// returns. SIGTERM first, and SIGKILL for one still there after two seconds.
+    private static func end(_ pid: pid_t) {
+        kill(pid, SIGTERM)
+        for _ in 0..<20 {
+            if waitpid(pid, nil, WNOHANG) != 0 { return }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        kill(pid, SIGKILL)
+        waitpid(pid, nil, 0)
     }
 }
 
@@ -139,6 +162,116 @@ extension DaemonProcess.Effects {
         case .startedHere(let pid):
             terminate(pid)
             log("stopped the daemon this helper started, pid \(pid)")
+        }
+    }
+}
+
+/// How long to wait before each attempt after a failed one: `first`, doubled per failure,
+/// never more than `most`. A pure schedule, so the pace at which the daemon is started and
+/// stopped is a value a test reads rather than a clock it waits on.
+/// [LAW:effects-at-boundaries]
+struct Backoff: Equatable {
+    let first: Duration
+    let most: Duration
+
+    /// The wait after the `failures`th failure in a row, counting from one.
+    func after(_ failures: Int) -> Duration {
+        // Doubled at most 20 times, which is past any cap worth having: `<<` on Int does not
+        // trap but gives 0 from a shift of 64, and a zero wait would start and stop the
+        // daemon as fast as it can.
+        min(first * (1 << min(max(failures - 1, 0), 20)), most)
+    }
+}
+
+/// The daemons this process started and has not yet stopped.
+///
+/// [LAW:one-source-of-truth] Recorded by the launch itself, not reported by whoever
+/// launched, so SIGTERM mid-attempt - with the pid still inside `reach` - stops it all the
+/// same, and a pid stopped once is never signalled again, whatever has since taken it.
+final class Children: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pids: Set<pid_t> = []
+    /// Set by `stopAll`, after which nothing is launched: a launch racing SIGTERM would
+    /// otherwise start a daemon after the stop had already been made.
+    private var stopping = false
+
+    struct Stopping: Error, CustomStringConvertible {
+        var description: String { "vhidd is stopping, so it starts no daemon" }
+    }
+
+    /// `effects` with every launch recorded and every termination limited to what is.
+    func tracking<Device>(_ effects: DaemonProcess.Effects<Device>) -> DaemonProcess.Effects<Device> {
+        DaemonProcess.Effects(
+            connect: effects.connect,
+            bringUp: effects.bringUp,
+            launch: {
+                self.lock.lock(); defer { self.lock.unlock() }
+                guard !self.stopping else { throw Stopping() }
+                let pid = try effects.launch()
+                self.pids.insert(pid)
+                return pid
+            },
+            terminate: { pid in
+                self.lock.lock(); defer { self.lock.unlock() }
+                guard self.pids.remove(pid) != nil else { return }
+                effects.terminate(pid)
+            }
+        )
+    }
+
+    /// Stops every daemon still recorded, and every launch after it refuses.
+    func stopAll(_ effects: DaemonProcess.Effects<some Any>) {
+        lock.lock(); defer { lock.unlock() }
+        stopping = true
+        pids.forEach(effects.terminate)
+        pids.removeAll()
+    }
+}
+
+extension DaemonProcess.Effects {
+    /// Keeps the devices up for as long as this process runs: reaches them, hands them to
+    /// `readiness` through `serve`, and when an attempt fails or its devices are lost, says
+    /// why through `readiness`, waits out `backoff`, and reaches them again.
+    ///
+    /// [LAW:dataflow-not-control-flow] A failed start and a lost connection are one path:
+    /// both take the devices down with a reason and retry, so neither ends the process and
+    /// neither is the spawn loop launchd's restarts used to make. `reach` stops any daemon
+    /// it started before it throws, and a loss stops the one behind it, so every start is
+    /// separated from the one before by a whole wait. [LAW:no-ambient-temporal-coupling]
+    ///
+    /// Failures count until the devices stay up for `backoff.most`, so a daemon that comes
+    /// up and dies at once is started ever less often, and one that served for a while is
+    /// reached again after the shortest wait.
+    ///
+    /// Returns only by `pause` throwing, which the daemon's never does.
+    func keepUp(
+        within limit: Duration,
+        backoff: Backoff,
+        readiness: Readiness,
+        serve: (DaemonProcess.Reached<Device>) -> any ServedDevices,
+        now: () -> ContinuousClock.Instant,
+        pause: (Duration) throws -> Void
+    ) rethrows -> Never {
+        var failures = 0
+        while true {
+            let attempt = readiness.begin()
+            do {
+                let reached = try reach(within: limit) { lost, _ in _ = readiness.lost(lost, in: attempt) }
+                readiness.up(serve(reached))
+                log("serving")
+                let since = now()
+                let why = readiness.whileUp()
+                // Lost, so whatever the daemon held for vhidd went with the connection; a
+                // daemon started here is stopped so the next attempt starts it afresh.
+                stop(reached.daemon)
+                failures = now() - since >= backoff.most ? 1 : failures + 1
+                log("the devices went down (\(why)); bringing them up again in \(backoff.after(failures))")
+            } catch {
+                failures += 1
+                readiness.failed(error)
+                log("could not bring the devices up (\(error)); trying again in \(backoff.after(failures))")
+            }
+            try pause(backoff.after(failures))
         }
     }
 }

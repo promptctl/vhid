@@ -9,12 +9,12 @@ import Helper
 /// "busy" in the same NSError a refused signature says it in, and would turn away a
 /// client that only wanted to ask who holds them. [LAW:single-enforcer]
 final class Listener: NSObject, NSXPCListenerDelegate {
-    private let devices: any ServedDevices
+    private let readiness: Readiness
     private let callers: CallerIdentity
     private let holder = Holder()
 
-    init(devices: any ServedDevices, callers: CallerIdentity) {
-        self.devices = devices
+    init(readiness: Readiness, callers: CallerIdentity) {
+        self.readiness = readiness
         self.callers = callers
     }
 
@@ -28,7 +28,7 @@ final class Listener: NSObject, NSXPCListenerDelegate {
         }
         let id = ObjectIdentifier(connection)
         connection.exportedInterface = NSXPCInterface(with: HelperService.self)
-        let seat = Seat(id, pid: connection.processIdentifier, holder: holder, devices: devices)
+        let seat = Seat(id, pid: connection.processIdentifier, holder: holder, readiness: readiness)
         connection.exportedObject = seat
         // Both, and not one: an interrupted connection ends invalid, a closed one ends
         // interrupted, and a client killed mid-burst can take either path. The release is
@@ -44,8 +44,8 @@ final class Listener: NSObject, NSXPCListenerDelegate {
         // client's still in flight would otherwise find the devices free and claim them
         // for a connection with no handler left to give them back.
         connection.invalidationHandler = { seat.end(because: "a client went away") }
-        connection.interruptionHandler = { [devices, holder] in
-            _ = holder.whileHolding(id) { devices.releaseEverything(because: "a client was interrupted") }
+        connection.interruptionHandler = { [readiness, holder] in
+            _ = holder.whileHolding(id) { readiness.releaseEverything(because: "a client was interrupted") }
         }
         connection.resume()
         log("accepted a connection from pid \(connection.processIdentifier)")

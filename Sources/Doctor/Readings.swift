@@ -41,11 +41,12 @@ public enum JobStanding: String, Sendable, Hashable, CaseIterable {
 public enum DaemonReading: Sendable, Hashable {
     /// The daemon answered, and said which process holds the devices, if any.
     ///
-    /// An answer is also the proof that both devices are up: the daemon begins listening
-    /// only once it has reached pqrs's daemon and both devices are ready, and it exits
-    /// when that connection is lost. A daemon without its devices has no listener to
-    /// answer from.
+    /// An answer is also the proof that both devices are up: while they are down the
+    /// daemon refuses the call with the reason, which reads as `devicesDown`.
     case answered(holder: Int32?)
+    /// The daemon answered, admitting this vhid, and said its devices are not up and why -
+    /// an unapproved driver extension, usually. It keeps trying, and serves once they are.
+    case devicesDown(reason: String)
     /// The daemon ended this process's connection, twice (NSCocoaErrorDomain 4097 at the
     /// client).
     ///
@@ -60,8 +61,7 @@ public enum DaemonReading: Sendable, Hashable {
     /// Something holds the service and said nothing before the deadline.
     ///
     /// launchd holds a job's endpoint from load, whether or not the daemon has started
-    /// listening on it, so a daemon that cannot bring its devices up - it exits, and
-    /// launchd starts it again - is reached and never answers.
+    /// listening on it, so a daemon that is not running is reached and never answers.
     case silent(reason: String)
     /// The call failed in a way none of the above names. Kept whole rather than folded
     /// into the nearest of them: a reading this build cannot classify is shown as what it
@@ -81,7 +81,7 @@ public enum DaemonReading: Sendable, Hashable {
     /// [LAW:types-are-the-program]
     public var daemonHasStarted: Bool {
         switch self {
-        case .answered, .refusedThisVhid: true
+        case .answered, .devicesDown, .refusedThisVhid: true
         case .unreachable, .silent, .failed: false
         }
     }
@@ -94,7 +94,7 @@ public enum DaemonReading: Sendable, Hashable {
     /// what launchd itself said. [LAW:no-silent-failure]
     public var someoneHoldsTheService: Bool {
         switch self {
-        case .answered, .refusedThisVhid, .silent: true
+        case .answered, .devicesDown, .refusedThisVhid, .silent: true
         case .unreachable, .failed: false
         }
     }

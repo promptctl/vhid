@@ -92,7 +92,7 @@ import Foundation
     /// Which process holds the devices, as a pid, or nil when none does. Claims nothing and
     /// sends no report, so asking it is never an act on the devices.
     ///
-    /// The answer is also the proof the devices are up: the daemon listens only once both
-    /// are ready, and exits when it loses them.
+    /// The answer is also the proof the devices are up: while they are down, this is
+    /// refused with the reason, as every act is.
     func status(reply: @escaping (NSNumber?, Error?) -> Void)
 }

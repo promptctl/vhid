@@ -16,7 +16,7 @@ import Testing
     static let daemonReadings: [DaemonReading] = [
         .answered(holder: nil), .answered(holder: 4242), .refusedThisVhid,
         .unreachable(reason: "NSCocoaErrorDomain 4099"), .silent(reason: "no answer in 5 seconds"),
-        .failed(reason: "something new"),
+        .failed(reason: "something new"), .devicesDown(reason: "devices not up: the driver is not activated"),
     ]
 
     // MARK: - the driver extension
@@ -129,7 +129,7 @@ import Testing
             let row = Requirement.daemon(reading, installation: Self.installation)
             let listening = switch reading {
             case .answered, .refusedThisVhid: true
-            case .unreachable, .silent, .failed: false
+            case .devicesDown, .unreachable, .silent, .failed: false
             }
             #expect(row.met == listening, "\(reading)")
         }
@@ -141,7 +141,7 @@ import Testing
         for reading in Self.daemonReadings where !Requirement.daemon(reading, installation: Self.installation).met {
             let step = try #require(Requirement.daemon(reading, installation: Self.installation).step)
             let said = switch reading {
-            case .unreachable(let reason), .silent(let reason), .failed(let reason): reason
+            case .devicesDown(let reason), .unreachable(let reason), .silent(let reason), .failed(let reason): reason
             case .answered, .refusedThisVhid: ""
             }
             #expect(step.contains(said), "\(reading)")
@@ -156,19 +156,17 @@ import Testing
         }
     }
 
-    /// A daemon that is held and silent is, usually, one whose devices cannot come up, and
-    /// the step says which row that is.
-    @Test func aSilentDaemonPointsAtTheDriverRow() throws {
-        let step = try #require(Requirement.daemon(.silent(reason: "x"), installation: Self.installation).step)
-        #expect(step.contains(Requirement.Row.driverExtension.rawValue))
-    }
-
     // MARK: - the signature
 
-    @Test func theSignatureRowIsMetOnlyByAnAnswer() {
+    /// Met by any reply to the call - an answer, or devices down - since either came
+    /// through admission.
+    @Test func theSignatureRowIsMetOnlyByAReply() {
         for reading in Self.daemonReadings {
             let row = Requirement.signature(reading, installation: Self.installation)
-            let answered = if case .answered = reading { true } else { false }
+            let answered = switch reading {
+            case .answered, .devicesDown: true
+            case .refusedThisVhid, .unreachable, .silent, .failed: false
+            }
             #expect(row.met == answered, "\(reading)")
         }
     }
@@ -246,12 +244,12 @@ import Testing
 
     // MARK: - which daemon readings prove a start
 
-    /// An answer and a refusal come from a daemon past its filing; nothing else proves one
+    /// An answer, devices down, and a refusal come from a daemon past its filing; nothing else proves one
     /// ever ran.
     @Test func onlyAnAnswerOrARefusalProvesADaemonStarted() {
         for reading in Self.daemonReadings {
             let proves = switch reading {
-            case .answered, .refusedThisVhid: true
+            case .answered, .devicesDown, .refusedThisVhid: true
             case .unreachable, .silent, .failed: false
             }
             #expect(reading.daemonHasStarted == proves, "\(reading)")

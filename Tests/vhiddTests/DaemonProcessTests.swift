@@ -126,4 +126,81 @@ import VirtualHID
         world.effects.stop(.startedHere(World.pid))
         #expect(world.terminated == [World.pid])
     }
+
+    private struct Stop: Error {}
+
+    /// A daemon started for devices that will not come up is stopped before each wait, and
+    /// not started again until the whole wait has passed: one spawn per backoff window.
+    /// Every failure is told to readiness as the reason acts are refused.
+    @Test func eachFailedAttemptStopsTheDaemonItStartedAndWaitsOutTheBackoff() {
+        let world = World(connections: [.failure(.noSocket(path: "nowhere"))])
+        var events: [String] = []
+        let effects = world.effects
+        let logged = DaemonProcess.Effects<Device>(
+            connect: effects.connect,
+            bringUp: effects.bringUp,
+            launch: { events.append("launch"); return try effects.launch() },
+            terminate: { events.append("stop"); effects.terminate($0) }
+        )
+        let readiness = Readiness()
+        var downWhileWaiting: [Bool] = []
+        #expect(throws: Stop.self) {
+            try logged.keepUp(within: .milliseconds(20), backoff: Backoff(first: .seconds(2), most: .seconds(5)), readiness: readiness, serve: { _ in RecordingDevices() }, now: { .now }) { wait in
+                events.append("wait \(wait)")
+                downWhileWaiting.append((try? readiness.devices()) == nil)
+                if events.filter({ $0.hasPrefix("wait") }).count == 3 { throw Stop() }
+            }
+        }
+        #expect(events == ["launch", "stop", "wait 2.0 seconds", "launch", "stop", "wait 4.0 seconds", "launch", "stop", "wait 5.0 seconds"])
+        #expect(downWhileWaiting == [true, true, true])
+    }
+
+    /// Devices whose connection is lost are taken down, the daemon started for them is
+    /// stopped, and after a wait they are reached and served again - the process never
+    /// ends over it. Devices lost as soon as they came up count as failures, so the wait
+    /// grows rather than restarting the daemon every two seconds.
+    @Test func lostDevicesAreStoppedAndBroughtUpAgain() {
+        let world = World(connections: [.failure(.noSocket(path: "nowhere")), .success(Device())])
+        let readiness = Readiness()
+        var served = 0
+        var downWhileWaiting: [Bool] = []
+        var waits: [Duration] = []
+        #expect(throws: Stop.self) {
+            try world.effects.keepUp(within: .seconds(1), backoff: Backoff(first: .seconds(2), most: .seconds(60)), readiness: readiness, serve: { _ in
+                served += 1
+                let lose = world.lost!
+                DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(20)) { lose(.closed) }
+                return RecordingDevices()
+            }, now: { .now }) { wait in
+                waits.append(wait)
+                downWhileWaiting.append((try? readiness.devices()) == nil)
+                if waits.count == 2 { throw Stop() }
+            }
+        }
+        #expect(served == 2)
+        #expect(waits == [.seconds(2), .seconds(4)])
+        #expect(downWhileWaiting == [true, true])
+        #expect(world.terminated == [World.pid])
+    }
+
+    /// Once stopping has begun, every daemon started is stopped and none is started after:
+    /// a launch racing SIGTERM is refused rather than orphaned.
+    @Test func stoppingAllStopsWhatWasStartedAndRefusesLaterStarts() throws {
+        let world = World(connections: [])
+        let children = Children()
+        let tracked = children.tracking(world.effects)
+        let pid = try tracked.launch()
+        children.stopAll(world.effects)
+        #expect(world.terminated == [pid])
+        #expect(throws: Children.Stopping.self) { try tracked.launch() }
+        #expect(world.launched == 1)
+        tracked.terminate(pid)
+        #expect(world.terminated == [pid])
+    }
+
+    @Test func theBackoffDoublesToItsCap() {
+        let backoff = Backoff(first: .seconds(2), most: .seconds(60))
+        #expect((1...7).map(backoff.after) == [.seconds(2), .seconds(4), .seconds(8), .seconds(16), .seconds(32), .seconds(60), .seconds(60)])
+        #expect(backoff.after(10_000) == .seconds(60))
+    }
 }

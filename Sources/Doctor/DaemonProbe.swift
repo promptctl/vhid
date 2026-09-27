@@ -49,6 +49,10 @@ public enum DaemonProbe {
     /// a plain `NSError` carrying its words as the localized description - so those words
     /// are what is shown, not the error's debug rendering.
     static func reading(failure error: any Error) -> DaemonReading {
+        let refused = error as NSError
+        if refused.domain == Installation.refusalDomain, refused.code == Installation.devicesDownCode {
+            return .devicesDown(reason: refused.localizedDescription)
+        }
         guard let unreachable = error as? HelperConnection.Unreachable else { return .failed(reason: (error as NSError).localizedDescription) }
         switch unreachable.cause {
         case .connection(domain: NSCocoaErrorDomain, code: NSXPCConnectionInterrupted, description: _): return .refusedThisVhid

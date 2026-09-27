@@ -2,6 +2,7 @@ import Foundation
 import Testing
 @testable import Doctor
 @testable import Helper
+@testable import Installations
 
 /// The status call as doctor makes it, against a far end of the test's own on a real XPC
 /// connection: an anonymous listener in this process, so each reading is what a real
@@ -19,6 +20,8 @@ import Testing
         case never
         /// Admitted, and answers the call with an error of its own.
         case fail
+        /// Admitted, and refuses the call as a daemon whose devices are not up.
+        case devicesDown
     }
 
     private final class FarEnd: NSObject, HelperService, NSXPCListenerDelegate, @unchecked Sendable {
@@ -41,6 +44,7 @@ import Testing
             switch answer {
             case .holder(let pid): reply(pid.map { NSNumber(value: $0) }, nil)
             case .fail: reply(nil, NSError(domain: "fake", code: 7, userInfo: [NSLocalizedDescriptionKey: "refused by the fake"]))
+            case .devicesDown: reply(nil, NSError(domain: Installation.refusalDomain, code: Installation.devicesDownCode, userInfo: [NSLocalizedDescriptionKey: "devices not up: the driver is not activated"]))
             case .never, .refuseTheConnection: lock.lock(); withheld.append(reply); lock.unlock()
             }
         }
@@ -94,6 +98,11 @@ import Testing
     @Test func aDaemonThatNeverAnswersIsSilentAtTheDeadline() async {
         let read = await reading(.never, replyTimeout: .milliseconds(200))
         guard case .silent = read else { Issue.record("read \(read)"); return }
+    }
+
+    /// A daemon listening without its devices is read by its code, carrying why.
+    @Test func aDaemonWhoseDevicesAreDownSaysWhy() async {
+        #expect(await reading(.devicesDown) == .devicesDown(reason: "devices not up: the driver is not activated"))
     }
 
     /// An answer this build cannot classify is kept whole, in the words it came with.

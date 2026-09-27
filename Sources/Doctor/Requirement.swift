@@ -389,19 +389,20 @@ public extension Requirement {
 // MARK: - the daemon's answer
 
 public extension Requirement {
-    /// Whether a daemon is listening on the service, which is also whether its devices are
-    /// up: it listens only once both are.
+    /// Whether a daemon is listening on the service with its devices up.
     ///
-    /// A refusal is an answer here. The daemon that refused this binary's signature was
-    /// listening to refuse it, so its devices are up and the one thing wrong is the
-    /// signature - which is the next row's to say, not this one's.
+    /// A refusal of the signature is an answer here: the daemon was listening to refuse
+    /// it, and the one thing known wrong is the signature - the next row's to say. Whether
+    /// its devices are up it did not say, since it refuses a caller before it is asked.
     static func daemon(_ reading: DaemonReading, installation: Installation) -> Requirement {
         Requirement(name: Row.daemon.rawValue, reads: daemonReads(reading), step: daemonStep(reading, installation: installation))
     }
 
     private static func daemonReads(_ reading: DaemonReading) -> String {
         switch reading {
-        case .answered, .refusedThisVhid: "listening, both devices up"
+        case .answered: "listening, both devices up"
+        case .refusedThisVhid: "listening"
+        case .devicesDown: "listening, devices not up"
         case .unreachable: "nothing holds the service"
         case .silent: "the service is held, and nothing answered"
         case .failed: "the call failed"
@@ -412,6 +413,13 @@ public extension Requirement {
         switch reading {
         case .answered, .refusedThisVhid:
             nil
+        case .devicesDown(let reason):
+            """
+            The daemon is up and cannot bring the devices up: \(reason)
+            An unmet \(Row.driverExtension.rawValue) row above is the usual reason. It
+            keeps trying, and serves once they come up. Its log says:
+                \(daemonLog(installation, last: "10m"))
+            """
         case .unreachable(let reason):
             """
             Nothing holds \(installation.service) (\(reason)).
@@ -423,9 +431,7 @@ public extension Requirement {
         case .silent(let reason):
             """
             launchd holds \(installation.service) and the daemon did not answer
-            (\(reason)). It listens only once both devices are up, and exits
-            and is started again while they cannot come up - an unmet
-            \(Row.driverExtension.rawValue) row above is the usual reason. Its log says:
+            (\(reason)). Its log says:
                 \(daemonLog(installation, last: "10m"))
             """
         case .failed(let reason):
@@ -453,7 +459,7 @@ public extension Requirement {
 
     private static func signatureReads(_ reading: DaemonReading) -> String {
         switch reading {
-        case .answered: "admitted"
+        case .answered, .devicesDown: "admitted"
         case .refusedThisVhid: "refused: the daemon ended this vhid's connection"
         case .unreachable, .silent, .failed: "not asked"
         }
@@ -461,7 +467,7 @@ public extension Requirement {
 
     private static func signatureStep(_ reading: DaemonReading, installation: Installation) -> String? {
         switch reading {
-        case .answered:
+        case .answered, .devicesDown:
             nil
         case .refusedThisVhid:
             """
@@ -497,6 +503,7 @@ public extension Requirement {
         switch reading {
         case .answered(nil): "free"
         case .answered(let holder?): "held by pid \(holder)"
+        case .devicesDown: "not up"
         case .refusedThisVhid, .unreachable, .silent, .failed: "not asked"
         }
     }
@@ -515,7 +522,7 @@ public extension Requirement {
         // stands in the way, not the daemon's.
         case .refusedThisVhid:
             waitsOn(.signature)
-        case .unreachable, .silent, .failed:
+        case .devicesDown, .unreachable, .silent, .failed:
             waitsOn(.daemon)
         }
     }
