@@ -26,4 +26,10 @@ import Testing
         #expect(lines[0].hasPrefix("1 display, main first."))
         #expect(lines[1] == "7\tmain\t0,0 2560x1440\t1.5x")
     }
+
+    /// A mode that could not be read says so, rather than passing for 1x.
+    @Test func anUnreadableScaleIsNotGuessed() {
+        let display = Display(id: 2, frame: ScreenRect(x: 0, y: 0, width: 800, height: 600), isMain: true, scale: nil)
+        #expect(Displays.row(display) == "2\tmain\t0,0 800x600\tscale unreadable")
+    }
 }

@@ -33,6 +33,6 @@ struct Displays: AsyncParsableCommand {
     /// backing scale. Tab-separated, like `eyes windows`.
     static func row(_ display: Display) -> String {
         "\(display.id)\t\(display.isMain ? "main" : "secondary")\t\(display.frame)"
-            + "\t\(String(format: "%g", display.scale))x"
+            + "\t\(display.scale.map { String(format: "%g", $0) + "x" } ?? "scale unreadable")"
     }
 }

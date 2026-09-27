@@ -94,7 +94,7 @@ enum EyesTools {
         tool: Tool(
             name: "displays",
             description: Displays.configuration.abstract
-                + " The id is what a display region takes; bounds are the screen points vhid click takes. Needs no grant.",
+                + " Bounds are the screen points vhid click takes. Needs no grant.",
             inputSchema: .object([
                 "type": "object",
                 "properties": .object([:]),
