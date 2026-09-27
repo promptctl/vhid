@@ -13,10 +13,10 @@ import Pointing
 /// somewhere the caller did not intend is the caller's problem to have; this says what
 /// the device did.
 public protocol Mouse: Sendable {
-    nonisolated(nonsending) func down(_ button: Button) async throws
-    nonisolated(nonsending) func releaseAll() async throws
-    nonisolated(nonsending) func move(by delta: Move) async throws
-    nonisolated(nonsending) func scroll(by delta: Scroll) async throws
+    func down(_ button: Button) async throws
+    func releaseAll() async throws
+    func move(by delta: Move) async throws
+    func scroll(by delta: Scroll) async throws
 }
 
 /// A mouse whose reports are posted on the device queue. The mirror of `QueuedKeyboard`,
@@ -31,8 +31,8 @@ public struct QueuedMouse: Mouse {
         self.queue = queue
     }
 
-    public nonisolated(nonsending) func down(_ button: Button) async throws { try await queue.run { [pointing] in try pointing.down(button) } }
-    public nonisolated(nonsending) func releaseAll() async throws { try await queue.run { [pointing] in try pointing.releaseAll() } }
-    public nonisolated(nonsending) func move(by delta: Move) async throws { try await queue.run { [pointing] in try pointing.move(by: delta) } }
-    public nonisolated(nonsending) func scroll(by delta: Scroll) async throws { try await queue.run { [pointing] in try pointing.scroll(by: delta) } }
+    public func down(_ button: Button) async throws { try await queue.run { [pointing] in try pointing.down(button) } }
+    public func releaseAll() async throws { try await queue.run { [pointing] in try pointing.releaseAll() } }
+    public func move(by delta: Move) async throws { try await queue.run { [pointing] in try pointing.move(by: delta) } }
+    public func scroll(by delta: Scroll) async throws { try await queue.run { [pointing] in try pointing.scroll(by: delta) } }
 }

@@ -152,3 +152,11 @@ let package = Package(
         ),
     ]
 )
+
+// Every nonisolated async function runs on its caller's executor until it suspends, so a
+// device call is in line on the `DeviceQueue` the moment it is asked for: calls asked in
+// program order on one actor arrive in that order, with nothing scheduled in between.
+// One setting for every target, so a fake and the device it stands in for run the same way.
+for target in package.targets {
+    target.swiftSettings = (target.swiftSettings ?? []) + [.enableUpcomingFeature("NonisolatedNonsendingByDefault")]
+}
