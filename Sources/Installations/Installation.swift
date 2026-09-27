@@ -40,9 +40,9 @@ public struct Installation: Sendable, Hashable, CustomStringConvertible {
     /// - two labels naming one Mach service: the second bootstrap exits 0, the job runs,
     ///   and it is never given the endpoint - it has no `endpoints` entry at all.
     ///
-    /// The second is what low-keyboard-3ti.13 recorded in the field: a helper sitting
-    /// unreachable for twelve minutes while logging that it was listening. Two stored
-    /// fields could drift back into exactly that; one field cannot.
+    /// The second is what low-talker's low-keyboard-3ti.13 recorded in the field: a helper
+    /// sitting unreachable for twelve minutes while logging that it was listening. Two
+    /// stored fields could drift back into exactly that; one field cannot.
     /// [LAW:one-source-of-truth] [LAW:no-silent-failure]
     public var launchdLabel: String { service }
 

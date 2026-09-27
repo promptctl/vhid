@@ -6,8 +6,8 @@ import Foundation
 /// Why a daemon and not the driver: opening the driver extension's user client requires
 /// `com.apple.developer.driverkit.userclient-access` naming
 /// `org.pqrs.Karabiner-DriverKit-VirtualHIDDevice`, which Apple grants per application
-/// identifier and which only pqrs's own daemon holds. Root does not help; measured, in the
-/// 3ti.2 spike. So the daemon is the way in.
+/// identifier and which only pqrs's own daemon holds. Root does not help; measured, in
+/// low-talker's 3ti.2 spike. So the daemon is the way in.
 ///
 /// **The caller must be root.** The socket's directory is mode 0700 owned by root, so a
 /// process that is not root cannot see the socket at all. That is stated here once and

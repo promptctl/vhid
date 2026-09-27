@@ -5,9 +5,9 @@ import Foundation
 /// for, filed by the process that owns the keyboard.
 ///
 /// macOS raises the assistant the moment a keyboard enumerates: it takes focus and asks
-/// for the physical key beside left Shift, to decide ANSI/ISO/JIS. Measured during the
-/// 3ti.2 spike, it swallowed the run's keystrokes outright - the text went to
-/// `com.apple.KeyboardSetupAssistant` instead of the target app. The assistant files its
+/// for the physical key beside left Shift, to decide ANSI/ISO/JIS. Measured during
+/// low-talker's 3ti.2 spike, it swallowed the run's keystrokes outright - the text went
+/// to `com.apple.KeyboardSetupAssistant` instead of the target app. The assistant files its
 /// verdict under `<product>-<vendor>-<country>` and never asks again about a device that
 /// already has one, so a device that files its own is never asked about.
 ///
@@ -23,11 +23,11 @@ enum KeyboardTypeAnswer {
     ///
     /// [LAW:effects-at-boundaries] Pure, so the one thing the merge must never do - drop
     /// another device's entry - is asserted without root and without a file. The cache on
-    /// this Mac already held an entry from an unrelated country-33 device, and the 3ti.7
-    /// spike's other temptation was to initialise this keyboard as country 33 so it would
-    /// collide with that entry: that would make the device declare something untrue about
-    /// itself, and would work only until the unrelated entry was cleared. We write our
-    /// own key and aim at nobody else's.
+    /// this Mac already held an entry from an unrelated country-33 device, and
+    /// low-talker's 3ti.7 spike's other temptation was to initialise this keyboard as
+    /// country 33 so it would collide with that entry: that would make the device declare
+    /// something untrue about itself, and would work only until the unrelated entry was
+    /// cleared. We write our own key and aim at nobody else's.
     static func filed(into cached: [String: Int]) -> [String: Int] {
         var answers = cached
         answers[VirtualKeyboardIdentity.keyboardTypeKey] = VirtualKeyboardIdentity.ansiKeyboardType
