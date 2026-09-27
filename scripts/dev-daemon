@@ -1,0 +1,108 @@
+#!/bin/bash
+# Registers this tree's daemon with launchd, or takes it back out.
+#
+#   dev-daemon install    # .build/debug/vhidd, under the name .build/debug/vhid dials
+#   dev-daemon remove
+#
+# Run from `make dev-daemon` and `make remove-dev-daemon`, which build and sign first;
+# it asks for sudo itself, for the lines that need root and no others.
+#
+# [LAW:one-source-of-truth] Nothing here knows a name or a plist's shape. The service is
+# what the debug vhid prints for `vhid service`, the one it dials by default, and the
+# plist is scripts/launchd-plist's, the writer the release pkg uses. Whether launchd gave
+# the job its endpoint is `vhid service standing`, the reading pkg/scripts/postinstall
+# and `vhid doctor` take.
+#
+# install replaces a job this script registered, so a second run after a rebuild or a
+# move of the tree is the same command as the first. A job it did not register is
+# refused whatever its label, both ways one can come to hold it:
+#
+# - a plist at the path that an installer's receipt claims, which is the pkg's and is
+#   replaced by installing the pkg again, not by this;
+# - a job loaded under the label with no plist at the path, which something else loaded
+#   and which this script could neither describe nor put back.
+#
+# Held to bash 3.2, like every script a fresh Mac might run.
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+vhid="$root/.build/debug/vhid"
+vhidd="$root/.build/debug/vhidd"
+
+usage() { echo "usage: dev-daemon install|remove" >&2; exit 2; }
+say() { echo "dev-daemon: $*"; }
+fail() { echo "dev-daemon: $*" >&2; exit 1; }
+
+[ $# -eq 1 ] || usage
+action=$1
+case "$action" in install|remove) ;; *) usage ;; esac
+
+[ -x "$vhid" ] || fail "$vhid is not built; run: make"
+service=$("$vhid" service) || fail "$vhid could not say which service it dials"
+plist="/Library/LaunchDaemons/$service.plist"
+
+# Loaded, not loaded, or unread - and unread is refused rather than taken for either,
+# because each of the other two is acted on. Only launchd's own "no such job" means
+# nothing is loaded. [LAW:no-silent-failure]
+loaded() {
+  local record
+  if record=$(launchctl print "system/$service" 2>&1); then return 0; fi
+  grep -q "Could not find service" <<<"$record" && return 1
+  fail "could not read whether $service is loaded: $record"
+}
+
+# A receipt's pkgid line is the pkg's claim on the file; a file no pkg installed prints
+# the path alone.
+if [ -e "$plist" ] && pkgutil --file-info "$plist" | grep -q '^pkgid:'; then
+  fail "$plist was installed by a pkg ($(pkgutil --file-info "$plist" | awk '/^pkgid:/ { print $2 }' | tr '\n' ' ')); this script registers only the jobs it writes"
+fi
+if [ ! -e "$plist" ] && loaded; then
+  fail "a job for $service is loaded with no plist at $plist, so this script did not register it; see: launchctl print system/$service"
+fi
+
+# The same stop pkg/scripts/preinstall makes, for the same reason: launchd adds no second
+# job under one label, and bootout answers 36 while the daemon is still releasing what it
+# holds. The label is watched until launchd lets go of it. [LAW:no-ambient-temporal-coupling]
+stop() {
+  local status=0 tries=0
+  sudo launchctl bootout "system/$service" || status=$?
+  case $status in
+    0) return ;;
+    36) ;;
+    *) fail "launchd would not unload $service (bootout exited $status)" ;;
+  esac
+  while loaded; do
+    tries=$((tries + 1))
+    [ $tries -le 30 ] || fail "$service was still loaded 30 s after launchd began unloading it"
+    sleep 1
+  done
+}
+
+if loaded; then
+  say "stopping the loaded $service job"
+  stop
+fi
+
+if [ "$action" = remove ]; then
+  if [ -e "$plist" ]; then sudo /bin/rm -f "$plist"; fi
+  say "removed $service"
+  exit 0
+fi
+
+[ -x "$vhidd" ] || fail "$vhidd is not built; run: make"
+"$root/scripts/launchd-plist" "$service" "$vhidd" | sudo tee "$plist" >/dev/null
+# Registering is asking for the job to run, so a `launchctl disable` left from before is
+# lifted rather than turned into a refused bootstrap that names nothing.
+sudo launchctl enable "system/$service"
+sudo launchctl bootstrap system "$plist" || fail "launchd would not load $plist; see: launchctl print system/$service"
+
+# A job loaded without its endpoint is a root process nothing can reach, restarted
+# forever, so it is taken back down, as postinstall does. [LAW:no-silent-failure]
+standing=$("$vhid" service standing) || fail "$vhid could not read launchd's record of $service; see: launchctl print system/$service"
+case "$standing" in
+  holding-the-service) say "loaded $service from $plist, running $vhidd" ;;
+  loaded-without-the-service)
+    sudo launchctl bootout "system/$service" || say "and launchd would not unload it either; unload it with: sudo launchctl bootout system/$service"
+    fail "launchd loaded $plist but holds no endpoint for $service on its behalf, so it was unloaded. Another job names $service - find it with: grep -l '>$service<' /Library/LaunchDaemons/*.plist" ;;
+  *) fail "launchd has no job for $service just after loading $plist (vhid service standing said: $standing)" ;;
+esac
