@@ -23,19 +23,23 @@ unlinked=(
 )
 probe() {
   local dir=.build/checkouts/$(basename "$1" .git) module probes=()
-  [[ -d $dir/Sources ]] || { echo "check-notice: no checkout at $dir; build first" >&2; exit 1; }
   for module in "$dir"/Sources/*/; do
     module=$(basename "$module")
     probes+=("${#module}$module")
   done
-  (IFS='|'; echo "${probes[*]}")
+  # A digit before the length would make it a longer name's length: 7Atomics in 17Atomics.
+  (IFS='|'; echo "(^|[^0-9])(${probes[*]})")
 }
 
 failed=0
 symbols=$(nm "$binary")
 while read -r url; do
   if [[ " ${unlinked[*]} " == *" $url "* ]]; then
-    if grep -qE "$(probe "$url")" <<<"$symbols"; then
+    checkout=.build/checkouts/$(basename "$url" .git)
+    if [[ ! -d $checkout/Sources ]]; then
+      echo "check-notice: no checkout at $checkout; build first" >&2
+      failed=1
+    elif grep -qE "$(probe "$url")" <<<"$symbols"; then
       echo "check-notice: $url is listed as unlinked but $binary links it; name it in NOTICE" >&2
       failed=1
     fi
