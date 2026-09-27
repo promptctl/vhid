@@ -64,9 +64,8 @@ enum DaemonProcess {
         let terminate: (pid_t) -> Void
     }
 
-    /// The effects done for real. The daemon outlives this process on purpose: a vhidd
-    /// that exits because the connection dropped is restarted by launchd and finds the
-    /// daemon where it left it, and only `stop` ends it.
+    /// The effects done for real. The daemon outlives any one connection on purpose, and
+    /// only `stop` ends it.
     static var real: Effects<HID> {
         Effects(
             connect: { whenLost in
@@ -75,17 +74,41 @@ enum DaemonProcess {
             },
             bringUp: { Startups(keyboard: try $0.keyboard.start(within: $1), mouse: try $0.mouse.start(within: $1)) },
             launch: spawn,
-            terminate: { kill($0, SIGTERM) }
+            terminate: end
         )
     }
 
+    /// Started with SIGTERM at its default: vhidd ignores SIGTERM to answer it on a queue,
+    /// and an ignored signal is inherited across exec, which would leave `end`'s SIGTERM
+    /// nothing to stop.
     private static func spawn() throws -> pid_t {
         var pid: pid_t = 0
         let arguments: [UnsafeMutablePointer<CChar>?] = [strdup(executable), nil]
         defer { arguments.forEach { free($0) } }
-        let spawned = posix_spawn(&pid, executable, nil, nil, arguments, environ)
+        var attributes: posix_spawnattr_t?
+        posix_spawnattr_init(&attributes)
+        defer { posix_spawnattr_destroy(&attributes) }
+        var defaults = sigset_t()
+        sigemptyset(&defaults)
+        sigaddset(&defaults, SIGTERM)
+        posix_spawnattr_setsigdefault(&attributes, &defaults)
+        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSIGDEF))
+        let spawned = posix_spawn(&pid, executable, nil, &attributes, arguments, environ)
         guard spawned == 0 else { throw CouldNotStart(code: spawned) }
         return pid
+    }
+
+    /// Stops a daemon this process started and reaps it, so it is gone - not a zombie, and
+    /// not a dying daemon the next attempt connects to as somebody else's - when this
+    /// returns. SIGTERM first, and SIGKILL for one still there after two seconds.
+    private static func end(_ pid: pid_t) {
+        kill(pid, SIGTERM)
+        for _ in 0..<20 {
+            if waitpid(pid, nil, WNOHANG) != 0 { return }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        kill(pid, SIGKILL)
+        waitpid(pid, nil, 0)
     }
 }
 

@@ -32,7 +32,14 @@ final class Readiness: @unchecked Sendable {
     /// either refused with a reason or served.
     private enum State {
         case down(Down)
-        case up(any ServedDevices)
+        case up(Up)
+    }
+
+    /// Devices that are up, and the attempt that brought them up: devices from two
+    /// attempts are two sets, and what a client held on the first is gone from the second.
+    struct Up {
+        let devices: any ServedDevices
+        let attempt: Int
     }
 
     /// Its own lock and never the devices', so a refusal is answered at once however long
@@ -48,18 +55,18 @@ final class Readiness: @unchecked Sendable {
     private var ended = false
 
     /// The devices, or why they are not up.
-    func devices() throws -> any ServedDevices {
+    func devices() throws -> Up {
         condition.lock(); defer { condition.unlock() }
         switch state {
         case .down(let why): throw why
-        case .up(let devices): return devices
+        case .up(let up): return up
         }
     }
 
     /// Devices that are not up hold nothing, so there is nothing to release.
     func releaseEverything(because reason: String) {
         do {
-            try devices().releaseEverything(because: reason)
+            try devices().devices.releaseEverything(because: reason)
         } catch {
             log("\(reason); nothing is held: \(error)")
         }
@@ -75,6 +82,7 @@ final class Readiness: @unchecked Sendable {
 
     func failed(_ error: any Error) {
         condition.lock(); defer { condition.unlock() }
+        guard !ended else { return }
         ended = true
         state = .down(.failed(error))
     }
@@ -84,7 +92,7 @@ final class Readiness: @unchecked Sendable {
     func up(_ devices: any ServedDevices) {
         condition.lock(); defer { condition.unlock() }
         guard !ended else { return }
-        state = .up(devices)
+        state = .up(Up(devices: devices, attempt: attempt))
     }
 
     /// Takes the devices down when `attempt` is the current one and has not already ended,

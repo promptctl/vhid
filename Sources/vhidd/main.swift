@@ -118,7 +118,7 @@ do {
                 return devices
             },
             now: { .now },
-            pause: { Thread.sleep(forTimeInterval: $0.seconds) }
+            pause: { Thread.sleep(forTimeInterval: Double($0.components.seconds) + Double($0.components.attoseconds) / 1e18) }
         )
     }
 

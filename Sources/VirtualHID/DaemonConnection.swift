@@ -451,14 +451,11 @@ private final class Link: @unchecked Sendable {
     }
 }
 
-public extension Duration {
-    /// The duration as the `TimeInterval` Foundation's waits take.
+private extension Duration {
     var seconds: TimeInterval {
         TimeInterval(components.seconds) + TimeInterval(components.attoseconds) / 1e18
     }
-}
 
-private extension Duration {
     var wholeMilliseconds: Int32 {
         Int32(clamping: components.seconds * 1_000 + components.attoseconds / 1_000_000_000_000_000)
     }

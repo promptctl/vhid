@@ -17,7 +17,7 @@ final class Holder: @unchecked Sendable {
     }
 
     private let lock = NSLock()
-    private var holding: (connection: ObjectIdentifier, pid: pid_t)?
+    private var holding: (connection: ObjectIdentifier, pid: pid_t, attempt: Int)?
 
     /// Runs `body` as `connection`'s act on the devices, claiming them for it first when
     /// nobody holds them, or throws `Busy` naming whose they are.
@@ -26,10 +26,12 @@ final class Holder: @unchecked Sendable {
     /// between them, and the devices are this connection's until it is freed. The claim is
     /// made by the first act and not at admission, so a connection that only asks who
     /// holds them never holds them. [LAW:single-enforcer]
-    func serve(_ connection: ObjectIdentifier, by pid: pid_t, _ body: () -> Void) throws {
+    ///
+    /// A hold on devices from an earlier attempt is no hold: those devices are gone.
+    func serve(_ connection: ObjectIdentifier, by pid: pid_t, on attempt: Int, _ body: () -> Void) throws {
         lock.lock(); defer { lock.unlock() }
-        if let holding, holding.connection != connection { throw Busy(pid: holding.pid) }
-        holding = (connection, pid)
+        if let holding, holding.connection != connection, holding.attempt == attempt { throw Busy(pid: holding.pid) }
+        holding = (connection, pid, attempt)
         body()
     }
 

@@ -27,7 +27,7 @@ import VirtualHID
     @Test func devicesThatComeUpAreHandedOut() throws {
         let devices = RecordingDevices()
         let readiness = Readiness.serving(devices)
-        #expect(try readiness.devices() === devices)
+        #expect(try readiness.devices().devices === devices)
         readiness.releaseEverything(because: "a client went away")
         #expect(devices.done == ["a client went away"])
     }
@@ -58,7 +58,7 @@ import VirtualHID
         let devices = RecordingDevices()
         readiness.up(devices)
         #expect(!readiness.lost(DaemonError.closed, in: earlier))
-        #expect(try readiness.devices() === devices)
+        #expect(try readiness.devices().devices === devices)
     }
 
     /// An attempt that failed keeps its reason: its connection closing afterwards is the

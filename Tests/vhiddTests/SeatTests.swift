@@ -54,4 +54,24 @@ import Testing
         #expect(answer.0 == nil)
         #expect(answer.1 == "\(Readiness.Down.starting)")
     }
+
+    /// A client whose devices were lost is told so on its next act, and on every act
+    /// after, rather than acting on fresh devices as if what it held were still held.
+    @Test func aSeatWhoseDevicesWereLostEnds() {
+        let (holder, readiness) = (Holder(), Readiness())
+        let first = readiness.begin()
+        readiness.up(RecordingDevices())
+        let seat = Seat(ObjectIdentifier(one), pid: 41, holder: holder, readiness: readiness)
+        seat.down(usage: 225) { #expect($0 == nil) }
+        _ = readiness.lost(NSError(domain: "test", code: 1), in: first)
+        _ = readiness.begin()
+        let fresh = RecordingDevices()
+        readiness.up(fresh)
+        var refusals: [String?] = []
+        seat.down(usage: 4) { refusals.append(($0 as NSError?)?.localizedDescription) }
+        seat.down(usage: 4) { refusals.append(($0 as NSError?)?.localizedDescription) }
+        #expect(refusals == ["\(Seat.Lost())", "\(Seat.Ended())"])
+        #expect(fresh.done.isEmpty)
+        #expect(holder.pid == nil)
+    }
 }

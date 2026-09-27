@@ -12,11 +12,11 @@ protocol ServedDevices: DeviceService {
     func releaseEverything(because reason: String)
 }
 
-/// The keyboard and the mouse, held open for the life of the daemon and served to one
-/// client at a time.
+/// The keyboard and the mouse, held open for as long as their connection to the daemon
+/// lasts and served to one client at a time.
 ///
-/// [LAW:no-ambient-temporal-coupling] Both are brought up at startup and never re-opened
-/// per client, because readiness is not instant: pqrs's daemon asks the driver whether a
+/// [LAW:no-ambient-temporal-coupling] Both are brought up once per connection and never
+/// re-opened per client, because readiness is not instant: pqrs's daemon asks the driver whether a
 /// device is ready on a one-second timer, so a connect-per-client daemon would put up to
 /// a full second in front of every client's first keystroke, for a reason that has
 /// nothing to do with the hardware. Paid once here, where nobody is waiting.

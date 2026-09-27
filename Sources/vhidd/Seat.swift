@@ -26,6 +26,10 @@ final class Seat: NSObject, HelperService, @unchecked Sendable {
     /// before the holder's lock and never after it.
     private let seat = NSLock()
     private var ended = false
+    /// The attempt whose devices this seat has acted on. Devices lost and brought up again
+    /// hold nothing this client set down, so a seat that held the lost ones ends rather
+    /// than carrying on as if its keys were still down. [LAW:no-silent-failure]
+    private var heldOn: Int?
 
     init(_ connection: ObjectIdentifier, pid: pid_t, holder: Holder, readiness: Readiness) {
         self.connection = connection
@@ -42,8 +46,14 @@ final class Seat: NSObject, HelperService, @unchecked Sendable {
         seat.lock(); defer { seat.unlock() }
         do {
             guard !ended else { throw Ended() }
-            let devices = try readiness.devices()
-            try holder.serve(connection, by: pid) { act(devices) }
+            let up = try readiness.devices()
+            if let heldOn, heldOn != up.attempt {
+                ended = true
+                holder.free(connection) {}
+                throw Lost()
+            }
+            try holder.serve(connection, by: pid, on: up.attempt) { act(up.devices) }
+            heldOn = up.attempt
         } catch {
             reply(refusal(error))
         }
@@ -80,6 +90,11 @@ final class Seat: NSObject, HelperService, @unchecked Sendable {
         } catch {
             reply(nil, refusal(error))
         }
+    }
+
+    /// A call on a seat whose devices were lost under it.
+    struct Lost: Error, CustomStringConvertible {
+        var description: String { "the devices this connection held were lost and brought up again, releasing everything it held; connect again" }
     }
 
     /// A call on a seat that has ended.
