@@ -67,7 +67,8 @@ layout has no keys for.
 `--service` says which installation to talk to. It defaults to the one the binary was
 built for: the installed copy for the installed CLI, and the development copy for a
 build from this tree. `vhid service` prints which. Coordinates are screen points from the top left of the main display; a display
-left of or above it has negative ones, which follow `--`.
+left of or above it has negative ones, which follow `--` after every option:
+`vhid click --times 2 -- -100 -40`.
 
 ## Over MCP
 
