@@ -163,13 +163,13 @@ service=$("$payload/usr/local/bin/vhid" service)
 
 # The version the packed CLI reports, which is the one a bug report will quote, held to
 # the one this tree was checked for above.
-# The packed eyes, run: a binary lipo joined and codesign rewrote is only known to start
-# once it has.
-"$payload/usr/local/bin/eyes" --help >/dev/null || fail "the packed eyes does not run"
-
 packed=$("$payload/usr/local/bin/vhid" --version)
 [ "$packed" = "$version" ] \
   || fail "the packed vhid reports version '$packed', not '$version'"
+
+# The packed eyes, run: a binary lipo joined and codesign rewrote is only known to start
+# once it has.
+"$payload/usr/local/bin/eyes" --help >/dev/null || fail "the packed eyes does not run"
 
 scripts/stage-uninstall "$service" "$IDENTIFIER" >"$payload/usr/local/libexec/vhid-uninstall"
 ditto scripts/virtual-hid-driver "$payload/usr/local/libexec/vhid-virtual-hid-driver"
