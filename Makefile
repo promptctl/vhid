@@ -34,7 +34,7 @@ SHELL := /bin/sh
 # this line would sign nothing and call it success. [LAW:no-silent-failure]
 SIGN := scripts/products | tr '\n' '\0' | xargs -0 scripts/sign "$(DEV_IDENTITY)"
 
-.PHONY: all build test check-pins sign signing-identity clean
+.PHONY: all build test check-pins sign signing-identity dev-daemon remove-dev-daemon clean
 
 all: build
 
@@ -76,6 +76,17 @@ test: signing-identity
 # with. `test` runs this too; this is the fast way to it after editing a pin.
 check-pins: build
 	scripts/check-driver-pins
+
+# This tree's daemon, registered with launchd under the service its CLI dials, replacing
+# one registered before. Built first, because what launchd runs is the binary as it
+# stands and a daemon left ad hoc signed refuses every caller. Asks for sudo.
+dev-daemon: build
+	scripts/dev-daemon install
+
+# No build first: taking a job out should not wait on a tree that compiles, and
+# rebuilding would relink the very binary launchd is running.
+remove-dev-daemon:
+	scripts/dev-daemon remove
 
 # Also the fix for a tree someone has built with bare `swift build`.
 sign:

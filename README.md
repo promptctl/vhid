@@ -132,6 +132,13 @@ rather than an identity that was refused, and costs an afternoon in the XPC plum
 before anyone suspects the signature. `make sign` repairs a tree that has been built
 that way.
 
+A build talks to the development daemon, `ai.promptctl.vhid.vhidd.dev`, and nothing
+answers it until launchd has a job for it. `make dev-daemon` builds, then registers
+`.build/debug/vhidd` under that name, replacing the job an earlier run registered; it
+asks for sudo. `make remove-dev-daemon` takes it out. Neither touches a job it did not
+register, the installed pkg's included. Launchd runs that binary as root, from a tree
+your own account can write to, until it is removed.
+
 The first `make` on a Mac makes a self-signed certificate called `vhid Dev` and signs
 with it from then on. Nothing has to be run by hand first: a certificate that has to be
 asked for is a certificate a first build does without, and a first build that does
