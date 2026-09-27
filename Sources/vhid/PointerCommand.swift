@@ -52,7 +52,7 @@ struct PlayCommand: AsyncParsableCommand {
             // script that cannot be played whole moves nothing.
             let play = try Play.parse(String(decoding: FileHandle.standardInput.readDataToEndOfFile(), as: UTF8.self))
             ending = .finished(try await Devices.using(try service.installation()) {
-                try await Player(pointer: $0.pointer, clock: WakingClock(), wall: Self.epochMicroseconds, lead: Self.lead).play(play)
+                try await Player(pointer: $0.pointer, clock: ContinuousClock(), wall: Self.epochMicroseconds, lead: Self.lead).play(play)
             })
         } catch {
             // The reports that did go out are printed even for a run that stopped, so a
@@ -128,9 +128,17 @@ struct PlayCommand: AsyncParsableCommand {
     /// late in a loop that kept the CPU busy between sleeps and 2505 us late in one that
     /// did not.
     ///
+    /// Nor is it the clock. `WakingClock` (last in 071a2d4) blocked a thread in
+    /// `mach_wait_until` for this. Interleaved with `ContinuousClock.sleep`, 150 of each
+    /// per gap, two runs, on battery on 2026-09-27, p50 lateness was WakingClock's 265 and
+    /// 266 us against 281 and 286 at 1 ms, 1271/1269 against 1035/1281 at 5 ms, 1800/1908
+    /// against 1968/1705 at 8 ms, and 4802/4495 against 3909/3412 at 20 ms. Neither led:
+    /// each was sooner in some rows and later in others, by up to a millisecond, so it
+    /// went. Not rerun on AC.
+    ///
     /// So no fixed number covers every gap a script can have, and this one does not
-    /// pretend to. It is the measured p99 for the 5 ms neighbourhood most scripts sit in,
-    /// and what it fails to cover is not hidden: a report that goes out late goes out
+    /// pretend to. It is the bare script's 2505 us at 5 ms with an idle core - a p50,
+    /// on AC, 2026-09-21 - the neighbourhood most scripts sit in, and what it fails to cover is not hidden: a report that goes out late goes out
     /// late and says so in `late_us`, which is the number a harness came here to read.
     /// [LAW:no-silent-failure]
     static let lead: Duration = .microseconds(2500)

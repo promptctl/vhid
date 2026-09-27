@@ -130,9 +130,9 @@ import Testing
     /// A lead, watched out on a clock that only moves when something sleeps on it.
     ///
     /// **Every other test here passes `lead: .zero`**, which skips the watch entirely - so
-    /// the value a replay actually runs with, and the whole reason `WakingClock` exists,
-    /// had no coverage at all. The watch yields until the deadline, which is right under a
-    /// clock that advances on its own and is forever under one that does not: without the
+    /// the value a replay actually runs with had no coverage at all. The watch yields until
+    /// the deadline, which is right under a clock that advances on its own and is forever
+    /// under one that does not: without the
     /// measurement that notices the clock standing still, this spins until the time limit.
     @Test(.timeLimit(.minutes(1)))
     func aLeadIsWatchedOutOnAClockThatOnlyMovesWhenSleptOn() async throws {
