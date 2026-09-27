@@ -109,6 +109,9 @@ check "unreadable launchd: forgets nothing" "" "$(cat "$STUB/reached")"
 SESSIONS= ; export SESSIONS
 state "$DAEMON" "" no; run
 check "nobody logged in: daemon still stopped" "" "$(cat "$STUB/loaded")"
+SESSIONS="0 248"
+state "$DAEMON" "" no; run
+check "login screen only: no menu bar item asked about" "0|" "$status|$(grep -c 'menu bar' <<<"$out" | grep -v '^0$')"
 SESSIONS="501 502"
 state "$DAEMON $AGENT gui/502/$SERVICE.menubar" "" no; run
 check "two sessions: both menu bar items stopped" "" "$(cat "$STUB/loaded")"

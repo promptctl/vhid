@@ -69,7 +69,9 @@ fi
 # of its own. It is a view of vhid, so one that will not stop, or whose record cannot
 # be read, is said and does not keep the rest from being removed: with its plist gone,
 # launchd does not start it again at that person's next login.
-for uid in $(ps -axo uid=,comm= | awk '$2 ~ /(^|\/)loginwindow$/ { print $1 }' | sort -u); do
+# The login screen's own loginwindow runs as root, and Setup Assistant's user is a
+# system one too; neither is a person's session, so only uids from 500 up count.
+for uid in $(ps -axo uid=,comm= | awk '$2 ~ /(^|\/)loginwindow$/ && $1 >= 500 { print $1 }' | sort -u); do
   agent="gui/$uid/$service.menubar"
   if record=$(launchctl print "$agent" 2>&1); then
     if why=$(stop_job "$agent"); then
