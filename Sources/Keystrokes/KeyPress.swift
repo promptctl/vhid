@@ -1,6 +1,6 @@
 /// Something that holds keys down and lets them all go.
 ///
-/// The two acts a HID keyboard performs, and the whole of what has to be true of a thing
+/// The acts a HID keyboard performs, and the whole of what has to be true of a thing
 /// for text to be typed on it. What is on the other side - the driver in this process, or
 /// a root daemon across an XPC boundary - is not a fact anything above here needs, which
 /// is what lets the same typing code run under `sudo` against the device and unprivileged
@@ -16,7 +16,12 @@
 /// so it is made on a thread kept for waiting: the daemon presses from the thread a
 /// client's call arrived on, and a client from the `DeviceQueue` its `QueuedKeyboard`
 /// runs every call on.
+///
+/// `hold` states the whole set down at once, which is how a replay says Shift stays held
+/// while A is let go: the device replaces its set with this one and derives the report from
+/// it, so this too composes no report.
 public protocol KeyPress: Sendable {
     func down(_ usage: Usage) throws
     func releaseAll() throws
+    func hold(_ keys: HeldKeys) throws
 }

@@ -108,6 +108,33 @@ enum Help {
         back from the cursor.
         """, commandLine: [negative(NegativeExample.drag)])
 
+    static let script = "the script, as JSON Lines: the start line, then one act a line"
+
+    static let play = VerbHelp(name: "play", abstract: "Replay a timed script of keyboard and mouse acts, one report each, and say when each went out.", discussion: """
+        The script is JSON Lines. The first line is where the cursor starts, reached before the \
+        clock starts: {"to":{"x":800,"y":500}}, in \(place). Every line after it is one act at t_ms \
+        milliseconds from the clock's start, in order:
+          {"t_ms":0,"keys":["leftShift",4]}       exactly these keys held from now: a modifier (\(Modifier.holdableNames)), \
+        a key name (\(KeyChord.keyNameList)), or a usage number from 4 to 231 - the physical key, never a character
+          {"t_ms":0,"buttons":["left"]}           exactly these buttons held from now: left, right, middle, or 1 to 32
+          {"t_ms":8.3,"move":{"dx":4,"dy":-2}}    relative motion in counts, -127 to 127, uncorrected
+          {"t_ms":16.7,"wheel":{"v":-1,"h":0}}    wheel ticks, -127 to 127; v positive rolls away from the hand
+          {"t_ms":1000,"keys":[]}                 every key up; {"buttons":[]} every button
+        A script is refused whole, before anything is connected, if a line is malformed, t_ms goes \
+        backwards or past an hour, a keys line holds more than 32 keys besides the modifiers, or it \
+        ends with a key or a button held. A line that repeats the held set sends nothing and \
+        prints no report line. A key held through a second with no other act is said again, which \
+        keeps it held and sends no report.
+
+        Output is JSON Lines: one {"report":{"index":…,"line":…,"scheduled_us":…,"sent_us":…,"acked_us":…}} \
+        per report, line being the script line it came from, times in microseconds since the Unix epoch, then \
+        {"done":{"reports":…,"start_reports":…,"late_us":{"p50":…,"p90":…,"p99":…,"max":…}}}, \
+        lateness being sent minus scheduled. A late report is sent late, never skipped.
+
+        A play that stops releases every key and button and prints no done line - the missing done \
+        line is what says it stopped.
+        """, commandLine: ["The script is read from stdin. A play that stops prints the reports that did go out first."])
+
     static let cursor = VerbHelp(name: "cursor", abstract: "Say where the pointer is, in the coordinates click takes.", discussion: """
         Read from the window server rather than from the daemon, which cannot know: macOS \
         accelerates what the device sends, so where the pointer went is a fact of the user's \

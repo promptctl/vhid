@@ -51,7 +51,7 @@ struct VerbTool: Sendable {
 /// Each is a CLI verb's core called with arguments read from JSON rather than from argv,
 /// so a tool and its verb cannot come to do different things. [LAW:one-source-of-truth]
 enum Tools {
-    static let all: [VerbTool] = [type, press, click, move, scroll, drag, cursor, doctor]
+    static let all: [VerbTool] = [type, press, click, move, scroll, drag, play, cursor, doctor]
 
     private static let x = Parameter.number("x", Help.x)
     private static let y = Parameter.number("y", Help.y)
@@ -117,6 +117,17 @@ enum Tools {
             return try await Devices.using(installation) {
                 try await DragCommand.drag(from: from, to: to, button: button, holding: held, with: $0.pointer, $0.keyboard)
             }
+        }
+    }()
+
+    /// What `vhid play` prints, as the call's answer. A play that stops is the tool's error,
+    /// which says how many reports went out before it did.
+    static let play: VerbTool = {
+        let script = Parameter.text("script", Help.script)
+        return VerbTool(Help.play, [script]) { arguments, installation in
+            let schedule = try PlayCommand.schedule(try arguments[script])
+            let played = try await Devices.using(installation) { try await PlayCommand.play(schedule, with: $0) }
+            return try PlayCommand.lines(of: .finished(played)).joined(separator: "\n")
         }
     }()
 

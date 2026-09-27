@@ -24,21 +24,14 @@ struct KeysLetGo: Equatable {
     let failure: String?
 }
 
-/// A keyboard that says which keys it holds, and can be told to hold exactly a set. The
-/// device is the one record of that: it counts a key whose request threw after reaching
-/// the driver, which no caller can. [LAW:one-source-of-truth]
+/// A keyboard that says which keys it holds. The device is the one record of that: it
+/// counts a key whose request threw after reaching the driver, which no caller can.
+/// [LAW:one-source-of-truth]
 protocol HeldKeyboard: KeyPress {
     var keysDown: Set<Usage> { get }
-    func hold(_ keys: HeldKeys) throws
-}
-
-/// A mouse that can be told to hold exactly a set of buttons.
-protocol HeldPointing: PointingDevice {
-    func hold(_ buttons: Set<Button>) throws
 }
 
 extension VirtualKeyboard: HeldKeyboard {}
-extension VirtualPointing: HeldPointing {}
 
 /// The keyboard and the mouse, held open for as long as their connection to the daemon
 /// lasts and served to one client at a time.
@@ -52,7 +45,7 @@ final class Devices: NSObject, ServedDevices, @unchecked Sendable {
     /// The seams and not the drivers, so a test hands in devices of its own and the
     /// daemon hands in the real ones. [LAW:composability]
     private let keyboard: any HeldKeyboard
-    private let mouse: any HeldPointing
+    private let mouse: any PointingDevice
     /// One report at a time, across both devices. [LAW:no-shared-mutable-globals] Each
     /// device keeps its own reports whole; this orders the two against each other, because
     /// they share the socket and the client: a keyboard report and a mouse report from one
@@ -83,7 +76,7 @@ final class Devices: NSObject, ServedDevices, @unchecked Sendable {
     /// When a client last asked for a report of either device; under `device`.
     private var lastReport: ContinuousClock.Instant
 
-    init(keyboard: any HeldKeyboard, mouse: any HeldPointing, limit: Duration = keyLimit,
+    init(keyboard: any HeldKeyboard, mouse: any PointingDevice, limit: Duration = keyLimit,
          now: @escaping () -> ContinuousClock.Instant = { .now }) {
         self.keyboard = keyboard
         self.mouse = mouse

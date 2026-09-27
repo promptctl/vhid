@@ -69,6 +69,8 @@ public struct Scroll: Hashable, Sendable {
 public protocol PointingDevice: Sendable {
     func down(_ button: Button) throws
     func releaseAll() throws
+    /// Exactly `buttons` down from now, whatever was down before.
+    func hold(_ buttons: Set<Button>) throws
     func move(by delta: Move) throws
     func scroll(by delta: Scroll) throws
 }
