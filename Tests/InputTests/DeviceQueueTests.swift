@@ -71,20 +71,19 @@ private struct JournalPointing: Pointing {
         #expect(journal.log == ["down 4"])
     }
 
-    /// A key and then a move, asked for on one queue, arrive in that order however long the
-    /// key's answer takes. On a queue of its own the move would land while the key waits.
+    /// A key and then a move, submitted to one queue, arrive in that order however long the
+    /// key's answer takes. Both are in line before the key is acknowledged, so a move that
+    /// could overtake the key would.
     @Test func aKeyAndAMoveOnOneQueueArriveInTheOrderAsked() async throws {
         let journal = Journal()
         let device = BlockingKeyPress(journal: journal)
+        let pointing = JournalPointing(journal: journal)
         let queue = DeviceQueue()
-        let keyboard = QueuedKeyboard(keyboard: device, queue: queue)
-        let mouse = QueuedMouse(pointing: JournalPointing(journal: journal), queue: queue)
-        let pressed = Task { try await keyboard.down(Usage(rawValue: 0x04)) }
-        let moved = Task { try await mouse.move(by: Move(x: Count(clamping: 3), y: Count(clamping: 4))) }
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { device.blocking })
+        let pressed = queue.submit { try device.down(Usage(rawValue: 0x04)) }
+        let moved = queue.submit { try pointing.move(by: Move(x: Count(clamping: 3), y: Count(clamping: 4))) }
         device.acknowledge()
-        try await pressed.value
-        try await moved.value
+        try await pressed.value()
+        try await moved.value()
         #expect(journal.log == ["down 4", "move 3 4"])
     }
 }

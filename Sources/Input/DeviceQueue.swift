@@ -1,4 +1,5 @@
 import Dispatch
+import Synchronization
 
 /// Where a device call waits for its acknowledgement: a serial queue of its own, off the
 /// main actor and off the cooperative pool.
@@ -22,11 +23,57 @@ public final class DeviceQueue: Sendable {
 
     public init() {}
 
-    /// Runs `call` on the queue and resumes with what it threw, if anything. Handed over
-    /// on the caller's actor, so calls made there run in the order they were made.
-    public func run(isolation: isolated (any Actor)? = #isolation, _ call: @escaping @Sendable () throws -> Void) async throws {
+    /// Puts `call` on the queue now, behind every call submitted before it, and hands back
+    /// what to await for its answer. Synchronous on purpose: the order calls reach the
+    /// device is the order `submit` was called in, which is plain program order - no
+    /// actor, task or scheduler stands between asking and being in line.
+    /// [LAW:no-ambient-temporal-coupling]
+    public func submit(_ call: @escaping @Sendable () throws -> Void) -> Acknowledgement {
+        let acknowledgement = Acknowledgement()
+        queue.async { acknowledgement.resolve(Result(catching: call)) }
+        return acknowledgement
+    }
+
+    /// Submits `call` and waits for its answer. Nonsending, so a caller's actor is where
+    /// the submit happens, before anything suspends.
+    public nonisolated(nonsending) func run(_ call: @escaping @Sendable () throws -> Void) async throws {
+        try await submit(call).value()
+    }
+}
+
+/// The answer to one submitted call: resolved once, on the queue, and awaited by whoever
+/// holds it - before or after it resolves.
+public final class Acknowledgement: Sendable {
+    private enum State {
+        case pending([CheckedContinuation<Void, any Error>])
+        case answered(Result<Void, any Error>)
+    }
+
+    private let state = Mutex(State.pending([]))
+
+    fileprivate init() {}
+
+    fileprivate func resolve(_ answer: Result<Void, any Error>) {
+        let waiting = state.withLock { state -> [CheckedContinuation<Void, any Error>] in
+            guard case .pending(let waiting) = state else { preconditionFailure("an acknowledgement is answered once") }
+            state = .answered(answer)
+            return waiting
+        }
+        for continuation in waiting { continuation.resume(with: answer) }
+    }
+
+    /// Returns once the call has run, throwing what it threw.
+    public func value() async throws {
         try await withCheckedThrowingContinuation { continuation in
-            queue.async { continuation.resume(with: Result(catching: call)) }
+            let answer = state.withLock { state -> Result<Void, any Error>? in
+                switch state {
+                case .answered(let answer): return answer
+                case .pending(let waiting):
+                    state = .pending(waiting + [continuation])
+                    return nil
+                }
+            }
+            if let answer { continuation.resume(with: answer) }
         }
     }
 }

@@ -19,8 +19,8 @@ import Keystrokes
 /// The keys are awaited rather than returned from: each one waits for the far side's
 /// acknowledgement, which is the pacing the driver needs.
 public protocol Keyboard: Sendable {
-    func down(_ usage: Usage) async throws
-    func releaseAll() async throws
+    nonisolated(nonsending) func down(_ usage: Usage) async throws
+    nonisolated(nonsending) func releaseAll() async throws
 }
 
 /// A keyboard whose reports are posted on the device queue.
@@ -39,6 +39,6 @@ public struct QueuedKeyboard: Keyboard {
         self.queue = queue
     }
 
-    public func down(_ usage: Usage) async throws { try await queue.run { [keyboard] in try keyboard.down(usage) } }
-    public func releaseAll() async throws { try await queue.run { [keyboard] in try keyboard.releaseAll() } }
+    public nonisolated(nonsending) func down(_ usage: Usage) async throws { try await queue.run { [keyboard] in try keyboard.down(usage) } }
+    public nonisolated(nonsending) func releaseAll() async throws { try await queue.run { [keyboard] in try keyboard.releaseAll() } }
 }
