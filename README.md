@@ -221,6 +221,11 @@ but Accepted, staples the ticket, and requires Gatekeeper to assess the pkg as
 `source=Notarized Developer ID`. The notary profile is made once per Mac with
 `xcrun notarytool store-credentials <profile>`.
 
+## License
+
+Apache License 2.0; see [LICENSE](LICENSE). [NOTICE](NOTICE) lists the third-party software
+the binaries link and the pqrs driver package the installer carries, with their terms.
+
 ## Status
 
 Under construction. Nothing here is released yet.

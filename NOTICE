@@ -1,0 +1,58 @@
+vhid
+Copyright 2026 Brandon Fryslie
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+-------------------------------------------------------------------------------
+Third-party software
+
+The vhid binaries statically link the components below. The installer package
+also carries pqrs.org's Karabiner-DriverKit-VirtualHIDDevice package, unmodified.
+
+* Karabiner-DriverKit-VirtualHIDDevice (pqrs.org) - The Unlicense
+  https://github.com/pqrs-org/Karabiner-DriverKit-VirtualHIDDevice
+
+* swift-argument-parser (Apple Inc.) - Apache License 2.0
+  https://github.com/apple/swift-argument-parser
+
+* swift-system (Apple Inc.) - Apache License 2.0
+  https://github.com/apple/swift-system
+
+* swift-log - Apache License 2.0
+  https://github.com/apple/swift-log
+  Its NOTICE reads, in part:
+
+    The SwiftLog Project
+    Copyright 2018, 2019 The SwiftLog Project
+
+    This product contains a derivation of the lock implementation and various
+    scripts from SwiftNIO (Apache License 2.0), https://github.com/apple/swift-nio
+
+* MCP Swift SDK - Apache License 2.0, with contributions not yet relicensed
+  remaining under the MIT License below
+  https://github.com/modelcontextprotocol/swift-sdk
+  Copyright (c) 2024-2025 Model Context Protocol a Series of LF Projects, LLC.
+
+* eventsource - MIT License below
+  https://github.com/mattt/eventsource
+  Copyright 2025 Mattt (https://mat.tt)
+
+MIT License, as it applies to the MCP Swift SDK and eventsource:
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
