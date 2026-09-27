@@ -43,7 +43,7 @@ import Testing
     @Test func theWatchFiresWhenTheCommandEnds() async throws {
         let command = try Process.run(URL(fileURLWithPath: "/bin/sleep"), arguments: ["30"])
         let ended = Ended()
-        let watch = CommandWatch(pid: command.processIdentifier, queue: .global()) { ended.signal() }
+        let watch = CommandWatch(pid: command.processIdentifier, queue: DispatchQueue(label: "watch")) { ended.signal() }
         #expect(!ended.wait(.milliseconds(100)))
         kill(command.processIdentifier, SIGKILL)
         command.waitUntilExit()
@@ -55,6 +55,8 @@ import Testing
     /// alone would wait forever. The child is left unreaped - a zombie, which `kill(pid, 0)`
     /// still finds - so its pid cannot be handed to another process mid-test, as a reaped
     /// one can while other tests spawn theirs.
+    // Each watch answers on a queue of its own: .global() is capped at the core count, and
+    // other tests blocking its threads on a small runner left the answer never delivered.
     @Test func theWatchFiresForACommandAlreadyEnded() throws {
         var pid: pid_t = 0
         let argv: [UnsafeMutablePointer<CChar>?] = [strdup("/usr/bin/true"), nil]
@@ -65,7 +67,7 @@ import Testing
         #expect(kill(pid, 0) == 0)
         #expect(CommandWatch.ended(pid))
         let ended = Ended()
-        let watch = CommandWatch(pid: pid, queue: .global()) { ended.signal() }
+        let watch = CommandWatch(pid: pid, queue: DispatchQueue(label: "watch")) { ended.signal() }
         #expect(ended.wait(.seconds(5)))
         withExtendedLifetime(watch) {}
     }
