@@ -47,8 +47,8 @@ import Testing
 
         /// Blocks until the release or ten seconds, so it is called through `blocking`, off
         /// the cooperative pool the rest of the test runs on. Ten because the bound only
-        /// ends a hang: on a loaded CI runner this test has taken six seconds, and at two
-        /// the release was missed twice (vhid-ci-flake-80e).
+        /// ends a hang: at two, CI missed the release on both attempts of run 36336822361
+        /// (vhid-ci-flake-80e).
         func awaitRelease() -> Bool {
             released.wait(timeout: .now() + .seconds(10)) == .success
         }
@@ -114,22 +114,30 @@ import Testing
 
     /// The first client going away releases everything, and the devices are then another
     /// client's. The release comes before the devices are let go, and the test can see
-    /// only the first of the two, so the next client's admission is asked for until it
-    /// comes or ten seconds pass.
+    /// only the first of the two, so the next client's admission is asked for, a beat apart,
+    /// until it comes or ten seconds have passed - each ask itself bounded by the client's
+    /// own reply timeout.
     @Test func aClientGoingAwayReleasesEverythingAndFreesTheDevices() async throws {
         let served = try serve()
         let first = client(of: served)
         let keyboard = first.helper.keyboard
         try await blocking { try keyboard.down(.leftShift) }
+        let left = ContinuousClock.now
         first.connection.invalidate()
         let devices = served.devices
         let released = try await blocking { devices.awaitRelease() }
-        #expect(released)
-        #expect(served.devices.releasedBecause.first == "a client went away")
+        // How long the release took and why, printed whether or not it passes: on CI this
+        // test has run for six seconds, and which of that is the release is the question
+        // vhid-ci-flake-80e is open on. [LAW:nothing-unseen]
+        let seen = "release after \(ContinuousClock.now - left), because \(devices.releasedBecause)"
+        print("ListenerTests: \(seen)")
+        #expect(released, "\(seen)")
+        #expect(devices.releasedBecause.first == "a client went away", "\(seen)")
 
         let deadline = ContinuousClock.now + .seconds(10)
         var next = try await admitted(served, pressing: .space)
         while !next, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(50))
             next = try await admitted(served, pressing: .space)
         }
         #expect(next, "no client was admitted after the first went away")
