@@ -35,8 +35,10 @@ import Testing
         }
 
         func releaseAll(reply: @escaping (Error?) -> Void) { reply(nil) }
+        func hold(usages: [UInt16], reply: @escaping (Error?) -> Void) { reply(nil) }
         func buttonDown(_ button: UInt8, reply: @escaping (Error?) -> Void) { reply(nil) }
         func releaseButtons(reply: @escaping (Error?) -> Void) { reply(nil) }
+        func holdButtons(_ buttons: UInt32, reply: @escaping (Error?) -> Void) { reply(nil) }
         func move(x: Int8, y: Int8, reply: @escaping (Error?) -> Void) { reply(nil) }
         func scroll(vertical: Int8, horizontal: Int8, reply: @escaping (Error?) -> Void) { reply(nil) }
 

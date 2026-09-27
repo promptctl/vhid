@@ -1,8 +1,9 @@
 import Pointing
 
-/// The mouse as a client reaches it: the four acts of `PointingDevice`, each one report the
-/// vhidd posts and acknowledges. A `Count` is already inside the descriptor's range, so
-/// what crosses is its byte and nothing is checked on the way. [LAW:parse-dont-validate]
+/// The mouse as a client reaches it: the four acts of `PointingDevice` and holding a set of
+/// buttons, each one report vhidd posts and acknowledges. A `Count` is already inside the
+/// descriptor's range, so what crosses is its byte and nothing is checked on the way.
+/// [LAW:parse-dont-validate]
 public struct HelperMouse: PointingDevice {
     let helper: HelperConnection
 
@@ -12,6 +13,11 @@ public struct HelperMouse: PointingDevice {
 
     public func releaseAll() throws {
         try helper.release { service, reply in service.releaseButtons(reply: reply) }
+    }
+
+    /// Holds exactly `buttons`, as the report's button field carries them.
+    public func hold(_ buttons: Set<Button>) throws {
+        try helper.call { service, reply in service.holdButtons(Button.field(buttons), reply: reply) }
     }
 
     public func move(by delta: Move) throws {

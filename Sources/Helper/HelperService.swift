@@ -1,7 +1,7 @@
 import Foundation
 
-/// What crosses the privilege boundary: a key goes down and every key comes up; a button
-/// goes down and every button comes up; the pointer moves by counts and the wheel rolls.
+/// What crosses the privilege boundary: a key goes down, every key comes up, or a set of
+/// keys is held; the same three for buttons; the pointer moves by counts and the wheel rolls.
 ///
 /// The driver extension takes commands from root alone, so the process that owns the
 /// devices is not the process that decides what to type or where to click. This protocol
@@ -52,11 +52,21 @@ import Foundation
     /// Every key up, which is what a report of nothing held says.
     func releaseAll(reply: @escaping (Error?) -> Void)
 
+    /// Holds exactly `usages` down, which may be none, and answers when the daemon has
+    /// acknowledged the report. A non-empty set equal to what is already held posts
+    /// nothing and counts only as the client being alive; an empty set always posts, as
+    /// `releaseAll` does.
+    func hold(usages: [UInt16], reply: @escaping (Error?) -> Void)
+
     /// Holds mouse button `button`, 1 through 32, down.
     func buttonDown(_ button: UInt8, reply: @escaping (Error?) -> Void)
 
     /// Every button up.
     func releaseButtons(reply: @escaping (Error?) -> Void)
+
+    /// Holds exactly the buttons whose bits are set in `buttons`, bit 0 for button 1,
+    /// which may be none, and answers when the daemon has acknowledged the report.
+    func holdButtons(_ buttons: UInt32, reply: @escaping (Error?) -> Void)
 
     /// Moves the pointer by `x` counts right and `y` counts down, buttons held as they are.
     func move(x: Int8, y: Int8, reply: @escaping (Error?) -> Void)

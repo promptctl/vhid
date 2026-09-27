@@ -35,15 +35,20 @@ import Testing
             if refusesRelease { throw Refused() }
             held.withLock { $0 = [] }
         }
+        func hold(_ keys: HeldKeys) throws {
+            recorded.withLock { $0.append("hold \(keys.usages.map(\.rawValue).sorted())") }
+            held.withLock { $0 = keys.usages }
+        }
     }
 
-    final class RecordingMouse: PointingDevice {
+    final class RecordingMouse: HeldPointing {
         private let recorded = Mutex<[String]>([])
 
         var log: [String] { recorded.withLock { $0 } }
 
         func down(_ button: Button) throws { recorded.withLock { $0.append("down \(button.rawValue)") } }
         func releaseAll() throws { recorded.withLock { $0.append("up") } }
+        func hold(_ buttons: Set<Button>) throws { recorded.withLock { $0.append("hold \(buttons.map(\.rawValue).sorted())") } }
         func move(by delta: Move) throws { recorded.withLock { $0.append("move \(delta.x.value) \(delta.y.value)") } }
         func scroll(by delta: Scroll) throws { recorded.withLock { $0.append("scroll \(delta.vertical.value) \(delta.horizontal.value)") } }
     }
@@ -208,5 +213,58 @@ import Testing
         #expect(holder.pid(on: attempt) == 4242)
         #expect(throws: Holder.Busy.self) { try holder.serve(ObjectIdentifier(second), by: 1, on: attempt) {} }
         withExtendedLifetime((first, second)) {}
+    }
+
+    /// A held set crosses as the wire's usages, and a button set as its bit field, bit 0
+    /// for button 1.
+    @Test func heldSetsReachTheDevicesAsSets() {
+        let keyboard = RecordingKeyboard()
+        let mouse = RecordingMouse()
+        let devices = Devices(keyboard: keyboard, mouse: mouse)
+        #expect(answer { devices.hold(usages: [0xE1, 0x04, 0x04], reply: $0) } == nil)
+        #expect(answer { devices.hold(usages: [], reply: $0) } == nil)
+        #expect(answer { devices.holdButtons(0b101, reply: $0) } == nil)
+        #expect(answer { devices.holdButtons(1 << 31, reply: $0) } == nil)
+        #expect(keyboard.log == ["hold [4, 225]", "hold []"])
+        #expect(mouse.log == ["hold [1, 3]", "hold [32]"])
+    }
+
+    /// More keys than one report carries is refused by name, and the device never sees it.
+    @Test func aSetNoReportCarriesIsRefusedByName() {
+        let keyboard = RecordingKeyboard()
+        let devices = Devices(keyboard: keyboard, mouse: RecordingMouse())
+        let refusal = answer { devices.hold(usages: Array(0x04...0x24), reply: $0) }
+        #expect(refusal?.localizedDescription == "33 keys are down, and one HID keyboard report carries 32")
+        #expect(keyboard.log.isEmpty)
+    }
+
+    /// Repeating a held set is a report, so it keeps its keys past the limit; a player that
+    /// stops repeating loses them.
+    @Test func aRepeatedHoldKeepsItsKeysPastTheLimit() {
+        let keyboard = RecordingKeyboard()
+        let (devices, clock) = timed(keyboard)
+        for _ in 0..<5 {
+            _ = answer { devices.hold(usages: [0xE1], reply: $0) }
+            clock.advance(.seconds(1))
+            #expect(devices.releaseKeysHeldPastLimit() == nil)
+        }
+        clock.advance(.seconds(1))
+        #expect(devices.releaseKeysHeldPastLimit()?.usages == [0xE1])
+    }
+
+    /// A client that leaves mid-hold has its keys and buttons released, however they came
+    /// to be held.
+    @Test func aClientLeavingMidHoldIsReleased() {
+        let keyboard = RecordingKeyboard()
+        let mouse = RecordingMouse()
+        let client = NSObject()
+        let seat = Seat(ObjectIdentifier(client), pid: 41, holder: Holder(), readiness: .serving(Devices(keyboard: keyboard, mouse: mouse)))
+        seat.hold(usages: [0xE1, 0x04]) { #expect($0 == nil) }
+        seat.holdButtons(1) { #expect($0 == nil) }
+        seat.end(because: "a client went away")
+        #expect(keyboard.log == ["hold [4, 225]", "up"])
+        #expect(keyboard.keysDown.isEmpty)
+        #expect(mouse.log == ["hold [1]", "up"])
+        withExtendedLifetime(client) {}
     }
 }
