@@ -20,7 +20,7 @@ func place(_ x: Double, _ y: Double) throws -> ScreenPoint {
 /// number for the other twenty-nine.
 ///
 /// [LAW:single-enforcer] Which strings are buttons is `Button.init?(_:)`'s to say, in
-/// `Pointing`, where the MCP server's crossing reads it too; argv is already a string, so
+/// module `Pointing`, where the MCP server's crossing reads it too; argv is already a string, so
 /// this crossing is nothing but the call.
 extension Button: ExpressibleByArgument {
     public init?(argument: String) {

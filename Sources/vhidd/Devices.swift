@@ -24,7 +24,7 @@ final class Devices: NSObject, ServedDevices, @unchecked Sendable {
     /// The seams and not the drivers, so a test hands in devices of its own and the
     /// daemon hands in the real ones. [LAW:composability]
     private let keyboard: any KeyPress
-    private let mouse: any Pointing
+    private let mouse: any PointingDevice
     /// One report at a time, across both devices. [LAW:no-shared-mutable-globals] Each
     /// device keeps its own reports whole; this orders the two against each other, because
     /// they share the socket and the client: a keyboard report and a mouse report from one
@@ -36,7 +36,7 @@ final class Devices: NSObject, ServedDevices, @unchecked Sendable {
     /// hop and take away the ability to answer on the thread that asked.
     private let device = NSLock()
 
-    init(keyboard: any KeyPress, mouse: any Pointing) {
+    init(keyboard: any KeyPress, mouse: any PointingDevice) {
         self.keyboard = keyboard
         self.mouse = mouse
     }

@@ -66,7 +66,7 @@ public struct Scroll: Hashable, Sendable {
 /// deciding what the device is holding. Releasing everything is the act that cannot
 /// disagree. [LAW:one-source-of-truth] Motion carries the buttons that are held, so a
 /// drag is a button down, moves, and a release. Sendable, for the reason `KeyPress` is.
-public protocol Pointing: Sendable {
+public protocol PointingDevice: Sendable {
     func down(_ button: Button) throws
     func releaseAll() throws
     func move(by delta: Move) throws

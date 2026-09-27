@@ -23,10 +23,10 @@ public protocol Mouse: Sendable {
 /// and it takes the same queue that keyboard was given: one sequence of reports, ordered
 /// the way the caller asked for them. [LAW:decomposition]
 public struct QueuedMouse: Mouse {
-    public let pointing: any Pointing
+    public let pointing: any PointingDevice
     public let queue: DeviceQueue
 
-    public init(pointing: any Pointing, queue: DeviceQueue) {
+    public init(pointing: any PointingDevice, queue: DeviceQueue) {
         self.pointing = pointing
         self.queue = queue
     }

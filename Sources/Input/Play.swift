@@ -27,7 +27,7 @@ public struct Play: Hashable, Sendable {
         public let report: Report
     }
 
-    /// The four acts `Pointing` performs, as data. [LAW:one-type-per-behavior]
+    /// The four acts `PointingDevice` performs, as data. [LAW:one-type-per-behavior]
     public enum Report: Hashable, Sendable {
         case move(Move)
         case wheel(Scroll)
