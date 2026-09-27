@@ -113,7 +113,7 @@ public enum ChordSpellingError: Error, CustomStringConvertible, Equatable {
     public var description: String {
         switch self {
         case .unknownTerm(let term, let spelling):
-            "\(term.debugDescription) in \(spelling.debugDescription) is not a modifier (\(Modifier.allCases.map(\.rawValue).joined(separator: ", "))), a key name (\(KeyChord.keyNameList)), a key code written key 0x24, or a single character"
+            "\(term.debugDescription) in \(spelling.debugDescription) is not a modifier (\(Modifier.names)), a key name (\(KeyChord.keyNameList)), a key code written key 0x24, or a single character"
         case .notOneKey(let character, let layout, let layers):
             "\(layout) does not type \(character.debugDescription) with one key and \(layers.map(\.description).joined(separator: " or ")); name the key it is on, and the modifiers as modifiers"
         case .moreThanOneKey(let spelling):

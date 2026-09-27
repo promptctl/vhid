@@ -32,13 +32,13 @@ import Testing
         #expect(mouse.log == ["key down e1", "key down e3", "move 5 0", "down 1", "up", "keys up"])
     }
 
-    /// No modifiers is the same run with no key downs, not a path of its own.
+    /// No modifiers touches no key: the act's reports are the whole run.
     @Test func noModifiersIsTheSameRunWithNothingHeld() async throws {
         let mouse = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
         try await mouse.pointer.holding(.none, on: mouse.keyboard) {
             try await $0.scroll(at: Self.target, vertical: 3, horizontal: 0)
         }
-        #expect(mouse.log == ["move 5 0", "scroll 3 0", "keys up"])
+        #expect(mouse.log == ["move 5 0", "scroll 3 0"])
     }
 
     /// A drag carries the modifiers from the press to the release.

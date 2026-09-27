@@ -110,6 +110,16 @@ extension Parameter where Taken == Clicks {
     }
 }
 
+extension Parameter where Taken == HeldModifiers {
+    /// Read by `HeldModifiers(spelled:)`, the rule `--modifiers` reads by, so the two refuse
+    /// the same spellings. [LAW:single-enforcer]
+    static func modifiers(_ name: String) -> Self {
+        Self(name: name, expected: Help.modifiers, schema: ["type": "string"], absent: nil) {
+            $0.stringValue.flatMap { try? HeldModifiers(spelled: $0) }
+        }
+    }
+}
+
 private extension Value {
     /// A JSON number, whichever of the two cases the SDK read it into.
     var number: Double? {

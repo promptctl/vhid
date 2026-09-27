@@ -27,6 +27,31 @@ public struct HeldModifiers: Hashable, Sendable, CustomStringConvertible {
     }
 }
 
+public extension HeldModifiers {
+    /// Modifier names joined by `+`, spelled the way a chord spells its modifiers:
+    /// `leftShift`, `leftCommand+leftOption`. [LAW:one-source-of-truth] The same words
+    /// `vhid press` reads, by `Modifier`'s own cases.
+    init(spelled spelling: String) throws(ModifiersRefused) {
+        var named: Set<Modifier> = []
+        for term in spelling.split(separator: "+", omittingEmptySubsequences: false).map(String.init) {
+            guard let modifier = Modifier(rawValue: term) else {
+                throw ModifiersRefused(description: "\(term.debugDescription) in \(spelling.debugDescription) is not a modifier (\(Modifier.names))")
+            }
+            named.insert(modifier)
+        }
+        do {
+            try self.init(named)
+        } catch {
+            throw ModifiersRefused(description: error.description)
+        }
+    }
+}
+
+/// A spelling of modifiers to hold that is not one, and why.
+public struct ModifiersRefused: Error, CustomStringConvertible, Equatable {
+    public let description: String
+}
+
 private extension String {
     var nonEmpty: String? { isEmpty ? nil : self }
 }
@@ -46,8 +71,11 @@ extension Pointer {
     /// handed this pointer, so click, drag and scroll are one operation here rather than
     /// three. [LAW:composability]
     ///
-    /// The same reports every time: no modifiers is zero downs and the same release, not a
-    /// path of its own. [LAW:dataflow-not-control-flow]
+    /// The keys released are the keys pressed: no modifiers is no key down and so no key
+    /// to let go, and the act's reports are all there is - a plain click posts nothing to
+    /// the keyboard, and a daemon that stops answering is not asked a second time about a
+    /// keyboard nobody touched. [LAW:dataflow-not-control-flow] The release is a value
+    /// chosen from what was pressed, not a branch around the act.
     ///
     /// **The mouse is the act's to release and the keyboard is this one's.** A pointer act
     /// lets every button go on its way out, stopped or not, so a stop here releases the
@@ -59,6 +87,7 @@ extension Pointer {
         isolation: isolated (any Actor)? = #isolation,
         _ act: (Pointer) async throws -> T
     ) async throws -> T {
+        let letGo: () async throws -> Void = held.pressed.isEmpty ? {} : { try await keyboard.releaseAll() }
         var stage = HoldingStopped.Stage.pressing
         do {
             for usage in held.pressed.usages {
@@ -68,10 +97,10 @@ extension Pointer {
             stage = .acting
             let done = try await act(self)
             stage = .releasing
-            try await keyboard.releaseAll()
+            try await letGo()
             return done
         } catch {
-            throw HoldingStopped(held: held, stage: stage, cause: error, unreleased: await failure(of: keyboard.releaseAll))
+            throw HoldingStopped(held: held, stage: stage, cause: error, unreleased: await failure(of: letGo))
         }
     }
 }

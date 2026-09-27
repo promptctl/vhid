@@ -37,6 +37,7 @@ enum Help {
     static let times = "how many presses without moving between them, at least 1"
     static let vertical = "wheel ticks, positive rolling the wheel away from the hand. With macOS's Natural scrolling on, as it is by default, that moves the view toward the end of what is scrolled, so the content slides up; with it off, toward the start. Negative is the other way"
     static let horizontal = "wheel ticks, positive tilting the wheel right. With Natural scrolling on, that moves the view toward the left edge; with it off, toward the right. Negative is the other way"
+    static let modifiers = "modifier keys held down for the whole act, joined by + the way a chord names them - e.g. leftShift or leftCommand+leftOption - from: " + Modifier.allCases.filter { $0.usage != nil }.map(\.rawValue).joined(separator: ", ")
     static let from = "where the button goes down"
     static let to = "where it comes up"
 

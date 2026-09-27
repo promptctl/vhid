@@ -68,7 +68,7 @@ import Testing
         let at = ScreenPoint(x: 5, y: 5)!
         let typed = await failure(against: far) { try await TypeCommand.type("ab", on: VerbTests.us, with: $0.typist) }
         let clicked = await failure(against: far) {
-            try await ClickCommand.click(at: at, button: .left, times: .single, with: Pointer(mouse: $0.mouse, cursor: { at }))
+            try await ClickCommand.click(at: at, button: .left, times: .single, holding: .none, with: Pointer(mouse: $0.mouse, cursor: { at }), $0.keyboard)
         }
         return (typed, clicked)
     }
@@ -105,7 +105,7 @@ import Testing
         let at = ScreenPoint(x: 5, y: 5)!
         let typed = await Self.failure { try await Devices.using(helper()) { try await TypeCommand.type("ab", on: VerbTests.us, with: $0.typist) } }
         let clicked = await Self.failure {
-            try await Devices.using(helper()) { try await ClickCommand.click(at: at, button: .left, times: .single, with: Pointer(mouse: $0.mouse, cursor: { at })) }
+            try await Devices.using(helper()) { try await ClickCommand.click(at: at, button: .left, times: .single, holding: .none, with: Pointer(mouse: $0.mouse, cursor: { at }), $0.keyboard) }
         }
         #expect(typed == "\(unreachable). 0 of 2 characters had been posted and acknowledged before this, and the rest were not sent")
         #expect(clicked == unreachable)

@@ -59,6 +59,7 @@ as a separate project.
 vhid type "hello"
 vhid press leftCommand+s
 vhid click 800 500 --button left --times 2
+vhid click 800 500 --modifiers leftCommand+leftShift
 vhid move 800 500
 vhid scroll 800 500 --vertical 3
 vhid drag 100 100 400 300

@@ -55,6 +55,7 @@ enum Tools {
 
     private static let x = Parameter.number("x", Help.x)
     private static let y = Parameter.number("y", Help.y)
+    private static let modifiers = Parameter.modifiers("modifiers").absent(.none)
 
     /// Two coordinates as one place. Never refused for a JSON number: every number JSON
     /// hands over is finite, and the one that is not, `1e400`, never gets this far.
@@ -83,9 +84,11 @@ enum Tools {
     static let click: VerbTool = {
         let button = Parameter.button("button").absent(.left)
         let times = Parameter.clicks("times").absent(.single)
-        return VerbTool(Help.click, [x, y, button, times]) { arguments, installation in
-            let (at, button, times) = (try point(arguments), try arguments[button], try arguments[times])
-            return try await Devices.using(installation) { try await ClickCommand.click(at: at, button: button, times: times, with: $0.pointer) }
+        return VerbTool(Help.click, [x, y, button, times, modifiers]) { arguments, installation in
+            let (at, button, times, held) = (try point(arguments), try arguments[button], try arguments[times], try arguments[modifiers])
+            return try await Devices.using(installation) {
+                try await ClickCommand.click(at: at, button: button, times: times, holding: held, with: $0.pointer, $0.keyboard)
+            }
         }
     }()
 
@@ -97,10 +100,10 @@ enum Tools {
     static let scroll: VerbTool = {
         let vertical = Parameter.whole("vertical", Help.vertical).absent(0)
         let horizontal = Parameter.whole("horizontal", Help.horizontal).absent(0)
-        return VerbTool(Help.scroll, [x, y, vertical, horizontal]) { arguments, installation in
-            let (at, vertical, horizontal) = (try point(arguments), try arguments[vertical], try arguments[horizontal])
+        return VerbTool(Help.scroll, [x, y, vertical, horizontal, modifiers]) { arguments, installation in
+            let (at, vertical, horizontal, held) = (try point(arguments), try arguments[vertical], try arguments[horizontal], try arguments[modifiers])
             return try await Devices.using(installation) {
-                try await ScrollCommand.scroll(at: at, vertical: vertical, horizontal: horizontal, with: $0.pointer)
+                try await ScrollCommand.scroll(at: at, vertical: vertical, horizontal: horizontal, holding: held, with: $0.pointer, $0.keyboard)
             }
         }
     }()
@@ -109,9 +112,11 @@ enum Tools {
         let from = Parameter.place("from", Help.from)
         let to = Parameter.place("to", Help.to)
         let button = Parameter.button("button").absent(.left)
-        return VerbTool(Help.drag, [from, to, button]) { arguments, installation in
-            let (from, to, button) = (try arguments[from], try arguments[to], try arguments[button])
-            return try await Devices.using(installation) { try await DragCommand.drag(from: from, to: to, button: button, with: $0.pointer) }
+        return VerbTool(Help.drag, [from, to, button, modifiers]) { arguments, installation in
+            let (from, to, button, held) = (try arguments[from], try arguments[to], try arguments[button], try arguments[modifiers])
+            return try await Devices.using(installation) {
+                try await DragCommand.drag(from: from, to: to, button: button, holding: held, with: $0.pointer, $0.keyboard)
+            }
         }
     }()
 
