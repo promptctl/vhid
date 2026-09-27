@@ -87,7 +87,7 @@ enum Help {
     static let scroll = VerbHelp(name: "scroll", abstract: "Roll the mouse wheel at a point on the screen.", discussion: """
         The pointer is moved to the point first, because a wheel scrolls whatever is under the \
         pointer. The ticks are the device's own, and macOS decides how far each one scrolls.
-        """)
+        """, commandLine: ["Negative coordinates follow --, after every option, as in: vhid scroll --vertical 3 -- -100 -40."])
 
     static let drag = VerbHelp(name: "drag", abstract: "Drag from one point on the screen to another.", discussion: """
         The pointer is moved to the first point, the button goes down, the pointer is moved to \
