@@ -15,31 +15,35 @@ struct Where: ParsableArguments {
     var rect: String?
 
     func validate() throws {
-        guard [display != nil, window != nil, rect != nil].filter({ $0 }).count <= 1 else {
-            throw ValidationError("give at most one of --display, --window, --rect")
-        }
-        _ = try parsedRect()
+        _ = try region
     }
 
-    private func parsedRect() throws -> ScreenRect? {
-        try rect.map { spelled in
-            let parts = spelled.split(separator: ",").map { Double($0.trimmingCharacters(in: .whitespaces)) }
-            guard parts.count == 4, let x = parts[0], let y = parts[1], let w = parts[2], let h = parts[3],
-                  [x, y, w, h].allSatisfy({ abs($0) <= 1_000_000 }), w > 0, h > 0
-            else { throw ValidationError("--rect wants x,y,width,height in points - a positive size, nothing past a million - got \(spelled)") }
-            return ScreenRect(x: x, y: y, width: w, height: h)
-        }
+    var region: Region {
+        get throws { try Self.region(display: display, window: window, rect: rect, flag: "--") }
     }
 
+    /// The one place a region is spelled from its three arguments, for the verbs and the
+    /// MCP tools alike, each naming an argument the way its caller spells it.
+    /// [LAW:single-enforcer]
+    ///
     /// The main display is the default rather than every display, because `Region` has no
     /// word for everywhere; the scope line names which display was read, so the default is
     /// never mistaken for the whole desk.
-    var region: Region {
-        get throws {
-            try parsedRect().map(Region.rect)
-                ?? window.map(Region.window)
-                ?? .display(display ?? CGMainDisplayID())
+    static func region(display: UInt32?, window: UInt32?, rect: String?, flag: String) throws -> Region {
+        guard [display != nil, window != nil, rect != nil].filter({ $0 }).count <= 1 else {
+            throw ValidationError("give at most one of \(flag)display, \(flag)window, \(flag)rect")
         }
+        return try rect.map { .rect(try parsedRect($0, flag: flag)) }
+            ?? window.map(Region.window)
+            ?? .display(display ?? CGMainDisplayID())
+    }
+
+    private static func parsedRect(_ spelled: String, flag: String) throws -> ScreenRect {
+        let parts = spelled.split(separator: ",").map { Double($0.trimmingCharacters(in: .whitespaces)) }
+        guard parts.count == 4, let x = parts[0], let y = parts[1], let w = parts[2], let h = parts[3],
+              [x, y, w, h].allSatisfy({ abs($0) <= 1_000_000 }), w > 0, h > 0
+        else { throw ValidationError("\(flag)rect wants x,y,width,height in points - a positive size, nothing past a million - got \(spelled)") }
+        return ScreenRect(x: x, y: y, width: w, height: h)
     }
 }
 
@@ -117,6 +121,13 @@ private extension Outcome {
 /// Reads with the pixel reader and prints. The one place the verbs meet the screen.
 @MainActor
 func look(_ query: Query) async throws {
-    let reading = try await PixelReader().read(query)
-    Report.lines(reading, query: query).forEach { print($0) }
+    print(try await Report.text(query, reading: PixelReader().read))
+}
+
+extension Report {
+    /// A query's reading as the text the verbs print and the MCP tools answer.
+    /// [LAW:one-source-of-truth]
+    static func text(_ query: Query, reading read: (Query) async throws -> Reading) async throws -> String {
+        lines(try await read(query), query: query).joined(separator: "\n")
+    }
 }

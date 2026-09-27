@@ -23,19 +23,30 @@ struct Find: AsyncParsableCommand {
     @OptionGroup var place: Where
 
     func validate() throws {
-        guard Text(text) != nil else { throw ValidationError("the text to find is blank") }
-        guard !(exact && edits != nil) else { throw ValidationError("give --exact or --edits, not both") }
-        guard edits.map({ Edits($0) != nil }) ?? true else { throw ValidationError("--edits cannot be negative") }
-        guard Limit(limit) != nil else { throw ValidationError("--limit must be at least 1") }
-    }
-
-    var match: Match {
-        edits.flatMap(Edits.init).map { .within(edits: $0, of: text) } ?? (exact ? .exact(text) : .contains(text))
+        _ = try Self.match(text, exact: exact, edits: edits, flag: "--")
+        _ = try Self.limit(limit, flag: "--")
     }
 
     @MainActor
     func run() async throws {
-        try await look(Query(match: match, region: place.region, limit: Limit(limit)!))
+        try await look(Query(match: Self.match(text, exact: exact, edits: edits, flag: "--"),
+                             region: place.region, limit: Self.limit(limit, flag: "--")))
+    }
+
+    /// What to match, or the refusal - one rule for the verb and the MCP tool, each naming
+    /// an argument the way its caller spells it (`flag` is `--` or nothing).
+    /// [LAW:single-enforcer]
+    static func match(_ text: String, exact: Bool, edits: Int?, flag: String) throws -> Match {
+        guard Text(text) != nil else { throw ValidationError("the text to find is blank") }
+        guard !(exact && edits != nil) else { throw ValidationError("give \(flag)exact or \(flag)edits, not both") }
+        guard let edits else { return exact ? .exact(text) : .contains(text) }
+        guard let within = Edits(edits) else { throw ValidationError("\(flag)edits cannot be negative") }
+        return .within(edits: within, of: text)
+    }
+
+    static func limit(_ count: Int, flag: String) throws -> Limit {
+        guard let limit = Limit(count) else { throw ValidationError("\(flag)limit must be at least 1") }
+        return limit
     }
 }
 
@@ -51,11 +62,11 @@ struct Read: AsyncParsableCommand {
     @OptionGroup var place: Where
 
     func validate() throws {
-        guard Limit(limit) != nil else { throw ValidationError("--limit must be at least 1") }
+        _ = try Find.limit(limit, flag: "--")
     }
 
     @MainActor
     func run() async throws {
-        try await look(Query(match: nil, region: place.region, limit: Limit(limit)!))
+        try await look(Query(match: nil, region: place.region, limit: Find.limit(limit, flag: "--")))
     }
 }

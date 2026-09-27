@@ -3,6 +3,7 @@ import Darwin
 import Eyes
 import Foundation
 import MCP
+import Pixels
 import System
 
 /// eyes' verbs as MCP tools, over stdio, for an agent that sees the screen in one session
@@ -84,13 +85,82 @@ enum EyesTools {
     typealias DisplayList = @Sendable () async -> [Display]
 
     typealias FrontmostApp = @Sendable () async -> Frontmost?
+    /// A reader's answer to one query: the pixel reader in the process, a fake in a test.
+    typealias Look = @Sendable (Query) async throws -> Reading
 
     static func all(
         windows listing: @escaping Listing = { try await Geometry.onScreen() },
         frontmost: @escaping FrontmostApp = { await Frontmost.now() },
-        displays: @escaping DisplayList = { Geometry.displays() }
+        displays: @escaping DisplayList = { Geometry.displays() },
+        reading look: @escaping Look = { try await PixelReader().read($0) }
     ) -> [EyesTool] {
-        [windows(listing, frontmost: frontmost), Self.displays(displays)]
+        [windows(listing, frontmost: frontmost), Self.displays(displays), find(look), read(look)]
+    }
+
+    /// Where `find` and `read` look, as `--display`, `--window` and `--rect` take it.
+    private static let place: [String: Value] = [
+        "display": .object(["type": "integer", "description": "Read this display, by the id `displays` lists. Defaults to the main display."]),
+        "window": .object(["type": "integer", "description": "Read this window's bounds, by the id `windows` lists."]),
+        "rect": .object(["type": "string", "description": "Read this rectangle: x,y,width,height in the points vhid clicks."]),
+        "limit": .object(["type": "integer", "minimum": 1, "description": "The most rows to answer with. Defaults to \(Limit.default.count)."]),
+    ]
+
+    /// Reading pixels needs Screen Recording, which macOS asks of the process responsible
+    /// for this one: for an MCP server, the app hosting it.
+    private static let grant = " Needs Screen Recording, granted to the app that runs this server."
+
+    static func find(_ look: @escaping Look) -> EyesTool { EyesTool(
+        tool: Tool(
+            name: "find",
+            description: Find.configuration.abstract + " " + (Find.configuration.discussion) + grant,
+            inputSchema: .object([
+                "type": "object",
+                "properties": .object(place.merging([
+                    "text": .object(["type": "string", "description": "The text to look for. Matches any run that contains it."]),
+                    "exact": .object(["type": "boolean", "description": "Match only a run that is exactly this text."]),
+                    "edits": .object(["type": "integer", "minimum": 0, "description": "Match a run within this many single-character edits of the text."]),
+                ]) { $1 }),
+                "required": .array(["text"]),
+                "additionalProperties": false,
+            ]),
+            annotations: .init(readOnlyHint: true, openWorldHint: true)),
+        call: { given in
+            try refuseStray(given, taken: ["text", "exact", "edits", "display", "window", "rect", "limit"])
+            guard let text = try argument("text", in: given, \.stringValue, "a string") else {
+                throw ArgumentRefused(description: "text is required: the text to look for")
+            }
+            let match = try Find.match(text, exact: try argument("exact", in: given, \.boolValue, "a boolean") ?? false,
+                                       edits: try argument("edits", in: given, \.intValue, "an integer"), flag: "")
+            return try await Report.text(try query(match, given), reading: look)
+        }) }
+
+    static func read(_ look: @escaping Look) -> EyesTool { EyesTool(
+        tool: Tool(
+            name: "read",
+            description: Read.configuration.abstract + grant,
+            inputSchema: .object([
+                "type": "object",
+                "properties": .object(place),
+                "additionalProperties": false,
+            ]),
+            annotations: .init(readOnlyHint: true, openWorldHint: true)),
+        call: { given in
+            try refuseStray(given, taken: ["display", "window", "rect", "limit"])
+            return try await Report.text(try query(nil, given), reading: look)
+        }) }
+
+    /// The region and limit `find` and `read` share, through the verbs' own rules.
+    private static func query(_ match: Match?, _ given: [String: Value]) throws -> Query {
+        let id = { (name: String) throws -> UInt32? in
+            try argument(name, in: given, \.intValue, "an integer").map { n in
+                guard let id = UInt32(exactly: n) else { throw ArgumentRefused(description: "\(name) is \(n), and ids are not negative") }
+                return id
+            }
+        }
+        let region = try Where.region(display: try id("display"), window: try id("window"),
+                                      rect: try argument("rect", in: given, \.stringValue, "a string"), flag: "")
+        let limit = try Find.limit(try argument("limit", in: given, \.intValue, "an integer") ?? Limit.default.count, flag: "")
+        return Query(match: match, region: region, limit: limit)
     }
 
     static func displays(_ list: @escaping DisplayList) -> EyesTool { EyesTool(
@@ -136,12 +206,16 @@ enum EyesTools {
     /// a value of any other type, rather than ignoring either. [LAW:parse-dont-validate]
     static func string(_ name: String, in given: [String: Value], only taken: [String]) throws -> String? {
         try refuseStray(given, taken: taken)
+        return try argument(name, in: given, \.stringValue, "a string")
+    }
+
+    /// The optional argument `name` as the type `read` takes out of it, refusing a value of
+    /// any other type rather than ignoring it. [LAW:parse-dont-validate]
+    static func argument<T>(_ name: String, in given: [String: Value], _ read: (Value) -> T?, _ type: String) throws -> T? {
         // An explicit null is how many clients leave an optional argument unset.
         guard let value = given[name], !value.isNull else { return nil }
-        guard let text = value.stringValue else {
-            throw ArgumentRefused(description: "\(name) is \(value), and it takes a string")
-        }
-        return text
+        guard let taken = read(value) else { throw ArgumentRefused(description: "\(name) is \(value), and it takes \(type)") }
+        return taken
     }
 
     /// Any argument not in `taken` is refused by name rather than ignored.

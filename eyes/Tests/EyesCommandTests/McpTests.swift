@@ -1,5 +1,6 @@
 import Eyes
 import MCP
+import Pixels
 import Testing
 @testable import EyesCommand
 
@@ -14,10 +15,17 @@ import Testing
         excluded: [])
     private static let front = Frontmost(pid: 401, name: "Finder")
 
+    /// A reader that sees one run, "Save", everywhere but display 666, where it has no grant.
+    private static let look: EyesTools.Look = { query in
+        if query.region == .display(666) { throw PixelsError.noGrant }
+        let save = Found(text: Text("Save")!, frame: ScreenRect(x: -300, y: 40, width: 40, height: 20), source: .pixels(confidence: Confidence(1)!))
+        return Reading(outcome: .matched(Matches([save])!), scope: Scope(region: ScreenRect(x: -1512, y: 316, width: 1512, height: 982), examined: 1, reach: .whole))
+    }
+
     /// A client connected to a server over `listing`, both torn down before this returns.
     private func connected<T>(_ body: (Client) async throws -> T) async throws -> T {
         let (clientSide, serverSide) = await InMemoryTransport.createConnectedPair()
-        let server = await Mcp.server(EyesTools.all(windows: { Self.listing }, frontmost: { Self.front }, displays: { DisplaysCommandTests.desk }))
+        let server = await Mcp.server(EyesTools.all(windows: { Self.listing }, frontmost: { Self.front }, displays: { DisplaysCommandTests.desk }, reading: Self.look))
         try await server.start(transport: serverSide)
         let client = Client(name: "test", version: "0")
         let result: Result<T, any Error>
@@ -40,7 +48,7 @@ import Testing
 
     @Test func theToolsAreListedAndReadOnly() async throws {
         let tools = try await connected { try await $0.listTools().tools }
-        #expect(tools.map(\.name) == ["windows", "displays"])
+        #expect(tools.map(\.name) == ["windows", "displays", "find", "read"])
         #expect(tools.allSatisfy { $0.annotations.readOnlyHint == true })
     }
 
@@ -74,5 +82,49 @@ import Testing
         let (refused, refusedIsError) = try await call(["display": 1], tool: "displays")
         #expect(refusedIsError == true)
         #expect(refused == "display is not an argument this tool takes: it takes none")
+    }
+
+    /// Each tool answers with what its verb prints for the same query: the arguments reach
+    /// the reader through the verbs' own rules. [LAW:one-source-of-truth]
+    @Test func findAndReadAnswerWithTheVerbsReport() async throws {
+        for (tool, arguments, query): (String, [String: Value], Query) in [
+            ("find", ["text": "save", "display": 1], Query(match: .contains("save"), region: .display(1))),
+            ("find", ["text": "Save", "exact": true, "window": 9, "limit": 3], Query(match: .exact("Save"), region: .window(9), limit: Limit(3)!)),
+            ("find", ["text": "Sabe", "edits": 1, "rect": "-400,0,200,100"],
+             Query(match: .within(edits: Edits(1)!, of: "Sabe"), region: .rect(ScreenRect(x: -400, y: 0, width: 200, height: 100)))),
+            ("read", ["display": 1, "limit": .null], Query(match: nil, region: .display(1))),
+        ] {
+            let (said, isError) = try await call(arguments, tool: tool)
+            #expect(isError != true)
+            #expect(said == (try await Report.text(query, reading: Self.look)))
+        }
+    }
+
+    /// A reader that could not look is a tool error that names the grant, never an empty answer.
+    @Test func aMissingGrantIsAToolErrorNamingIt() async throws {
+        for tool in ["find", "read"] {
+            let (said, isError) = try await call(tool == "find" ? ["text": "Save", "display": 666] : ["display": 666], tool: tool)
+            #expect(isError == true)
+            #expect(said.hasPrefix("Screen Recording is not granted"))
+        }
+    }
+
+    @Test func findAndReadRefuseWhatTheVerbsRefuse() async throws {
+        for (tool, arguments, expected): (String, [String: Value], String) in [
+            ("find", [:], "text is required: the text to look for"),
+            ("find", ["text": "  "], "the text to find is blank"),
+            ("find", ["text": "a", "exact": true, "edits": 1], "give exact or edits, not both"),
+            ("find", ["text": "a", "edits": -1], "edits cannot be negative"),
+            ("find", ["text": "a", "exact": "yes"], "exact is yes, and it takes a boolean"),
+            ("read", ["limit": 0], "limit must be at least 1"),
+            ("read", ["display": 1, "window": 2], "give at most one of display, window, rect"),
+            ("read", ["display": -1], "display is -1, and ids are not negative"),
+            ("read", ["rect": "1,2,3"], "rect wants x,y,width,height in points - a positive size, nothing past a million - got 1,2,3"),
+            ("read", ["text": "a"], "text is not an argument this tool takes: it takes display, window, rect, limit"),
+        ] {
+            let (said, isError) = try await call(arguments, tool: tool)
+            #expect(isError == true, "\(tool) \(arguments)")
+            #expect(said == expected)
+        }
     }
 }
