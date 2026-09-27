@@ -66,7 +66,7 @@ public extension DriverState {
                 scripts/virtual-hid-driver remove
                 scripts/virtual-hid-driver install
             Without one, install vhid's pkg again, which lays the whole package
-            back down. If this row still reads residue after that, what is
+            back down. If the driver still reads residue after that, what is
             left is something macOS lets go of only at a restart: restart the
             Mac, then run vhid doctor again.
             """
