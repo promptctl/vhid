@@ -222,6 +222,25 @@ import Testing
         #expect(played.reports.map(\.scheduled) == [0, 10, 20, 1500, 1600, 1700, 1800, 1900, 2000].map { Self.epoch + $0 * 1000 })
     }
 
+    /// A play stopped before its first keys line never pressed a key, so the keyboard is
+    /// not asked to let go of one, and nothing says a key may be held.
+    @Test func aStopBeforeAnyKeyLeavesTheKeyboardAlone() async throws {
+        let fake = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
+        fake.refused = 0 ..< 1
+        let play = try Play.parse("""
+            {"to":{"x":0,"y":0}}
+            {"t_ms":0,"buttons":["left"]}
+            {"t_ms":1,"keys":["leftShift"]}
+            {"t_ms":2,"keys":[]}
+            {"t_ms":3,"buttons":[]}
+            """)
+        let stopped = try await #require(throws: PlayStopped.self) {
+            try await Player(pointer: fake.pointer, keyboard: fake.keyboard, clock: ManualClock(), wall: { Self.epoch }, lead: .zero).play(Schedule(play))
+        }
+        #expect(fake.log == ["hold [1]", "up"])
+        #expect(!"\(stopped)".contains("key"))
+    }
+
     @Test func latenessIsReadByNearestRank() {
         #expect(Lateness(of: (1...100).map(Int64.init).shuffled()).ranks == [50, 90, 99, 100])
         #expect(Lateness(of: [7]).ranks == [7, 7, 7, 7])

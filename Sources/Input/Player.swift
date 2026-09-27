@@ -13,7 +13,9 @@ import Pointing
 /// Shift held for three seconds with nothing else happening would be cut. Wherever a key
 /// is held and no act comes for `keepAlive`, the schedule repeats the held set; the daemon
 /// counts the call as the client being alive and posts nothing for it, since the driver
-/// already holds that set. [LAW:dataflow-not-control-flow] The keep-alives are values in
+/// already holds that set. A player stalled past the limit - stopped in a debugger, a Mac
+/// asleep - has had its keys let go, and its next keep-alive presses them again, as a
+/// report no report line shows. [LAW:dataflow-not-control-flow] The keep-alives are values in
 /// the schedule the player walks like any other act, not a timer running beside it.
 public struct Schedule: Hashable, Sendable {
     public let start: ScreenPoint
@@ -35,7 +37,7 @@ public struct Schedule: Hashable, Sendable {
         case move(Move)
         case wheel(Scroll)
         /// The keys already held, said again so the daemon keeps them. Not a report: the
-        /// driver is sent nothing.
+        /// driver is sent nothing while it still holds them.
         case keepAlive(HeldKeys)
 
         var isReport: Bool {
@@ -50,8 +52,11 @@ public struct Schedule: Hashable, Sendable {
     /// How many of the acts are reports, which is what a play that stops is counted against.
     public var reports: Int { acts.filter(\.report.isReport).count }
 
-    /// Whether any act holds a key, and so whether a stop has a keyboard to let go of.
-    var holdsKeys: Bool { acts.contains { if case .keys = $0.report { true } else { false } } }
+    /// Whether any of the first `count` acts holds a key, and so whether a play stopped
+    /// there has a keyboard to let go of.
+    func holdsKeys(in count: Int) -> Bool {
+        acts.prefix(count).contains { if case .keys = $0.report { true } else { false } }
+    }
 
     public init(_ play: Play) throws(Play.ScriptInvalid) {
         var keys = (held: HeldKeys.none, line: 0)
@@ -126,12 +131,13 @@ public struct Player<C: Clock> where C.Duration == Duration {
 
     public func play(_ play: Schedule, isolation: isolated (any Actor)? = #isolation) async throws -> Played {
         var went: [Played.Report] = []
+        var reached = 0
         do {
             let reports = try await pointer.move(to: play.start)
             let started = clock.now
             let epoch = wall()
             let at = { (offset: Duration) in epoch + offset.microseconds }
-            for event in play.acts {
+            for (index, event) in play.acts.enumerated() {
                 let deadline = started.advanced(by: event.at)
                 let wake = deadline.advanced(by: .zero - lead)
                 // A wait of any length is slices, each asking whether the run was
@@ -171,6 +177,8 @@ public struct Player<C: Clock> where C.Duration == Duration {
                 }
                 try Task.checkCancellation()
                 let sent = started.duration(to: clock.now)
+                // Counted before the post: one that throws may still have reached the driver.
+                reached = index + 1
                 try await post(event.report)
                 let played = Played.Report(line: event.line, scheduled: at(event.at), sent: at(sent), acked: at(started.duration(to: clock.now)))
                 went += event.report.isReport ? [played] : []
@@ -179,10 +187,11 @@ public struct Player<C: Clock> where C.Duration == Duration {
         } catch {
             // Both devices, whatever either answers, because a stop can land with a key and
             // a button both held. [LAW:no-silent-failure] A script that holds no key has no
-            // keyboard to let go of, and a failed release of one would report a key held
-            // that never went down. [LAW:dataflow-not-control-flow] The release is a value
-            // chosen from the schedule, as `Pointer.holding` chooses its own.
-            let letGo: () async throws -> Void = play.holdsKeys ? { try await keyboard.releaseAll() } : {}
+            // keyboard to let go of, nor does one stopped before its first keys line, and a
+            // failed release there would report a key held that never went down.
+            // [LAW:dataflow-not-control-flow] The release is a value chosen from the acts
+            // that were sent, as `Pointer.holding` chooses its own.
+            let letGo: () async throws -> Void = play.holdsKeys(in: reached) ? { try await keyboard.releaseAll() } : {}
             let keys = await failure(of: letGo)
             throw PlayStopped(played: went, of: play.reports, cause: error, unreleasedKeys: keys, unreleasedButtons: await pointer.release())
         }
