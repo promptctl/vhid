@@ -252,8 +252,13 @@ actor OneAtATime {
     func read(_ query: Query) async throws -> Reading {
         let before = tail
         let look = look
-        let mine = Task { _ = await before?.value; return try await look(query) }
+        let mine = Task {
+            _ = await before?.value
+            // A call withdrawn while it waited leaves without reading. [LAW:no-silent-failure]
+            try Task.checkCancellation()
+            return try await look(query)
+        }
         tail = Task { _ = try? await mine.value }
-        return try await mine.value
+        return try await withTaskCancellationHandler { try await mine.value } onCancel: { mine.cancel() }
     }
 }

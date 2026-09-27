@@ -160,4 +160,24 @@ import Testing
         }
         #expect(await gauge.most == 1)
     }
+
+    /// A call withdrawn while it waits its turn never reads.
+    @Test func aWithdrawnCallLeavesTheQueueWithoutReading() async throws {
+        actor Count { var n = 0; func add() { n += 1 } }
+        let count = Count()
+        let serial = OneAtATime { _ in
+            await count.add()
+            try await Task.sleep(for: .milliseconds(50))
+            return Reading(outcome: .nearest([]), scope: Scope(region: ScreenRect(x: 0, y: 0, width: 1, height: 1), examined: 0, reach: .whole))
+        }
+        let query = Query(match: nil, region: .display(1))
+        let first = Task { try await serial.read(query) }
+        try await Task.sleep(for: .milliseconds(10))
+        let second = Task { try await serial.read(query) }
+        try await Task.sleep(for: .milliseconds(10))
+        second.cancel()
+        _ = try await first.value
+        await #expect(throws: CancellationError.self) { try await second.value }
+        #expect(await count.n == 1)
+    }
 }
