@@ -149,11 +149,6 @@ public struct Readiness: Sendable, Hashable, CustomStringConvertible {
 
 // MARK: - shared wording
 
-/// Where a driver extension is approved. Named once because every step that asks for the
-/// click ends up here, and a reader following one of them to a pane that does not exist
-/// is a reader who stops.
-private let loginItemsPane = "System Settings > General > Login Items & Extensions"
-
 /// The step of a row whose fact is not read until an earlier row is met.
 ///
 /// Unmet rather than met or absent: nothing was read, so nothing may be claimed, and a
@@ -255,18 +250,9 @@ public extension Requirement {
                 \(DriverProbe.managerExecutable) activate
             """
         case .awaitingApproval:
-            """
-            Open \(loginItemsPane),
-            click the (i) beside Driver Extensions, and turn on
-            \(DriverProbe.bundleID).
-            """
+            DriverProbe.switchStep
         case .disabled:
-            """
-            The driver is registered and switched off. Open
-            \(loginItemsPane),
-            click the (i) beside Driver Extensions, and turn on
-            \(DriverProbe.bundleID).
-            """
+            "The driver is registered and switched off. \(DriverProbe.switchStep)"
         case .pendingReboot:
             """
             The driver was removed, and macOS keeps it registered until this

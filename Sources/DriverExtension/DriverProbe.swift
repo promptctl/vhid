@@ -13,6 +13,10 @@ public enum DriverProbe {
     /// extension everywhere rather than the package or the app around it.
     public static let bundleID = "org.pqrs.Karabiner-DriverKit-VirtualHIDDevice"
     public static let teamID = "G43BCU2T37"
+    /// The one thing a person does to approve the extension, in the words every place that
+    /// asks for it uses: `vhid doctor`'s step and the daemon's refusal while the driver is
+    /// off. [LAW:one-source-of-truth]
+    public static let switchStep = "Open System Settings > General > Login Items & Extensions, click the (i) beside Driver Extensions, and turn on \(bundleID)."
     /// The IORegistry node the driver publishes once it has matched.
     public static let ioNodeName = "org_pqrs_Karabiner_DriverKit_VirtualHIDDeviceRoot"
     /// Karabiner-Elements is a separate product that ships this same driver and writes

@@ -1,3 +1,4 @@
+import DriverExtension
 import Foundation
 import Keystrokes
 import Testing
@@ -86,7 +87,7 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
     /// failure is what it did say, which is how an unapproved driver gets named.
     @Test(arguments: [
         ([], "nothing about the driver"),
-        ([(.driverActivated, false)], "driver activated: no"),
+        ([(.driverActivated, false)], "driver activated: no. The driver extension is not switched on. \(DriverProbe.switchStep)"),
         ([(.driverConnected, false), (.driverActivated, true)], "driver activated: yes, driver connected: no"),
         ([(.driverConnected, true), (.keyboardReady, false)], "driver connected: yes, keyboard ready: no"),
     ] as [([(DaemonConnection.Status, Bool)], String)])

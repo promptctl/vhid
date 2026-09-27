@@ -17,6 +17,8 @@ service=$(cat "$here/service")
 plist="/Library/LaunchDaemons/$service.plist"
 vhid=/usr/local/bin/vhid
 
+driver_extensions="x-apple.systempreferences:com.apple.ExtensionsPreferences?extensionPointIdentifier=com.apple.system_extension.driver_extension.extension-point"
+
 say() { echo "vhid postinstall: $*"; }
 fail() { echo "vhid postinstall: $*" >&2; exit 1; }
 
@@ -72,3 +74,18 @@ esac
 # can turn it on. So it is reported, not failed on.
 state=$("$vhid" driver state 2>&1) && status=0 || status=$?
 say "driver (vhid driver state exited $status): $(tr '\n' ' ' <<<"$state")"
+
+# The switch is the one step left, so the person is put in front of it rather than told
+# where it is: this URL opens the Driver Extensions sheet itself. Unless the driver is
+# already on, since the registration the activation asked for can land a moment after the
+# state above was read; and only for someone logged in - a window for nobody is nothing.
+# Opening is a courtesy the closing page and vhid doctor both back up, so a refusal is
+# said, not failed on.
+case "$console:$state" in
+  root:*|loginwindow:*|_mbsetupuser:*) ;;
+  *:enabled|*:running) ;;
+  *)
+    launchctl asuser "$(id -u "$console")" sudo -u "$console" /usr/bin/open "$driver_extensions" \
+      && say "opened Driver Extensions in System Settings for $console" \
+      || say "could not open Driver Extensions in System Settings for $console" ;;
+esac
