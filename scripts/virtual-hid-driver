@@ -53,9 +53,17 @@ TRUSTED_STATUS="   Status: signed by a developer certificate issued by Apple for
 PKG_FILE="Karabiner-DriverKit-VirtualHIDDevice-$PKG_VERSION.pkg"
 PKG_URL="https://github.com/pqrs-org/Karabiner-DriverKit-VirtualHIDDevice/releases/download/v$PKG_VERSION/$PKG_FILE"
 
-MANAGER_APP=/Applications/.Karabiner-VirtualHIDDevice-Manager.app
+# VHID_DRIVER_ROOT prefixes the two payload trees, for scripts/uninstall-test, which
+# runs this removal against a scratch Mac; unset, they are the real ones.
+MANAGER_APP=${VHID_DRIVER_ROOT:-}/Applications/.Karabiner-VirtualHIDDevice-Manager.app
 MANAGER="$MANAGER_APP/Contents/MacOS/Karabiner-VirtualHIDDevice-Manager"
-SUPPORT_DIR="/Library/Application Support/org.pqrs/Karabiner-DriverKit-VirtualHIDDevice"
+SUPPORT_DIR="${VHID_DRIVER_ROOT:-}/Library/Application Support/org.pqrs/Karabiner-DriverKit-VirtualHIDDevice"
+
+# How `remove` tells its caller to run it again and to confirm where it left the Mac.
+# vhid-uninstall, which sources this file from the pkg, has neither this script nor its
+# verbs on the Mac it runs on, and names its own.
+REMOVE_AGAIN=${REMOVE_AGAIN:-"scripts/virtual-hid-driver remove"}
+CONFIRM_ABSENT=${CONFIRM_ABSENT:-"scripts/virtual-hid-driver expect absent"}
 
 die() { echo "virtual-hid-driver: $*" >&2; exit 1; }
 
@@ -359,10 +367,40 @@ machine restarts. That entry is not a failure, and nothing else clears it.
 
   Restart the Mac
 
-Then confirm with:  scripts/virtual-hid-driver expect absent
 INSTRUCTION
+      echo "Then confirm with:  $CONFIRM_ABSENT" >&2
       exit 2 ;;
     *) die "after removal, the driver is '$1', which is not a state removing can leave behind" ;;
+  esac
+}
+
+# What makes `remove` refuse before it changes anything, as its own step so a caller that
+# must stop other things first - vhid-uninstall, stopping vhid's jobs - can ask it before
+# doing so. Ends the run with the reason when removal would refuse. [LAW:single-enforcer]
+remove_refusals() {
+  local elements registered
+  # Karabiner-Elements ships this same driver and shares the Manager app, the support
+  # directory and the receipt id, so everything below would take it down with it. The
+  # refusal comes before the deactivation as well as before the deletion, because
+  # withdrawing the extension already stops the driver Karabiner-Elements is using.
+  #
+  # A receipt that could not be read refuses too. "I could not tell" is not "it is not
+  # installed", and this is the one verb whose mistake cannot be walked back.
+  # [LAW:no-silent-failure]
+  elements=$(receipt_version "$ELEMENTS_RECEIPT")
+  case "$elements" in
+    none) ;;
+    probe-failed) die "could not tell whether $ELEMENTS_RECEIPT is installed, and removal deletes files the two products share; refusing to guess" ;;
+    *) die "Karabiner-Elements $elements is installed and shares $MANAGER_APP and $SUPPORT_DIR with the driver package, so removing the driver would break it and nothing here could put it back; remove Karabiner-Elements first if that is what you want" ;;
+  esac
+
+  # A live registration is withdrawn by the Manager as the logged-in person, so with
+  # nobody logged in there is no one to make that request, and nothing is deleted.
+  registered=$(driver_registration)
+  case "$registered" in
+    unregistered|pending-reboot) ;;
+    probe-failed) die "could not read whether the extension is still registered, and deleting the Manager while it is would strand the registration with nothing able to retract it; refusing to guess" ;;
+    *) [ "$(id -u)" != 0 ] || console_user >/dev/null ;;
   esac
 }
 
@@ -379,20 +417,7 @@ cmd_remove() {
     absent|pending-reboot) remove_outcome "$result" ;;
   esac
 
-  # Karabiner-Elements ships this same driver and shares the Manager app, the support
-  # directory and the receipt id, so everything below would take it down with it. The
-  # refusal comes before the deactivation as well as before the deletion, because
-  # withdrawing the extension already stops the driver Karabiner-Elements is using.
-  #
-  # A receipt that could not be read refuses too. "I could not tell" is not "it is not
-  # installed", and this is the one verb whose mistake cannot be walked back.
-  # [LAW:no-silent-failure]
-  elements=$(receipt_version "$ELEMENTS_RECEIPT")
-  case "$elements" in
-    none) ;;
-    probe-failed) die "could not tell whether $ELEMENTS_RECEIPT is installed, and removal deletes files the two products share; refusing to guess" ;;
-    *) die "Karabiner-Elements $elements is installed and shares $MANAGER_APP and $SUPPORT_DIR with the driver package, so removing the driver would break it and nothing here could put it back; remove Karabiner-Elements first if that is what you want" ;;
-  esac
+  remove_refusals
 
   # [LAW:no-ambient-temporal-coupling] Deactivation must precede file removal, and the
   # order is not a preference. Only the Manager can withdraw the extension, and
@@ -409,7 +434,11 @@ cmd_remove() {
     probe-failed) die "could not read whether the extension is still registered, and deleting the Manager while it is would strand the registration with nothing able to retract it; refusing to guess" ;;
     *)
       echo "==> deactivating the driver extension" >&2
-      [[ -x $MANAGER ]] || die "the extension is registered as '$registered' but $MANAGER is missing, so nothing here can withdraw it; reinstall the package, then run 'remove'"
+      [[ -x $MANAGER ]] || die "the extension is registered as '$registered' but $MANAGER is missing, so nothing here can withdraw it; reinstall the package, then run: $REMOVE_AGAIN"
+      # An activation postinstall left waiting on the switch would race this withdrawal
+      # and outlive the Manager it runs from, so it is ended first, as postinstall ends
+      # one a previous install left.
+      pkill -f "$MANAGER activate" || true
       as_console_user "$MANAGER" deactivate
 
       # The Manager prints "request ... is failed" and still exits 0, so the withdrawal
@@ -438,7 +467,7 @@ cmd_remove() {
   # could stop the verb. [LAW:no-silent-failure]
   receipts=$(receipts_present)
   case "$receipts" in
-    probe-failed) die "the installer receipt for $BUNDLE_ID could not be read, so whether to forget it is unknown; the payload is already deleted, and re-running 'remove' once the cause is fixed will finish the job" ;;
+    probe-failed) die "the installer receipt for $BUNDLE_ID could not be read, so whether to forget it is unknown; the payload is already deleted, and running $REMOVE_AGAIN once the cause is fixed will finish the job" ;;
   esac
   for id in $receipts; do
     echo "==> forgetting installer receipt $id (sudo)" >&2
@@ -452,13 +481,19 @@ cmd_remove() {
 # them, it is simply run; run as root - vhid-uninstall --driver, which sources this file
 # from the pkg - it is made on their behalf in their session, the way postinstall asks
 # for the activation, and refused when nobody is logged in to make it.
-as_console_user() {
-  [ "$(id -u)" = 0 ] || { "$@"; return; }
+console_user() {
   local console
   console=$(stat -f %Su /dev/console)
   case "$console" in
     root|loginwindow|_mbsetupuser) die "nobody is logged in, and withdrawing the driver extension is the logged-in person's request to make; log in, then run this again" ;;
   esac
+  echo "$console"
+}
+as_console_user() {
+  [ "$(id -u)" = 0 ] || { "$@"; return; }
+  local console
+  console_user >/dev/null   # in the main shell, where its refusal can end the run
+  console=$(console_user)
   launchctl asuser "$(id -u "$console")" sudo -u "$console" "$@"
 }
 

@@ -31,6 +31,8 @@ case $1 in
     fi
     grep -qxF "$2" "$STUB/loaded" && exit 0
     echo "Could not find service \"$2\" in domain"; exit 113 ;;
+  asuser)
+    echo "asuser $2" >>"$STUB/reached"; shift 2; exec "$@" ;;
   bootout)
     echo "bootout $2" >>"$STUB/reached"
     status=0
@@ -54,10 +56,12 @@ case $1 in
 esac
 S
 # sudo runs what it is given, as this user, and says it was asked.
-printf '#!/bin/bash\necho "sudo $*" >>"$STUB/reached"\nexec "$@"\n' >"$STUB/bin/sudo"
+printf '#!/bin/bash\necho "sudo $*" >>"$STUB/reached"\n[ "$1" = -u ] && shift 2\nexec "$@"\n' >"$STUB/bin/sudo"
 # The sessions someone is logged into, as loginwindow processes owned by each uid.
 printf '#!/bin/bash\nfor u in ${SESSIONS-501}; do echo "$u /System/Library/CoreServices/loginwindow.app/Contents/MacOS/loginwindow"; done\necho "0 /sbin/launchd"\n' >"$STUB/bin/ps"
-printf '#!/bin/bash\necho "${STUB_UID:-501}"\n' >"$STUB/bin/id"
+printf '#!/bin/bash\necho "${CONSOLE_USER:-brandon}"\n' >"$STUB/bin/stat"
+# `id -u` is who runs this, as STUB_UID says; `id -u <name>` is that person's uid.
+printf '#!/bin/bash\n[ $# -gt 1 ] && echo 501 || echo "${STUB_UID:-501}"\n' >"$STUB/bin/id"
 chmod +x "$STUB/bin/"*
 export STUB PATH="$STUB/bin:$PATH" VHID_UNINSTALL_ROOT="$STUB/root"
 
@@ -194,6 +198,23 @@ check "Karabiner-Elements present: refused" 1 "$status"
 check "Karabiner-Elements present: says why" 1 "$(grep -c 'Karabiner-Elements 15.5.0 is installed and shares' <<<"$out")"
 check "Karabiner-Elements present: driver untouched" "" "$(grep '^manager\|^sudo rm' "$STUB/reached")"
 check "Karabiner-Elements present: vhid's files left" "$before" "$(left)"
+check "Karabiner-Elements present: vhid's jobs left running" "$DAEMON" "$(cat "$STUB/loaded")"
+
+driver_mac yes; echo "$DEV" >>"$STUB/loaded"; before=$(left); run_driver
+check "dev job loaded: --driver refused" 1 "$status"
+check "dev job loaded: nothing stopped or removed" "$before|" "$(left)|$(grep -v '^$' "$STUB/reached")"
+
+state "" "" no; run_driver
+check "--driver on a clean Mac: exit" 0 "$status"
+check "--driver on a clean Mac: nothing to remove" 1 "$(grep -c 'nothing to remove' <<<"$out")"
+
+# The withdrawal as root, which is how the pkg's uninstaller always runs it: made in the
+# logged-in person's session as them, and refused with nobody logged in.
+: >"$STUB/reached"
+out=$(STUB_UID=0 /bin/bash -c 'source scripts/virtual-hid-driver; as_console_user echo withdrawn' 2>&1); status=$?
+check "as root: asked in the person's session, as them" "0 withdrawn|asuser 501|sudo -u brandon echo withdrawn" "$status $out|$(tr '\n' '|' <"$STUB/reached" | sed 's/|$//')"
+out=$(STUB_UID=0 CONSOLE_USER=loginwindow /bin/bash -c 'source scripts/virtual-hid-driver; as_console_user echo withdrawn' 2>&1); status=$?
+check "as root, nobody logged in: refused, nothing run" "1 no" "$status $(grep -qx withdrawn <<<"$out" && echo ran || echo no)"
 
 echo "uninstall-test: $pass passed, $failed failed"
 [ $failed -eq 0 ]
