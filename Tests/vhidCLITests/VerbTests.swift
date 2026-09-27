@@ -51,7 +51,7 @@ import Testing
 
     // MARK: press
 
-    @Test func keysPressesEveryChordAndNamesThemBack() async throws {
+    @Test func pressPressesEveryChordAndNamesThemBack() async throws {
         let keyboard = RecordingKeyboard()
         let said = try await PressCommand.press(["leftCommand+s", "return"], on: Self.us, with: Typist(keyboard: keyboard))
         #expect(said.hasSuffix(" on \(Self.us.name)"))

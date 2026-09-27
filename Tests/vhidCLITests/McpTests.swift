@@ -48,7 +48,7 @@ import Testing
         }
     }
 
-    /// A misspelt argument is refused, not ignored: `count` for `times` would otherwise
+    /// A wrongly named argument is refused, not ignored: `count` for `times` would otherwise
     /// click once where three were asked for.
     @Test func anArgumentTheToolDoesNotTakeIsRefusedByName() async {
         #expect(await Self.refusal(Tools.click, ["x": 1, "y": 2, "count": 3])
