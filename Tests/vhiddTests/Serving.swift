@@ -23,5 +23,6 @@ final class RecordingDevices: NSObject, ServedDevices, @unchecked Sendable {
     func releaseButtons(reply: @escaping (Error?) -> Void) { note("release buttons", reply) }
     func move(x: Int8, y: Int8, reply: @escaping (Error?) -> Void) { note("move", reply) }
     func scroll(vertical: Int8, horizontal: Int8, reply: @escaping (Error?) -> Void) { note("scroll", reply) }
+    func releaseKeysHeldPastLimit() -> KeysLetGo? { nil }
     func releaseEverything(because reason: String) { lock.lock(); acts.append(reason); lock.unlock() }
 }

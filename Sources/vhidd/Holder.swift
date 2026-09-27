@@ -42,6 +42,13 @@ final class Holder: @unchecked Sendable {
         return holding.flatMap { $0.attempt == attempt ? $0.pid : nil }
     }
 
+    /// Runs `body` with the pid holding `attempt`'s devices, or nil, under the lock, so no
+    /// connection can claim or free them part way through it.
+    func withHolder<T>(on attempt: Int, _ body: (pid_t?) -> T) -> T {
+        lock.lock(); defer { lock.unlock() }
+        return body(holding.flatMap { $0.attempt == attempt ? $0.pid : nil })
+    }
+
     /// Runs `body` while `connection` holds the devices, and reports whether it did. The
     /// lock is held across `body`, so no other connection can claim them part way
     /// through it.
