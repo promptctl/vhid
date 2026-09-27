@@ -99,6 +99,47 @@ nothing between calls and a `vhid click` from a shell still gets through. Stdout
 only JSON-RPC; diagnostics go to stderr. An argument a tool will not act on comes back as
 a tool error naming it, before anything is connected.
 
+`eyes mcp` serves `windows`, `displays`, `find` and `read` the same way. The two are
+separate servers, and a client runs both.
+
+In Claude Code:
+
+```sh
+claude mcp add vhid -- /usr/local/bin/vhid mcp
+claude mcp add eyes -- /usr/local/bin/eyes mcp
+```
+
+In Claude Desktop, under `mcpServers` in
+`~/Library/Application Support/Claude/claude_desktop_config.json`, then restart it:
+
+```json
+{
+  "mcpServers": {
+    "vhid": { "command": "/usr/local/bin/vhid", "args": ["mcp"] },
+    "eyes": { "command": "/usr/local/bin/eyes", "args": ["mcp"] }
+  }
+}
+```
+
+vhid's tools need what `vhid doctor` checks and no grant of the client's. eyes'
+`windows` and `displays` need nothing; `find` and `read` need Screen Recording, which
+macOS asks of the app that started the server: Claude Desktop, or the terminal running
+`claude`. Until it is granted they answer with a tool error that says so.
+
+Every coordinate either server prints or takes is the same screen point, so one loop
+closes without conversion:
+
+| step | tool | what it answers |
+|---|---|---|
+| where the displays are | eyes `displays` | each id and its bounds, negative left of or above the main display |
+| what is in front | eyes `windows` | each window's owner and bounds, and the frontmost application |
+| where the text is | eyes `find` `{"text": "Save", "display": 2}` | the point to click, then the run it read |
+| press it | vhid `click` `{"x": 812, "y": 604}` | nothing but success or the reason it could not |
+| what changed | eyes `find` again | the run gone, or still there, with a scope line saying where it looked |
+
+Neither server decides the next step. `click` presses the point it is given whatever is
+there, and `find` reports what is on screen, not whether the click did what was meant.
+
 ## Installing
 
 vhid ships as one signed, notarized pkg. It installs:
