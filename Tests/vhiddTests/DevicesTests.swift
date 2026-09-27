@@ -9,18 +9,31 @@ import Testing
 /// The devices as vhidd serves them, over recording devices of the test's own: what
 /// the wire may carry that the device cannot, and what a client leaving lets go of.
 @Suite struct DevicesTests {
-    final class RecordingKeyboard: KeyPress {
+    /// Holds keys the way the device does: noted before the request, which may throw
+    /// having reached the driver, and cleared only by a release that succeeds.
+    final class RecordingKeyboard: HeldKeyboard {
         private let recorded = Mutex<[String]>([])
+        private let held = Mutex<Set<Usage>>([])
         let refusesRelease: Bool
+        let refusesDown: Bool
 
-        init(refusesRelease: Bool = false) { self.refusesRelease = refusesRelease }
+        init(refusesRelease: Bool = false, refusesDown: Bool = false) {
+            self.refusesRelease = refusesRelease
+            self.refusesDown = refusesDown
+        }
 
         var log: [String] { recorded.withLock { $0 } }
+        var keysDown: Set<Usage> { held.withLock { $0 } }
 
-        func down(_ usage: Usage) throws { recorded.withLock { $0.append("down \(usage.rawValue)") } }
+        func down(_ usage: Usage) throws {
+            recorded.withLock { $0.append("down \(usage.rawValue)") }
+            held.withLock { _ = $0.insert(usage) }
+            if refusesDown { throw Refused() }
+        }
         func releaseAll() throws {
             recorded.withLock { $0.append("up") }
             if refusesRelease { throw Refused() }
+            held.withLock { $0 = [] }
         }
     }
 
@@ -110,7 +123,7 @@ import Testing
         clock.advance(.milliseconds(1999))
         #expect(devices.releaseKeysHeldPastLimit() == nil)
         clock.advance(.milliseconds(1))
-        #expect(devices.releaseKeysHeldPastLimit() == KeysLetGo(usages: [0x04, 0xE3], failure: nil))
+        #expect(devices.releaseKeysHeldPastLimit() == KeysLetGo(usages: [0x04, 0xE3], limit: .seconds(2), failure: nil))
         #expect(keyboard.log == ["down 227", "down 4", "up"])
         clock.advance(.seconds(5))
         #expect(devices.releaseKeysHeldPastLimit() == nil)
@@ -132,7 +145,7 @@ import Testing
             clock.advance(.seconds(10))
             #expect(devices.releaseKeysHeldPastLimit() == nil)
         }
-        #expect(!keyboard.log.isEmpty && keyboard.log.count == 60)
+        #expect(keyboard.log.count == 60)
     }
 
     /// A button held past the limit stays down: a replayed pointer script holds one across gaps.
@@ -145,14 +158,36 @@ import Testing
         #expect(mouse.log == ["down 1"])
     }
 
-    /// A release the keyboard refused is reported and tried again on the next sweep.
-    @Test func aRefusedReleaseIsReportedAndRetried() {
+    /// A release the keyboard refused is reported and due again on the very next sweep.
+    @Test func aRefusedReleaseIsReportedAndRetriedAtOnce() {
         let (devices, clock) = timed(RecordingKeyboard(refusesRelease: true))
         _ = answer { devices.down(usage: 0x04, reply: $0) }
         clock.advance(.seconds(2))
         #expect(devices.releaseKeysHeldPastLimit()?.failure != nil)
+        clock.advance(.milliseconds(250))
+        #expect(devices.releaseKeysHeldPastLimit()?.usages == [0x04])
+    }
+
+    /// A key whose request threw after reaching the driver is still down on the device,
+    /// and the deadline releases it.
+    @Test func aKeyWhoseRequestThrewIsStillReleased() {
+        let (devices, clock) = timed(RecordingKeyboard(refusesDown: true))
+        #expect(answer { devices.down(usage: 0x04, reply: $0) } != nil)
         clock.advance(.seconds(2))
         #expect(devices.releaseKeysHeldPastLimit()?.usages == [0x04])
+    }
+
+    /// A modifier held through a drag the client paces over seconds is live: every pointer
+    /// report counts, and the modifier stays down.
+    @Test func aModifierHeldThroughAPacedDragIsNotCut() {
+        let (devices, clock) = timed()
+        _ = answer { devices.down(usage: 0xE2, reply: $0) }
+        _ = answer { devices.buttonDown(1, reply: $0) }
+        for _ in 0..<30 {
+            clock.advance(.milliseconds(200))
+            _ = answer { devices.move(x: 5, y: 0, reply: $0) }
+            #expect(devices.releaseKeysHeldPastLimit() == nil)
+        }
     }
 
     /// The deadline releases the keys and leaves the devices with the client that held them,
@@ -167,7 +202,7 @@ import Testing
         let attempt = try readiness.devices().attempt
         try holder.serve(client, by: 4242, on: attempt) { devices.down(usage: 0x04) { _ in } }
         clock.advance(.seconds(3))
-        #expect(releaseKeysHeldPastLimit(readiness, holder) == "pid 4242 held 0x04 past 2.0 seconds with no keyboard report; released")
+        #expect(releaseKeysHeldPastLimit(readiness, holder) == "pid 4242 held 0x04 past 2.0 seconds with no report; released")
         #expect(holder.pid(on: attempt) == 4242)
         #expect(throws: Holder.Busy.self) { try holder.serve(ObjectIdentifier(second), by: 1, on: attempt) {} }
         withExtendedLifetime((first, second)) {}

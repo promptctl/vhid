@@ -19,7 +19,7 @@ final class Listener: NSObject, NSXPCListenerDelegate {
         self.readiness = readiness
         self.callers = callers
         super.init()
-        sweep.schedule(deadline: .now(), repeating: .milliseconds(250))
+        sweep.schedule(deadline: .now(), repeating: .milliseconds(250), leeway: .milliseconds(100))
         sweep.setEventHandler { [readiness, holder] in releaseKeysHeldPastLimit(readiness, holder).map(log) }
         sweep.resume()
     }
@@ -61,10 +61,16 @@ final class Listener: NSObject, NSXPCListenerDelegate {
 
 /// Lets go of keys a client has held past the limit and says whose they were. The holder
 /// keeps the devices: the client's next act still works, and its own key-up is harmless.
+///
+/// The holder is read and the keys released under the holder's lock, in the order a
+/// client's act takes the two locks, so the pid named is the one whose keys these were.
 func releaseKeysHeldPastLimit(_ readiness: Readiness, _ holder: Holder) -> String? {
-    guard let (letGo, attempt) = readiness.releaseKeysHeldPastLimit() else { return nil }
-    let whose = holder.pid(on: attempt).map { "pid \($0)" } ?? "no client"
-    let keys = letGo.usages.map { String(format: "0x%02X", $0) }.joined(separator: ", ")
-    return "\(whose) held \(keys) past \(Devices.keyLimit) with no keyboard report; "
-        + (letGo.failure.map { "the keyboard would not release: \($0)" } ?? "released")
+    guard let up = try? readiness.devices() else { return nil }
+    return holder.withHolder(on: up.attempt) { pid in
+        up.devices.releaseKeysHeldPastLimit().map { letGo in
+            let keys = letGo.usages.map { String(format: "0x%02X", $0) }.joined(separator: ", ")
+            return "\(pid.map { "pid \($0)" } ?? "no client") held \(keys) past \(letGo.limit) with no report; "
+                + (letGo.failure.map { "the keyboard would not release: \($0)" } ?? "released")
+        }
+    }
 }

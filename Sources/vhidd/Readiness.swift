@@ -72,13 +72,6 @@ final class Readiness: @unchecked Sendable {
         }
     }
 
-    /// Releases keys held past the limit on the devices that are up, answering with what was
-    /// let go of and the attempt those devices belong to; devices that are not up hold nothing.
-    func releaseKeysHeldPastLimit() -> (KeysLetGo, attempt: Int)? {
-        guard let up = try? devices() else { return nil }
-        return up.devices.releaseKeysHeldPastLimit().map { ($0, up.attempt) }
-    }
-
     /// Starts an attempt, returning the number its connection's loss is reported under.
     func begin() -> Int {
         condition.lock(); defer { condition.unlock() }

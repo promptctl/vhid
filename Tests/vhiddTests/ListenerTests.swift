@@ -41,7 +41,7 @@ import Testing
         func scroll(vertical: Int8, horizontal: Int8, reply: @escaping (Error?) -> Void) { reply(nil) }
 
         func releaseKeysHeldPastLimit() -> KeysLetGo? { nil }
-    func releaseEverything(because reason: String) {
+        func releaseEverything(because reason: String) {
             lock.lock(); reasons.append(reason); lock.unlock()
             released.signal()
         }
