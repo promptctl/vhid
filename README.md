@@ -193,7 +193,7 @@ ships something nobody can run, and the build stays green while it happens.
 
 ## Releasing
 
-A release is published by pushing its tag:
+A release is published by pushing its tag, once `CHANGELOG.md` has its section:
 
 ```sh
 git tag v$(scripts/version --base) && git push origin v$(scripts/version --base)

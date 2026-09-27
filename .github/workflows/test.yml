@@ -4,6 +4,7 @@
 # The job names are the check names ruleset 23733334 requires before a PR can merge
 # into master. Renaming a job renames its check, and the ruleset then waits for a check
 # that will never report, which blocks every PR. Change both together or neither.
+# release.yml reads this file's job names too, and requires each to be green on the tag.
 name: test
 
 on:

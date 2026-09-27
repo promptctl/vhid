@@ -1,0 +1,9 @@
+#!/bin/bash
+# Sourced by scripts/release and scripts/notarize: sets notary_keychain to the arguments
+# that tell notarytool where the profile is. Empty for the login keychain; --keychain
+# NOTARY_KEYCHAIN when that is set, as in the release workflow, whose keychain is its own
+# and which notarytool will not find on the search list.
+#
+# Held to bash 3.2, like every script here.
+notary_keychain=()
+[ -n "${NOTARY_KEYCHAIN:-}" ] && notary_keychain=(--keychain "$NOTARY_KEYCHAIN")

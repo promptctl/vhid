@@ -11,8 +11,9 @@
 #
 # The keychain's password is made here and never kept: the keychain lives as long as the
 # job. The private keys are opened to codesign, productbuild and pkgbuild when imported,
-# so no build stops at a dialog nobody can click. It is appended to the search list,
-# because make-pkg finds the identities with `security find-identity`, which reads it.
+# so no build stops at a dialog nobody can click. It goes first on the search list, ahead
+# of what was there, because make-pkg finds the identities with `security find-identity`,
+# which reads that list.
 #
 # Held to bash 3.2, like every script here.
 set -euo pipefail
@@ -55,7 +56,15 @@ for secret in DEVELOPER_ID_APPLICATION_P12 DEVELOPER_ID_INSTALLER_P12; do
 done
 security set-key-partition-list -S apple-tool:,apple: -k "$password" "$keychain" >/dev/null
 
-# Appended, never substituted: `list-keychains -s` replaces the whole list. Read into a
+# The intermediate both certificates chain to, which a runner need not have: without it
+# `security find-identity -v` finds no valid identity and make-pkg refuses to sign.
+intermediate=$keychain.cer
+curl --fail --silent --show-error --location --output "$intermediate" \
+  https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer
+security import "$intermediate" -k "$keychain" >&2 || true   # already trusted is fine
+rm -f "$intermediate"
+
+# Added, never substituted: `list-keychains -s` replaces the whole list. Read into a
 # variable first so a failing `security` stops here instead of arriving as an empty list,
 # and read line by line so a path with spaces stays one path.
 listing=$(security list-keychains -d user)
