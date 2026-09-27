@@ -9,6 +9,19 @@ public protocol StoppedPartWay: Error {
     var cause: any Error { get }
 }
 
+/// What `release` threw, answered rather than thrown: every run that stops lets its device
+/// go on the way out and reports a release that failed beside the stop, never over it, so
+/// the operator is told both. [LAW:no-silent-failure] The one copy of that shape, for the
+/// keyboard and the mouse alike. [LAW:one-source-of-truth]
+func failure(of release: () async throws -> Void, isolation: isolated (any Actor)? = #isolation) async -> (any Error)? {
+    do {
+        try await release()
+        return nil
+    } catch {
+        return error
+    }
+}
+
 public extension Error {
     /// This error and every cause under it, outermost first.
     var causes: [any Error] {

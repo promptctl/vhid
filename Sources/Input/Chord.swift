@@ -40,9 +40,11 @@ extension Keystroke {
     public init(chord: KeyChord) throws(UnpressableChord) {
         guard let key = chord.key else { throw UnpressableChord(chord: chord, because: "it has no key to strike; modifiers alone are held, not struck") }
         guard let usage = Usage(virtualKeyCode: key.rawValue) else { throw UnpressableChord(chord: chord, because: "key code \(key.rawValue) is not a key the keyboard page names") }
-        let unpressable = chord.modifiers.filter { $0.usage == nil }
-        guard unpressable.isEmpty else { throw UnpressableChord(chord: chord, because: "\(unpressable.map(\.rawValue).sorted().joined(separator: ", ")) is not a key the device can hold") }
-        self.init(usage, Modifiers(chord.modifiers.compactMap(\.usage)))
+        do {
+            self.init(usage, try HeldModifiers(chord.modifiers).pressed)
+        } catch {
+            throw UnpressableChord(chord: chord, because: error.description)
+        }
     }
 }
 
