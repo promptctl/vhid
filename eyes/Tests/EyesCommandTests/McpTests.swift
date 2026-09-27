@@ -12,11 +12,12 @@ import Testing
             Window(id: 2, owner: "Finder", pid: 401, frame: ScreenRect(x: -800, y: 0, width: 800, height: 600), layer: 0),
         ],
         excluded: [])
+    private static let front = Frontmost(pid: 401, name: "Finder")
 
     /// A client connected to a server over `listing`, both torn down before this returns.
     private func connected<T>(_ body: (Client) async throws -> T) async throws -> T {
         let (clientSide, serverSide) = await InMemoryTransport.createConnectedPair()
-        let server = await Mcp.server(EyesTools.all(windows: { Self.listing }, displays: { DisplaysCommandTests.desk }))
+        let server = await Mcp.server(EyesTools.all(windows: { Self.listing }, frontmost: { Self.front }, displays: { DisplaysCommandTests.desk }))
         try await server.start(transport: serverSide)
         let client = Client(name: "test", version: "0")
         let result: Result<T, any Error>
@@ -48,9 +49,9 @@ import Testing
         for owner: Value in [.null, "finder"] {
             let (said, isError) = try await call(owner.isNull ? [:] : ["owner": owner])
             #expect(isError != true)
-            #expect(said == Windows.report(Self.listing, owner: owner.stringValue))
+            #expect(said == Windows.report(Self.listing, owner: owner.stringValue, frontmost: Self.front))
         }
-        #expect(try await call(["owner": .null]).0 == Windows.report(Self.listing, owner: nil))
+        #expect(try await call(["owner": .null]).0 == Windows.report(Self.listing, owner: nil, frontmost: Self.front))
     }
 
     /// Refusals come back as tool errors in the model's words, not as ignored arguments.

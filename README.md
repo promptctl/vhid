@@ -33,7 +33,7 @@ The cost of that isolation is this paragraph: `make test` at the root does not r
 `eyes`' tests.
 
 ```sh
-eyes windows                      # owner, layer and bounds of each on-screen window
+eyes windows                      # owner, layer and bounds of each on-screen window; where keys go
 eyes displays                     # each display's id, bounds and scale, main first
 eyes find Save                    # where "Save" is: the point to click, then the text
 eyes find Settings --exact --display 3

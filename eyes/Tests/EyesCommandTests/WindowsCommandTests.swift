@@ -17,10 +17,36 @@ import Testing
     /// clauses only appear when there is something to count.
     @Test func awholeReadingClaimsNothingItDidNotDo() {
         let listing = WindowListing(windows: [window(id: 1), window(id: 2)], excluded: [])
-        let line = Windows.scope(shown: 2, listing: listing)
+        let line = Windows.scope(shown: 2, listing: listing, frontmost: nil)
         #expect(line == "2 windows, front to back."
             + " On screen only: minimized, hidden and other-Space windows were never looked at."
-            + " Owner, layer and bounds; titles need Screen Recording.")
+            + " Owner, layer and bounds; titles need Screen Recording."
+            + " No application is frontmost.")
+    }
+
+    /// The frontmost application is found by pid, not by row order: its menu at layer 101
+    /// and the Dock at 20 sit above its window, and a row of it is marked wherever it falls.
+    @Test func theFrontmostApplicationsRowsAreMarkedByPidNotPosition() {
+        let rows = [
+            Window(id: 9, owner: "Safari", pid: 400, frame: ScreenRect(x: 10, y: 0, width: 200, height: 300), layer: 101),
+            Window(id: 8, owner: "Dock", pid: 90, frame: ScreenRect(x: 0, y: 900, width: 1512, height: 82), layer: 20),
+            Window(id: 7, owner: "Window Server", pid: 91, frame: ScreenRect(x: 0, y: 0, width: 1512, height: 33), layer: 24),
+            Window(id: 2, owner: "Finder", pid: 401, frame: ScreenRect(x: 0, y: 33, width: 800, height: 600), layer: 0),
+            Window(id: 1, owner: "Safari", pid: 400, frame: ScreenRect(x: 0, y: 33, width: 1512, height: 949), layer: 0),
+        ]
+        let lines = Windows.report(WindowListing(windows: rows, excluded: []), owner: nil,
+                                   frontmost: Frontmost(pid: 400, name: "Safari")).split(separator: "\n")
+        #expect(lines[0].hasSuffix(" Keys go to Safari (pid 400), its rows marked front."))
+        #expect(lines.dropFirst().map { $0.hasSuffix("\tfront") } == [true, false, false, false, true])
+    }
+
+    /// Keys go to the frontmost application even when the owner filter hides all of it, so
+    /// it is named anyway and the scope says none of its rows are shown.
+    @Test func aFrontmostApplicationWithNoRowShownIsStillNamed() {
+        let listing = WindowListing(windows: [window(id: 1, owner: "Safari")], excluded: [])
+        let report = Windows.report(listing, owner: "safari", frontmost: Frontmost(pid: 77, name: "Terminal"))
+        #expect(report.split(separator: "\n")[0].hasSuffix(" Keys go to Terminal (pid 77), which has no row here."))
+        #expect(!report.contains("\tfront"))
     }
 
     /// The narrowing no count can reach, and so the one that has to be said in words: the
@@ -29,11 +55,10 @@ import Testing
     /// caller told "no Safari window" while Safari sits minimized was told something true
     /// about the screen and false about the question they asked.
     @Test func everyReadingSaysItOnlyLookedAtWhatIsOnScreen() {
-        let whole = Windows.scope(shown: 2, listing: WindowListing(windows: [window()], excluded: []))
+        let whole = Windows.scope(shown: 2, listing: WindowListing(windows: [window()], excluded: []), frontmost: nil)
         let narrowed = Windows.scope(
             shown: 0,
-            listing: WindowListing(windows: [window()], excluded: [WindowExclusion(reason: .invisible, count: 1)])
-        )
+            listing: WindowListing(windows: [window()], excluded: [WindowExclusion(reason: .invisible, count: 1)]), frontmost: nil)
         for line in [whole, narrowed] {
             #expect(line.contains("On screen only"))
             #expect(line.contains("minimized"))
@@ -43,14 +68,14 @@ import Testing
     /// One window is one window, not "1 windows".
     @Test func theCountReadsAsEnglish() {
         let listing = WindowListing(windows: [window()], excluded: [])
-        #expect(Windows.scope(shown: 1, listing: listing).hasPrefix("1 window, front to back."))
+        #expect(Windows.scope(shown: 1, listing: listing, frontmost: nil).hasPrefix("1 window, front to back."))
     }
 
     /// The owner filter says how much it took away and out of what, because the rows below
     /// cannot show what is missing from them.
     @Test func theOwnerFilterDeclaresWhatItTookAway() {
         let listing = WindowListing(windows: (1...12).map { window(id: UInt32($0)) }, excluded: [])
-        let line = Windows.scope(shown: 2, listing: listing)
+        let line = Windows.scope(shown: 2, listing: listing, frontmost: nil)
         #expect(line.contains("2 windows, front to back"))
         #expect(line.contains("10 of 12 filtered by owner"))
     }
@@ -67,7 +92,7 @@ import Testing
                 WindowExclusion(reason: .unreadable, count: 1),
             ]
         )
-        let line = Windows.scope(shown: 12, listing: listing)
+        let line = Windows.scope(shown: 12, listing: listing, frontmost: nil)
         #expect(line.contains("27 listed"))
         #expect(line.contains("2 arealess"))
         #expect(line.contains("12 invisible"))
@@ -81,7 +106,7 @@ import Testing
             windows: (1...12).map { window(id: UInt32($0)) },
             excluded: [WindowExclusion(reason: .invisible, count: 3)]
         )
-        let line = Windows.scope(shown: 4, listing: listing)
+        let line = Windows.scope(shown: 4, listing: listing, frontmost: nil)
         #expect(line.contains("8 of 12 filtered by owner"))
         #expect(line.contains("15 listed, 3 invisible"))
     }
