@@ -1,0 +1,27 @@
+#!/bin/bash
+# stop_job <launchd target>: unloads a job and returns once launchd has let go of it, or
+# prints why not to stdout and returns 1. Sourced by preinstall beside it, and written
+# into /usr/local/libexec/vhid-uninstall by scripts/stage-uninstall, so the pkg stops a
+# job one way whether it is installing over it or removing it. [LAW:one-source-of-truth]
+#
+# bootout answers 36, "Operation now in progress", when the job was told to stop and is
+# still unwinding - the daemon releases every key and stops the pqrs daemon it started
+# before it exits. That is a stop under way, not a refusal, so the label is watched until
+# launchd lets go of it, for as long as a clean exit could take and no longer.
+# [LAW:no-ambient-temporal-coupling] The condition waited on is launchd's own answer.
+#
+# Held to bash 3.2, like every script here.
+stop_job() {
+  local target=$1 status=0 tries=0
+  launchctl bootout "$target" >/dev/null 2>&1 || status=$?
+  case $status in
+    0) return 0 ;;
+    36) ;;
+    *) echo "launchd would not unload $target (bootout exited $status)"; return 1 ;;
+  esac
+  while launchctl print "$target" >/dev/null 2>&1; do
+    tries=$((tries + 1))
+    [ $tries -le 30 ] || { echo "$target was still loaded 30 s after launchd began unloading it"; return 1; }
+    sleep 1
+  done
+}

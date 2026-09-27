@@ -13,22 +13,33 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 SERVICE=ai.promptctl.vhid.vhidd
 STUB=$(mktemp -d) || exit 1
 trap 'rm -rf "$STUB"' EXIT
-scripts/stage-uninstall "$SERVICE" >"$STUB/vhid-uninstall" && chmod +x "$STUB/vhid-uninstall" || exit 1
+scripts/stage-uninstall "$SERVICE" "$(scripts/make-pkg --identifier)" >"$STUB/vhid-uninstall" && chmod +x "$STUB/vhid-uninstall" || exit 1
 
 mkdir "$STUB/bin"
-# Loaded jobs are lines of $STUB/loaded; LAUNCHCTL_UNREADABLE makes print fail the way a
-# broken launchd would, and BOOTOUT_STATUS makes bootout answer as told.
+# Loaded jobs are lines of $STUB/loaded. UNREADABLE (a target, or "all") makes print fail
+# the way a broken launchd would. BOOTOUT_STATUS makes bootout of BOOTOUT_TARGET (or of
+# every target) answer as told: 36 unloads the job only after two more prints, as a
+# daemon still unwinding does, and anything else unloads nothing.
 cat >"$STUB/bin/launchctl" <<'S'
 #!/bin/bash
+unload() { grep -vxF "$1" "$STUB/loaded" >"$STUB/loaded.new"; mv "$STUB/loaded.new" "$STUB/loaded"; }
 case $1 in
   print)
-    [ -n "${LAUNCHCTL_UNREADABLE:-}" ] && { echo "launchctl: something else went wrong"; exit 1; }
+    [ "${UNREADABLE:-}" = all ] || [ "${UNREADABLE:-}" = "$2" ] && { echo "launchctl: something else went wrong"; exit 1; }
+    if [ -f "$STUB/unwinding" ]; then
+      n=$(cat "$STUB/unwinding"); [ "$n" -le 1 ] && { rm "$STUB/unwinding"; unload "$2"; } || echo $((n - 1)) >"$STUB/unwinding"
+    fi
     grep -qxF "$2" "$STUB/loaded" && exit 0
     echo "Could not find service \"$2\" in domain"; exit 113 ;;
   bootout)
     echo "bootout $2" >>"$STUB/reached"
-    grep -vxF "$2" "$STUB/loaded" >"$STUB/loaded.new"; mv "$STUB/loaded.new" "$STUB/loaded"
-    exit "${BOOTOUT_STATUS:-0}" ;;
+    status=0
+    [ -z "${BOOTOUT_TARGET:-}" ] || [ "$BOOTOUT_TARGET" = "$2" ] && status=${BOOTOUT_STATUS:-0}
+    case $status in
+      0) unload "$2" ;;
+      36) echo 2 >"$STUB/unwinding" ;;
+    esac
+    exit "$status" ;;
 esac
 exit 97
 S
@@ -40,8 +51,9 @@ case $1 in
   *) exit 97 ;;
 esac
 S
-printf '#!/bin/bash\necho "${CONSOLE_USER:-brandon}"\n' >"$STUB/bin/stat"
-printf '#!/bin/bash\necho 501\n' >"$STUB/bin/id"
+# The sessions someone is logged into, as loginwindow processes owned by each uid.
+printf '#!/bin/bash\nfor u in ${SESSIONS-501}; do echo "$u /System/Library/CoreServices/loginwindow.app/Contents/MacOS/loginwindow"; done\necho "0 /sbin/launchd"\n' >"$STUB/bin/ps"
+printf '#!/bin/bash\necho "${STUB_UID:-501}"\n' >"$STUB/bin/id"
 chmod +x "$STUB/bin/"*
 export STUB PATH="$STUB/bin:$PATH" VHID_UNINSTALL_ROOT="$STUB/root"
 
@@ -89,15 +101,40 @@ check "dev job: exit" 0 "$status"
 check "dev job: left loaded" "$DEV" "$(cat "$STUB/loaded")"
 check "dev job: never booted out" "forget ai.promptctl.vhid" "$(cat "$STUB/reached")"
 
-state "$DAEMON" "$ALL" yes; before=$(left); LAUNCHCTL_UNREADABLE=1 run
+state "$DAEMON" "$ALL" yes; before=$(left); UNREADABLE=all run
 check "unreadable launchd: fails" 1 "$status"
 check "unreadable launchd: removes nothing" "$before" "$(left)"
 check "unreadable launchd: forgets nothing" "" "$(cat "$STUB/reached")"
 
-CONSOLE_USER=loginwindow; export CONSOLE_USER
+SESSIONS= ; export SESSIONS
 state "$DAEMON" "" no; run
 check "nobody logged in: daemon still stopped" "" "$(cat "$STUB/loaded")"
-unset CONSOLE_USER
+SESSIONS="501 502"
+state "$DAEMON $AGENT gui/502/$SERVICE.menubar" "" no; run
+check "two sessions: both menu bar items stopped" "" "$(cat "$STUB/loaded")"
+unset SESSIONS
+
+state "$DAEMON" "$ALL" yes; BOOTOUT_STATUS=36 run
+check "daemon still unwinding: waited for, then removed" "0 " "$status $(left)"
+
+state "$DAEMON" "$ALL" yes; before=$(left); BOOTOUT_STATUS=5 run
+check "daemon will not unload: fails" 1 "$status"
+check "daemon will not unload: removes nothing" "$before" "$(left)"
+check "daemon will not unload: forgets nothing" "bootout $DAEMON" "$(cat "$STUB/reached")"
+
+state "$DAEMON $AGENT" "$ALL" yes; UNREADABLE=$AGENT run
+check "agent record unreadable: still exits 0" 0 "$status"
+check "agent record unreadable: said" 1 "$(grep -c 'could not read whether the menu bar item runs' <<<"$out")"
+check "agent record unreadable: the rest removed" "" "$(left)"
+
+state "$DAEMON $AGENT" "$ALL" yes; BOOTOUT_TARGET=$AGENT BOOTOUT_STATUS=5 run
+check "agent will not stop: still exits 0" 0 "$status"
+check "agent will not stop: said" 1 "$(grep -c 'could not stop the menu bar item' <<<"$out")"
+check "agent will not stop: the rest removed" "" "$(left)"
+
+state "$DAEMON" "$ALL" yes; before=$(left); STUB_UID=0 run
+check "root with the test's root set: refused" 1 "$status"
+check "root with the test's root set: touches nothing" "$before|" "$(left)|$(cat "$STUB/reached")"
 
 echo "uninstall-test: $pass passed, $failed failed"
 [ $failed -eq 0 ]

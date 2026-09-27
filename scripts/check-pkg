@@ -76,6 +76,9 @@ if [ -x "$uninstaller" ]; then
   drift=$(diff <(echo "$files") <(echo "$removes")) \
     || fail "vhid-uninstall does not remove exactly what the pkg installs (< installed, > removed):
 $drift"
+  identifier=$(sed -n 's/.*<pkg-info [^>]*identifier="\([^"]*\)".*/\1/p' "$x/vhid.pkg/PackageInfo")
+  forgets=$(sed -n 's/^receipt=//p' "$uninstaller")
+  [ "$forgets" = "$identifier" ] || fail "vhid-uninstall forgets receipt '$forgets', but the pkg's is '$identifier'"
 fi
 
 # The job's three names for the service, which launchd, the daemon and the CLI must agree on.

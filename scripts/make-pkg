@@ -4,6 +4,7 @@
 #
 #   scripts/make-pkg <output directory>    # prints <output directory>/vhid-<version>.pkg, <version> from VERSION
 #   scripts/make-pkg --team    # prints the team whose Developer ID signs a release
+#   scripts/make-pkg --identifier    # prints the pkg's receipt identifier
 #   scripts/make-pkg --unsigned <output directory>
 #     # prints <output directory>/vhid-<version>-unsigned.pkg, <version> whatever this tree builds
 #
@@ -52,6 +53,8 @@ fail() { echo "make-pkg: $*" >&2; exit 1; }
 # The team, for the release workflow's notary credentials, read from here rather than
 # written a second time.
 [ "${1:-}" = --team ] && { echo "$TEAM"; exit 0; }
+# The receipt, for scripts/uninstall-test to stage the uninstaller as this script does.
+[ "${1:-}" = --identifier ] && { echo "$IDENTIFIER"; exit 0; }
 
 signed=true
 [ "${1:-}" = --unsigned ] && { signed=false; shift; }
@@ -148,7 +151,7 @@ packed=$("$payload/usr/local/bin/vhid" --version)
 [ "$packed" = "$version" ] \
   || fail "the packed vhid reports version '$packed', not '$version'"
 
-scripts/stage-uninstall "$service" >"$payload/usr/local/libexec/vhid-uninstall"
+scripts/stage-uninstall "$service" "$IDENTIFIER" >"$payload/usr/local/libexec/vhid-uninstall"
 
 plist="$payload/Library/LaunchDaemons/$service.plist"
 scripts/launchd-plist "$service" /usr/local/libexec/vhidd >"$plist"
