@@ -37,6 +37,7 @@ eyes windows                      # owner, layer and bounds of each on-screen wi
 eyes find Save                    # where "Save" is: the point to click, then the text
 eyes find Settings --exact --display 3
 eyes read --window 4127           # every run of text in one window, in reading order
+eyes mcp                          # the verbs as MCP tools over stdio (windows so far)
 ```
 
 `find` and `read` recognise pixels on-device with Vision and need Screen Recording. Each

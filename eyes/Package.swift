@@ -17,6 +17,11 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
+        // The MCP SDK, for `eyes mcp`: the protocol's framing and lifecycle are its to get
+        // right. Pinned to the minor vhid's own manifest pins, since the SDK is pre-1.0.
+        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", .upToNextMinor(from: "0.12.1")),
+        // Its logger, for the transport's diagnostics on stderr.
+        .package(url: "https://github.com/apple/swift-log.git", from: "1.5.0"),
     ],
     targets: [
         // The vocabulary both readers speak and the protocol both conform to. It links
@@ -46,11 +51,19 @@ let package = Package(
         // a case-insensitive filesystem, which is what macOS gives you by default.
         .executableTarget(
             name: "EyesCommand",
-            dependencies: ["Eyes", "Pixels", .product(name: "ArgumentParser", package: "swift-argument-parser")],
+            dependencies: [
+                "Eyes", "Pixels",
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+                .product(name: "MCP", package: "swift-sdk"),
+                .product(name: "Logging", package: "swift-log"),
+            ],
             path: "Sources/Command"
         ),
         // The scope line is the sentence that licenses every narrow answer under it, so it
         // is checked here rather than read off a terminal by eye. [LAW:verifiable-goals]
-        .testTarget(name: "EyesCommandTests", dependencies: ["EyesCommand", "Eyes"]),
+        .testTarget(
+            name: "EyesCommandTests",
+            dependencies: ["EyesCommand", "Eyes", .product(name: "MCP", package: "swift-sdk")]
+        ),
     ]
 )
