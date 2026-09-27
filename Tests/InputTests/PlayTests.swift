@@ -145,7 +145,8 @@ import Testing
     }
 
     /// A long wait asks whether the run was cancelled every slice, so a cancel during a
-    /// minute's hold ends it one slice in and releases the button, not a minute later.
+    /// minute's hold ends it one slice in and releases the button, not a minute later. The
+    /// script holds no key, so the keyboard is not touched on the way out.
     ///
     /// Aimed at the clock rather than at a report, because the hold is where the cancel has
     /// to land: a cancel raised at the button-down would prove nothing about the wait. The
@@ -168,7 +169,7 @@ import Testing
         #expect(stopped.played.count == 1)
         #expect(stopped.causes.contains { $0 is CancellationError })
         #expect(clock.now.offset == Player<ManualClock>.slice)
-        #expect(fake.log == ["hold [1]", "keys up", "up"])
+        #expect(fake.log == ["hold [1]", "up"])
     }
 
     /// A lead, watched out on a clock that only moves when something sleeps on it.
@@ -234,20 +235,22 @@ import Testing
         fake.refused = 1 ..< .max
         let play = try Play.parse("""
             {"to":{"x":0,"y":0}}
+            {"t_ms":0,"keys":["leftShift"]}
             {"t_ms":0,"buttons":["left"]}
             {"t_ms":1,"move":{"dx":5,"dy":0}}
             {"t_ms":2,"buttons":[]}
+            {"t_ms":2,"keys":[]}
             """)
         let stopped = try await #require(throws: PlayStopped.self) {
             try await Player(pointer: fake.pointer, keyboard: fake.keyboard, clock: clock, wall: { Self.epoch }, lead: .zero).play(Schedule(play))
         }
         #expect(stopped.played.count == 1)
-        #expect(stopped.of == 3)
+        #expect(stopped.of == 5)
         #expect(stopped.causes.contains { $0 is Refused })
-        #expect("\(stopped)".contains("after 1 of 3 reports"))
+        #expect("\(stopped)".contains("after 1 of 5 reports"))
         #expect("\(stopped)".contains("A key may be left held"))
         #expect("\(stopped)".contains("A button may be left held"))
-        #expect(fake.log == ["hold [1]", "move 5 0", "keys up", "up"])
+        #expect(fake.log == ["keys hold [e1]", "hold [1]", "keys up", "up"])
     }
 }
 

@@ -85,11 +85,16 @@ struct PlayCommand: AsyncParsableCommand {
                                               sentUs: report.sent, ackedUs: report.acked)))
         }
         if case .finished(let played) = ending {
-            lines.append(try line(DoneLine(done: .init(reports: played.reports.count,
-                                                       startReports: played.startReports,
-                                                       lateUs: played.lateness))))
+            lines.append(try done(played))
         }
         return lines
+    }
+
+    /// The line that says a play finished, and the whole of what the tool answers: a
+    /// recorded minute is thousands of report lines, which a tool's caller reads into its
+    /// context and a harness reads from the command line instead.
+    static func done(_ played: Played) throws -> String {
+        try line(DoneLine(done: .init(reports: played.reports.count, startReports: played.startReports, lateUs: played.lateness)))
     }
 
     /// How early each report is woken for. `Player` sleeps until this much before the

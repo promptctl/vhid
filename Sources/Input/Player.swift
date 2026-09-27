@@ -9,7 +9,7 @@ import Pointing
 /// already held sends nothing, so it is not an act.
 ///
 /// **Keys held through a quiet stretch are kept alive here, as acts.** vhidd lets go of
-/// every key two seconds after the client last spoke (`Devices.keyLimit` in vhidd), so
+/// every key `HeldKeys.silenceLimit` after the client last spoke, so
 /// Shift held for three seconds with nothing else happening would be cut. Wherever a key
 /// is held and no act comes for `keepAlive`, the schedule repeats the held set; the daemon
 /// counts the call as the client being alive and posts nothing for it, since the driver
@@ -43,12 +43,15 @@ public struct Schedule: Hashable, Sendable {
         }
     }
 
-    /// The longest a held key goes without a call: half vhidd's two-second limit, so a
-    /// keep-alive that goes out late still lands well inside it.
-    public static let keepAlive: Duration = .seconds(1)
+    /// The longest a held key goes without a call: half vhidd's limit, so a keep-alive that
+    /// goes out late still lands well inside it.
+    public static let keepAlive: Duration = HeldKeys.silenceLimit / 2
 
     /// How many of the acts are reports, which is what a play that stops is counted against.
     public var reports: Int { acts.filter(\.report.isReport).count }
+
+    /// Whether any act holds a key, and so whether a stop has a keyboard to let go of.
+    var holdsKeys: Bool { acts.contains { if case .keys = $0.report { true } else { false } } }
 
     public init(_ play: Play) throws(Play.ScriptInvalid) {
         var keys = (held: HeldKeys.none, line: 0)
@@ -175,8 +178,12 @@ public struct Player<C: Clock> where C.Duration == Duration {
             return Played(startReports: reports, reports: went)
         } catch {
             // Both devices, whatever either answers, because a stop can land with a key and
-            // a button both held. [LAW:no-silent-failure]
-            let keys = await failure(of: keyboard.releaseAll)
+            // a button both held. [LAW:no-silent-failure] A script that holds no key has no
+            // keyboard to let go of, and a failed release of one would report a key held
+            // that never went down. [LAW:dataflow-not-control-flow] The release is a value
+            // chosen from the schedule, as `Pointer.holding` chooses its own.
+            let letGo: () async throws -> Void = play.holdsKeys ? { try await keyboard.releaseAll() } : {}
+            let keys = await failure(of: letGo)
             throw PlayStopped(played: went, of: play.reports, cause: error, unreleasedKeys: keys, unreleasedButtons: await pointer.release())
         }
     }
@@ -242,10 +249,7 @@ public struct PlayStopped: StoppedPartWay, CustomStringConvertible {
     public let unreleasedButtons: (any Error)?
 
     public var description: String {
-        var said = "the play stopped after \(played.count) of \(of) reports: \(cause.reported)"
-        if let keys = unreleasedKeys { said = said.then("The keyboard was not released afterwards: \(keys.reported)").then("A key may be left held") }
-        if let buttons = unreleasedButtons { said = said.then("The mouse was not released afterwards: \(buttons.reported)").then("A button may be left held") }
-        return said
+        PointingStopped.unreleased(unreleasedButtons, after: TypingStopped.unreleased(unreleasedKeys, after: "the play stopped after \(played.count) of \(of) reports: \(cause.reported)"))
     }
 }
 

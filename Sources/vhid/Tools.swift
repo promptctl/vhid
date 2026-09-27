@@ -120,14 +120,14 @@ enum Tools {
         }
     }()
 
-    /// What `vhid play` prints, as the call's answer. A play that stops is the tool's error,
-    /// which says how many reports went out before it did.
+    /// The done line `vhid play` prints, as the call's answer. A play that stops is the
+    /// tool's error, which says how many reports went out before it did.
     static let play: VerbTool = {
         let script = Parameter.text("script", Help.script)
         return VerbTool(Help.play, [script]) { arguments, installation in
             let schedule = try PlayCommand.schedule(try arguments[script])
             let played = try await Devices.using(installation) { try await PlayCommand.play(schedule, with: $0) }
-            return try PlayCommand.lines(of: .finished(played)).joined(separator: "\n")
+            return try PlayCommand.done(played)
         }
     }()
 

@@ -126,14 +126,18 @@ enum Help {
         prints no report line. A key held through a second with no other act is said again, which \
         keeps it held and sends no report.
 
-        Output is JSON Lines: one {"report":{"index":…,"line":…,"scheduled_us":…,"sent_us":…,"acked_us":…}} \
-        per report, line being the script line it came from, times in microseconds since the Unix epoch, then \
-        {"done":{"reports":…,"start_reports":…,"late_us":{"p50":…,"p90":…,"p99":…,"max":…}}}, \
-        lateness being sent minus scheduled. A late report is sent late, never skipped.
-
-        A play that stops releases every key and button and prints no done line - the missing done \
-        line is what says it stopped.
-        """, commandLine: ["The script is read from stdin. A play that stops prints the reports that did go out first."])
+        A finished play answers {"done":{"reports":…,"start_reports":…,"late_us":{"p50":…,"p90":…,"p99":…,"max":…}}}: \
+        how many reports went out, how many the pointer took to reach the start, and how late \
+        they went out in microseconds, sent minus scheduled. A late report is sent late, never \
+        skipped. A play that stops releases every key and button and fails, saying how many \
+        reports went out before it did.
+        """, commandLine: ["""
+        The script is read from stdin. Before the done line, stdout carries one \
+        {"report":{"index":…,"line":…,"scheduled_us":…,"sent_us":…,"acked_us":…}} per report, line \
+        being the script line it came from, times in microseconds since the Unix epoch. A play that \
+        stops prints the reports that did go out and no done line - the missing done line is what \
+        says it stopped.
+        """])
 
     static let cursor = VerbHelp(name: "cursor", abstract: "Say where the pointer is, in the coordinates click takes.", discussion: """
         Read from the window server rather than from the daemon, which cannot know: macOS \

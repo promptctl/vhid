@@ -69,7 +69,7 @@ final class Devices: NSObject, ServedDevices, @unchecked Sendable {
     /// Any report counts as the client being alive, pointer ones included: a modifier held
     /// through a drag the client paces over seconds is live, and a stopped client sends
     /// nothing at all.
-    static let keyLimit: Duration = .seconds(2)
+    static let keyLimit = HeldKeys.silenceLimit
 
     private let limit: Duration
     private let now: () -> ContinuousClock.Instant

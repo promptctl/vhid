@@ -339,6 +339,11 @@ public struct PointingStopped: StoppedPartWay, CustomStringConvertible {
     }
 
     public var description: String {
-        unreleased.map { cause.reported.then("The mouse was not released afterwards: \($0.reported)").then("A button may be left held") } ?? cause.reported
+        Self.unreleased(unreleased, after: cause.reported)
+    }
+
+    /// `report`, and then that a button may be held when the mouse's release failed.
+    static func unreleased(_ error: (any Error)?, after report: String) -> String {
+        error.map { report.then("The mouse was not released afterwards: \($0.reported)").then("A button may be left held") } ?? report
     }
 }

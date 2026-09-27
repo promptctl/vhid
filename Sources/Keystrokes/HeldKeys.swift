@@ -16,6 +16,11 @@ public struct HeldKeys: Hashable, Sendable {
     }
 
     public static let none = try! HeldKeys([])
+
+    /// How long vhidd lets a key stay down with no word from its client before it lets go.
+    /// Here, where both ends can read it, because the daemon enforces it and a player that
+    /// holds a key through a quiet stretch has to speak inside it. [LAW:one-source-of-truth]
+    public static let silenceLimit: Duration = .seconds(2)
 }
 
 public struct TooManyKeys: Error, CustomStringConvertible {
