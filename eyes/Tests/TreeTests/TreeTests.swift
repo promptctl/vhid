@@ -102,23 +102,24 @@ func facts(_ texts: [Heard<String?>] = [.answered("OK")], frame: Heard<ScreenRec
     }
 }
 
-@Suite struct ScreensOffTests {
-    @Test func aFrameOffTheRegionHoldsNothing() {
-        #expect(facts(frame: .answered(ScreenRect(x: 2000, y: 0, width: 50, height: 50))).screensOff(region, under: []))
+@Suite struct InnerTests {
+    @Test func aFrameOffTheClipLeavesNothingToDescendInto() {
+        #expect(facts(frame: .answered(ScreenRect(x: 2000, y: 0, width: 50, height: 50))).inner(region, under: []) == nil)
     }
 
-    /// Only the part inside the region matters: a window mostly off it, whose visible
-    /// part is under a window in front, holds nothing to click.
+    /// Only the part inside the clip matters: a window mostly off it, whose visible part is
+    /// under a window in front, holds nothing to click.
     @Test func theVisiblePartUnderOneWindowInFrontHoldsNothing() {
         let wide = ScreenRect(x: -500, y: 0, width: 800, height: 400)
-        #expect(facts(frame: .answered(wide)).screensOff(region, under: [ScreenRect(x: 0, y: 0, width: 300, height: 400)]))
-        #expect(!facts(frame: .answered(wide)).screensOff(region, under: [ScreenRect(x: 0, y: 0, width: 200, height: 400)]))
+        #expect(facts(frame: .answered(wide)).inner(region, under: [ScreenRect(x: 0, y: 0, width: 300, height: 400)]) == nil)
+        #expect(facts(frame: .answered(wide)).inner(region, under: [ScreenRect(x: 0, y: 0, width: 200, height: 400)])
+            == ScreenRect(x: 0, y: 0, width: 300, height: 400))
     }
 
-    /// No frame says nothing about where the children are, so the walk goes on.
+    /// No frame says nothing about where the children are, so they keep the clip given.
     @Test(arguments: [Heard<ScreenRect?>.unanswered, .answered(nil), .answered(ScreenRect(x: 5, y: 5, width: 0, height: 0))])
-    func anElementWithNoUsableFrameIsDescendedInto(frame: Heard<ScreenRect?>) {
-        #expect(!facts(frame: frame).screensOff(region, under: []))
+    func anElementWithNoUsableFrameHandsOnItsClip(frame: Heard<ScreenRect?>) {
+        #expect(facts(frame: frame).inner(region, under: []) == region)
     }
 }
 
@@ -131,9 +132,8 @@ struct FakeTree {
     func walked(_ roots: [String] = ["window"], covers: [ScreenRect] = [], unwalked: Int = 0,
                 limit: Int = 100, elapsed: Duration = .zero) -> Walked {
         walk(
-            from: roots.map { Root(element: $0, covers: covers) },
+            from: roots.map { Root(element: $0, clip: region, covers: covers) },
             unwalked: unwalked,
-            in: region,
             within: Bounds(elements: Limit(limit)!, time: .seconds(5)),
             elapsed: { elapsed },
             read: read
@@ -234,6 +234,62 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
         #expect(w.found.map(\.text.value) == ["Save changes?"])
         #expect(w.excluded.contains(Exclusion(reason: .covered, count: 3)))
     }
+
+    /// A row scrolled out of its list, still inside the window, sits under the toolbar: it
+    /// is clipped by the list, so no click reaches it and nothing under it is read.
+    @Test func aRowScrolledOutOfItsListIsNotAFinding() {
+        let list = ScreenRect(x: 0, y: 100, width: 400, height: 300)
+        let tree = FakeTree(nodes: [
+            "window": node(nil, region, children: .answered(["toolbar", "list"]), role: "AXWindow"),
+            "toolbar": node("Back", ScreenRect(x: 0, y: 0, width: 80, height: 40)),
+            "list": node(nil, list, children: .answered(["shown", "scrolled"]), role: "AXList"),
+            "shown": node("Kept", ScreenRect(x: 0, y: 150, width: 400, height: 20), role: "AXRow"),
+            "scrolled": node("Gone", ScreenRect(x: 0, y: 10, width: 400, height: 20), children: .answered(["cell"]), role: "AXRow"),
+            "cell": node("Gone", ScreenRect(x: 0, y: 10, width: 400, height: 20), role: "AXStaticText"),
+        ])
+        let w = tree.walked()
+        #expect(w.found.map(\.text.value) == ["Back", "Kept"])
+        #expect(w.examined == 5)
+        #expect(w.excluded.contains(Exclusion(reason: .unplaced, count: 1)))
+    }
+
+    /// A window's title is where its title bar draws it, not the middle of its document.
+    @Test func anAreaSaysNothingAtItsCentreAndItsTitleIsFoundWhereItIsDrawn() {
+        let tree = FakeTree(nodes: [
+            "window": node("Tree Target", region, children: .answered(["title"]), role: "AXWindow"),
+            "title": node("Tree Target", ScreenRect(x: 400, y: 0, width: 200, height: 28), role: "AXStaticText"),
+        ])
+        let w = tree.walked()
+        #expect(w.found.map(\.frame) == [ScreenRect(x: 400, y: 0, width: 200, height: 28)])
+        #expect(w.excluded == [Exclusion(reason: .area, count: 1)])
+    }
+}
+
+/// Accessibility frames are global top-left points, the space `vhid click` presses in, so
+/// an element on a display left of and above the main one is found at negative points and
+/// its centre is the click with no conversion.
+@Suite struct DisplayTests {
+    let left = ScreenRect(x: -1920, y: -300, width: 1920, height: 1080)
+
+    @MainActor @Test func aFrameAsTheTreeAnswersItIsTheScreenRectUnchanged() {
+        var origin = CGPoint(x: -1500, y: -200)
+        var size = CGSize(width: 80, height: 30)
+        let frame = TreeReader.frame(AXValueCreate(.cgPoint, &origin), AXValueCreate(.cgSize, &size))
+        #expect(frame == ScreenRect(x: -1500, y: -200, width: 80, height: 30))
+        #expect(frame?.centre == ScreenPoint(x: -1460, y: -185))
+    }
+
+    @Test func anElementOnADisplayAtANegativeOriginIsFoundThere() {
+        let button = ScreenRect(x: -1500, y: -200, width: 80, height: 30)
+        let tree = FakeTree(nodes: [
+            "window": node(nil, ScreenRect(x: -1800, y: -250, width: 800, height: 600), children: .answered(["ok"]), role: "AXWindow"),
+            "ok": node("OK", button),
+        ])
+        let w = walk(from: [Root(element: "window", clip: left, covers: [])], unwalked: 0,
+                     within: Bounds(elements: Limit(10)!, time: .seconds(5)), elapsed: { .zero }, read: tree.read)
+        #expect(w.found.map(\.frame) == [button])
+        #expect(w.reach == .whole)
+    }
 }
 
 @Suite struct PlanTests {
@@ -245,7 +301,7 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
 
     @Test func eachMatchedWindowIsARootCoveredByTheOnesInFront() {
         let front = window(1, pid: 2, ScreenRect(x: 0, y: 0, width: 300, height: 300))
-        let (roots, unwalked) = plan(seen([front, window(2, document)], in: region), matched: [1: "front", 2: "doc"])
+        let (roots, unwalked) = plan(seen([front, window(2, document)], in: region), matched: [1: "front", 2: "doc"], in: region)
         #expect(roots.map(\.element) == ["front", "doc"])
         #expect(roots.map(\.covers) == [[], [front.frame]])
         #expect(unwalked == 0)
@@ -255,7 +311,7 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
     /// it read, and it says so - it also covers what is under it.
     @Test func aVisibleWindowWithNothingToWalkIsCountedAndCovers() {
         let menu = window(5, ScreenRect(x: 150, y: 120, width: 200, height: 300))
-        let (roots, unwalked) = plan(seen([menu, window(2, document)], in: region), matched: [2: "doc"])
+        let (roots, unwalked) = plan(seen([menu, window(2, document)], in: region), matched: [2: "doc"], in: region)
         #expect(roots.map(\.element) == ["doc"])
         #expect(roots[0].covers == [menu.frame])
         #expect(unwalked == 1)
@@ -266,7 +322,7 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
         let full = window(1, pid: 2, region)
         let visible = seen([full, window(2, document), window(3, pid: 4, ScreenRect(x: 2000, y: 0, width: 10, height: 10))], in: region)
         #expect(visible.map(\.window.id) == [1])
-        let (roots, unwalked) = plan(visible, matched: [1: "full"])
+        let (roots, unwalked) = plan(visible, matched: [1: "full"], in: region)
         #expect(roots.map(\.element) == ["full"])
         #expect(unwalked == 0)
     }

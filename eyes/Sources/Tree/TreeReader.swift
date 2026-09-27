@@ -41,11 +41,10 @@ public struct TreeReader: Reader {
         let clock = ContinuousClock()
         let start = clock.now
         let visible = seen(windows, in: region)
-        let (roots, unwalked) = plan(visible, matched: try Self.match(visible.map(\.window)))
+        let (roots, unwalked) = plan(visible, matched: try Self.match(visible.map(\.window)), in: region)
         let walked = try walk(
             from: roots,
             unwalked: unwalked,
-            in: region,
             within: Self.bounds,
             elapsed: { clock.now - start },
             read: Self.node
@@ -167,7 +166,7 @@ public struct TreeReader: Reader {
         return AXValueGetValue(value as! AXValue, .axError, &error) ? error : nil
     }
 
-    private static func frame(_ position: CFTypeRef?, _ size: CFTypeRef?) -> ScreenRect? {
+    static func frame(_ position: CFTypeRef?, _ size: CFTypeRef?) -> ScreenRect? {
         unboxed(position, as: .cgPoint, CGPoint.zero).flatMap { origin in
             unboxed(size, as: .cgSize, CGSize.zero).map { ScreenRect(CGRect(origin: origin, size: $0)) }
         }

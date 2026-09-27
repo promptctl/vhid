@@ -219,8 +219,12 @@ public struct Exclusion: Sendable, Hashable {
     public enum Reason: String, Sendable, Hashable {
         /// No text on it at all.
         case wordless
-        /// Zero-sized, offscreen, or outside the region asked for.
+        /// Zero-sized, offscreen, outside the region asked for, or outside what holds it - a
+        /// row scrolled out of its list.
         case unplaced
+        /// An area holding other elements - a window, a group, a list - whose text names the
+        /// area. Its centre is on whatever sits there, not on the words.
+        case area
         /// Under another window: its centre is where a click would land on something else.
         /// The tree reports elements whether or not anything covers them, and a point a
         /// caller cannot press is not a finding.
