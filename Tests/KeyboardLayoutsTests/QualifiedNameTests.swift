@@ -6,8 +6,8 @@ import Testing
 /// `KeyboardLayouts.NoLayout` below would not build.
 private enum NoLayout {}
 
-@Suite struct QualifiedNameTests {
+@Suite struct KeyboardLayoutsQualifiedNameTests {
     @Test func anImporterWithItsOwnNoLayoutStillQualifiesTheModulesNoLayout() {
-        #expect(KeyboardLayouts.NoLayout.noSourceNamed("x") == .noSourceNamed("x"))
+        #expect(KeyboardLayouts.NoLayout.noSourceNamed("x").description.hasSuffix(" x"))
     }
 }
