@@ -43,7 +43,7 @@ private func pointingReports(_ fake: FakeDaemon) -> [[UInt8]] {
             try fake.send(.response(id: id, payload: []))
             try fake.push([(.keyboardReady, true)])
         }
-        #expect(throws: DaemonError.silent) { try mouse(on: fake).start(within: .milliseconds(200)) }
+        #expect(throws: DaemonError.notReady(awaiting: .pointingReady, said: [.keyboardReady: true])) { try mouse(on: fake).start(within: .milliseconds(200)) }
     }
 }
 

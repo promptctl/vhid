@@ -55,13 +55,25 @@ public final class DaemonConnection: Sendable {
     }
 
     /// The status table, by index, from `virtual_hid_device_service/response.hpp`.
-    enum Status: UInt8 {
+    public enum Status: UInt8, Sendable {
         case none = 0
         case driverActivated = 1
         case driverConnected = 2
         case driverVersionMismatched = 3
         case keyboardReady = 4
         case pointingReady = 5
+
+        /// The words `DaemonError` reports this status in.
+        public var name: String {
+            switch self {
+            case .none: "none"
+            case .driverActivated: "driver activated"
+            case .driverConnected: "driver connected"
+            case .driverVersionMismatched: "driver version mismatched"
+            case .keyboardReady: "keyboard ready"
+            case .pointingReady: "pointing ready"
+            }
+        }
     }
 
     private let link: Link
@@ -134,7 +146,7 @@ public final class DaemonConnection: Sendable {
         // On every way out, so an answer to a request nobody waits on any more is dropped
         // at the door rather than kept for a collector that never comes.
         defer { link.forget(id) }
-        try link.wait(by: deadline) { $0.requests[id] == true }
+        try link.wait(by: deadline, until: { $0.requests[id] == true }, missed: { _ in .silent })
     }
 
     /// Waits until the daemon has said `status` holds, however long ago it said so. The
@@ -143,8 +155,12 @@ public final class DaemonConnection: Sendable {
     /// rather than when it happened, and this takes up to a second however fast the device
     /// really was. That is why a connection is meant to be held open rather than made per
     /// call.
+    ///
+    /// A deadline missed here is `.notReady` carrying the daemon's latest word on each
+    /// status, never `.silent`: bring-up reaches this only after the daemon answered its
+    /// request, so what it said, or that it said nothing about the driver, is the reason.
     func wait(for status: Status, by deadline: ContinuousClock.Instant) throws {
-        try link.wait(by: deadline) { $0.status[status] == true }
+        try link.wait(by: deadline, until: { $0.status[status] == true }, missed: { .notReady(awaiting: status, said: $0.status) })
     }
 
     /// Brings one device up: sends its initialize request with `payload`, then waits for
@@ -264,14 +280,15 @@ private final class Link: @unchecked Sendable {
     /// Blocks until `satisfied` holds, the connection has failed, or the deadline passes,
     /// in that order of precedence: an answer that arrived is an answer, even on a stream
     /// that ended just after it. [LAW:no-silent-failure] A daemon that says nothing is a
-    /// named failure at the deadline, not a wait without end.
-    func wait(by deadline: ContinuousClock.Instant, until satisfied: (Link) -> Bool) throws {
+    /// named failure at the deadline, not a wait without end - named by `missed`, from what
+    /// the link had heard by then.
+    func wait(by deadline: ContinuousClock.Instant, until satisfied: (Link) -> Bool, missed: (Link) -> DaemonError) throws {
         guarded.lock(); defer { guarded.unlock() }
         while true {
             if satisfied(self) { return }
             if let failure { throw failure }
             let remaining = deadline - ContinuousClock.now
-            guard remaining > .zero else { throw DaemonError.silent }
+            guard remaining > .zero else { throw missed(self) }
             guarded.wait(until: Date(timeIntervalSinceNow: remaining.seconds))
         }
     }
