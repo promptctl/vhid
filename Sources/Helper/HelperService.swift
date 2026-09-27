@@ -53,8 +53,9 @@ import Foundation
     func releaseAll(reply: @escaping (Error?) -> Void)
 
     /// Holds exactly `usages` down, which may be none, and answers when the daemon has
-    /// acknowledged the report. A non-empty set equal to what is already held posts
-    /// nothing and counts only as the client being alive; an empty set always posts, as
+    /// acknowledged the report. A non-empty set equal to the one the driver last
+    /// acknowledged posts nothing and counts only as the client being alive; after a
+    /// request that failed, the same set posts again. An empty set always posts, as
     /// `releaseAll` does.
     func hold(usages: [UInt16], reply: @escaping (Error?) -> Void)
 
@@ -65,7 +66,8 @@ import Foundation
     func releaseButtons(reply: @escaping (Error?) -> Void)
 
     /// Holds exactly the buttons whose bits are set in `buttons`, bit 0 for button 1,
-    /// which may be none, and answers when the daemon has acknowledged the report.
+    /// which may be none, and answers when the daemon has acknowledged the report. Always
+    /// posts: buttons are not timed, so a repeat keeps nothing alive.
     func holdButtons(_ buttons: UInt32, reply: @escaping (Error?) -> Void)
 
     /// Moves the pointer by `x` counts right and `y` counts down, buttons held as they are.

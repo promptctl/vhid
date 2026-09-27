@@ -72,6 +72,11 @@ import Testing
         #expect(answer { devices.move(x: -128, y: 0, reply: $0) }?.localizedDescription == "-128 is outside the -127 through 127 a report carries")
         #expect(answer { devices.scroll(vertical: 1, horizontal: -128, reply: $0) }?.localizedDescription == "-128 is outside the -127 through 127 a report carries")
         #expect(mouse.log.isEmpty)
+        let keyboard = RecordingKeyboard()
+        let typing = Devices(keyboard: keyboard, mouse: RecordingMouse())
+        #expect(answer { typing.down(usage: 3, reply: $0) }?.localizedDescription == "usage 3 is not one of the keys 4 through 231")
+        #expect(answer { typing.hold(usages: [0xE1, 0xE8], reply: $0) }?.localizedDescription == "usage 232 is not one of the keys 4 through 231")
+        #expect(keyboard.log.isEmpty)
     }
 
     /// What the device can carry reaches it as asked, and the reply is nil.

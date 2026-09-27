@@ -68,8 +68,9 @@ final class Devices: NSObject, ServedDevices, @unchecked Sendable {
     ///
     /// A stopped client that is still connected - suspended mid-chord, paused in a
     /// debugger, a hung MCP host - keeps its key down, and macOS repeats it into whatever
-    /// app is in front. No verb holds a key across idle time: a modifier held for a click,
-    /// scroll or drag spans a pointer gesture measured at about 150ms across a whole desk.
+    /// app is in front. A modifier held for a click, scroll or drag spans a pointer gesture
+    /// measured at about 150ms across a whole desk; a player holding a key longer repeats
+    /// `hold`, which posts nothing and keeps the key only while the player keeps asking.
     /// Buttons are not timed, because a replayed pointer script holds one across gaps.
     ///
     /// Any report counts as the client being alive, pointer ones included: a modifier held
@@ -116,7 +117,7 @@ final class Devices: NSObject, ServedDevices, @unchecked Sendable {
     }
 
     func down(usage: UInt16, reply: @escaping (Error?) -> Void) {
-        attempt({ try keyboard.down(Usage(rawValue: usage)) }, reply)
+        attempt({ try keyboard.down(try Self.usage(usage)) }, reply)
     }
 
     func releaseAll(reply: @escaping (Error?) -> Void) {
@@ -126,7 +127,7 @@ final class Devices: NSObject, ServedDevices, @unchecked Sendable {
     /// [LAW:single-enforcer] More than a report carries is refused by `HeldKeys`, by name,
     /// before the device sees it. A usage named twice on the wire is one key held.
     func hold(usages: [UInt16], reply: @escaping (Error?) -> Void) {
-        attempt({ try keyboard.hold(try HeldKeys(Set(usages.map(Usage.init(rawValue:))))) }, reply)
+        attempt({ try keyboard.hold(try HeldKeys(Set(usages.map(Self.usage)))) }, reply)
     }
 
     /// A release the keyboard refused is tried again one limit later, not on every sweep:
@@ -182,10 +183,16 @@ final class Devices: NSObject, ServedDevices, @unchecked Sendable {
         log(button.map { "\(reason), and the mouse would not release: \($0)" } ?? "\(reason); every button is up")
     }
 
-    /// [LAW:parse-dont-validate] The wire's byte is wider than the device on both counts -
-    /// button 0 and 33 upward have no bit, and -128 is below the descriptor's minimum -
+    /// [LAW:parse-dont-validate] The wire is wider than the device on every count - a usage
+    /// outside the keyboard page's keys names no key, button 0 and 33 upward have no bit,
+    /// and -128 is below the descriptor's minimum -
     /// and a value the device cannot carry is refused here by name, once, rather than
     /// folded to the nearest one it can.
+    private static func usage(_ value: UInt16) throws -> Usage {
+        guard Usage.keys.contains(value) else { throw NotOnTheDevice.usage(value) }
+        return Usage(rawValue: value)
+    }
+
     private static func button(_ number: UInt8) throws -> Button {
         guard let button = Button(rawValue: number) else { throw NotOnTheDevice.button(number) }
         return button
@@ -199,11 +206,13 @@ final class Devices: NSObject, ServedDevices, @unchecked Sendable {
 
 /// A value the wire can carry and the device cannot.
 enum NotOnTheDevice: Error, CustomStringConvertible {
+    case usage(UInt16)
     case button(UInt8)
     case count(Int8)
 
     var description: String {
         switch self {
+        case .usage(let value): "usage \(value) is not one of the keys \(Usage.keys.lowerBound) through \(Usage.keys.upperBound)"
         case .button(let number): "button \(number) is not one of the 32 the device has a bit for"
         case .count(let value): "\(value) is outside the -127 through 127 a report carries"
         }

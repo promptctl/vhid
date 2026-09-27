@@ -59,16 +59,15 @@ public final class VirtualKeyboard: KeyPress {
 
     private let daemon: DaemonConnection
     private let reportTimeout: Duration
-    /// What the device is holding, and what the driver last acknowledged holding.
+    /// What the device is holding, and whether the driver acknowledged exactly that.
     ///
-    /// `keysDown` may say a key is held that is not, for the reason `post` gives, so it
-    /// cannot say whether a report would repeat what the driver already has; `acknowledged`
-    /// can, and is nil whenever a request is outstanding or threw, since the driver may
-    /// then hold the old set or the new one. [LAW:one-source-of-truth] Two readings of one
-    /// device, each true of a different question, under one lock.
+    /// `keysDown` may say a key is held that is not, for the reason `post` gives, so alone
+    /// it cannot say whether a report would repeat what the driver already has. `settled`
+    /// is false whenever a request is outstanding or threw, since the driver may then hold
+    /// the old set or the new one. [LAW:one-source-of-truth] One set, and one fact about it.
     private struct Held {
         var keysDown: Set<Usage> = []
-        var acknowledged: Set<Usage>?
+        var settled = false
     }
 
     /// Nothing outside this type may set it, and every report is a reading of it - taken
@@ -132,11 +131,11 @@ public final class VirtualKeyboard: KeyPress {
     /// a player saying it is still alive while a key stays down, and a repeated report
     /// would reach macOS as nothing at best. The client was marked alive by the call
     /// before it got here, which is what keeps the keys past the daemon's limit. An empty
-    /// set always posts, as `releaseAll` does. The skip is read from the acknowledged set,
-    /// which a failed request clears, so the retry of a `hold` that threw always posts.
+    /// set always posts, as `releaseAll` does. The skip needs the set settled, which a
+    /// failed request unsettles, so the retry of a `hold` that threw always posts.
     public func hold(_ keys: HeldKeys) throws {
         try held.withLock { held in
-            if keys.usages.isEmpty || held.acknowledged != keys.usages {
+            if keys.usages.isEmpty || !held.settled || held.keysDown != keys.usages {
                 try post(&held) { _ in keys.usages }
             }
         }
@@ -147,9 +146,9 @@ public final class VirtualKeyboard: KeyPress {
     /// emptied on the daemon's answer and not before, for the reason `post` gives.
     public func reset() throws {
         try held.withLock { held in
-            held.acknowledged = nil
+            held.settled = false
             try daemon.request(.keyboardReset, by: .now + reportTimeout)
-            held = Held(keysDown: [], acknowledged: [])
+            held = Held(keysDown: [], settled: true)
         }
     }
 
@@ -178,8 +177,8 @@ public final class VirtualKeyboard: KeyPress {
         let next = change(held.keysDown)
         let report = try KeyboardReport(held: next)
         held.keysDown.formUnion(next)
-        held.acknowledged = nil
+        held.settled = false
         try daemon.request(.postKeyboardInputReport, report.bytes, by: .now + reportTimeout)
-        held = Held(keysDown: next, acknowledged: next)
+        held = Held(keysDown: next, settled: true)
     }
 }
