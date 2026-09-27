@@ -1,4 +1,5 @@
 import Foundation
+import KeyboardLayouts
 import Keystrokes
 import Pointing
 
@@ -111,6 +112,20 @@ public struct Recorder {
         vhidModifiers.formIntersection(session)
         last = event.location
         if self.held != held { lines.append(.keys(event.at, self.held)) }
+    }
+
+    /// Whether the person holds any key: a stop waits, briefly, for the stop chord's own
+    /// releases to arrive.
+    public var holdsKeys: Bool { !held.isEmpty }
+
+    /// The keys a Control-C stop is made of on `layout`: both Controls, and the key that
+    /// types `c` there - found as `vhid press` finds it, so on Dvorak it is the key QWERTY
+    /// calls `i`.
+    public static func stopKeys(on layout: KeyboardLayout) throws -> Set<Usage> {
+        guard let code = layout.key(typing: "c", on: .plain), let key = Usage(virtualKeyCode: code) else {
+            throw ChordSpellingError.notOneKey("c", layout: layout.name, [.plain])
+        }
+        return [.leftControl, .rightControl, key]
     }
 
     /// What the person holds: their keys, and the session's modifiers less vhid's.

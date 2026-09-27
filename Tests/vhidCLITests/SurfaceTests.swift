@@ -13,7 +13,7 @@ import Testing
     /// Verbs only the command line has. Adding one here is the deliberate act: a new verb
     /// missing from `Tools.all` fails the test until it is listed. `help` is the argument
     /// parser's own.
-    static let commandLineOnly: Set = ["mcp", "driver", "service", "help"]
+    static let commandLineOnly: Set = ["mcp", "driver", "service", "record", "help"]
 
     /// Options every verb on the command line takes and no tool does: a tool's daemon is
     /// the server's, chosen once when it starts, and the version is the server's initialize answer.

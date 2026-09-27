@@ -67,6 +67,7 @@ vhid scroll 800 500 --vertical 3
 vhid drag 100 100 400 300
 vhid cursor
 vhid play < script.jsonl
+vhid record > script.jsonl   # Control-C stops; needs Input Monitoring for vhid-record.app
 vhid doctor
 ```
 
@@ -152,6 +153,7 @@ vhid ships as one signed, notarized pkg. It installs:
 | `/usr/local/libexec/vhidd` | the root daemon that owns the devices |
 | `/Library/LaunchDaemons/ai.promptctl.vhid.vhidd.plist` | the daemon's launchd job, loaded as the install finishes |
 | `/usr/local/libexec/vhid-menubar` | the menu bar item |
+| `/usr/local/libexec/vhid-record.app` | the tap `vhid record` runs, granted Input Monitoring once |
 | `/Library/LaunchAgents/ai.promptctl.vhid.vhidd.menubar.plist` | its launchd job, started at every login |
 | `/usr/local/libexec/vhid-uninstall` | removes everything in this table |
 | `/usr/local/libexec/vhid-virtual-hid-driver` | the driver removal `vhid-uninstall --driver` runs |

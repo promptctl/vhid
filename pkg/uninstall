@@ -34,6 +34,9 @@ paths() {
 /usr/local/bin/eyes
 /usr/local/libexec/vhidd
 /usr/local/libexec/vhid-menubar
+/usr/local/libexec/vhid-record.app/Contents/Info.plist
+/usr/local/libexec/vhid-record.app/Contents/MacOS/vhid-record
+/usr/local/libexec/vhid-record.app/Contents/_CodeSignature/CodeResources
 /usr/local/libexec/vhid-uninstall
 /usr/local/libexec/vhid-virtual-hid-driver
 /Library/LaunchDaemons/$service.plist
@@ -143,6 +146,14 @@ while IFS= read -r path; do
     removed=$((removed + 1))
   fi
 done <<<"$(paths)"
+
+# The directories only the tap app's bundle has, deepest first, once the files above have
+# left them empty, unannounced: its files were. rmdir leaves any that something else put a
+# file in.
+for directory in Contents/_CodeSignature Contents/MacOS Contents ""; do
+  directory=$root/usr/local/libexec/vhid-record.app${directory:+/$directory}
+  [ -d "$directory" ] && rmdir "$directory" 2>/dev/null || :
+done
 
 if pkgutil --pkg-info "$receipt" >/dev/null 2>&1; then
   pkgutil --forget "$receipt" >/dev/null || fail "pkgutil would not forget the $receipt receipt"

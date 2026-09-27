@@ -34,6 +34,13 @@ SHELL := /bin/sh
 # this line would sign nothing and call it success. [LAW:no-silent-failure]
 SIGN := scripts/products | tr '\n' '\0' | xargs -0 scripts/sign "$(DEV_IDENTITY)"
 
+# vhid-record.app, the bundle `vhid record` finds beside vhid in the build tree, made
+# around the vhid-record just signed and signed itself. After $(SIGN) every time, because
+# a relinked binary has to reach the bundle too, and a bundle signed ad hoc would be a new
+# app to Input Monitoring on every build rather than the one granted.
+RECORD_APP := bin=$$(swift build --show-bin-path) && scripts/record-app "$$bin/vhid-record" "$$bin" "$$(scripts/version --base)" \
+	| tr '\n' '\0' | xargs -0 scripts/sign "$(DEV_IDENTITY)"
+
 .PHONY: all build test check-pins sign signing-identity dev-daemon remove-dev-daemon clean
 
 all: build
@@ -44,6 +51,7 @@ all: build
 build: signing-identity
 	swift build
 	$(SIGN)
+	$(RECORD_APP)
 
 # `swift build` first and on its own line, for two reasons. It builds executables no
 # test depends on, which `swift test` would leave unbuilt for `sign` to fail on; and a
@@ -68,7 +76,7 @@ build: signing-identity
 # against what that CLI links, then the driver script's own contracts and the uninstaller against stubs.
 test: signing-identity
 	swift build
-	swift test; status=$$?; $(SIGN) || exit $$?; exit $$status
+	swift test; status=$$?; $(SIGN) || exit $$?; $(RECORD_APP) || exit $$?; exit $$status
 	scripts/check-driver-pins
 	scripts/check-notice
 	scripts/virtual-hid-driver-test
@@ -93,6 +101,7 @@ remove-dev-daemon:
 # Also the fix for a tree someone has built with bare `swift build`.
 sign:
 	$(SIGN)
+	$(RECORD_APP)
 
 # Idempotent, which is why the targets above can simply depend on it. Once per Mac in
 # practice; a no-op every time after that.
