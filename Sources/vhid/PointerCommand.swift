@@ -137,8 +137,8 @@ struct PlayCommand: AsyncParsableCommand {
     /// went. Not rerun on AC.
     ///
     /// So no fixed number covers every gap a script can have, and this one does not
-    /// pretend to. It is the 5 ms p50 above, measured on AC with an idle core, the
-    /// neighbourhood most scripts sit in, and what it fails to cover is not hidden: a report that goes out late goes out
+    /// pretend to. It is the bare script's 2505 us at 5 ms with an idle core - a p50,
+    /// on AC, 2026-09-21 - the neighbourhood most scripts sit in, and what it fails to cover is not hidden: a report that goes out late goes out
     /// late and says so in `late_us`, which is the number a harness came here to read.
     /// [LAW:no-silent-failure]
     static let lead: Duration = .microseconds(2500)
