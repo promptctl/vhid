@@ -93,7 +93,8 @@ check "fully installed: exit" 0 "$status"
 check "fully installed: files left" "" "$(left)"
 check "fully installed: jobs left" "" "$(cat "$STUB/loaded")"
 check "fully installed: receipt forgotten" no "$([ -f "$STUB/receipt" ] && echo yes || echo no)"
-check "fully installed: said what it removed" 11 "$(grep -c '^vhid-uninstall: \(stopped\|removed\|forgot\)' <<<"$out")"
+# Every path, then the two jobs and the receipt.
+check "fully installed: said what it removed" $(($(wc -w <<<"$ALL") + 3)) "$(grep -c '^vhid-uninstall: \(stopped\|removed\|forgot\)' <<<"$out")"
 
 state "" "/usr/local/bin/vhid /Library/LaunchDaemons/$SERVICE.plist" no; run
 check "partly installed: exit" 0 "$status"

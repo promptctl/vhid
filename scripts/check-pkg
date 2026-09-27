@@ -35,6 +35,10 @@ if [ -x "$cli" ]; then
   dials=$("$cli" service 2>&1) || dials="<vhid service failed: $dials>"
   [ "$dials" = "$service" ] || fail "the packed vhid dials '$dials', not the '$service' the scripts load"
 fi
+eyes=$x/vhid.pkg/Payload/usr/local/bin/eyes
+if [ -x "$eyes" ]; then
+  said=$("$eyes" --help 2>&1) || fail "the packed eyes does not run: $said"
+fi
 for binary in usr/local/bin/vhid usr/local/bin/eyes usr/local/libexec/vhidd usr/local/libexec/vhid-menubar; do
   [ -f "$x/vhid.pkg/Payload/$binary" ] || continue
   archs=$(lipo -archs "$x/vhid.pkg/Payload/$binary" 2>&1) || archs="<lipo failed: $archs>"

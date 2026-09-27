@@ -113,7 +113,8 @@ bin=$(build --show-bin-path)
 # joined: swiftbuild links its executable with no _main (the entry point of a target not
 # named for its product, measured with Swift 6.3), and it needs none of swiftbuild's
 # plugin support.
-eyes_build() { (cd eyes && swift build -c release --triple "$1-apple-macosx15.0" --scratch-path "$work/eyes-$1" "${@:2}"); }
+# One scratch path: SwiftPM keeps each triple's products apart under it and shares the checkouts.
+eyes_build() { swift build --package-path eyes -c release --triple "$1-apple-macosx15.0" --scratch-path "$work/eyes" "${@:2}"; }
 eyes_build arm64 >&2
 eyes_build x86_64 >&2
 eyes_bin=$work/eyes-universal
@@ -130,7 +131,7 @@ ditto "$eyes_bin/eyes" "$payload/usr/local/bin/eyes"
 # What the notary service refuses, asked of one binary after signing it: no Developer
 # ID signature from the team, no Hardened Runtime, no secure timestamp, or the
 # get-task-allow entitlement. The identifier is set rather than left to the linker's
-# name for the product, so the two binaries read as vhid's in any signature listing.
+# name for the product, so every binary reads as vhid's in any signature listing.
 sign() {
   local binary=$1 identifier=$2 signature entitlements
   codesign --force --sign "$application" --options runtime --timestamp --identifier "$identifier" "$binary" >&2
@@ -162,6 +163,10 @@ service=$("$payload/usr/local/bin/vhid" service)
 
 # The version the packed CLI reports, which is the one a bug report will quote, held to
 # the one this tree was checked for above.
+# The packed eyes, run: a binary lipo joined and codesign rewrote is only known to start
+# once it has.
+"$payload/usr/local/bin/eyes" --help >/dev/null || fail "the packed eyes does not run"
+
 packed=$("$payload/usr/local/bin/vhid" --version)
 [ "$packed" = "$version" ] \
   || fail "the packed vhid reports version '$packed', not '$version'"
@@ -184,7 +189,7 @@ plutil -lint "$agent" >&2
 # carries the package the script's pins name. [LAW:single-enforcer]
 scripts/check-driver-pins "$payload/usr/local/bin/vhid" >&2
 scripts/check-notice "$payload/usr/local/bin/vhid" "$work/build" >&2
-scripts/check-notice "$payload/usr/local/bin/eyes" "$work/eyes-arm64" >&2
+scripts/check-notice "$payload/usr/local/bin/eyes" "$work/eyes" eyes >&2
 
 staged="$work/scripts"
 ditto pkg/scripts "$staged"
