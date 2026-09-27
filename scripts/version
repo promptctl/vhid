@@ -1,0 +1,19 @@
+#!/bin/sh
+# Prints the version this tree builds: VERSION's value alone when HEAD is the commit tagged
+# v<VERSION> and no tracked file differs from it, and otherwise that value marked as a
+# development build of the commit it came from, as 0.1.0-dev+1a2b3c4, or 0.1.0-dev with no
+# git to ask. [LAW:one-source-of-truth] VERSION is the one place the number is written.
+#
+#   scripts/version [repo]     the repo defaults to this script's own
+set -eu
+root=${1:-$(cd "$(dirname "$0")/.." && pwd)}
+version=$(tr -d '[:space:]' <"$root/VERSION")
+# --no-optional-locks: the build plugin that runs this may not write into .git.
+git() { command git --no-optional-locks -C "$root" "$@"; }
+commit=$(git rev-parse --short HEAD 2>/dev/null) || { echo "$version-dev"; exit 0; }
+if git tag --points-at HEAD | grep -qx "v$version" \
+  && [ -z "$(git status --porcelain --untracked-files=no)" ]; then
+  echo "$version"
+else
+  echo "$version-dev+$commit"
+fi

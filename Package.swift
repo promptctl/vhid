@@ -43,6 +43,11 @@ let package = Package(
         // nothing, so neither the layout nor the device has to link the other to speak.
         // [LAW:one-way-deps]
         .target(name: "Keystrokes"),
+        // The version the binaries report, stamped at build time from VERSION and git by
+        // the plugin, so no copy of the number is written down anywhere but VERSION.
+        // [LAW:one-source-of-truth]
+        .target(name: "Version", plugins: ["VersionStamp"]),
+        .plugin(name: "VersionStamp", capability: .buildTool()),
         // The vocabulary stands on its own, so its tests do too: nothing here imports a
         // layout or a device. [LAW:decomposition]
         .testTarget(name: "KeystrokesTests", dependencies: ["Keystrokes"]),
@@ -139,6 +144,7 @@ let package = Package(
             name: "vhid",
             dependencies: [
                 "Input", "Helper", "Installations", "KeyboardLayouts", "Keystrokes", "Pointing", "DriverExtension", "Doctor",
+                "Version",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "MCP", package: "swift-sdk"),
                 .product(name: "Logging", package: "swift-log"),
@@ -150,7 +156,7 @@ let package = Package(
         .testTarget(
             name: "vhidCLITests",
             dependencies: [
-                "vhid", "Input", "Helper", "Installations", "Keystrokes", "Pointing", "Doctor",
+                "vhid", "Input", "Helper", "Installations", "Keystrokes", "Pointing", "Doctor", "Version",
                 .product(name: "MCP", package: "swift-sdk"),
             ]
         ),
@@ -166,7 +172,7 @@ let package = Package(
 // Every nonisolated async function runs on its caller's executor until it suspends, so a
 // device call is in line on the `DeviceQueue` the moment it is asked for: calls asked in
 // program order on one actor arrive in that order, with nothing scheduled in between.
-// One setting for every target, so a fake and the device it stands in for run the same way.
-for target in package.targets {
+// One setting for every target that compiles into the product (a plugin takes no settings), so a fake and the device it stands in for run the same way.
+for target in package.targets where target.type != .plugin {
     target.swiftSettings = (target.swiftSettings ?? []) + [.enableUpcomingFeature("NonisolatedNonsendingByDefault")]
 }

@@ -1,8 +1,8 @@
 #!/bin/bash
 # The whole release: the pkg built and signed, then notarized and stapled.
 #
-#   NOTARY_PROFILE=<profile> scripts/release <version> <output directory>
-#     # prints <output directory>/vhid-<version>.pkg
+#   NOTARY_PROFILE=<profile> scripts/release <output directory>
+#     # prints <output directory>/vhid-<version>.pkg, <version> from VERSION
 #
 # [LAW:composability] Each step is its own script, runnable alone; this one orders them.
 #

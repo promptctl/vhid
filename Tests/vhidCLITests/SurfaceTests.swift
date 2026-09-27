@@ -16,8 +16,8 @@ import Testing
     static let commandLineOnly: Set = ["pointer", "mcp", "driver", "service", "help"]
 
     /// Options every verb on the command line takes and no tool does: a tool's daemon is
-    /// the server's, chosen once when it starts.
-    static let commandLineOnlyOptions: Set = ["--service", "--help"]
+    /// the server's, chosen once when it starts, and the version is the server's initialize answer.
+    static let commandLineOnlyOptions: Set = ["--service", "--help", "--version"]
 
     /// What the command line adds to a tool's description, which is true of the command
     /// line alone. Read from `Help` because the dump cannot tell a note from the discussion;
