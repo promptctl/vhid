@@ -128,17 +128,6 @@ minute, and refuses every verb with `devices not up:` and the reason, which name
 driver's step while the driver is off. Once the driver is on, the
 next attempt brings the devices up with no restart.
 
-`sudo /usr/local/libexec/vhid-uninstall` stops the daemon and the menu bar item, removes
-every file in the table and forgets the pkg's receipt; run again, it says there is
-nothing to remove. It never touches the development job a build of this tree registers,
-and it leaves the pqrs driver installed, since Karabiner-Elements may use it; pqrs's own
-scripts in `/Library/Application Support/org.pqrs/Karabiner-DriverKit-VirtualHIDDevice/scripts/uninstall`
-remove it later. With `--driver` it also withdraws the driver extension, as whoever is
-logged in, and removes the driver package. That is refused, before anything is stopped,
-while Karabiner-Elements is installed or the development job is loaded, since both use
-the driver; and vhid's files stay until the driver's removal has run, which can leave
-its registration to clear at the next restart.
-
 The installed CLI talks to the installed daemon by default. A build from this tree talks
 to the development copy, `ai.promptctl.vhid.vhidd.dev`, so the two can run side by side.
 
@@ -154,6 +143,24 @@ doctor would print `ready`, a warning triangle when it would not. Its menu lists
 rows and the daemon's most recent failure, and clicking a row copies its full text. It
 only reads; Quit stops it until the next login. The item from a build of this tree,
 `.build/debug/vhid-menubar`, shows the development copy and says `dev` beside its icon.
+
+## Uninstalling
+
+```sh
+sudo /usr/local/libexec/vhid-uninstall            # vhid
+sudo /usr/local/libexec/vhid-uninstall --driver   # vhid and the pqrs driver
+```
+
+The first stops the daemon and the menu bar item, removes
+every file listed under Installing and forgets the pkg's receipt; run again, it says there is
+nothing to remove. It never touches the development job a build of this tree registers,
+and it leaves the pqrs driver installed, since Karabiner-Elements may use it; pqrs's own
+scripts in `/Library/Application Support/org.pqrs/Karabiner-DriverKit-VirtualHIDDevice/scripts/uninstall`
+remove it later. With `--driver` it also withdraws the driver extension, as whoever is
+logged in, and removes the driver package. That is refused, before anything is stopped,
+while Karabiner-Elements is installed or the development job is loaded, since both use
+the driver; and vhid's files stay until the driver's removal has run, which can leave
+its registration to clear at the next restart.
 
 ## Building
 
