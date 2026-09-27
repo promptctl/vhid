@@ -256,9 +256,12 @@ private let keyWords: [String: Usage] = {
     return Dictionary(uniqueKeysWithValues: modifiers + named)
 }()
 
-private extension Usage {
+extension Usage {
     /// This key as a script would write it: its word when it has one, else its number.
     var spelled: String { keyWords.first { $0.value == self }?.key ?? "\(rawValue)" }
+
+    /// This key as a keys list holds it in JSON: its word in quotes, or its number.
+    var written: String { keyWords.first { $0.value == self }.map { "\"\($0.key)\"" } ?? "\(rawValue)" }
 }
 
 /// One key of a `keys` list: a key by its HID usage, never by the character a layout puts
