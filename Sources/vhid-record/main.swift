@@ -41,7 +41,9 @@ func refuse(_ reason: String) -> Never {
 // under Input Monitoring for the person to switch on.
 guard IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted else {
     IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
-    refuse("Input Monitoring is not granted to vhid-record (\(Bundle.main.bundleIdentifier ?? arguments[0])). Switch it on in System Settings > Privacy & Security > Input Monitoring, then run vhid record again")
+    // The path too: macOS does not always list an app that asked, and a person adding it
+    // by hand has to be able to find it.
+    refuse("Input Monitoring is not granted to vhid-record (\(Bundle.main.bundleIdentifier ?? arguments[0])). In System Settings > Privacy & Security > Input Monitoring, switch it on - or, if it is not listed, click + and add \(Bundle.main.bundlePath) - then run vhid record again")
 }
 
 let stopKeys: Set<Usage>
@@ -110,25 +112,33 @@ do {
 let startPoint = CGEvent(source: nil)?.location ?? .zero
 guard let start = ScreenPoint(x: startPoint.x, y: startPoint.y) else { refuse("the cursor's position \(startPoint) is not a point") }
 let clock = ContinuousClock()
+/// The tap's own clock at the start: nanoseconds since boot, which every event's
+/// timestamp is on. An event's time is when it happened, not when the tap handed it over.
+let startedAt = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
 /// A script's times stop at an hour, which is as long as a recording runs.
 let hour = Duration.milliseconds(Int64(Play.longest))
 let hourNote = "the recording reached an hour, the longest a script plays, and stopped"
-let began = clock.now
+/// Now, on the events' clock.
+func sinceStart() -> Duration { .nanoseconds(Int64(clock_gettime_nsec_np(CLOCK_UPTIME_RAW)) - Int64(startedAt)) }
 
 /// The recording, and whether it is still taking events. Touched on the main queue only,
 /// where the tap and every message are delivered.
 @MainActor final class Session {
     var recorder: Recorder
     var taking = true
+    /// Whether a stop or an end has begun; the first one is the ending, and later ones
+    /// change nothing.
+    private var finishing = false
 
     init(recorder: Recorder) { self.recorder = recorder }
 
     /// Sends the recording and exits: a stop waits up to half a second, or until nothing
     /// is held, for the stop chord's own releases, and takes out its keys.
     func finish(_ ending: ToApp, notes: [String] = []) {
-        guard taking else { return }
+        guard !finishing else { return }
+        finishing = true
         // Never past an hour, which is as far as a script's times go.
-        let stoppedAt = min(began.duration(to: clock.now), hour)
+        let stoppedAt = min(sinceStart(), hour)
         let deadline = clock.now + .milliseconds(500)
         func send() {
             taking = false
@@ -172,7 +182,8 @@ func tapEvent(_ type: CGEventType, _ event: CGEvent) -> TapEvent? {
     default: kind = nil
     }
     // Field 87: the registry ID of the service that sent it; not a published CGEventField.
-    return kind.map { TapEvent(at: began.duration(to: clock.now), sender: UInt64(bitPattern: event.getIntegerValueField(CGEventField(rawValue: 87)!)), location: place, kind: $0) }
+    let at = Duration.nanoseconds(Int64(event.timestamp) - Int64(startedAt))
+    return kind.map { TapEvent(at: max(at, .zero), sender: UInt64(bitPattern: event.getIntegerValueField(CGEventField(rawValue: 87)!)), location: place, kind: $0) }
 }
 
 let kinds: [CGEventType] = [
@@ -182,8 +193,8 @@ let kinds: [CGEventType] = [
 let mask = kinds.reduce(CGEventMask(0)) { $0 | CGEventMask(1) << $1.rawValue }
 guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .tailAppendEventTap, options: .listenOnly, eventsOfInterest: mask, callback: { _, type, event, _ in
     MainActor.assumeIsolated {
-        // A tap macOS turned off for being slow is turned back on; what it missed is lost,
-        // and said so.
+        // A tap macOS turned off has missed events, so what it recorded is ended there
+        // rather than carried on with a gap in it, and said so.
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             session.finish(.end, notes: ["macOS turned the tap off (\(type == .tapDisabledByTimeout ? "too slow" : "by user input")), so the recording ends there"])
         } else if session.taking, let taken = tapEvent(type, event) {
@@ -199,7 +210,9 @@ CFRunLoopAddSource(CFRunLoopGetMain(), CFMachPortCreateRunLoopSource(kCFAllocato
 // vhidd or the driver restarting re-creates the devices under new IDs, so the IDs are read
 // again whenever an event service appears. [LAW:one-source-of-truth] The registry is the
 // one source; the recorder's set is its latest reading.
-let notifications = IONotificationPortCreate(kIOMainPortDefault)!
+guard let notifications = IONotificationPortCreate(kIOMainPortDefault) else {
+    refuse("vhid's devices could not be watched for coming back under new IDs")
+}
 IONotificationPortSetDispatchQueue(notifications, .main)
 var appeared: io_iterator_t = 0
 let reread: IOServiceMatchingCallback = { _, iterator in
@@ -212,7 +225,10 @@ let reread: IOServiceMatchingCallback = { _, iterator in
         }
     }
 }
-IOServiceAddMatchingNotification(notifications, kIOFirstMatchNotification, IOServiceMatching("IOHIDEventService"), reread, nil, &appeared)
+let watching = IOServiceAddMatchingNotification(notifications, kIOFirstMatchNotification, IOServiceMatching("IOHIDEventService"), reread, nil, &appeared)
+guard watching == KERN_SUCCESS else {
+    refuse("vhid's devices could not be watched for coming back under new IDs: kern_return \(watching)")
+}
 reread(nil, appeared)
 
 // An hour with no event ends the recording too.

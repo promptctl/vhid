@@ -38,7 +38,7 @@ SIGN := scripts/products | tr '\n' '\0' | xargs -0 scripts/sign "$(DEV_IDENTITY)
 # around the vhid-record just signed and signed itself. After $(SIGN) every time, because
 # a relinked binary has to reach the bundle too, and a bundle signed ad hoc would be a new
 # app to Input Monitoring on every build rather than the one granted.
-RECORD_APP := bin=$$(swift build --show-bin-path) && scripts/record-app "$$bin/vhid-record" "$$bin" "$$(scripts/version --base)" \
+RECORD_APP := bin=$$(swift build --show-bin-path) && scripts/record-app "$$bin/vhid-record" "$$bin" "$$(scripts/version --base)" ai.promptctl.vhid.record.dev \
 	| tr '\n' '\0' | xargs -0 scripts/sign "$(DEV_IDENTITY)"
 
 .PHONY: all build test check-pins sign signing-identity dev-daemon remove-dev-daemon clean

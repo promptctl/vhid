@@ -128,7 +128,7 @@ ditto "$bin/vhid" "$payload/usr/local/bin/vhid"
 ditto "$bin/vhidd" "$payload/usr/local/libexec/vhidd"
 ditto "$bin/vhid-menubar" "$payload/usr/local/libexec/vhid-menubar"
 ditto "$eyes_bin/eyes" "$payload/usr/local/bin/eyes"
-record_app=$(scripts/record-app "$bin/vhid-record" "$payload/usr/local/libexec" "$(scripts/version --base)")
+record_app=$(scripts/record-app "$bin/vhid-record" "$payload/usr/local/libexec" "$(scripts/version --base)" "$IDENTIFIER.record")
 
 # What the notary service refuses, asked of one binary after signing it: no Developer
 # ID signature from the team, no Hardened Runtime, no secure timestamp, or the
@@ -215,7 +215,20 @@ chmod 755 "$payload/usr/local/bin/vhid" "$payload/usr/local/bin/eyes" "$payload/
   "$payload/usr/local/libexec/vhid-uninstall" "$payload/usr/local/libexec/vhid-virtual-hid-driver" "$record_app/Contents/MacOS/vhid-record"
 chmod 644 "$record_app/Contents/Info.plist" "$record_app/Contents/_CodeSignature/CodeResources"
 chmod 644 "$plist" "$agent"
-pkgbuild --root "$payload" --scripts "$staged" --identifier "$IDENTIFIER" --version "$version" \
+# The tap app's bundle stays where it is installed: a bundle is relocatable by default,
+# and Installer would otherwise write it over any copy LaunchServices knows by its
+# identifier, such as one a build tree made, leaving /usr/local/libexec without it.
+components_plist="$work/components.plist"
+pkgbuild --analyze --root "$payload" "$components_plist" >&2
+# plutil cannot count a root array, so each entry is taken until there is none; the pkg
+# carries the tap app, so finding no bundle at all is a payload that lost it.
+i=0
+while plutil -extract "$i" xml1 -o /dev/null "$components_plist" 2>/dev/null; do
+  plutil -replace "$i.BundleIsRelocatable" -bool false "$components_plist"
+  i=$((i + 1))
+done
+[ "$i" -gt 0 ] || fail "pkgbuild found no bundle in the payload to keep in place"
+pkgbuild --root "$payload" --component-plist "$components_plist" --scripts "$staged" --identifier "$IDENTIFIER" --version "$version" \
   --install-location / --ownership recommended "$components/vhid.pkg" >&2
 
 # Downloaded and checked against the pins by the script that owns them, and named in the

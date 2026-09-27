@@ -114,15 +114,19 @@ public final class TieListener: @unchecked Sendable {
         guard let made = mkdtemp(&template) else { throw TieFailure("could not make a directory for the socket: \(String(cString: strerror(errno)))") }
         directory = String(cString: made)
         path = directory + "/tie"
-        descriptor = try TieEnd.socketDescriptor()
+        do {
+            descriptor = try TieEnd.socketDescriptor()
+        } catch {
+            rmdir(directory)
+            throw error
+        }
         var address = try TieEnd.address(path)
         let bound = withUnsafePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(descriptor, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
         }
+        // Every property is set, so deinit closes the socket and removes the directory.
         guard bound == 0, listen(descriptor, 1) == 0 else {
             let error = errno
-            close(descriptor)
-            rmdir(directory)
             throw TieFailure("could not listen on \(path): \(String(cString: strerror(error)))")
         }
     }

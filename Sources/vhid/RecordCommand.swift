@@ -34,8 +34,14 @@ struct RecordCommand: ParsableCommand {
             throw TieFailure("the tap app's first word was \(other.map { "\($0)" } ?? "nothing"), not that it was recording")
         }
         // SIGINT is the stop, whose own keys come out of the recording; SIGTERM ends it and
-        // drops nothing. A failed send is the app gone, which the read below reports.
-        let watch = SignalWatch { number in try? app.send(number == SIGINT ? ToApp.stop : ToApp.end) }
+        // drops nothing. A failed send is the app gone, which the read below reports. A
+        // second signal is someone the first did not reach - an app that stopped answering -
+        // and ends the command, whose exit the app's pid watch sees.
+        let signals = Signals()
+        let watch = SignalWatch { number in
+            guard signals.first() else { Darwin.exit(128 + number) }
+            try? app.send(number == SIGINT ? ToApp.stop : ToApp.end)
+        }
         defer { withExtendedLifetime(watch) {} }
         while let message = try app.receive(FromApp.self) {
             switch message {
@@ -82,7 +88,9 @@ struct RecordCommand: ParsableCommand {
 
     /// The tap app: installed in libexec beside vhid's bin, or in a build tree beside vhid.
     static func app() throws -> URL {
-        let bin = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath().deletingLastPathComponent()
+        // The executable's own path, not argv[0], which is a bare `vhid` when found on PATH.
+        guard let executable = Bundle.main.executableURL else { throw RecordRefusal.noApp(["(this vhid's own path is unknown)"]) }
+        let bin = executable.resolvingSymlinksInPath().deletingLastPathComponent()
         let candidates = [bin.appendingPathComponent("../libexec/vhid-record.app").standardized, bin.appendingPathComponent("vhid-record.app")]
         guard let app = candidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }) else {
             throw RecordRefusal.noApp(candidates.map(\.path))
@@ -95,6 +103,18 @@ struct RecordCommand: ParsableCommand {
     static func launch(app: URL, socket: String) throws {
         let opened = try Command("/usr/bin/open", "-n", "-g", app.path, "--args", socket, String(getpid())).run()
         guard opened.status == 0 else { throw TieFailure("open could not launch \(app.path): \(opened.merged)") }
+    }
+}
+
+/// Whether a signal is the first, from whichever thread answers it.
+private final class Signals: @unchecked Sendable {
+    private let lock = NSLock()
+    private var seen = false
+
+    func first() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        defer { seen = true }
+        return !seen
     }
 }
 

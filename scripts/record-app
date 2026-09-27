@@ -3,7 +3,12 @@
 # vhid-record binary, and prints its path. Signing is the caller's: the dev identity for
 # `make`, the Developer ID for scripts/make-pkg.
 #
-#   scripts/record-app <vhid-record binary> <output directory> <version>
+#   scripts/record-app <vhid-record binary> <output directory> <version> <bundle identifier>
+#
+# The identifier is the caller's, because Input Monitoring holds one grant per identifier
+# tied to the signing certificate: a dev bundle and the release one under one identifier
+# would each invalidate the other's grant. `make` passes ai.promptctl.vhid.record.dev,
+# scripts/make-pkg ai.promptctl.vhid.record.
 #
 # A bundle and not a bare binary because Input Monitoring is granted to the responsible
 # process, and a bundle launched with `open` is its own: listed under its identifier and
@@ -14,12 +19,9 @@
 set -euo pipefail
 binary=${1:?usage: scripts/record-app <vhid-record binary> <output directory> <version>}
 out=${2:?usage: scripts/record-app <vhid-record binary> <output directory> <version>}
-version=${3:?usage: scripts/record-app <vhid-record binary> <output directory> <version>}
+version=${3:?usage: scripts/record-app <vhid-record binary> <output directory> <version> <bundle identifier>}
+identifier=${4:?usage: scripts/record-app <vhid-record binary> <output directory> <version> <bundle identifier>}
 [ -f "$binary" ] || { echo "record-app: $binary was not built" >&2; exit 1; }
-
-# [LAW:one-source-of-truth] The identifier Input Monitoring lists the app under, and the
-# only place it is written; scripts/make-pkg signs the bundle under what this plist says.
-identifier=ai.promptctl.vhid.record
 
 app=$out/vhid-record.app
 rm -rf "$app"
