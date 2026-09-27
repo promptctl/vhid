@@ -27,6 +27,11 @@ extension Modifier {
     /// Derived through the modifier's key code and the one key-code table, rather than
     /// tabulated a second time here. [LAW:one-source-of-truth]
     public var usage: Usage? { Usage(virtualKeyCode: keyCode) }
+
+    /// The modifiers the device can hold, and their spellings for a refusal or a help
+    /// text to list. [LAW:one-source-of-truth] Read off `usage`, never listed by hand.
+    public static let holdable = allCases.filter { $0.usage != nil }
+    public static var holdableNames: String { holdable.map(\.rawValue).joined(separator: ", ") }
 }
 
 extension Keystroke {

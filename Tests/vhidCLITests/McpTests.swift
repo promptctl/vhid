@@ -1,3 +1,4 @@
+import Input
 import Foundation
 @testable import Doctor
 import Installations
@@ -48,11 +49,27 @@ import Testing
         }
     }
 
+    /// An unknown modifier is refused as a tool error, before any device is reached, on
+    /// every pointer tool that holds them.
+    @Test func anUnknownModifierIsRefusedNamingIt() async {
+        #expect(await Self.refusal(Tools.click, ["x": 1, "y": 2, "modifiers": "leftShift+hyper"])?.hasSuffix("\"hyper\" in \"leftShift+hyper\" is not a modifier to hold (\(Modifier.holdableNames))") == true)
+        #expect(await Self.refusal(Tools.scroll, ["x": 1, "y": 2, "modifiers": "function"])?.hasSuffix("function is not a key the device can hold") == true)
+        #expect(await Self.refusal(Tools.drag, ["from": ["x": 1, "y": 2], "to": ["x": 3, "y": 4], "modifiers": 3])?.hasPrefix("modifiers is 3") == true)
+    }
+
+    /// The schema offers it, not required.
+    @Test func thePointerToolsTakeModifiers() {
+        for tool in [Tools.click, Tools.scroll, Tools.drag] {
+            #expect(tool.tool.inputSchema.objectValue?["properties"]?.objectValue?["modifiers"] != nil, "\(tool.tool.name)")
+            #expect(tool.tool.inputSchema.objectValue?["required"]?.arrayValue?.contains("modifiers") != true, "\(tool.tool.name)")
+        }
+    }
+
     /// A wrongly named argument is refused, not ignored: `count` for `times` would otherwise
     /// click once where three were asked for.
     @Test func anArgumentTheToolDoesNotTakeIsRefusedByName() async {
         #expect(await Self.refusal(Tools.click, ["x": 1, "y": 2, "count": 3])
-            == "count is not an argument this tool takes: it takes x, y, button, times")
+            == "count is not an argument this tool takes: it takes x, y, button, times, modifiers")
         #expect(await Self.refusal(Tools.cursor, ["x": 1]) == "x is not an argument this tool takes, and it takes none")
     }
 

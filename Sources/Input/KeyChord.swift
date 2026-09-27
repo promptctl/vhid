@@ -84,6 +84,10 @@ public enum Modifier: String, Hashable, Codable, CaseIterable, Sendable, CustomS
     /// typed rather than in Swift's name for the case.
     public var description: String { rawValue }
 
+    /// Every modifier's spelling, for a refusal to list what it would have taken.
+    /// [LAW:one-source-of-truth]
+    public static var names: String { allCases.map(\.rawValue).joined(separator: ", ") }
+
     /// [LAW:single-enforcer] Which modifiers exist is this type's rule, so a spelling that
     /// names another is answered from the cases themselves and never falls out of step
     /// with them.
@@ -92,7 +96,7 @@ public enum Modifier: String, Hashable, Codable, CaseIterable, Sendable, CustomS
         guard let modifier = Modifier(rawValue: raw) else {
             throw DecodingError.dataCorrupted(.init(
                 codingPath: decoder.codingPath,
-                debugDescription: "\"\(raw)\" is not a modifier: \(Modifier.allCases.map(\.rawValue).joined(separator: ", "))"))
+                debugDescription: "\"\(raw)\" is not a modifier: \(Modifier.names)"))
         }
         self = modifier
     }

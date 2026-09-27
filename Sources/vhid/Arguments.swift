@@ -38,6 +38,19 @@ extension Button: ExpressibleByArgument {
     // help text, where it can be stated rather than enumerated. [LAW:no-silent-failure]
 }
 
+/// `--modifiers` as the verbs read it: `HeldModifiers(spelled:)`, whose refusal names the
+/// word that is not a modifier, as the MCP parameter's does. A transform rather than
+/// `ExpressibleByArgument`, whose failable init would drop that reason for "is invalid".
+/// [LAW:no-silent-failure]
+func heldModifiers(_ spelling: String) throws -> HeldModifiers {
+    try HeldModifiers(spelled: spelling)
+}
+
+/// How a verb's report says what it held: nothing, when it held nothing.
+func holding(_ held: HeldModifiers) -> String {
+    held.pressed.isEmpty ? "" : " holding \(held)"
+}
+
 /// How many times a button is pressed without moving between presses.
 ///
 /// [LAW:polishing-by-subtraction] Empty on purpose, and measured so before it was emptied.

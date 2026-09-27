@@ -54,6 +54,22 @@ import Testing
         }
     }
 
+    /// `--modifiers` takes the chord vocabulary on all three pointer verbs, and a word that
+    /// is not a modifier is refused at the parse, by name, before anything connects.
+    @Test func modifiersParseOrAreRefusedByName() throws {
+        #expect(try ClickCommand.parse(["--modifiers", "leftShift+leftCommand", "1", "2"]).modifiers == HeldModifiers([.leftShift, .leftCommand]))
+        #expect(try ScrollCommand.parse(["--modifiers", "leftCommand", "1", "2"]).modifiers == HeldModifiers([.leftCommand]))
+        #expect(try DragCommand.parse(["--modifiers", "leftOption", "1", "2", "3", "4"]).modifiers == HeldModifiers([.leftOption]))
+        #expect(try ClickCommand.parse(["1", "2"]).modifiers == .none)
+        for (spelling, reason) in [("leftShift+hyper", "\"hyper\" in \"leftShift+hyper\" is not a modifier to hold (leftShift, "),
+                                   ("function", "function is not a key the device can hold"),
+                                   ("", "\"\" in \"\" is not a modifier to hold")] {
+            let refused = #expect(throws: (any Error).self) { try ClickCommand.parse(["--modifiers", spelling, "1", "2"]) }
+            let message = refused.map { ClickCommand.message(for: $0) } ?? ""
+            #expect(message.contains("--modifiers") && message.contains(reason), "\(spelling): \(message)")
+        }
+    }
+
     @Test func anOrdinaryPointParses() throws {
         let click = try ClickCommand.parse(["100", "40.5"])
         #expect(click.x == 100)
@@ -105,3 +121,4 @@ import Testing
         #expect(throws: (any Error).self) { try ClickCommand.parse(["-100", "50"]) }
     }
 }
+
