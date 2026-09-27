@@ -264,6 +264,22 @@ import Testing
         #expect(played.reports.count == 43)
     }
 
+    /// Calibration trusts only bursts that stayed inside the recording: heading for a point
+    /// 20 points away, a burst of three 8-count reports would carry the cursor past it,
+    /// where a screen edge may have stopped it, so the table stops at 4 counts.
+    @Test func calibrationStaysWhereTheRecordingWent() async throws {
+        let fake = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
+        let script = try Schedule(Play.parse("""
+            {"to":{"x":0,"y":0}}
+            {"t_ms":0,"at":{"x":20,"y":0}}
+            {"t_ms":8,"at":{"x":0,"y":0}}
+            """))
+        let calibration = try #require(script.calibration)
+        let steering = try await fake.pointer.calibrate(calibration, from: script.start, clock: ManualClock())
+        #expect(steering.samples.map(\.counts) == [1, 2, 4])
+        #expect(steering.samples.map(\.perCount) == [1, 1, 1])
+    }
+
     /// A cursor that will not move gives calibration nothing to steer by, and the play
     /// stops before its first act, saying so.
     @Test func aCursorThatWillNotMoveStopsCalibration() async throws {

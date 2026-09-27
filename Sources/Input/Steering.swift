@@ -112,10 +112,16 @@ extension Pointer {
         var samples: [Steering.Sample] = []
         for size in Self.ladder {
             let step = Move(x: Count(clamping: Int((unit.0 * Double(size)).rounded())), y: Count(clamping: Int((unit.1 * Double(size)).rounded())))
-            let paced = try await run(step, times: Self.burst, from: start, every: calibration.interval, clock: clock)
-                - (try await run(step, times: 1, from: start, every: calibration.interval, clock: clock))
+            let long = try await run(step, times: Self.burst, from: start, every: calibration.interval, clock: clock)
+            let short = try await run(step, times: 1, from: start, every: calibration.interval, clock: clock)
+            // The screen is only known to go as far as the recording went. A burst carried
+            // past its farthest point may have been stopped at a screen edge and measured
+            // short, so it is not taken, and nothing longer is tried: the table holds the
+            // last length it trusts for every longer report. The shortest is always taken,
+            // since a table needs one sample.
+            guard long < away || samples.isEmpty else { break }
             let counts = hypot(Double(step.x.value), Double(step.y.value))
-            let sample = Steering.Sample(counts: counts, perCount: paced / (counts * Double(Self.burst - 1)))
+            let sample = Steering.Sample(counts: counts, perCount: (long - short) / (counts * Double(Self.burst - 1)))
             samples.append(sample)
             if sample.counts * sample.perCount >= calibration.reach { break }
         }
