@@ -35,10 +35,10 @@ extension Keystroke {
     /// [LAW:parse-dont-validate] A chord names keys by macOS key code and modifiers by
     /// name, and neither is proven pressable until here: the key may be one the keyboard
     /// page has no usage for, a modifier may be Fn, and a chord may be modifiers alone -
-    /// a hotkey, which is held rather than struck, and which a keystroke cannot say. A
+    /// something held rather than struck, which a keystroke cannot say. A
     /// caller holding a `Keystroke` holds one the device can press.
     public init(chord: KeyChord) throws(UnpressableChord) {
-        guard let key = chord.key else { throw UnpressableChord(chord: chord, because: "it has no key to strike; modifiers alone are a hotkey, not a keystroke") }
+        guard let key = chord.key else { throw UnpressableChord(chord: chord, because: "it has no key to strike; modifiers alone are held, not struck") }
         guard let usage = Usage(virtualKeyCode: key.rawValue) else { throw UnpressableChord(chord: chord, because: "key code \(key.rawValue) is not a key the keyboard page names") }
         let unpressable = chord.modifiers.filter { $0.usage == nil }
         guard unpressable.isEmpty else { throw UnpressableChord(chord: chord, because: "\(unpressable.map(\.rawValue).sorted().joined(separator: ", ")) is not a key the device can hold") }

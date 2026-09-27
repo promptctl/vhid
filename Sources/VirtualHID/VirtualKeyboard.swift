@@ -100,8 +100,8 @@ public final class VirtualKeyboard: KeyPress {
     /// asks the driver whether the keyboard is ready on a one-second timer, so readiness
     /// is discovered on the next tick rather than when it happened. The number is pqrs's
     /// poll interval, not the hardware, and it is the reason a connection is meant to be
-    /// held open rather than made per insert - a caller that connects for each insert
-    /// pays it every time.
+    /// held open rather than made per call - a client that connects for each call pays it
+    /// every time.
     @discardableResult
     public func start(within limit: Duration) throws -> Startup {
         try daemon.initialize(.keyboardInitialize, Self.parameters, until: .keyboardReady, within: limit)

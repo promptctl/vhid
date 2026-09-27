@@ -13,8 +13,9 @@
 /// cannot disagree. [LAW:one-source-of-truth]
 ///
 /// Sendable, because a press blocks the thread it is made on until the far side answers,
-/// so it is made on a thread kept for waiting: the helper's listener presses from XPC's
-/// threads, and the typist from a queue that is not the one the hotkey is heard on.
+/// so it is made on a thread kept for waiting: the daemon presses from the thread a
+/// client's call arrived on, and a client from the `DeviceQueue` its `QueuedKeyboard`
+/// runs every call on.
 public protocol KeyPress: Sendable {
     func down(_ usage: Usage) throws
     func releaseAll() throws

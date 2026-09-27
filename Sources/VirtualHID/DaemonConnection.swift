@@ -18,7 +18,7 @@ import Foundation
 /// when nobody has asked it anything - a heartbeat every three seconds, a health check
 /// now and then, a status push when the driver changes state - and it hangs up on a
 /// client that has said nothing for fifteen seconds, measured on this Mac. A connection
-/// read only while a request was in flight went quiet between inserts and was found dead
+/// read only while a request was in flight went quiet between calls and was found dead
 /// by the next write. So the reading is not part of asking; it is a lifecycle with its own
 /// owner, and asking is writing a request and waiting to be told the answer arrived.
 /// [LAW:no-ambient-temporal-coupling]
@@ -142,7 +142,7 @@ public final class DaemonConnection: Sendable {
     /// daemon asks the driver once a second, so readiness is *discovered* on the next tick
     /// rather than when it happened, and this takes up to a second however fast the device
     /// really was. That is why a connection is meant to be held open rather than made per
-    /// insert.
+    /// call.
     func wait(for status: Status, by deadline: ContinuousClock.Instant) throws {
         try link.wait(by: deadline) { $0.status[status] == true }
     }

@@ -17,9 +17,10 @@ import Input
         #expect(try Keystroke(chord: KeyChord(key: Key(rawValue: 0x24))) == Keystroke(.returnKey))
     }
 
-    /// Modifiers alone are a hotkey, held and released, and a keystroke cannot say that.
+    /// Modifiers alone are held and released, never struck, and a keystroke cannot say that.
     @Test func aModifierOnlyChordCannotBePressed() {
-        #expect(throws: UnpressableChord.self) { try Keystroke(chord: KeyChord(modifiers: .rightOption)) }
+        let chord = KeyChord(modifiers: .rightOption)
+        #expect(throws: UnpressableChord(chord: chord, because: "it has no key to strike; modifiers alone are held, not struck")) { try Keystroke(chord: chord) }
     }
 
     /// Fn is not a key to the device: the keyboard page has no usage for it.

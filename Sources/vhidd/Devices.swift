@@ -17,7 +17,7 @@ protocol ServedDevices: DeviceService {
 ///
 /// [LAW:no-ambient-temporal-coupling] Both are brought up at startup and never re-opened
 /// per client, because readiness is not instant: pqrs's daemon asks the driver whether a
-/// device is ready on a one-second timer, so a connect-per-insert helper would put up to
+/// device is ready on a one-second timer, so a connect-per-client daemon would put up to
 /// a full second in front of every client's first keystroke, for a reason that has
 /// nothing to do with the hardware. Paid once here, where nobody is waiting.
 final class Devices: NSObject, ServedDevices, @unchecked Sendable {
