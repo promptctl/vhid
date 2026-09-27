@@ -3,6 +3,7 @@ import Darwin
 import Eyes
 import Foundation
 import MCP
+import Pixels
 import System
 
 /// eyes' verbs as MCP tools, over stdio, for an agent that sees the screen in one session
@@ -84,13 +85,96 @@ enum EyesTools {
     typealias DisplayList = @Sendable () async -> [Display]
 
     typealias FrontmostApp = @Sendable () async -> Frontmost?
+    /// A reader's answer to one query: the pixel reader in the process, a fake in a test.
+    typealias Look = @Sendable (Query) async throws -> Reading
 
     static func all(
         windows listing: @escaping Listing = { try await Geometry.onScreen() },
         frontmost: @escaping FrontmostApp = { await Frontmost.now() },
-        displays: @escaping DisplayList = { Geometry.displays() }
+        displays: @escaping DisplayList = { Geometry.displays() },
+        reading look: @escaping Look = { try await PixelReader().read($0) }
     ) -> [EyesTool] {
-        [windows(listing, frontmost: frontmost), Self.displays(displays)]
+        let serial = OneAtATime(look)
+        let read: Look = { try await serial.read($0) }
+        return [windows(listing, frontmost: frontmost), Self.displays(displays), find(read), Self.read(read)]
+    }
+
+    /// Where `find` and `read` look, as `--display`, `--window` and `--rect` take it.
+    private static let place: [String: Value] = [
+        "display": .object(["type": "integer", "description": .string(Help.display)]),
+        "window": .object(["type": "integer", "description": .string(Help.window)]),
+        "rect": .object(["type": "string", "description": .string(Help.rect)]),
+        "limit": .object(["type": "integer", "minimum": 1, "description": "The most rows to answer with. Defaults to \(Limit.default.count)."]),
+    ]
+
+    /// Reading pixels needs Screen Recording, which macOS asks of the process responsible
+    /// for this one: for an MCP server, the app hosting it.
+    private static let grant = " Needs Screen Recording, granted to the app that runs this server."
+
+    static func find(_ look: @escaping Look) -> EyesTool { EyesTool(
+        tool: Tool(
+            name: "find",
+            description: Find.configuration.abstract + " " + (Find.configuration.discussion) + grant,
+            inputSchema: .object([
+                "type": "object",
+                "properties": .object(place.merging([
+                    "text": .object(["type": "string", "description": .string(Help.text)]),
+                    "exact": .object(["type": "boolean", "description": .string(Help.exact)]),
+                    "edits": .object(["type": "integer", "minimum": 0, "description": .string(Help.edits)]),
+                ]) { $1 }),
+                "required": .array(["text"]),
+                "additionalProperties": false,
+            ]),
+            annotations: .init(readOnlyHint: true, openWorldHint: true)),
+        call: { given in
+            try refuseStray(given, taken: ["text", "exact", "edits", "display", "window", "rect", "limit"])
+            guard let text = try argument("text", in: given, \.stringValue, "a string") else {
+                throw ArgumentRefused(description: "text is required: the text to look for")
+            }
+            let match = try Find.match(text, exact: try argument("exact", in: given, \.boolValue, "a boolean") ?? false,
+                                       edits: try argument("edits", in: given, \.intValue, "an integer"), as: .argument)
+            return try await answer(try query(match, given), look)
+        }) }
+
+    static func read(_ look: @escaping Look) -> EyesTool { EyesTool(
+        tool: Tool(
+            name: "read",
+            description: Read.configuration.abstract + grant,
+            inputSchema: .object([
+                "type": "object",
+                "properties": .object(place),
+                "additionalProperties": false,
+            ]),
+            annotations: .init(readOnlyHint: true, openWorldHint: true)),
+        call: { given in
+            try refuseStray(given, taken: ["display", "window", "rect", "limit"])
+            return try await answer(try query(nil, given), look)
+        }) }
+
+    /// The region and limit `find` and `read` share, through the verbs' own rules.
+    private static func query(_ match: Match?, _ given: [String: Value]) throws -> Query {
+        let id = { (name: String) throws -> UInt32? in
+            try argument(name, in: given, \.intValue, "an integer").map { n in
+                guard let id = UInt32(exactly: n) else {
+                    throw ArgumentRefused(description: "\(name) is \(n), which is not a window-server id (0 to \(UInt32.max))")
+                }
+                return id
+            }
+        }
+        let region = try Where.region(display: try id("display"), window: try id("window"),
+                                      rect: try argument("rect", in: given, \.stringValue, "a string"), as: .argument)
+        let limit = try Where.limit(try argument("limit", in: given, \.intValue, "an integer") ?? Limit.default.count, as: .argument)
+        return Query(match: match, region: region, limit: limit)
+    }
+
+    /// The verbs' report, with the grant refusal pointed at the process that holds the
+    /// grant for a server: the app hosting it, not eyes. [LAW:no-silent-failure]
+    private static func answer(_ query: Query, _ look: Look) async throws -> String {
+        do {
+            return try await Report.text(query, reading: look)
+        } catch PixelsError.noGrant {
+            throw ArgumentRefused(description: "\(PixelsError.noGrant) Under eyes mcp the grant is the app's that runs this server, not eyes'.")
+        }
     }
 
     static func displays(_ list: @escaping DisplayList) -> EyesTool { EyesTool(
@@ -136,12 +220,16 @@ enum EyesTools {
     /// a value of any other type, rather than ignoring either. [LAW:parse-dont-validate]
     static func string(_ name: String, in given: [String: Value], only taken: [String]) throws -> String? {
         try refuseStray(given, taken: taken)
+        return try argument(name, in: given, \.stringValue, "a string")
+    }
+
+    /// The optional argument `name` as the type `read` takes out of it, refusing a value of
+    /// any other type rather than ignoring it. [LAW:parse-dont-validate]
+    static func argument<T>(_ name: String, in given: [String: Value], _ read: (Value) -> T?, _ type: String) throws -> T? {
         // An explicit null is how many clients leave an optional argument unset.
         guard let value = given[name], !value.isNull else { return nil }
-        guard let text = value.stringValue else {
-            throw ArgumentRefused(description: "\(name) is \(value), and it takes a string")
-        }
-        return text
+        guard let taken = read(value) else { throw ArgumentRefused(description: "\(name) is \(value), and it takes \(type)") }
+        return taken
     }
 
     /// Any argument not in `taken` is refused by name rather than ignored.
@@ -149,5 +237,28 @@ enum EyesTools {
         guard let stray = given.keys.sorted().first(where: { !taken.contains($0) }) else { return }
         throw ArgumentRefused(description: "\(stray) is not an argument this tool takes: "
             + (taken.isEmpty ? "it takes none" : "it takes \(taken.joined(separator: ", "))"))
+    }
+}
+
+/// Reads one query at a time. Two Vision recognitions in flight in one process crashed
+/// inside TextRecognition in 4 of 15 runs (PixelReader), and the MCP server starts a task
+/// per request, so an agent's parallel calls would otherwise put two in flight.
+actor OneAtATime {
+    private let look: EyesTools.Look
+    private var tail: Task<Void, Never>?
+
+    init(_ look: @escaping EyesTools.Look) { self.look = look }
+
+    func read(_ query: Query) async throws -> Reading {
+        let before = tail
+        let look = look
+        let mine = Task {
+            _ = await before?.value
+            // A call withdrawn while it waited leaves without reading. [LAW:no-silent-failure]
+            try Task.checkCancellation()
+            return try await look(query)
+        }
+        tail = Task { _ = try? await mine.value }
+        return try await withTaskCancellationHandler { try await mine.value } onCancel: { mine.cancel() }
     }
 }

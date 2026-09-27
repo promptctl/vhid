@@ -1,11 +1,13 @@
 import Eyes
 import MCP
+import Pixels
 import Testing
 @testable import EyesCommand
 
 /// What `eyes mcp` offers, asked through a client over an in-memory transport, with a
 /// listing written here in place of the window server.
-@Suite struct McpTests {
+/// Serialized: the fake reader records into one shared `asked`.
+@Suite(.serialized) struct McpTests {
     private static let listing = WindowListing(
         windows: [
             Window(id: 1, owner: "Safari", pid: 400, frame: ScreenRect(x: 0, y: 33, width: 1512, height: 949), layer: 0),
@@ -14,10 +16,25 @@ import Testing
         excluded: [])
     private static let front = Frontmost(pid: 401, name: "Finder")
 
+    /// Every query the fake reader was handed, so a test can check what reached it.
+    actor Asked {
+        var queries: [Query] = []
+        func add(_ q: Query) { queries.append(q) }
+    }
+    private static let asked = Asked()
+
+    /// A reader that sees one run, "Save", everywhere but display 666, where it has no grant.
+    private static let look: EyesTools.Look = { query in
+        await asked.add(query)
+        if query.region == .display(666) { throw PixelsError.noGrant }
+        let save = Found(text: Text("Save")!, frame: ScreenRect(x: -300, y: 40, width: 40, height: 20), source: .pixels(confidence: Confidence(1)!))
+        return Reading(outcome: .matched(Matches([save])!), scope: Scope(region: ScreenRect(x: -1512, y: 316, width: 1512, height: 982), examined: 1, reach: .whole))
+    }
+
     /// A client connected to a server over `listing`, both torn down before this returns.
     private func connected<T>(_ body: (Client) async throws -> T) async throws -> T {
         let (clientSide, serverSide) = await InMemoryTransport.createConnectedPair()
-        let server = await Mcp.server(EyesTools.all(windows: { Self.listing }, frontmost: { Self.front }, displays: { DisplaysCommandTests.desk }))
+        let server = await Mcp.server(EyesTools.all(windows: { Self.listing }, frontmost: { Self.front }, displays: { DisplaysCommandTests.desk }, reading: Self.look))
         try await server.start(transport: serverSide)
         let client = Client(name: "test", version: "0")
         let result: Result<T, any Error>
@@ -40,7 +57,7 @@ import Testing
 
     @Test func theToolsAreListedAndReadOnly() async throws {
         let tools = try await connected { try await $0.listTools().tools }
-        #expect(tools.map(\.name) == ["windows", "displays"])
+        #expect(tools.map(\.name) == ["windows", "displays", "find", "read"])
         #expect(tools.allSatisfy { $0.annotations.readOnlyHint == true })
     }
 
@@ -74,5 +91,93 @@ import Testing
         let (refused, refusedIsError) = try await call(["display": 1], tool: "displays")
         #expect(refusedIsError == true)
         #expect(refused == "display is not an argument this tool takes: it takes none")
+    }
+
+    /// Each tool answers with what its verb prints for the same query: the arguments reach
+    /// the reader through the verbs' own rules. [LAW:one-source-of-truth]
+    @Test func findAndReadAnswerWithTheVerbsReport() async throws {
+        for (tool, arguments, query): (String, [String: Value], Query) in [
+            ("find", ["text": "save", "display": 1], Query(match: .contains("save"), region: .display(1))),
+            ("find", ["text": "Save", "exact": true, "window": 9, "limit": 3], Query(match: .exact("Save"), region: .window(9), limit: Limit(3)!)),
+            ("find", ["text": "Sabe", "edits": 1, "rect": "-400,0,200,100"],
+             Query(match: .within(edits: Edits(1)!, of: "Sabe"), region: .rect(ScreenRect(x: -400, y: 0, width: 200, height: 100)))),
+            ("read", ["display": 1, "limit": .null], Query(match: nil, region: .display(1))),
+        ] {
+            let (said, isError) = try await call(arguments, tool: tool)
+            #expect(isError != true)
+            #expect(await Self.asked.queries.last == query)
+            #expect(said == (try await Report.text(query, reading: Self.look)))
+        }
+    }
+
+    /// A reader that could not look is a tool error that names the grant, never an empty answer.
+    @Test func aMissingGrantIsAToolErrorNamingIt() async throws {
+        for tool in ["find", "read"] {
+            let (said, isError) = try await call(tool == "find" ? ["text": "Save", "display": 666] : ["display": 666], tool: tool)
+            #expect(isError == true)
+            #expect(said == "\(PixelsError.noGrant) Under eyes mcp the grant is the app's that runs this server, not eyes'.")
+        }
+    }
+
+    @Test func findAndReadRefuseWhatTheVerbsRefuse() async throws {
+        for (tool, arguments, expected): (String, [String: Value], String) in [
+            ("find", [:], "text is required: the text to look for"),
+            ("find", ["text": "  "], "the text to find is blank"),
+            ("find", ["text": "a", "exact": true, "edits": 1], "give exact or edits, not both"),
+            ("find", ["text": "a", "edits": -1], "edits cannot be negative"),
+            ("find", ["text": "a", "exact": "yes"], "exact is yes, and it takes a boolean"),
+            ("read", ["limit": 0], "limit must be at least 1"),
+            ("read", ["display": 1, "window": 2], "give at most one of display, window, rect"),
+            ("read", ["display": -1], "display is -1, which is not a window-server id (0 to 4294967295)"),
+            ("read", ["window": 4_294_967_296], "window is 4294967296, which is not a window-server id (0 to 4294967295)"),
+            ("read", ["rect": "1,2,3"], "rect wants x,y,width,height in points - a positive size, nothing past a million - got 1,2,3"),
+            ("read", ["text": "a"], "text is not an argument this tool takes: it takes display, window, rect, limit"),
+        ] {
+            let (said, isError) = try await call(arguments, tool: tool)
+            #expect(isError == true, "\(tool) \(arguments)")
+            #expect(said == expected)
+        }
+    }
+
+    /// Reads never overlap, however many calls arrive at once: two Vision recognitions in
+    /// one process are a measured crash.
+    @Test func readsRunOneAtATime() async throws {
+        actor Gauge {
+            var now = 0, most = 0
+            func enter() { now += 1; most = max(most, now) }
+            func leave() { now -= 1 }
+        }
+        let gauge = Gauge()
+        let serial = OneAtATime { query in
+            await gauge.enter()
+            try await Task.sleep(for: .milliseconds(20))
+            await gauge.leave()
+            return Reading(outcome: .nearest([]), scope: Scope(region: ScreenRect(x: 0, y: 0, width: 1, height: 1), examined: 0, reach: .whole))
+        }
+        try await withThrowingTaskGroup(of: Reading.self) { group in
+            for _ in 0..<5 { group.addTask { try await serial.read(Query(match: nil, region: .display(1))) } }
+            for try await _ in group {}
+        }
+        #expect(await gauge.most == 1)
+    }
+
+    /// A call withdrawn while it waits its turn never reads.
+    @Test func aWithdrawnCallLeavesTheQueueWithoutReading() async throws {
+        actor Count { var n = 0; func add() { n += 1 } }
+        let count = Count()
+        let serial = OneAtATime { _ in
+            await count.add()
+            try await Task.sleep(for: .milliseconds(50))
+            return Reading(outcome: .nearest([]), scope: Scope(region: ScreenRect(x: 0, y: 0, width: 1, height: 1), examined: 0, reach: .whole))
+        }
+        let query = Query(match: nil, region: .display(1))
+        let first = Task { try await serial.read(query) }
+        try await Task.sleep(for: .milliseconds(10))
+        let second = Task { try await serial.read(query) }
+        try await Task.sleep(for: .milliseconds(10))
+        second.cancel()
+        _ = try await first.value
+        await #expect(throws: CancellationError.self) { try await second.value }
+        #expect(await count.n == 1)
     }
 }

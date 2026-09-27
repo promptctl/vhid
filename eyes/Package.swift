@@ -63,7 +63,7 @@ let package = Package(
         // is checked here rather than read off a terminal by eye. [LAW:verifiable-goals]
         .testTarget(
             name: "EyesCommandTests",
-            dependencies: ["EyesCommand", "Eyes", .product(name: "MCP", package: "swift-sdk")]
+            dependencies: ["EyesCommand", "Eyes", "Pixels", .product(name: "MCP", package: "swift-sdk")]
         ),
     ]
 )
