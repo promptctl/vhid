@@ -71,6 +71,36 @@ import Testing
         #expect(click.y == -40.5)
     }
 
+    /// Each pointer verb's help shows options before `--`, the one order that parses: the
+    /// line it prints is found in the rendered help and parsed from the root as typed, and an
+    /// option moved after `--` is refused.
+    @Test(arguments: [
+        (Help.NegativeExample.click, ClickCommand.self as ParsableCommand.Type),
+        (Help.NegativeExample.move, MoveCommand.self),
+        (Help.NegativeExample.scroll, ScrollCommand.self),
+        (Help.NegativeExample.drag, DragCommand.self),
+    ])
+    func eachVerbsNegativeExampleParses(argv: [String], verb: ParsableCommand.Type) throws {
+        let rendered = Vhid.helpMessage(for: verb, columns: 10_000)
+        #expect(rendered.contains("vhid " + argv.joined(separator: " ")))
+        #expect(type(of: try Vhid.parseAsRoot(argv)) == verb)
+        let dash = argv.firstIndex(of: "--")!
+        // `move` shows no option, so it has none to move past `--`.
+        if dash > 1 {
+            let optionsLast = [argv[0]] + argv[dash...] + argv[1..<dash]
+            #expect(throws: (any Error).self) { try Vhid.parseAsRoot(Array(optionsLast)) }
+        }
+    }
+
+    @Test func theNegativeExamplesLandOnTheNumbersTheyShow() throws {
+        let click = try #require(try Vhid.parseAsRoot(Help.NegativeExample.click) as? ClickCommand)
+        #expect((click.x, click.y) == (-100, -40))
+        let drag = try #require(try Vhid.parseAsRoot(Help.NegativeExample.drag) as? DragCommand)
+        #expect((drag.fromX, drag.fromY, drag.toX, drag.toY) == (-100, 40, 200, 40))
+        let scroll = try #require(try Vhid.parseAsRoot(Help.NegativeExample.scroll) as? ScrollCommand)
+        #expect((scroll.x, scroll.y, scroll.vertical) == (-100, -40, 3))
+    }
+
     @Test func aBareNegativeCoordinateIsRefusedRatherThanMisread() {
         #expect(throws: (any Error).self) { try ClickCommand.parse(["-100", "50"]) }
     }

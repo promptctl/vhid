@@ -45,7 +45,19 @@ enum Help {
         ArgumentHelp(phrase.prefix(1).uppercased() + phrase.dropFirst() + ".")
     }
 
-    private static func negative(_ example: String) -> String { "Negative coordinates follow --, as in: vhid \(example)." }
+    /// The one order that parses a negative coordinate: every option, then `--`, then the
+    /// numbers. Each verb's example is kept as argv so a test parses exactly what the help
+    /// prints. [LAW:one-source-of-truth]
+    enum NegativeExample {
+        static let click = ["click", "--button", "left", "--", "-100", "-40"]
+        static let move = ["move", "--", "-100", "-40"]
+        static let scroll = ["scroll", "--vertical", "3", "--", "-100", "-40"]
+        static let drag = ["drag", "--button", "left", "--", "-100", "40", "200", "40"]
+    }
+
+    private static func negative(_ argv: [String]) -> String {
+        "Negative coordinates follow --, after every option, as in: vhid \(argv.joined(separator: " "))."
+    }
 
     static let type = VerbHelp(name: "type", abstract: "Type text on the virtual keyboard, which macOS sees as hardware.", discussion: """
         The text goes wherever keys would go if they were pressed now: nothing here chooses or \
@@ -77,23 +89,23 @@ enum Help {
         steered in a loop - post a delta, read the cursor back, repeat - and the point it reports \
         landing at is read back from the cursor rather than the point that was asked for. The two \
         can differ by under a point.
-        """, commandLine: [negative("click -- -100 -40")])
+        """, commandLine: [negative(NegativeExample.click)])
 
     static let move = VerbHelp(name: "move", abstract: "Move the pointer to a point on the screen, pressing nothing.", discussion: """
         Steered the way click steers it - post a delta, read the cursor back, repeat - and the \
         point it reports is read back from the cursor.
-        """, commandLine: [negative("move -- -100 -40")])
+        """, commandLine: [negative(NegativeExample.move)])
 
     static let scroll = VerbHelp(name: "scroll", abstract: "Roll the mouse wheel at a point on the screen.", discussion: """
         The pointer is moved to the point first, because a wheel scrolls whatever is under the \
         pointer. The ticks are the device's own, and macOS decides how far each one scrolls.
-        """, commandLine: ["Negative coordinates follow --, after every option, as in: vhid scroll --vertical 3 -- -100 -40."])
+        """, commandLine: [negative(NegativeExample.scroll)])
 
     static let drag = VerbHelp(name: "drag", abstract: "Drag from one point on the screen to another.", discussion: """
         The pointer is moved to the first point, the button goes down, the pointer is moved to \
         the second with it held, and every button comes up. Both points it reports are read \
         back from the cursor.
-        """, commandLine: [negative("drag -- -100 40 200 40")])
+        """, commandLine: [negative(NegativeExample.drag)])
 
     static let cursor = VerbHelp(name: "cursor", abstract: "Say where the pointer is, in the coordinates click takes.", discussion: """
         Read from the window server rather than from the daemon, which cannot know: macOS \
