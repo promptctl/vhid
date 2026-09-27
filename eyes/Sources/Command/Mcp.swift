@@ -17,17 +17,17 @@ struct Mcp: AsyncParsableCommand {
         abstract: "Serve the verbs as MCP tools over stdin and stdout.",
         discussion: """
             Newline-delimited JSON-RPC on stdin and stdout, and nothing else on stdout: every \
-            diagnostic goes to stderr. The tools are \(EyesTools.all.map(\.tool.name).joined(separator: ", ")). \
+            diagnostic goes to stderr. The tools are \(EyesTools.all().map(\.tool.name).joined(separator: ", ")). \
             They take what the verbs of the same name take and answer with what those verbs \
             print, scope line first.
             """)
 
     /// The server as a client's initialize finds it, with its tools attached.
-    static func server() async -> Server {
+    static func server(_ tools: [EyesTool] = EyesTools.all()) async -> Server {
         let server = Server(name: "eyes", version: "0", capabilities: .init(tools: .init(listChanged: false)))
-        await server.withMethodHandler(ListTools.self) { _ in .init(tools: EyesTools.all.map(\.tool)) }
+        await server.withMethodHandler(ListTools.self) { _ in .init(tools: tools.map(\.tool)) }
         await server.withMethodHandler(CallTool.self) { request in
-            guard let verb = EyesTools.all.first(where: { $0.tool.name == request.name }) else {
+            guard let verb = tools.first(where: { $0.tool.name == request.name }) else {
                 throw MCPError.invalidParams("there is no tool called \(request.name.debugDescription)")
             }
             // A verb that could not do what it was asked is a tool error, whose words the
@@ -36,6 +36,11 @@ struct Mcp: AsyncParsableCommand {
             do {
                 let said = try await verb.call(request.arguments ?? [:])
                 return .init(content: [.text(text: said, annotations: nil, _meta: nil)], isError: false)
+            } catch where Task.isCancelled {
+                // A withdrawn call is answered with nothing, as the MCP spec says; what it
+                // said on the way out still reaches stderr. [LAW:no-silent-failure]
+                FileHandle.standardError.write(Data("eyes: \(request.name) withdrawn: \(error)\n".utf8))
+                throw CancellationError()
             } catch {
                 return .init(content: [.text(text: "\(error)", annotations: nil, _meta: nil)], isError: true)
             }
@@ -70,10 +75,17 @@ struct ArgumentRefused: Error, CustomStringConvertible {
 
 /// Every tool, in the order a client lists them. Each calls its verb's own core, so a tool
 /// and its verb cannot come to say different things. [LAW:one-source-of-truth]
+///
+/// The screen is a parameter, so a test hands the tools a listing it wrote and the
+/// process hands them the window server. [LAW:effects-at-boundaries]
 enum EyesTools {
-    static let all: [EyesTool] = [windows]
+    typealias Listing = @Sendable () async throws -> WindowListing
 
-    static let windows = EyesTool(
+    static func all(windows listing: @escaping Listing = { try await Geometry.onScreen() }) -> [EyesTool] {
+        [windows(listing)]
+    }
+
+    static func windows(_ listing: @escaping Listing) -> EyesTool { EyesTool(
         tool: Tool(
             name: "windows",
             description: Windows.configuration.abstract
@@ -92,8 +104,8 @@ enum EyesTools {
         call: { given in
             let owner = try string("owner", in: given, only: ["owner"])
             try Windows.refuseEmpty(owner, named: "owner")
-            return Windows.report(try await Geometry.onScreen(), owner: owner)
-        })
+            return Windows.report(try await listing(), owner: owner)
+        }) }
 
     /// The one optional string argument `name`, refusing any argument not in `taken` and
     /// a value of any other type, rather than ignoring either. [LAW:parse-dont-validate]
@@ -101,7 +113,8 @@ enum EyesTools {
         if let stray = given.keys.sorted().first(where: { !taken.contains($0) }) {
             throw ArgumentRefused(description: "\(stray) is not an argument this tool takes: it takes \(taken.joined(separator: ", "))")
         }
-        guard let value = given[name] else { return nil }
+        // An explicit null is how many clients leave an optional argument unset.
+        guard let value = given[name], !value.isNull else { return nil }
         guard let text = value.stringValue else {
             throw ArgumentRefused(description: "\(name) is \(value), and it takes a string")
         }

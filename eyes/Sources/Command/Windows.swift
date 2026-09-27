@@ -24,16 +24,16 @@ struct Windows: AsyncParsableCommand {
     /// screen full of them. It arrives from `--owner "$APP"` with `APP` unset, which is a
     /// mistake worth a sentence rather than a confident empty list.
     func validate() throws {
-        try Self.refuseEmpty(owner, named: "--owner")
+        try Self.refuseEmpty(owner, named: "--owner", " (A shell variable that did not expand?)")
     }
 
     /// One wording for the command line and the MCP tool alike, each naming the argument
     /// the way its caller spelled it. [LAW:single-enforcer]
-    static func refuseEmpty(_ owner: String?, named name: String) throws {
+    static func refuseEmpty(_ owner: String?, named name: String, _ hint: String = "") throws {
         guard owner?.isEmpty != true else {
             throw ValidationError(
                 "\(name) was given an empty value, which would filter out every window. "
-                    + "Leave \(name) off to list them all. (A shell variable that did not expand?)"
+                    + "Leave \(name) off to list them all.\(hint)"
             )
         }
     }

@@ -54,6 +54,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: swift --version
+      # eyes' transport is a copy of vhid's, since the packages link nothing of each
+      # other's; this holds the copy to the original, header and logger label aside.
+      - run: diff <(tail -n +3 Sources/Command/AnsweringTransport.swift | sed 's/eyes\.mcp/vhid.mcp/') ../Sources/vhid/AnsweringTransport.swift
+        shell: bash
       - run: swift build
       - run: swift test
 
