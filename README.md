@@ -88,16 +88,57 @@ left of or above it has negative ones, which follow `--` after every option:
 ## Over MCP
 
 `vhid mcp` serves the same verbs as MCP tools over stdio: `type`, `press`, `click`,
-`move`, `scroll`, `drag`, `cursor` and `doctor`. Point a client at the binary with the one argument:
-
-```json
-{ "command": "/path/to/vhid", "args": ["mcp"] }
-```
+`move`, `scroll`, `drag`, `cursor` and `doctor`, run as `vhid mcp`.
 
 Each tool call connects to the daemon and leaves when it returns, so a session holds
 nothing between calls and a `vhid click` from a shell still gets through. Stdout carries
 only JSON-RPC; diagnostics go to stderr. An argument a tool will not act on comes back as
 a tool error naming it, before anything is connected.
+
+`eyes mcp` serves `windows`, `displays`, `find` and `read` the same way. The two are
+separate servers, and a client runs both.
+
+In Claude Code:
+
+```sh
+claude mcp add --scope user vhid -- /usr/local/bin/vhid mcp
+claude mcp add --scope user eyes -- /usr/local/bin/eyes mcp
+```
+
+In Claude Desktop, merged into the `mcpServers` object of
+`~/Library/Application Support/Claude/claude_desktop_config.json` (keeping any servers
+already there), then quit and reopen it:
+
+```json
+{
+  "mcpServers": {
+    "vhid": { "command": "/usr/local/bin/vhid", "args": ["mcp"] },
+    "eyes": { "command": "/usr/local/bin/eyes", "args": ["mcp"] }
+  }
+}
+```
+
+vhid's tools need what `vhid doctor` checks and no grant of the client's. eyes'
+`windows` and `displays` need nothing. `find` and `read` need Screen Recording, held by
+the app macOS counts as responsible for the server: Claude Desktop, or the terminal app
+running `claude` - under tmux, SSH or an editor's terminal, whichever app started that.
+eyes never prompts for it: add the app under **System Settings > Privacy & Security >
+Screen Recording**, then quit and reopen it, since a running server keeps the answer it
+started with. Until then `find` and `read` answer with a tool error saying so.
+
+Every coordinate either server prints or takes is the same screen point, so one loop
+closes without conversion:
+
+| step | tool | what it answers |
+|---|---|---|
+| where the displays are | eyes `displays` | each id and its bounds, negative left of or above the main display |
+| what is in front | eyes `windows` | each window's owner and bounds, and the frontmost application |
+| where the text is | eyes `find` `{"text": "Save", "display": 3}` | the point to click, then the run it read: `-700,604	Save` on a display left of the main one |
+| press it | vhid `click` `{"x": -700, "y": 604}` | where it clicked, or the reason it could not |
+| what changed | eyes `find` again | the run gone, or still there, with a scope line saying where it looked |
+
+Neither server decides the next step. `click` presses the point it is given whatever is
+there, and `find` reports what is on screen, not whether the click did what was meant.
 
 ## Installing
 
@@ -106,7 +147,7 @@ vhid ships as one signed, notarized pkg. It installs:
 | path | what it is |
 |---|---|
 | `/usr/local/bin/vhid` | the CLI |
-| `/usr/local/bin/eyes` | the screen reader: `windows` and `displays` need no grant; `find` and `read` need Screen Recording, which macOS asks of the process responsible for eyes - the terminal, or for `eyes mcp` the MCP host app |
+| `/usr/local/bin/eyes` | the screen reader: `windows` and `displays` need no grant; `find` and `read` need Screen Recording ([Over MCP](#over-mcp) says whose) |
 | `/usr/local/libexec/vhidd` | the root daemon that owns the devices |
 | `/Library/LaunchDaemons/ai.promptctl.vhid.vhidd.plist` | the daemon's launchd job, loaded as the install finishes |
 | `/usr/local/libexec/vhid-menubar` | the menu bar item |
