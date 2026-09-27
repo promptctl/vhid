@@ -4,6 +4,7 @@
 #
 #   scripts/make-pkg <output directory>    # prints <output directory>/vhid-<version>.pkg, <version> from VERSION
 #   scripts/make-pkg --team    # prints the team whose Developer ID signs a release
+#   scripts/make-pkg --identifier    # prints the pkg's receipt identifier
 #   scripts/make-pkg --unsigned <output directory>
 #     # prints <output directory>/vhid-<version>-unsigned.pkg, <version> whatever this tree builds
 #
@@ -19,6 +20,7 @@
 #   /Library/LaunchDaemons/<service>.plist         its job, loaded by postinstall
 #   /usr/local/libexec/vhid-menubar                the menu bar item
 #   /Library/LaunchAgents/<service>.menubar.plist  its job, in each logged-in session
+#   /usr/local/libexec/vhid-uninstall              removes all of the above
 #
 # and the driver package, installed first, whose extension postinstall asks macOS to
 # activate for the logged-in user. Approving that activation is the one step left to a
@@ -51,6 +53,8 @@ fail() { echo "make-pkg: $*" >&2; exit 1; }
 # The team, for the release workflow's notary credentials, read from here rather than
 # written a second time.
 [ "${1:-}" = --team ] && { echo "$TEAM"; exit 0; }
+# The receipt, for scripts/uninstall-test to stage the uninstaller as this script does.
+[ "${1:-}" = --identifier ] && { echo "$IDENTIFIER"; exit 0; }
 
 signed=true
 [ "${1:-}" = --unsigned ] && { signed=false; shift; }
@@ -147,6 +151,8 @@ packed=$("$payload/usr/local/bin/vhid" --version)
 [ "$packed" = "$version" ] \
   || fail "the packed vhid reports version '$packed', not '$version'"
 
+scripts/stage-uninstall "$service" "$IDENTIFIER" >"$payload/usr/local/libexec/vhid-uninstall"
+
 plist="$payload/Library/LaunchDaemons/$service.plist"
 scripts/launchd-plist "$service" /usr/local/libexec/vhidd >"$plist"
 plutil -lint "$plist" >&2
@@ -175,7 +181,8 @@ mkdir -p "$components"
 # root:wheel; the modes are this. The plist is 0644 because launchd refuses a job file
 # anyone but root can write.
 find "$payload" -type d -exec chmod 755 {} +
-chmod 755 "$payload/usr/local/bin/vhid" "$payload/usr/local/libexec/vhidd" "$payload/usr/local/libexec/vhid-menubar"
+chmod 755 "$payload/usr/local/bin/vhid" "$payload/usr/local/libexec/vhidd" "$payload/usr/local/libexec/vhid-menubar" \
+  "$payload/usr/local/libexec/vhid-uninstall"
 chmod 644 "$plist" "$agent"
 pkgbuild --root "$payload" --scripts "$staged" --identifier "$IDENTIFIER" --version "$version" \
   --install-location / --ownership recommended "$components/vhid.pkg" >&2

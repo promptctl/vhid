@@ -1,0 +1,106 @@
+#!/bin/bash
+# Removes what the vhid pkg installed: stops the daemon's job and the menu bar item, deletes
+# the files the pkg put down (this script among them), and forgets the pkg's receipt. The
+# pqrs driver the pkg also installed is left in place: Karabiner-Elements may be using it.
+#
+#   sudo /usr/local/libexec/vhid-uninstall
+#   /usr/local/libexec/vhid-uninstall --paths    # what it removes, one per line, and nothing else
+#
+# Running it again finds nothing and says so. It touches the one service it was packed for
+# and no other, so the .dev job a working tree registers is never stopped by it.
+#
+# scripts/stage-uninstall writes in, from scripts/make-pkg, the service - the answer the
+# packed vhid gives, which pkg/scripts/service carries for preinstall and postinstall -
+# the pkg's receipt identifier, and pkg/scripts/stop-job, so the job stopped here is the
+# job the install started, stopped the way preinstall stops it. [LAW:one-source-of-truth]
+#
+# VHID_UNINSTALL_ROOT prefixes every path, for scripts/uninstall-test, which runs as
+# nobody's root; as root it is refused, since launchctl and pkgutil would still act on
+# this Mac while the files removed were somewhere else.
+#
+# Held to bash 3.2, like every script here.
+set -euo pipefail
+
+service=@SERVICE@
+receipt=@RECEIPT@
+root=${VHID_UNINSTALL_ROOT:-}
+
+# Every path the pkg's payload holds that is not a directory; scripts/check-pkg holds this
+# list to the pkg's own bill of materials, so the two cannot drift.
+paths() {
+  cat <<PATHS
+/usr/local/bin/vhid
+/usr/local/libexec/vhidd
+/usr/local/libexec/vhid-menubar
+/usr/local/libexec/vhid-uninstall
+/Library/LaunchDaemons/$service.plist
+/Library/LaunchAgents/$service.menubar.plist
+PATHS
+}
+if [ "${1:-}" = --paths ]; then paths; exit 0; fi
+[ $# -eq 0 ] || { echo "usage: sudo $0 [--paths]" >&2; exit 64; }
+
+say() { echo "vhid-uninstall: $*"; }
+fail() { echo "vhid-uninstall: $*" >&2; exit 1; }
+
+if [ "$(id -u)" -eq 0 ]; then
+  [ -z "$root" ] || fail "VHID_UNINSTALL_ROOT is for the test, which does not run as root; unset it"
+else
+  [ -n "$root" ] || fail "removing a root daemon takes root: sudo $0"
+fi
+
+# @STOP_JOB@
+
+removed=0
+
+# The daemon first: its record is the one whose reading decides whether anything is
+# removed. Only launchd's "no such job" means nothing is loaded; a record it could not
+# read is not taken for an absent one, and nothing is removed from under a job that may
+# still run. [LAW:no-silent-failure]
+if record=$(launchctl print "system/$service" 2>&1); then
+  why=$(stop_job "system/$service") || fail "$why; nothing was removed"
+  say "stopped system/$service"
+  removed=$((removed + 1))
+elif ! grep -q "Could not find service" <<<"$record"; then
+  fail "could not read whether $service is loaded, so nothing was removed: $record"
+fi
+
+# The menu bar item in every session someone is logged into - each has a loginwindow
+# of its own. It is a view of vhid, so one that will not stop, or whose record cannot
+# be read, is said and does not keep the rest from being removed: with its plist gone,
+# launchd does not start it again at that person's next login.
+# The login screen's own loginwindow runs as root, and Setup Assistant's user is a
+# system one too; neither is a person's session, so only uids from 500 up count.
+for uid in $(ps -axo uid=,comm= | awk '$2 ~ /(^|\/)loginwindow$/ && $1 >= 500 { print $1 }' | sort -u); do
+  agent="gui/$uid/$service.menubar"
+  if record=$(launchctl print "$agent" 2>&1); then
+    if why=$(stop_job "$agent"); then
+      say "stopped $agent"
+      removed=$((removed + 1))
+    else
+      say "could not stop the menu bar item in $agent ($why); it goes when that session logs out"
+    fi
+  elif ! grep -q "Could not find service" <<<"$record"; then
+    say "could not read whether the menu bar item runs in $agent: $record"
+  fi
+done
+
+while IFS= read -r path; do
+  if [ -e "$root$path" ] || [ -L "$root$path" ]; then
+    rm -f "$root$path"
+    say "removed $path"
+    removed=$((removed + 1))
+  fi
+done <<<"$(paths)"
+
+if pkgutil --pkg-info "$receipt" >/dev/null 2>&1; then
+  pkgutil --forget "$receipt" >/dev/null || fail "pkgutil would not forget the $receipt receipt"
+  say "forgot the $receipt receipt"
+  removed=$((removed + 1))
+fi
+
+if [ $removed -eq 0 ]; then
+  say "nothing to remove: no vhid job, file or receipt is here"
+else
+  say "done. The pqrs driver the pkg installed stays: Karabiner-Elements may use it too"
+fi

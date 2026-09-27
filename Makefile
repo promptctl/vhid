@@ -65,13 +65,14 @@ build: signing-identity
 #
 # The driver-script checks and the NOTICE check come after the signing, because none
 # links anything and so none can undo it: the pins against the CLI just built, NOTICE
-# against what that CLI links, then the driver script's own contracts against a stubbed one.
+# against what that CLI links, then the driver script's own contracts and the uninstaller against stubs.
 test: signing-identity
 	swift build
 	swift test; status=$$?; $(SIGN) || exit $$?; exit $$status
 	scripts/check-driver-pins
 	scripts/check-notice
 	scripts/virtual-hid-driver-test
+	scripts/uninstall-test
 
 # The driver pins scripts/virtual-hid-driver acts on, held to the ones the CLI was built
 # with. `test` runs this too; this is the fast way to it after editing a pin.

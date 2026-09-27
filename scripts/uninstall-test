@@ -1,0 +1,143 @@
+#!/bin/bash
+# vhid-uninstall, as the pkg ships it, run against stubs: launchctl, pkgutil, stat and id
+# answer from files in a scratch directory, and every path is under a scratch root, so
+# nothing here can stop a job or delete a file on this Mac.
+#
+# [LAW:behavior-not-structure] What is checked is what is left behind - jobs, files,
+# receipt - and what the script said and exited with.
+#
+# Held to bash 3.2, like every script here.
+set -uo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+SERVICE=ai.promptctl.vhid.vhidd
+STUB=$(mktemp -d) || exit 1
+trap 'rm -rf "$STUB"' EXIT
+scripts/stage-uninstall "$SERVICE" "$(scripts/make-pkg --identifier)" >"$STUB/vhid-uninstall" && chmod +x "$STUB/vhid-uninstall" || exit 1
+
+mkdir "$STUB/bin"
+# Loaded jobs are lines of $STUB/loaded. UNREADABLE (a target, or "all") makes print fail
+# the way a broken launchd would. BOOTOUT_STATUS makes bootout of BOOTOUT_TARGET (or of
+# every target) answer as told: 36 unloads the job only after two more prints, as a
+# daemon still unwinding does, and anything else unloads nothing.
+cat >"$STUB/bin/launchctl" <<'S'
+#!/bin/bash
+unload() { grep -vxF "$1" "$STUB/loaded" >"$STUB/loaded.new"; mv "$STUB/loaded.new" "$STUB/loaded"; }
+case $1 in
+  print)
+    [ "${UNREADABLE:-}" = all ] || [ "${UNREADABLE:-}" = "$2" ] && { echo "launchctl: something else went wrong"; exit 1; }
+    if [ -f "$STUB/unwinding" ]; then
+      n=$(cat "$STUB/unwinding"); [ "$n" -le 1 ] && { rm "$STUB/unwinding"; unload "$2"; } || echo $((n - 1)) >"$STUB/unwinding"
+    fi
+    grep -qxF "$2" "$STUB/loaded" && exit 0
+    echo "Could not find service \"$2\" in domain"; exit 113 ;;
+  bootout)
+    echo "bootout $2" >>"$STUB/reached"
+    status=0
+    [ -z "${BOOTOUT_TARGET:-}" ] || [ "$BOOTOUT_TARGET" = "$2" ] && status=${BOOTOUT_STATUS:-0}
+    case $status in
+      0) unload "$2" ;;
+      36) echo 2 >"$STUB/unwinding" ;;
+    esac
+    exit "$status" ;;
+esac
+exit 97
+S
+cat >"$STUB/bin/pkgutil" <<'S'
+#!/bin/bash
+case $1 in
+  --pkg-info) [ -f "$STUB/receipt" ] ;;
+  --forget) echo "forget $2" >>"$STUB/reached"; rm -f "$STUB/receipt" ;;
+  *) exit 97 ;;
+esac
+S
+# The sessions someone is logged into, as loginwindow processes owned by each uid.
+printf '#!/bin/bash\nfor u in ${SESSIONS-501}; do echo "$u /System/Library/CoreServices/loginwindow.app/Contents/MacOS/loginwindow"; done\necho "0 /sbin/launchd"\n' >"$STUB/bin/ps"
+printf '#!/bin/bash\necho "${STUB_UID:-501}"\n' >"$STUB/bin/id"
+chmod +x "$STUB/bin/"*
+export STUB PATH="$STUB/bin:$PATH" VHID_UNINSTALL_ROOT="$STUB/root"
+
+pass=0 failed=0
+check() {
+  if [ "$3" = "$2" ]; then pass=$((pass + 1)); else
+    failed=$((failed + 1)); printf 'uninstall-test: %s\n  want: %s\n  got:  %s\n' "$1" "$2" "$3" >&2
+  fi
+}
+
+# A Mac in the given state: the jobs named loaded, the files named present, the receipt
+# there or not.
+state() {
+  rm -rf "$STUB/root" "$STUB/reached" "$STUB/receipt"; : >"$STUB/loaded"; : >"$STUB/reached"
+  local jobs=$1 files=$2 receipt=$3 job path
+  for job in $jobs; do echo "$job" >>"$STUB/loaded"; done
+  for path in $files; do mkdir -p "$STUB/root$(dirname "$path")"; : >"$STUB/root$path"; done
+  [ "$receipt" = yes ] && : >"$STUB/receipt"
+  return 0
+}
+left() { (cd "$STUB/root" 2>/dev/null && find . -type f | sort | tr '\n' ' '); }
+run() { out=$("$STUB/vhid-uninstall" 2>&1); status=$?; }
+
+ALL=$("$STUB/vhid-uninstall" --paths | tr '\n' ' ')
+DAEMON=system/$SERVICE AGENT=gui/501/$SERVICE.menubar DEV=system/$SERVICE.dev
+
+state "$DAEMON $AGENT" "$ALL" yes; run
+check "fully installed: exit" 0 "$status"
+check "fully installed: files left" "" "$(left)"
+check "fully installed: jobs left" "" "$(cat "$STUB/loaded")"
+check "fully installed: receipt forgotten" no "$([ -f "$STUB/receipt" ] && echo yes || echo no)"
+check "fully installed: said what it removed" 9 "$(grep -c '^vhid-uninstall: \(stopped\|removed\|forgot\)' <<<"$out")"
+
+state "" "/usr/local/bin/vhid /Library/LaunchDaemons/$SERVICE.plist" no; run
+check "partly installed: exit" 0 "$status"
+check "partly installed: files left" "" "$(left)"
+check "partly installed: nothing stopped that was not loaded" "" "$(cat "$STUB/reached")"
+
+state "" "" no; run
+check "nothing installed: exit" 0 "$status"
+check "nothing installed: says so" "vhid-uninstall: nothing to remove: no vhid job, file or receipt is here" "$out"
+
+state "$DEV" "/usr/local/bin/vhid" yes; run
+check "dev job: exit" 0 "$status"
+check "dev job: left loaded" "$DEV" "$(cat "$STUB/loaded")"
+check "dev job: never booted out" "forget ai.promptctl.vhid" "$(cat "$STUB/reached")"
+
+state "$DAEMON" "$ALL" yes; before=$(left); UNREADABLE=all run
+check "unreadable launchd: fails" 1 "$status"
+check "unreadable launchd: removes nothing" "$before" "$(left)"
+check "unreadable launchd: forgets nothing" "" "$(cat "$STUB/reached")"
+
+SESSIONS= ; export SESSIONS
+state "$DAEMON" "" no; run
+check "nobody logged in: daemon still stopped" "" "$(cat "$STUB/loaded")"
+SESSIONS="0 248"
+state "$DAEMON" "" no; run
+check "login screen only: no menu bar item asked about" "0|" "$status|$(grep -c 'menu bar' <<<"$out" | grep -v '^0$')"
+SESSIONS="501 502"
+state "$DAEMON $AGENT gui/502/$SERVICE.menubar" "" no; run
+check "two sessions: both menu bar items stopped" "" "$(cat "$STUB/loaded")"
+unset SESSIONS
+
+state "$DAEMON" "$ALL" yes; BOOTOUT_STATUS=36 run
+check "daemon still unwinding: waited for, then removed" "0 " "$status $(left)"
+
+state "$DAEMON" "$ALL" yes; before=$(left); BOOTOUT_STATUS=5 run
+check "daemon will not unload: fails" 1 "$status"
+check "daemon will not unload: removes nothing" "$before" "$(left)"
+check "daemon will not unload: forgets nothing" "bootout $DAEMON" "$(cat "$STUB/reached")"
+
+state "$DAEMON $AGENT" "$ALL" yes; UNREADABLE=$AGENT run
+check "agent record unreadable: still exits 0" 0 "$status"
+check "agent record unreadable: said" 1 "$(grep -c 'could not read whether the menu bar item runs' <<<"$out")"
+check "agent record unreadable: the rest removed" "" "$(left)"
+
+state "$DAEMON $AGENT" "$ALL" yes; BOOTOUT_TARGET=$AGENT BOOTOUT_STATUS=5 run
+check "agent will not stop: still exits 0" 0 "$status"
+check "agent will not stop: said" 1 "$(grep -c 'could not stop the menu bar item' <<<"$out")"
+check "agent will not stop: the rest removed" "" "$(left)"
+
+state "$DAEMON" "$ALL" yes; before=$(left); STUB_UID=0 run
+check "root with the test's root set: refused" 1 "$status"
+check "root with the test's root set: touches nothing" "$before|" "$(left)|$(cat "$STUB/reached")"
+
+echo "uninstall-test: $pass passed, $failed failed"
+[ $failed -eq 0 ]
