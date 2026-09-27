@@ -241,6 +241,63 @@ import Testing
         #expect(!"\(stopped)".contains("key"))
     }
 
+    /// A recorded drag replays onto the points it was recorded at: the table carries the
+    /// cursor between them, and the closed loop puts the press and the release exactly on
+    /// their points, whatever the table got wrong. [LAW:verifiable-goals]
+    @Test func aRecordedDragPressesAndReleasesOnItsPoints() async throws {
+        let fake = FakeMouse(at: ScreenPoint(x: 100, y: 100)!)
+        let watched = WatchedMouse(fake)
+        var lines = [#"{"to":{"x":100,"y":100}}"#, #"{"t_ms":0,"at":{"x":130,"y":110}}"#, #"{"t_ms":8,"buttons":["left"]}"#]
+        for step in 1...40 {
+            lines.append(#"{"t_ms":\#(8 + step * 8),"at":{"x":\#(130 + step * 7).5,"y":\#(110 + step * 3)}}"#)
+        }
+        lines.append(#"{"t_ms":400,"buttons":[]}"#)
+        let play = try Play.parse(lines.joined(separator: "\n"))
+        let played = try await Player(pointer: Pointer(mouse: watched, cursor: fake.cursor), keyboard: fake.keyboard, clock: ManualClock(), wall: { Self.epoch }, lead: .zero).play(Schedule(play))
+        // Within half a point, which is where the pointer's loop stops: this mouse moves
+        // whole points, and 410.5 is between two.
+        let recorded = [ScreenPoint(x: 130, y: 110)!, ScreenPoint(x: 410.5, y: 230)!]
+        #expect(watched.pressedAt.count == recorded.count)
+        for (landed, point) in zip(watched.pressedAt, recorded) {
+            #expect(landed.map { abs($0.x - point.x) <= 0.5 && abs($0.y - point.y) <= 0.5 } == true, "\(String(describing: landed)) for \(point)")
+        }
+        #expect(played.reports.count == 43)
+    }
+
+    /// Calibration trusts only bursts that stayed inside the recording: heading for a point
+    /// 20 points away, a burst of three 8-count reports would carry the cursor past it,
+    /// where a screen edge may have stopped it, so the table stops at 4 counts.
+    @Test func calibrationStaysWhereTheRecordingWent() async throws {
+        let fake = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
+        let script = try Schedule(Play.parse("""
+            {"to":{"x":0,"y":0}}
+            {"t_ms":0,"at":{"x":20,"y":0}}
+            {"t_ms":8,"at":{"x":0,"y":0}}
+            """))
+        let calibration = try #require(script.calibration)
+        let steering = try await fake.pointer.calibrate(calibration, from: script.start, clock: ManualClock())
+        #expect(steering.samples.map(\.counts) == [1, 2, 4])
+        #expect(steering.samples.map(\.perCount) == [1, 1, 1])
+    }
+
+    /// A cursor that will not move gives calibration nothing to steer by, and the play
+    /// stops before its first act, saying so.
+    @Test func aCursorThatWillNotMoveStopsCalibration() async throws {
+        let fake = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
+        fake.stuck = true
+        let play = try Play.parse("""
+            {"to":{"x":0,"y":0}}
+            {"t_ms":0,"at":{"x":20,"y":0}}
+            {"t_ms":8,"buttons":["left"]}
+            {"t_ms":16,"buttons":[]}
+            """)
+        let stopped = try await #require(throws: PlayStopped.self) {
+            try await Player(pointer: fake.pointer, keyboard: fake.keyboard, clock: ManualClock(), wall: { Self.epoch }, lead: .zero).play(Schedule(play))
+        }
+        #expect(stopped.line == nil)
+        #expect(stopped.causes.contains { $0 is Steering.Unmoved })
+    }
+
     @Test func latenessIsReadByNearestRank() {
         #expect(Lateness(of: (1...100).map(Int64.init).shuffled()).ranks == [50, 90, 99, 100])
         #expect(Lateness(of: [7]).ranks == [7, 7, 7, 7])
@@ -266,7 +323,7 @@ import Testing
         #expect(stopped.played.count == 1)
         #expect(stopped.of == 5)
         #expect(stopped.causes.contains { $0 is Refused })
-        #expect("\(stopped)".contains("after 1 of 5 reports"))
+        #expect("\(stopped)".contains("at line 3 after 1 of 5 reports"))
         #expect("\(stopped)".contains("A key may be left held"))
         #expect("\(stopped)".contains("A button may be left held"))
         #expect(fake.log == ["keys hold [e1]", "hold [1]", "keys up", "up"])
@@ -275,6 +332,27 @@ import Testing
 
 extension Lateness {
     var ranks: [Int64] { [p50, p90, p99, max] }
+}
+
+/// A mouse that notes where the cursor was each time the buttons changed: where a press
+/// and a release landed, which is what a replayed click is judged by.
+final class WatchedMouse: Mouse {
+    let mouse: FakeMouse
+    private let noted = Mutex<[ScreenPoint?]>([])
+
+    init(_ mouse: FakeMouse) { self.mouse = mouse }
+
+    var pressedAt: [ScreenPoint?] { noted.withLock { $0 } }
+
+    func hold(_ buttons: Set<Button>) async throws {
+        let at = mouse.position
+        noted.withLock { $0.append(at) }
+        try mouse.hold(buttons)
+    }
+    func down(_ button: Button) async throws { try mouse.down(button) }
+    func releaseAll() async throws { try mouse.releaseAll() }
+    func move(by delta: Move) async throws { try mouse.move(by: delta) }
+    func scroll(by delta: Scroll) async throws { try mouse.scroll(by: delta) }
 }
 
 /// A mouse whose every report takes `cost` on the clock, as a vhidd round trip does.
@@ -383,9 +461,39 @@ final class ManualClock: Clock {
         #expect(script.reports == 6)
     }
 
+    /// A script of at lines steers onto the last at point before every buttons line and at
+    /// the end - the start, before any at line - and is measured at its own pace, toward
+    /// the farthest point it visits. A script of move lines is neither.
+    @Test func atLinesAreSteeredBeforeEveryClickAndAtTheEnd() throws {
+        let script = try schedule("""
+            {"t_ms":0,"buttons":["left"]}
+            {"t_ms":10,"at":{"x":11,"y":1}}
+            {"t_ms":18,"at":{"x":41,"y":1}}
+            {"t_ms":20,"at":{"x":31,"y":1}}
+            {"t_ms":30,"buttons":[]}
+            """)
+        let (one, eleven, fortyOne, thirtyOne) = (ScreenPoint(x: 1, y: 1)!, ScreenPoint(x: 11, y: 1)!, ScreenPoint(x: 41, y: 1)!, ScreenPoint(x: 31, y: 1)!)
+        #expect(script.acts == [
+            Schedule.Act(at: .zero, report: .steer(one), line: 2),
+            Schedule.Act(at: .zero, report: .buttons([.left]), line: 2),
+            Schedule.Act(at: .milliseconds(10), report: .at(eleven), line: 3),
+            Schedule.Act(at: .milliseconds(18), report: .at(fortyOne), line: 4),
+            Schedule.Act(at: .milliseconds(20), report: .at(thirtyOne), line: 5),
+            Schedule.Act(at: .milliseconds(30), report: .steer(thirtyOne), line: 6),
+            Schedule.Act(at: .milliseconds(30), report: .buttons([]), line: 6),
+            Schedule.Act(at: .milliseconds(30), report: .steer(thirtyOne), line: 6),
+        ])
+        #expect(script.reports == 5)
+        #expect(script.calibration?.interval == .milliseconds(8))
+        #expect(script.calibration?.reach == 30)
+        #expect(script.calibration?.toward == fortyOne)
+        let moved = try schedule(#"{"t_ms":0,"buttons":["left"]}"# + "\n" + #"{"t_ms":1,"move":{"dx":3,"dy":0}}"# + "\n" + #"{"t_ms":2,"buttons":[]}"#)
+        #expect(moved.calibration == nil)
+        #expect(!moved.acts.contains { if case .steer = $0.report { true } else { false } })
+    }
+
     /// What the player does not send is refused at the line that asks for it.
     @Test(arguments: [
-        (#"{"t_ms":0,"at":{"x":5,"y":5}}"#, 2, "does not steer to at lines"),
         (#"{"t_ms":0,"buttons":[]}"# + "\n" + #"{"t_ms":1,"keys":[]}"#, 2, "no line of this script"),
     ])
     func whatThePlayerDoesNotSendIsRefusedAtItsLine(lines: String, line: Int, saying: String) throws {

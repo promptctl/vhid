@@ -17,9 +17,43 @@ import Pointing
 /// asleep - has had its keys let go, and its next keep-alive presses them again, as a
 /// report no report line shows. [LAW:dataflow-not-control-flow] The keep-alives are values in
 /// the schedule the player walks like any other act, not a timer running beside it.
+///
+/// **A script of `at` lines is steered, and every click lands where it was recorded.**
+/// Between clicks each `at` line is reports from a table measured before the clock starts
+/// (`Steering`); before every buttons line and at the end the schedule has a `steer`, the
+/// pointer's closed loop onto the last `at` point, which takes out whatever error the
+/// table built up. Scripts of `move` lines have no steer and no calibration: their counts
+/// are the input.
 public struct Schedule: Hashable, Sendable {
     public let start: ScreenPoint
     public let acts: [Act]
+    /// What to measure before the clock starts, when the script has `at` lines.
+    public let calibration: Calibration?
+
+    /// The measurement `Steering` is made from, read off the script.
+    public struct Calibration: Hashable, Sendable {
+        /// How far apart the script's `at` lines are, the median gap: acceleration depends
+        /// on the pace, so the table is measured at the pace it is used at.
+        public let interval: Duration
+        /// The longest step between two consecutive `at` points, in points: the ladder stops
+        /// at the first report length that covers it.
+        public let reach: Double
+        /// The `at` point farthest from the start, which calibration heads for, so it moves
+        /// the cursor where the recording went.
+        public let toward: ScreenPoint
+
+        /// The gap assumed for a script with one `at` line, or all at one time: the 120 Hz
+        /// a trackpad reports at.
+        public static let pace: Duration = .microseconds(8333)
+
+        init(start: ScreenPoint, points: [(at: Duration, point: ScreenPoint)]) {
+            let gaps = zip(points, points.dropFirst()).map { $1.at - $0.at }.filter { $0 > .zero }.sorted()
+            interval = gaps.isEmpty ? Self.pace : gaps[gaps.count / 2]
+            let path = [start] + points.map(\.point)
+            reach = zip(path, path.dropFirst()).map { hypot($1.x - $0.x, $1.y - $0.y) }.max() ?? 0
+            toward = path.max { hypot($0.x - start.x, $0.y - start.y) < hypot($1.x - start.x, $1.y - start.y) } ?? start
+        }
+    }
 
     public struct Act: Hashable, Sendable {
         public let at: Duration
@@ -36,12 +70,21 @@ public struct Schedule: Hashable, Sendable {
         case buttons(Set<Button>)
         case move(Move)
         case wheel(Scroll)
+        /// The cursor should be here now: reports from the calibrated table, without
+        /// reading the cursor.
+        case at(ScreenPoint)
         /// The keys already held, said again so the daemon keeps them. Not a report: the
         /// driver is sent nothing while it still holds them.
         case keepAlive(HeldKeys)
+        /// The pointer's closed loop onto this point, however many reports it takes. Not a
+        /// report of the script's, and the time it takes pushes every later act back.
+        case steer(ScreenPoint)
 
         var isReport: Bool {
-            if case .keepAlive = self { false } else { true }
+            switch self {
+            case .keepAlive, .steer: false
+            case .keys, .buttons, .move, .wheel, .at: true
+            }
         }
     }
 
@@ -62,6 +105,12 @@ public struct Schedule: Hashable, Sendable {
         var keys = (held: HeldKeys.none, line: 0)
         var buttons: Set<Button> = []
         var acts: [Act] = []
+        let points = play.events.compactMap { event in if case .at(let point) = event.report { (event.at, point) } else { nil } }
+        // Where the steer before a click aims: the last at point, or the start before any.
+        var aim = play.start
+        // [LAW:dataflow-not-control-flow] A script of move lines steers nowhere: its steers
+        // are an empty list, not a branch around them.
+        let steer = { (at: Duration, line: Int) in points.isEmpty ? [] : [Act(at: at, report: .steer(aim), line: line)] }
         for event in play.events {
             var quiet = acts.last?.at ?? .zero
             while !keys.held.usages.isEmpty, event.at - quiet > Self.keepAlive {
@@ -78,18 +127,21 @@ public struct Schedule: Hashable, Sendable {
             case .buttons(let next):
                 buttons = next
                 report = .buttons(next)
+                acts += steer(event.at, event.line)
             case .move(let delta): report = .move(delta)
             case .wheel(let delta): report = .wheel(delta)
-            case .at:
-                throw Play.ScriptInvalid(line: event.line, reason: "vhid play does not steer to at lines; move the pointer with move lines")
+            case .at(let point):
+                aim = point
+                report = .at(point)
             }
             acts.append(Act(at: event.at, report: report, line: event.line))
         }
-        guard !acts.isEmpty else {
+        guard let last = acts.last else {
             throw Play.ScriptInvalid(line: play.events[0].line, reason: "no line of this script sends a report")
         }
         self.start = play.start
-        self.acts = acts
+        self.acts = acts + steer(last.at, last.line)
+        self.calibration = points.isEmpty ? nil : Calibration(start: play.start, points: points)
     }
 }
 
@@ -132,13 +184,30 @@ public struct Player<C: Clock> where C.Duration == Duration {
     public func play(_ play: Schedule, isolation: isolated (any Actor)? = #isolation) async throws -> Played {
         var went: [Played.Report] = []
         var reached = 0
+        // The act being waited on or played, which a stop names.
+        var line: Int?
         do {
-            let reports = try await pointer.move(to: play.start)
+            var reports = try await pointer.move(to: play.start)
+            // Measured before the clock starts, from the start, and the cursor brought back
+            // to it after. [LAW:no-ambient-temporal-coupling] The table exists before any
+            // at act can ask for it.
+            var course: Course?
+            if let calibration = play.calibration {
+                let steering = try await pointer.calibrate(calibration, from: play.start, clock: clock)
+                reports += try await pointer.move(to: play.start)
+                // Read back: the loop stops beside a point it cannot land on.
+                course = Course(steering: steering, interval: calibration.interval, at: try pointer.cursor())
+            }
             let started = clock.now
             let epoch = wall()
             let at = { (offset: Duration) in epoch + offset.microseconds }
+            // How far the closed loops so far have pushed the script back. Timing is kept
+            // between clicks, not across them.
+            var delay = Duration.zero
             for (index, event) in play.acts.enumerated() {
-                let deadline = started.advanced(by: event.at)
+                line = event.line
+                let due = event.at + delay
+                let deadline = started.advanced(by: due)
                 let wake = deadline.advanced(by: .zero - lead)
                 // A wait of any length is slices, each asking whether the run was
                 // cancelled, so a cancelled play ends a long hold within a slice and not at
@@ -179,9 +248,35 @@ public struct Player<C: Clock> where C.Duration == Duration {
                 let sent = started.duration(to: clock.now)
                 // Counted before the post: one that throws may still have reached the driver.
                 reached = index + 1
-                try await post(event.report)
-                let played = Played.Report(line: event.line, scheduled: at(event.at), sent: at(sent), acked: at(started.duration(to: clock.now)))
-                went += event.report.isReport ? [played] : []
+                // How many device reports this act sent: an at line sends what its step
+                // takes, which may be none. [LAW:one-source-of-truth] The count a report
+                // line stands for is what went to the device.
+                var sentReports = 1
+                switch event.report {
+                case .steer(let point):
+                    let current = try steered(course)
+                    let began = clock.now
+                    try await pointer.move(to: point)
+                    delay += began.duration(to: clock.now)
+                    course = Course(steering: current.steering, interval: current.interval, at: try pointer.cursor())
+                case .at(let point):
+                    let current = try steered(course)
+                    let (moves, lands) = current.steering.reports(from: current.at, to: point)
+                    // A step longer than one report is paced as the table was measured, so
+                    // macOS accelerates each report as the table says.
+                    for (number, move) in moves.enumerated() {
+                        if number > 0 { try await clock.sleep(until: clock.now.advanced(by: current.interval), tolerance: .zero) }
+                        try await pointer.mouse.move(by: move)
+                    }
+                    sentReports = moves.count
+                    course = Course(steering: current.steering, interval: current.interval, at: lands)
+                case .keys(let held), .keepAlive(let held): try await keyboard.hold(held)
+                case .buttons(let held): try await pointer.mouse.hold(held)
+                case .move(let delta): try await pointer.mouse.move(by: delta)
+                case .wheel(let delta): try await pointer.mouse.scroll(by: delta)
+                }
+                let played = Played.Report(line: event.line, scheduled: at(due), sent: at(sent), acked: at(started.duration(to: clock.now)))
+                went += event.report.isReport && sentReports > 0 ? [played] : []
             }
             return Played(startReports: reports, reports: went)
         } catch {
@@ -193,17 +288,29 @@ public struct Player<C: Clock> where C.Duration == Duration {
             // that were sent, as `Pointer.holding` chooses its own.
             let letGo: () async throws -> Void = play.holdsKeys(in: reached) ? { try await keyboard.releaseAll() } : {}
             let keys = await failure(of: letGo)
-            throw PlayStopped(played: went, of: play.reports, cause: error, unreleasedKeys: keys, unreleasedButtons: await pointer.release())
+            throw PlayStopped(played: went, of: play.reports, line: line,
+                              cause: error, unreleasedKeys: keys, unreleasedButtons: await pointer.release())
         }
     }
 
-    private func post(_ report: Schedule.Report, isolation: isolated (any Actor)? = #isolation) async throws {
-        switch report {
-        case .keys(let held), .keepAlive(let held): try await keyboard.hold(held)
-        case .buttons(let held): try await pointer.mouse.hold(held)
-        case .move(let delta): try await pointer.mouse.move(by: delta)
-        case .wheel(let delta): try await pointer.mouse.scroll(by: delta)
-        }
+    /// Where the table thinks the cursor is, the table, and the pace it was measured at.
+    private struct Course {
+        let steering: Steering
+        let interval: Duration
+        let at: ScreenPoint
+    }
+
+    /// The course of a schedule that has at or steer acts, which is one that was
+    /// calibrated. [LAW:types-are-the-program] exception: `Schedule` makes a calibration
+    /// whenever it makes either act, and the type does not carry that, so a course missing
+    /// here is a `Schedule` bug, said by name rather than trapped.
+    private func steered(_ course: Course?) throws -> Course {
+        guard let course else { throw Uncalibrated() }
+        return course
+    }
+
+    struct Uncalibrated: Error, CustomStringConvertible {
+        var description: String { "an at line came with no calibration to steer it by, which a Schedule never makes" }
     }
 }
 
@@ -251,6 +358,9 @@ public struct Lateness: Hashable, Sendable, Encodable {
 public struct PlayStopped: StoppedPartWay, CustomStringConvertible {
     public let played: [Played.Report]
     public let of: Int
+    /// The script line being played when it stopped, or nil when it stopped before the
+    /// first act: on the way to the start, or calibrating.
+    public let line: Int?
     public let cause: any Error
     /// The failures of the releases that followed the stop, when they failed too. Nil says
     /// that device holds nothing; anything else says a key or a button may be held.
@@ -258,7 +368,8 @@ public struct PlayStopped: StoppedPartWay, CustomStringConvertible {
     public let unreleasedButtons: (any Error)?
 
     public var description: String {
-        PointingStopped.unreleased(unreleasedButtons, after: TypingStopped.unreleased(unreleasedKeys, after: "the play stopped after \(played.count) of \(of) reports: \(cause.reported)"))
+        let place = line.map { " at line \($0)" } ?? ""
+        return PointingStopped.unreleased(unreleasedButtons, after: TypingStopped.unreleased(unreleasedKeys, after: "the play stopped\(place) after \(played.count) of \(of) reports: \(cause.reported)"))
     }
 }
 
