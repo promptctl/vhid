@@ -106,57 +106,85 @@ enum Candidate: Equatable {
     case excluded(Exclusion.Reason)
 }
 
-/// Whether nothing in `frame` can be clicked in `region`: the part of it inside the
-/// region is empty, or lies wholly under one window in front.
+/// The part of `frame` a click can reach inside `clip`: none when they do not meet, or when
+/// what they share lies wholly under one window in front.
 ///
-/// One rule for an element's subtree and for a window the tree cannot walk, so "could
+/// One rule for an element's children and for a window the tree cannot walk, so "could
 /// anything there be seen" means one thing. [LAW:single-enforcer]
-func hidden(_ frame: ScreenRect, in region: ScreenRect, under covers: [ScreenRect]) -> Bool {
-    let visible = frame.cgRect.intersection(region.cgRect)
-    return visible.isNull || visible.isEmpty || covers.contains { $0.cgRect.contains(visible) }
+func visible(_ frame: ScreenRect, in clip: ScreenRect, under covers: [ScreenRect]) -> ScreenRect? {
+    let shared = frame.cgRect.intersection(clip.cgRect)
+    guard !shared.isNull, !shared.isEmpty, !covers.contains(where: { $0.cgRect.contains(shared) }) else { return nil }
+    return ScreenRect(shared)
+}
+
+/// Roles whose frame is an area holding other elements. What such an element says names
+/// the area - a window's title, a list's label - and the centre of the area is on whatever
+/// sits there, never on the words: measured, a window's title came back at the middle of
+/// its document. The words themselves, where they are drawn, are an element of their own.
+/// Not a group: on a web page a labelled group is as often a control - an icon button
+/// whose only child is its image - pressed at its centre.
+let areas: Set<Role> = Set([
+    kAXApplicationRole, kAXWindowRole, kAXSheetRole, kAXDrawerRole, kAXScrollAreaRole,
+    kAXSplitGroupRole, kAXTabGroupRole, kAXToolbarRole, kAXListRole, kAXOutlineRole, kAXTableRole,
+    kAXColumnRole, kAXBrowserRole, kAXLayoutAreaRole, kAXGridRole, kAXRadioGroupRole, kAXMenuRole,
+    kAXMenuBarRole, kAXPopoverRole, "AXWebArea",
+].map { Role(rawValue: $0) })
+
+extension Node {
+    /// The element as a finding: its first text that is not blank, at its own frame, if it
+    /// is not an area, and the centre of that frame - the point a click lands on - is
+    /// inside `clip` and under none of the windows in front of this one.
+    ///
+    /// An area is known by its role and children together: a list with nothing under it is
+    /// the thing its label names, and its centre is where it is pressed. It is decided first, from reads that arrive with the role, so an area
+    /// whose text would not answer never leaves the region unread over words that could
+    /// not have been a finding. Placement is decided before text, so an element that could
+    /// never be a finding here is unplaced or covered whatever its text reads did - a busy
+    /// element off the region does not make the region unread. An element is unanswered
+    /// only when a read it needed failed: its frame would not say, or no text answered and
+    /// one would not say. [LAW:no-silent-failure] [LAW:effects-at-boundaries] Pure, so
+    /// every rule an element is kept or dropped by is tested with facts a test wrote.
+    func candidate(in clip: ScreenRect, under covers: [ScreenRect]) -> Candidate {
+        let leaf = if case .answered(let children) = children { children.isEmpty } else { false }
+        guard leaf || !areas.contains(facts.role) else { return .excluded(.area) }
+        if case .answered(let placed) = facts.frame {
+            guard let placed, !placed.isEmpty, clip.contains(placed.centre) else { return .excluded(.unplaced) }
+            guard !covers.contains(where: { $0.contains(placed.centre) }) else { return .excluded(.covered) }
+        }
+        guard let text = facts.texts.lazy.compactMap({ $0.answer.flatMap { $0 }.flatMap(Text.init) }).first else {
+            return .excluded(facts.texts.contains(.unanswered) ? .unanswered : .wordless)
+        }
+        guard case .answered(let placed?) = facts.frame else { return .excluded(.unanswered) }
+        return .found(Found(text: text, frame: placed, source: .tree(role: facts.role)))
+    }
 }
 
 extension Facts {
-    /// The element as a finding in `region`: its first text that is not blank, at its own
-    /// frame, if the centre of that frame - the point a click lands on - is in the region
-    /// and under none of the windows in front of this one.
+    /// Where this element's children can be clicked, nil when nothing of its frame is left
+    /// to see in `clip`, so the walk does not descend.
     ///
-    /// Placement is decided before text, so an element that could never be a finding here
-    /// is unplaced or covered whatever its text reads did - a busy element off the region
-    /// does not make the region unread. An element is unanswered only when a read it needed
-    /// failed: its frame would not say, or no text answered and one would not say.
-    /// [LAW:no-silent-failure] [LAW:effects-at-boundaries] Pure, so every rule an element
-    /// is kept or dropped by is tested with facts a test wrote.
-    func candidate(in region: ScreenRect, under covers: [ScreenRect]) -> Candidate {
-        if case .answered(let placed) = frame {
-            guard let placed, !placed.isEmpty, region.contains(placed.centre) else { return .excluded(.unplaced) }
-            guard !covers.contains(where: { $0.contains(placed.centre) }) else { return .excluded(.covered) }
-        }
-        guard let text = texts.lazy.compactMap({ $0.answer.flatMap { $0 }.flatMap(Text.init) }).first else {
-            return .excluded(texts.contains(.unanswered) ? .unanswered : .wordless)
-        }
-        guard case .answered(let placed?) = frame else { return .excluded(.unanswered) }
-        return .found(Found(text: text, frame: placed, source: .tree(role: role)))
-    }
-
-    /// Whether nothing under this element can be a finding, so the walk does not descend.
-    ///
-    /// Measured, this is what lets a walk reach a window at all: a full-screen terminal in
-    /// front held four thousand elements, every one of them off the region asked about,
-    /// and walking them spent the whole element bound. A child can lie outside its
-    /// parent's frame - scrolled-off rows do - but then it is clipped by that parent and
-    /// no click reaches it either. An element with no frame, or an empty one, says
-    /// nothing about where its children are, so the walk goes on into it.
-    func screensOff(_ region: ScreenRect, under covers: [ScreenRect]) -> Bool {
-        guard case .answered(let placed?) = frame, !placed.isEmpty else { return false }
-        return hidden(placed, in: region, under: covers)
+    /// Only a scroll area cuts the clip down to its frame: a row scrolled out of its list
+    /// is hidden by it, so no click reaches the row, and its centre lies under the toolbar.
+    /// Any other element may draw its children outside its own frame - a web page's
+    /// dropdown hangs below its header - so they keep the clip it was given, but only while
+    /// some of that element can be seen: one wholly off the clip or covered is not
+    /// descended into, whatever hangs off it. That bet is what lets a walk reach a window at
+    /// all: measured, a full-screen terminal in front held four thousand elements, every
+    /// one off the region, and walking them spent the whole element bound. An element with no frame, or an empty one, says nothing
+    /// about where its children are, so the walk goes on into it.
+    func inner(_ clip: ScreenRect, under covers: [ScreenRect]) -> ScreenRect? {
+        guard case .answered(let placed?) = frame, !placed.isEmpty else { return clip }
+        guard let shown = visible(placed, in: clip, under: covers) else { return nil }
+        return role == Role(rawValue: kAXScrollAreaRole) ? shown : clip
     }
 }
 
-/// Where a walk starts: one window's element, and the frames of every window in front of
-/// it, which everything under it inherits.
+/// Where a walk starts: one window's element, the part of the screen a click inside it can
+/// reach, and the frames of every window in front of it. Everything under it inherits the
+/// covers, and the clip narrowed by each frame on the way down.
 struct Root<Element> {
     let element: Element
+    let clip: ScreenRect
     let covers: [ScreenRect]
 }
 
@@ -197,7 +225,6 @@ private struct Place: Hashable {
 func walk<Element>(
     from roots: [Root<Element>],
     unwalked: Int,
-    in region: ScreenRect,
     within bounds: Bounds,
     elapsed: () -> Duration,
     read: (Element) throws -> Node<Element>
@@ -215,23 +242,23 @@ func walk<Element>(
             guard elapsed() < bounds.time else { stop = .timeBudget(bounds.time); break roots }
             let node = try read(root.element)
             examined += 1
-            let candidate = node.facts.candidate(in: region, under: root.covers)
+            let candidate = node.candidate(in: root.clip, under: root.covers)
             switch candidate {
             case .found(let run) where !seen.insert(Place(text: run.text.value, frame: run.frame)).inserted:
                 counts[.duplicate, default: 0] += 1
             case .found(let run): found.append(run)
             case .excluded(let reason): counts[reason, default: 0] += 1
             }
-            let screened = node.facts.screensOff(region, under: root.covers)
-            switch node.children {
-            case .answered(let children) where !screened:
-                queue.append(contentsOf: children.map { Root(element: $0, covers: root.covers) })
-            case .answered: break
+            let inner = node.facts.inner(root.clip, under: root.covers)
+            switch (node.children, inner) {
+            case (.answered(let children), let inner?):
+                queue.append(contentsOf: children.map { Root(element: $0, clip: inner, covers: root.covers) })
+            case (.answered, nil): break
             // A subtree unread is one more unanswered part - unless nothing in it could be
             // seen, or this element was already counted as one.
-            case .unanswered where !screened && candidate != .excluded(.unanswered):
+            case (.unanswered, _?) where candidate != .excluded(.unanswered):
                 counts[.unanswered, default: 0] += 1
-            case .unanswered: break
+            case (.unanswered, _): break
             }
         }
     }
@@ -244,20 +271,29 @@ func walk<Element>(
 }
 
 /// The on-screen windows any of which can be seen in `region`, front to back, each with
-/// the frames of every window in front of it - every layer, so the menu bar and the Dock
-/// cover what they cover. A window off the region or wholly behind one in front holds
-/// nothing to read, so it is never matched, walked or counted. Pure, so the rule is tested
-/// with windows a test wrote.
-func seen(_ windows: [Window], in region: ScreenRect) -> [(window: Window, covers: [ScreenRect])] {
-    windows.enumerated().map { (window: $1, covers: windows[..<$0].map(\.frame)) }
-        .filter { !hidden($0.window.frame, in: region, under: $0.covers) }
+/// the part of it that can be seen there and the frames of every window in front of it -
+/// every layer, so the menu bar and the Dock cover what they cover. A window off the
+/// region or wholly behind one in front holds nothing to read, so it is never matched,
+/// walked or counted. Pure, so the rule is tested with windows a test wrote.
+func seen(_ windows: [Window], in region: ScreenRect) -> [Seen] {
+    windows.enumerated().compactMap { index, window in
+        let covers = windows[..<index].map(\.frame)
+        return visible(window.frame, in: region, under: covers).map { Seen(window: window, clip: $0, covers: covers) }
+    }
+}
+
+/// A window that can be seen, where, and under what.
+struct Seen {
+    let window: Window
+    let clip: ScreenRect
+    let covers: [ScreenRect]
 }
 
 /// Seen windows as roots to walk, and a count of the ones with no element to start from -
 /// an open menu, a system surface, a window whose app would not list it. Those were on
 /// screen and never read. [LAW:no-silent-failure]
-func plan<Element>(_ seen: [(window: Window, covers: [ScreenRect])], matched: [UInt32: Element]) -> (roots: [Root<Element>], unwalked: Int) {
-    let roots = seen.compactMap { entry in matched[entry.window.id].map { Root(element: $0, covers: entry.covers) } }
+func plan<Element>(_ seen: [Seen], matched: [UInt32: Element]) -> (roots: [Root<Element>], unwalked: Int) {
+    let roots = seen.compactMap { entry in matched[entry.window.id].map { Root(element: $0, clip: entry.clip, covers: entry.covers) } }
     return (roots, seen.count - roots.count)
 }
 
