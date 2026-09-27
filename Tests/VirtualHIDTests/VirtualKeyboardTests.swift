@@ -162,7 +162,7 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
     /// Every other byte assertion here compares the module's packing against `report(_:_:)`,
     /// which packs a report the same way the module does - so the one thing those tests
     /// exist to catch, a wrong layout, is the one thing they would agree with. This is the
-    /// only place the layout is stated independently of the code that produces it, and the
+    /// only place the layout is stated independently of the code that produces it, and
     /// `report(_:_:)` is checked against it here. [LAW:one-source-of-truth]
     @Test func aReportIsSixtySevenBytesLaidOutTheWayTheDriverReadsThem() throws {
         var expected = [UInt8](repeating: 0, count: 67)
