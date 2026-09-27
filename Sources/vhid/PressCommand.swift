@@ -63,6 +63,6 @@ struct ChordsStopped: StoppedPartWay, CustomStringConvertible {
     let cause: any Error
 
     var description: String {
-        "\(cause.reported). \(pressed) of \(of) chords had been pressed before this, and the rest were not sent"
+        cause.reported.then("\(pressed) of \(of) chords had been pressed before this, and the rest were not sent")
     }
 }

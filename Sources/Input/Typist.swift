@@ -125,16 +125,13 @@ public struct TypingStopped: StoppedPartWay, CustomStringConvertible {
         // which no reset here can clear and which silently changes the next character
         // that app receives. [LAW:no-silent-failure]
         let pending = halfTyped.map { ", and \(String($0).debugDescription) was left half typed: its accent is pending in the app and will combine with whatever it receives next" } ?? ""
-        // A cause that is already a sentence - the daemon's refusal ends on the driver's
-        // step - is not given a second full stop.
-        let reported = cause.reported
-        let stop = reported.hasSuffix(".") ? "" : "."
-        return "\(reported)\(stop) \(progress)\(pending)\(Self.unreleased(unreleased))"
+        return Self.unreleased(unreleased, after: cause.reported.then("\(progress)\(pending)"))
     }
 
-    /// The same sentence a stopped chord ends with. [LAW:one-source-of-truth]
-    static func unreleased(_ error: (any Error)?) -> String {
-        error.map { ". The keyboard was not released afterwards: \($0). A key may be left held" } ?? ""
+    /// `report`, then the same sentences a stopped chord ends with when its release
+    /// failed too. [LAW:one-source-of-truth]
+    static func unreleased(_ error: (any Error)?, after report: String) -> String {
+        error.map { report.then("The keyboard was not released afterwards: \($0.reported)").then("A key may be left held") } ?? report
     }
 }
 
@@ -149,5 +146,5 @@ public struct ChordStopped: StoppedPartWay, CustomStringConvertible {
         self.unreleased = unreleased
     }
 
-    public var description: String { "\(cause.reported)\(TypingStopped.unreleased(unreleased))" }
+    public var description: String { TypingStopped.unreleased(unreleased, after: cause.reported) }
 }

@@ -1,5 +1,6 @@
 import DriverExtension
 import Foundation
+import Synchronization
 import VirtualHID
 
 /// Karabiner-VirtualHIDDevice-Daemon, the root process that holds the driver open, and
@@ -125,11 +126,20 @@ extension DaemonProcess.Effects {
     /// never answers, or one whose devices will not start, is stopped before the failure
     /// leaves. The caller holds no pid to orphan. `whenLost` is told the daemon's origin
     /// with the loss, for the same reason: what it may stop is this unit's knowledge.
+    ///
+    /// A daemon stopped here closes its connection on the way down, and that close is
+    /// this failure's consequence, not a loss: told, it would stand in for the failure as
+    /// the reason every client is refused with. So `whenLost` hears nothing from the
+    /// moment the stop is decided. [LAW:no-silent-failure]
     func reach(within limit: Duration, whenLost: @escaping @Sendable (DaemonError, DaemonProcess.Origin) -> Void) throws -> DaemonProcess.Reached<Device> {
-        let (devices, origin) = try connection(by: .now + limit, whenLost: whenLost)
+        let stopping = Mutex(false)
+        let (devices, origin) = try connection(by: .now + limit) { error, origin in
+            if !stopping.withLock({ $0 }) { whenLost(error, origin) }
+        }
         do {
             return DaemonProcess.Reached(devices: devices, daemon: origin, startup: try bringUp(devices, limit))
         } catch {
+            stopping.withLock { $0 = true }
             stop(origin)
             throw error
         }

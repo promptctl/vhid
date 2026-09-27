@@ -284,8 +284,16 @@ cmd_install() {
   echo "==> installing (sudo)" >&2
   sudo installer -pkg "$SCRATCH_PKG" -target /
 
+  # The Manager does not exit until the request is answered, and on a Mac that never
+  # approved the driver that answer is the switch the instruction below names: waited on,
+  # this would hang before saying where it is. So it is left running, and the state is
+  # read once the request has landed, or after ten seconds.
   echo "==> activating the driver extension" >&2
-  "$MANAGER" activate
+  "$MANAGER" activate </dev/null &
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    [ "$("$VHID" driver state 2>/dev/null)" = installed-inactive ] || break
+    sleep 1
+  done
 
   # The Manager exits 0 even when handed a bare usage error, so its exit status proves
   # nothing at all and the state probe is the only honest report. [LAW:verifiable-goals]

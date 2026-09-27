@@ -29,3 +29,17 @@ public extension Error {
         self is CancellationError ? "the run was cancelled" : "\(self)"
     }
 }
+
+public extension String {
+    /// This report with `next` after it as a sentence of its own.
+    ///
+    /// Every wrapper that says more after its cause joins them here, so none has to know
+    /// what the cause ends on. [LAW:one-source-of-truth] A cause that already ends a
+    /// sentence gets no second full stop, and one over several lines - the daemon's
+    /// refusal ends on the driver's step, sometimes on a command to copy - has `next` on a
+    /// line of its own, where it is not read as part of that step or pasted with it.
+    func then(_ next: String) -> String {
+        if contains("\n") { return "\(self)\n\(next)" }
+        return hasSuffix(".") ? "\(self) \(next)" : "\(self). \(next)"
+    }
+}

@@ -57,6 +57,7 @@ manager=$("$vhid" driver pins | awk -F'\t' '$1 == "manager-executable" { print $
 [ -n "$manager" ] || fail "$vhid driver pins names no manager-executable"
 
 console=$(stat -f %Su /dev/console)
+asked=no
 case "$console" in
   # The login window, and Setup Assistant's own user: nobody who could approve anything.
   root|loginwindow|_mbsetupuser)
@@ -66,19 +67,27 @@ case "$console" in
     # The state read below is. It also does not exit until the request is answered, and
     # on a Mac that never approved the driver that answer is the switch this script opens
     # below: waited on, the install would hang there until someone found the switch
-    # unaided. So it is left running, its output to the log, and not waited for.
+    # unaided. So it is left running, its output to the log, and not waited for; one a
+    # previous install left waiting is ended first, so reinstalling does not pile them up.
+    # Whether the request landed is read below rather than taken from having started it.
+    pkill -u "$console" -f "$manager activate" || true
     launchctl asuser "$(id -u "$console")" sudo -u "$console" "$manager" activate >>/var/log/install.log 2>&1 </dev/null &
-    say "asked macOS to activate the driver extension for $console" ;;
+    asked=yes
+    say "started the activation of the driver extension for $console" ;;
 esac
 
 # Where the driver stands now, in the words `vhid driver state` uses anywhere else. A
 # verdict of awaiting-approval is the expected answer on a Mac that never had it: the
 # daemon is loaded and keeps retrying until the switch is turned on, and nothing here
-# can turn it on. So it is reported, not failed on. The request just made lands a moment
-# later, so installed-inactive is read again for up to ten seconds.
+# can turn it on. So it is reported, not failed on. A request just made lands a moment
+# later, so after one installed-inactive is read again for up to ten seconds.
+#
+# The verdict is the last line: `vhid driver state` writes its fact table to stderr
+# first, and both go into $state for the log.
 for _ in 1 2 3 4 5 6 7 8 9 10; do
   state=$("$vhid" driver state 2>&1) && status=0 || status=$?
-  [ "${state##*$'\n'}" = installed-inactive ] || break
+  verdict=${state##*$'\n'}
+  [ "$asked" = yes ] && [ "$verdict" = installed-inactive ] || break
   sleep 1
 done
 say "driver (vhid driver state exited $status): $(tr '\n' ' ' <<<"$state")"
@@ -89,10 +98,6 @@ say "driver (vhid driver state exited $status): $(tr '\n' ' ' <<<"$state")"
 # asked for can land a moment after the state above was read - and only for someone
 # logged in. Opening is a courtesy the closing page and vhid doctor both back up, so a
 # refusal is said, not failed on.
-#
-# The verdict is the last line: `vhid driver state` writes its fact table to stderr
-# first, and both went into $state for the log.
-verdict=${state##*$'\n'}
 case "$console" in
   root|loginwindow|_mbsetupuser) ;;
   *)

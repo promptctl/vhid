@@ -80,16 +80,6 @@ import VirtualHID
         #expect(try readiness.devices().devices === devices)
     }
 
-    /// A failing attempt stops the daemon it started, so its connection closes before the
-    /// failure is told; the failure, which names the driver's step, is the refusal.
-    @Test func aFailureReplacesTheLossItsOwnAttemptReportedOnTheWay() {
-        let readiness = Readiness()
-        let attempt = readiness.begin()
-        _ = readiness.lost(DaemonError.closed, in: attempt)
-        readiness.failed(DaemonError.silent)
-        #expect(refusal(readiness) == "devices not up: \(DaemonError.silent)")
-    }
-
     /// An attempt that failed keeps its reason: its connection closing afterwards is the
     /// failure's consequence, not a new cause.
     @Test func aLateLossDoesNotReplaceWhyTheAttemptFailed() {
