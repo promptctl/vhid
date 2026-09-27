@@ -6,7 +6,7 @@ import Synchronization
 import Testing
 @testable import vhidd
 
-/// The devices as the helper serves them, over recording devices of the test's own: what
+/// The devices as vhidd serves them, over recording devices of the test's own: what
 /// the wire may carry that the device cannot, and what a client leaving lets go of.
 @Suite struct DevicesTests {
     final class RecordingKeyboard: KeyPress {

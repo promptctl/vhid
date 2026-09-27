@@ -4,7 +4,7 @@
 /// for text to be typed on it. What is on the other side - the driver in this process, or
 /// a root daemon across an XPC boundary - is not a fact anything above here needs, which
 /// is what lets the same typing code run under `sudo` against the device and unprivileged
-/// against the helper. [LAW:composability]
+/// against the daemon. [LAW:composability]
 ///
 /// There is no `up(_:)`. A caller that released one key at a time would be deciding what
 /// the device is holding, and the device is the only thing that can know: it derives every

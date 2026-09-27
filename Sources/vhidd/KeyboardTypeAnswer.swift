@@ -11,7 +11,7 @@ import Foundation
 /// verdict under `<product>-<vendor>-<country>` and never asks again about a device that
 /// already has one, so a device that files its own is never asked about.
 ///
-/// [LAW:decomposition] This is the helper's, and not `vhid doctor`'s, because of who can do
+/// [LAW:decomposition] This is vhidd's, and not `vhid doctor`'s, because of who can do
 /// it rather than who noticed: the file is under /Library/Preferences and wants root,
 /// this process is root, and it is the one process that must already be running before
 /// the virtual keyboard can type at all. low-talker's onboarding used to print a `sudo
@@ -70,7 +70,7 @@ enum KeyboardTypeAnswer {
         // a file left 0600 by an interrupted first start, or tightened later by anything
         // outside this process, was read on every subsequent start, found to need no
         // merge, and returned from before the mode was ever looked at - so low-talker's
-        // unprivileged reader failed permanently while the helper believed itself fine,
+        // unprivileged reader failed permanently while vhidd believed itself fine,
         // and `vhid doctor`, the reader now, would fail the same way.
         // [LAW:dataflow-not-control-flow]
         try File.makeReadable(at: path)
@@ -80,10 +80,10 @@ enum KeyboardTypeAnswer {
     /// What a start found. Two named outcomes rather than a bare Bool, because the log
     /// line differs and "already there" is the ordinary case on every boot after the
     /// first - a start that says nothing about which one it was leaves a reader unable to
-    /// tell a working helper from one that has stopped filing anything.
+    /// tell a working vhidd from one that has stopped filing anything.
     ///
     /// Which is a claim about the log, so it is kept where the log can be held to it: the
-    /// cases carry the words the helper says, and a test reads them back to check that no
+    /// cases carry the words vhidd says, and a test reads them back to check that no
     /// two outcomes reach a reader as the same sentence. The enum existed for one start
     /// before the caller discarded it and logged one line either way - the justification
     /// above true of the type and false of the program. [LAW:one-source-of-truth]
@@ -106,7 +106,7 @@ enum KeyboardTypeAnswer {
         /// The mode the file must end up with, whoever wrote it.
         ///
         /// World-readable is load-bearing rather than incidental: `vhid doctor` reads this
-        /// file with no privilege, and a file this helper tightened would leave its row
+        /// file with no privilege, and a file vhidd tightened would leave its row
         /// permanently unreadable for every ordinary user while the answer inside it was
         /// perfectly correct. Measured on this platform: an atomic *replace* keeps the
         /// existing file's mode, so a Mac that already has this file is never tightened -

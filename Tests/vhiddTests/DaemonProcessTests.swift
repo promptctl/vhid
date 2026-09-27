@@ -4,7 +4,7 @@ import VirtualHID
 @testable import vhidd
 
 /// The daemon's lifecycle as a policy over what the world answers: reached when it runs,
-/// started when it does not, and stopped only when this helper started it and could not
+/// started when it does not, and stopped only when vhidd started it and could not
 /// use it. Driven with answers of the test's own and no daemon. [LAW:behavior-not-structure]
 @Suite struct DaemonProcessTests {
     /// The devices the policy hands back as it was given. Held by the test, so identity
@@ -72,7 +72,7 @@ import VirtualHID
     }
 
     /// Nothing answers, so the daemon is started and reached once it comes up; the loss
-    /// handler is told the daemon is this helper's, so it may stop it.
+    /// handler is told the daemon is vhidd's, so it may stop it.
     @Test func aDaemonThatDoesNotAnswerIsStartedAndReachedWhenItComesUp() throws {
         let device = Device()
         let world = World(connections: [.failure(.noSocket(path: "nowhere")), .failure(.socket("connect", ECONNREFUSED)), .success(device)])

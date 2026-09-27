@@ -6,9 +6,9 @@ import Installations
 /// The two devices an installation's daemon owns, as a client reaches them.
 ///
 /// [LAW:decomposition] One sentence, and the reason it is one type rather than two is
-/// that the two cannot be made separately. The helper serves one client at a time, so a
+/// that the two cannot be made separately. The daemon serves one client at a time, so a
 /// keyboard and a mouse in one process are one client and share one connection - two
-/// would have the second refused as busy by the first. And the helper takes their
+/// would have the second refused as busy by the first. And the daemon takes their
 /// reports as a single sequence, so they share one `DeviceQueue`: with a queue each, the
 /// order reports were asked in and the order they arrive in could differ.
 ///

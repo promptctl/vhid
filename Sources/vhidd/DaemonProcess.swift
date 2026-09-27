@@ -7,7 +7,7 @@ import VirtualHID
 /// The public package installs it and registers nothing to run it: there is no launchd
 /// job for it on a Mac that has never had Karabiner-Elements, so a driver that is
 /// enabled and running per `scripts/virtual-hid-driver state` still types nothing. This
-/// helper owns that lifecycle alongside its own. [LAW:no-ambient-temporal-coupling] It
+/// vhidd owns that lifecycle alongside its own. [LAW:no-ambient-temporal-coupling] It
 /// reaches for the daemon first and starts it only when nothing answers, so a daemon
 /// somebody else is running - by hand, or by Karabiner-Elements' own job - is used as it
 /// stands rather than doubled.
@@ -15,7 +15,7 @@ enum DaemonProcess {
     static let executable = "/Library/Application Support/org.pqrs/Karabiner-DriverKit-VirtualHIDDevice/Applications/Karabiner-VirtualHIDDevice-Daemon.app/Contents/MacOS/Karabiner-VirtualHIDDevice-Daemon"
 
     /// Devices that are up, where the daemon behind them came from - found running, or
-    /// started here, in which case it is this helper's to stop - and what bringing them up
+    /// started here, in which case it is vhidd's to stop - and what bringing them up
     /// cost. [LAW:types-are-the-program] Two origins, two duties, and no pid to wonder about.
     struct Reached<Device> {
         let devices: Device
@@ -64,7 +64,7 @@ enum DaemonProcess {
         let terminate: (pid_t) -> Void
     }
 
-    /// The effects done for real. The daemon outlives this process on purpose: a helper
+    /// The effects done for real. The daemon outlives this process on purpose: a vhidd
     /// that exits because the connection dropped is restarted by launchd and finds the
     /// daemon where it left it, and only `stop` ends it.
     static var real: Effects<HID> {
@@ -96,7 +96,7 @@ extension DaemonProcess.Effects {
     /// different waits, so none is handed what another left.
     /// [LAW:no-ambient-temporal-coupling]
     ///
-    /// [LAW:single-enforcer] The one unit that can leave a daemon running that this helper
+    /// [LAW:single-enforcer] The one unit that can leave a daemon running that vhidd
     /// started, so it is the one that makes sure it does not: a daemon started here that
     /// never answers, or one whose devices will not start, is stopped before the failure
     /// leaves. The caller holds no pid to orphan. `whenLost` is told the daemon's origin
@@ -131,7 +131,7 @@ extension DaemonProcess.Effects {
         }
     }
 
-    /// Ends the daemon this helper started. A daemon somebody else started is theirs to end.
+    /// Ends the daemon vhidd started. A daemon somebody else started is theirs to end.
     func stop(_ origin: DaemonProcess.Origin) {
         switch origin {
         case .alreadyRunning:

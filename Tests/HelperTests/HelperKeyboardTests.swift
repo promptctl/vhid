@@ -104,7 +104,7 @@ import Testing
 
     /// Runs `body` on a thread of the test's own and awaits what it returned or threw.
     ///
-    /// `HelperConnection` blocks the thread it is called on until the helper answers,
+    /// `HelperConnection` blocks the thread it is called on until the daemon answers,
     /// which is its contract. A test body runs on the cooperative pool, whose width is the
     /// machine's core count, and a call that blocks there holds one of its threads for
     /// the whole wait: measured on the three-core CI runner, four such calls held every
@@ -141,7 +141,7 @@ import Testing
         #expect(far.service.pointed == ["button 1", "move -3 127", "scroll 2 -1", "release"])
     }
 
-    /// The helper's refusal reaches the caller as the error the helper sent, not as a
+    /// The daemon's refusal reaches the caller as the error the daemon sent, not as a
     /// connection failure. [LAW:no-silent-failure]
     @Test func theHelpersRefusalIsThrown() async throws {
         let (helper, far) = helper(.refuse(domain: "fake", code: 7))

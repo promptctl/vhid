@@ -15,14 +15,14 @@ import Security
 /// a code-signature check in front of every key.
 struct CallerIdentity {
     /// The code-signing requirement a caller must satisfy: signed by the certificate that
-    /// signed this helper.
+    /// signed vhidd.
     ///
     /// [LAW:one-source-of-truth] Read off this process's own signature rather than
-    /// compiled in or handed over by whoever installed the job. The CLI and this helper are
+    /// compiled in or handed over by whoever installed the job. The CLI and vhidd are
     /// signed together - by the dev identity `make signing-identity` makes, or
     /// by the Developer ID that ships them - so "whoever signed me" is the one statement
     /// of who may call that is true of every installation without anyone writing it down.
-    /// A helper signed ad hoc has no certificate to name and does not start; an
+    /// A vhidd signed ad hoc has no certificate to name and does not start; an
     /// unidentified root keystroke service is the failure this exists to make impossible.
     let requirement: SecRequirement
     /// The requirement as text, for the log: an operator refused by it needs to know what
