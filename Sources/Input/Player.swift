@@ -17,6 +17,9 @@ public struct MouseScript: Hashable, Sendable {
     public struct Act: Hashable, Sendable {
         public let at: Duration
         public let report: Report
+        /// The script line it came from; a line that sends nothing has no act, so this and
+        /// not an act's place is how a report is matched to the script.
+        public let line: Int
     }
 
     /// What the mouse is asked to do, one report each.
@@ -43,12 +46,13 @@ public struct MouseScript: Hashable, Sendable {
             case .buttons(let next) where next.isSuperset(of: held) && next.count == held.count + 1:
                 report = .press(next.subtracting(held).first!)
             case .buttons(let next) where next.isSuperset(of: held): throw refuse(event, "this line presses \(next.count - held.count) buttons at once")
+            case .buttons(let next) where next.isDisjoint(with: held): throw refuse(event, "this line lets go of every held button and presses others")
             case .buttons: throw refuse(event, "this line lets go of some buttons and keeps others held")
             case .keys: throw refuse(event, "this is a keys line")
             case .at: throw refuse(event, "this is an at line")
             }
             if case .buttons(let next) = event.report { held = next }
-            acts.append(Act(at: event.at, report: report))
+            acts.append(Act(at: event.at, report: report, line: event.line))
         }
         guard !acts.isEmpty else {
             throw Play.ScriptInvalid(line: play.events[0].line, reason: "no line of this script sends the mouse a report")
@@ -140,7 +144,7 @@ public struct Player<C: Clock> where C.Duration == Duration {
                 try Task.checkCancellation()
                 let sent = started.duration(to: clock.now)
                 try await post(event.report)
-                went.append(Played.Report(scheduled: at(event.at), sent: at(sent), acked: at(started.duration(to: clock.now))))
+                went.append(Played.Report(line: event.line, scheduled: at(event.at), sent: at(sent), acked: at(started.duration(to: clock.now))))
             }
             return Played(startReports: reports, reports: went)
         } catch {
@@ -165,10 +169,11 @@ public struct Played: Hashable, Sendable {
     public let reports: [Report]
 
     /// One report's times, each in microseconds since the Unix epoch: when it was due,
-    /// when it was handed to the mouse, and when the mouse acknowledged it. Its place in
-    /// the script is its place in the list, since reports go out in order and a stop ends
-    /// the list rather than leaving a gap in it.
+    /// when it was handed to the mouse, and when the mouse acknowledged it, with the script
+    /// line it came from. Reports go out in order and a stop ends the list rather than
+    /// leaving a gap in it.
     public struct Report: Hashable, Sendable {
+        public let line: Int
         public let scheduled: Int64
         public let sent: Int64
         public let acked: Int64

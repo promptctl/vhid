@@ -133,9 +133,9 @@ import Testing
         let played = try await Player(pointer: Pointer(mouse: mouse, cursor: fake.cursor), clock: clock, wall: { Self.epoch }, lead: .zero).play(MouseScript(play))
         #expect(played.startReports == 0)
         #expect(played.reports == [
-            Played.Report(scheduled: Self.epoch, sent: Self.epoch, acked: Self.epoch + 3000),
-            Played.Report(scheduled: Self.epoch + 1000, sent: Self.epoch + 3000, acked: Self.epoch + 6000),
-            Played.Report(scheduled: Self.epoch + 10000, sent: Self.epoch + 10000, acked: Self.epoch + 13000),
+            Played.Report(line: 2, scheduled: Self.epoch, sent: Self.epoch, acked: Self.epoch + 3000),
+            Played.Report(line: 3, scheduled: Self.epoch + 1000, sent: Self.epoch + 3000, acked: Self.epoch + 6000),
+            Played.Report(line: 4, scheduled: Self.epoch + 10000, sent: Self.epoch + 10000, acked: Self.epoch + 13000),
         ])
         #expect(played.lateness.ranks == [0, 2000, 2000, 2000])
         #expect(fake.log == ["down 1", "move 5 0", "up"])
@@ -289,9 +289,9 @@ final class ManualClock: Clock {
             {"t_ms":3,"buttons":[]}
             """))
         #expect(script.acts == [
-            MouseScript.Act(at: .zero, report: .press(.left)),
-            MouseScript.Act(at: .milliseconds(2), report: .press(Button(rawValue: 8)!)),
-            MouseScript.Act(at: .milliseconds(3), report: .releaseAll),
+            MouseScript.Act(at: .zero, report: .press(.left), line: 2),
+            MouseScript.Act(at: .milliseconds(2), report: .press(Button(rawValue: 8)!), line: 4),
+            MouseScript.Act(at: .milliseconds(3), report: .releaseAll, line: 5),
         ])
     }
 
@@ -301,6 +301,7 @@ final class ManualClock: Clock {
         (#"{"t_ms":0,"buttons":["left"]}"# + "\n" + #"{"t_ms":0,"buttons":["left","right"]}"# + "\n" + #"{"t_ms":1,"buttons":["left"]}"# + "\n" + #"{"t_ms":2,"buttons":[]}"#, 4, "keeps others"),
         (#"{"t_ms":0,"keys":["leftShift"]}"# + "\n" + #"{"t_ms":1,"keys":[]}"#, 2, "keys line"),
         (#"{"t_ms":0,"at":{"x":5,"y":5}}"#, 2, "at line"),
+        (#"{"t_ms":0,"buttons":["left"]}"# + "\n" + #"{"t_ms":1,"buttons":["right"]}"# + "\n" + #"{"t_ms":2,"buttons":[]}"#, 3, "every held button"),
         (#"{"t_ms":0,"buttons":[]}"#, 2, "no line of this script"),
     ])
     func actsTheMouseCannotTakeAreRefusedAtTheirLine(lines: String, line: Int, saying: String) throws {

@@ -32,15 +32,15 @@ struct PlayCommand: AsyncParsableCommand {
               {"t_ms":8.3,"move":{"dx":4,"dy":-2}}   relative motion in counts, -127 to 127, uncorrected
               {"t_ms":16.7,"wheel":{"v":-1,"h":0}}   wheel ticks, -127 to 127; v positive rolls away from the hand
               {"t_ms":1000,"buttons":[]}             every button up
-            A script is refused whole, before the cursor moves, if a line is malformed, t_ms goes \
+            A script is refused whole, before anything is connected, if a line is malformed, t_ms goes \
             backwards or past an hour, it ends with a button held, or a buttons line adds more \
             than one button or lets go of some and keeps others. The script format also has keys \
             and at lines, for the keyboard and for steering to a point; the mouse alone cannot \
             play them, so they are refused here. A buttons line that repeats the held set sends \
             nothing and prints no report line.
 
-            Stdout is JSON Lines: one {"report":{"index":…,"scheduled_us":…,"sent_us":…,"acked_us":…}} \
-            per report, times in microseconds since the Unix epoch, then \
+            Stdout is JSON Lines: one {"report":{"index":…,"line":…,"scheduled_us":…,"sent_us":…,"acked_us":…}} \
+            per report, line being the script line it came from, times in microseconds since the Unix epoch, then \
             {"done":{"reports":…,"start_reports":…,"late_us":{"p50":…,"p90":…,"p99":…,"max":…}}}, \
             lateness being sent minus scheduled. A late report is sent late, never skipped.
 
@@ -107,7 +107,7 @@ struct PlayCommand: AsyncParsableCommand {
     /// contract, and it needs no daemon, no clock and no mouse to answer for itself.
     static func lines(of ending: Ending) throws -> [String] {
         var lines = try ending.reports.enumerated().map { index, report in
-            try line(ReportLine(report: .init(index: index, scheduledUs: report.scheduled,
+            try line(ReportLine(report: .init(index: index, line: report.line, scheduledUs: report.scheduled,
                                               sentUs: report.sent, ackedUs: report.acked)))
         }
         if case .finished(let played) = ending {
@@ -171,6 +171,7 @@ struct PlayCommand: AsyncParsableCommand {
 
         struct Times: Encodable {
             let index: Int
+            let line: Int
             let scheduledUs: Int64
             let sentUs: Int64
             let ackedUs: Int64
