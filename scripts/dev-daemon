@@ -4,7 +4,7 @@
 #   dev-daemon install    # .build/debug/vhidd, under the name .build/debug/vhid dials
 #   dev-daemon remove
 #
-# Run from `make dev-daemon` and `make remove-dev-daemon`, which build and sign first;
+# Run from `make dev-daemon`, which builds and signs first, and `make remove-dev-daemon`;
 # it asks for sudo itself, for the lines that need root and no others.
 #
 # [LAW:one-source-of-truth] Nothing here knows a name or a plist's shape. The service is
@@ -55,7 +55,7 @@ loaded() {
 # under pipefail, a grep -q that stops early can leave pkgutil on SIGPIPE and turn a
 # claim into a miss.
 if [ -e "$plist" ]; then
-  receipt=$(pkgutil --file-info "$plist")
+  receipt=$(pkgutil --file-info "$plist") || fail "pkgutil could not say whether a pkg installed $plist"
   if grep -q '^pkgid:' <<<"$receipt"; then
     fail "$plist was installed by a pkg ($(awk '/^pkgid:/ { print $2 }' <<<"$receipt" | tr '\n' ' ')); this script registers only the jobs it writes"
   fi
@@ -65,7 +65,7 @@ fi
 # loaded from anywhere else - another plist, an SMAppService bundle - is refused even
 # when a stale plist of ours sits at the path.
 if loaded; then
-  origin=$(launchctl print "system/$service" | awk -F' = ' '!found && /^\tpath = / { print $2; found = 1 }')
+  origin=$(launchctl print "system/$service" | awk -F' = ' '!found && /^\tpath = / { print $2; found = 1 }') || fail "could not read where launchd loaded $service from; see: launchctl print system/$service"
   [ "$origin" = "$plist" ] || fail "the $service job launchd has loaded came from ${origin:-no plist}, not $plist, so this script did not register it; see: launchctl print system/$service"
 fi
 

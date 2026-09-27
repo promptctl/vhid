@@ -83,7 +83,9 @@ check-pins: build
 dev-daemon: build
 	scripts/dev-daemon install
 
-remove-dev-daemon: build
+# No build first: taking a job out should not wait on a tree that compiles, and
+# rebuilding would relink the very binary launchd is running.
+remove-dev-daemon:
 	scripts/dev-daemon remove
 
 # Also the fix for a tree someone has built with bare `swift build`.
