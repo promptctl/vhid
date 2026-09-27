@@ -11,8 +11,8 @@ import Foundation
 enum Frame: Equatable {
     /// The frame types the wire carries with no request id. They are their own case
     /// because the id is what separates them, and a shape that gave every frame an id
-    /// would have to invent one here - which is what the spike did, answering 0 and
-    /// leaving every reader to know by folklore that 0 meant absent rather than a frame
+    /// would have to invent one here - which is what low-talker's spike did, answering 0
+    /// and leaving every reader to know by folklore that 0 meant absent rather than a frame
     /// numbered zero. [LAW:types-are-the-program]
     case control(Kind, payload: [UInt8])
     case request(id: UInt64, payload: [UInt8])

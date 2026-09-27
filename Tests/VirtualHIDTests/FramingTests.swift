@@ -31,8 +31,8 @@ import Testing
     }
 
     /// The frames the protocol gives no id carry none, and there is nothing on the case to
-    /// ask for one. The spike answered 0 in the id position for these, which has the shape
-    /// of a real id while meaning "absent" - a state the protocol does not have.
+    /// ask for one. low-talker's spike answered 0 in the id position for these, which has
+    /// the shape of a real id while meaning "absent" - a state the protocol does not have.
     /// [LAW:types-are-the-program]
     @Test func aFrameTheProtocolGivesNoIDHasNoIDToAskFor() throws {
         let heartbeat = Frame.control(.heartbeat, payload: [])

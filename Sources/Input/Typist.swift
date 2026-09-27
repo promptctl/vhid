@@ -113,10 +113,11 @@ public struct TypingStopped: StoppedPartWay, CustomStringConvertible {
     }
 
     public var description: String {
-        // "Posted and acknowledged", not "typed", and the difference is the spike's whole
-        // finding: the daemon acknowledges reports the driver then drops, so the count is
-        // what left here and an upper bound on what landed, never a delivery receipt. A
-        // run interrupted at 445 has been seen to leave 436 in the document.
+        // "Posted and acknowledged", not "typed", and the difference is the whole finding
+        // of low-talker's spike: the daemon acknowledges reports the driver then
+        // drops, so the count is what left here and an upper bound on what landed, never
+        // a delivery receipt. A run interrupted at 445 has been seen to leave 436 in the
+        // document.
         let progress = typed < of
             ? "\(typed) of \(of) characters had been posted and acknowledged before this, and the rest were not sent"
             : "all \(of) characters had been posted and acknowledged before this"

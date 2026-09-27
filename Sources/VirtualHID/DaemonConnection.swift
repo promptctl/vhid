@@ -6,8 +6,8 @@ import Foundation
 /// Why a daemon and not the driver: opening the driver extension's user client requires
 /// `com.apple.developer.driverkit.userclient-access` naming
 /// `org.pqrs.Karabiner-DriverKit-VirtualHIDDevice`, which Apple grants per application
-/// identifier and which only pqrs's own daemon holds. Root does not help; measured, in the
-/// 3ti.2 spike. So the daemon is the way in.
+/// identifier and which only pqrs's own daemon holds. Root does not help; measured, in
+/// low-talker's 3ti.2 spike. So the daemon is the way in.
 ///
 /// **The caller must be root.** The socket's directory is mode 0700 owned by root, so a
 /// process that is not root cannot see the socket at all. That is stated here once and
@@ -156,9 +156,9 @@ public final class DaemonConnection: Sendable {
         let deadline = began + limit
         try self.request(request, payload, by: deadline)
         // Taken here because `request` returns on the daemon's answer to it. Timing the
-        // first frame of the readiness wait instead - as this did, and the spike before
-        // it - reports the first status push under a name that says the daemon had not
-        // spoken yet, when answering the request is exactly what it just did.
+        // first frame of the readiness wait instead - as this did, and low-talker's spike
+        // before it - reports the first status push under a name that says the daemon had
+        // not spoken yet, when answering the request is exactly what it just did.
         let answered = ContinuousClock.now
         try wait(for: ready, by: deadline)
         return Startup(answered: answered - began, ready: ContinuousClock.now - began)
