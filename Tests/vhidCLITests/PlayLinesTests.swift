@@ -14,16 +14,16 @@ import Testing
 /// internal. Making it public to spare a test that keyword would be adding API to a
 /// shipped library for the test's convenience. [LAW:carrying-cost]
 @Suite struct PlayLinesTests {
-    static func report(_ scheduled: Int64, _ sent: Int64, _ acked: Int64) -> Played.Report {
-        Played.Report(scheduled: scheduled, sent: sent, acked: acked)
+    static func report(_ scheduled: Int64, _ sent: Int64, _ acked: Int64, line: Int = 2) -> Played.Report {
+        Played.Report(line: line, scheduled: scheduled, sent: sent, acked: acked)
     }
 
     @Test func aFinishedPlayPrintsALinePerReportAndThenADoneLine() throws {
-        let played = Played(startReports: 4, reports: [Self.report(1_000, 1_050, 1_090), Self.report(2_000, 2_500, 2_600)])
+        let played = Played(startReports: 4, reports: [Self.report(1_000, 1_050, 1_090), Self.report(2_000, 2_500, 2_600, line: 4)])
         let lines = try PlayCommand.lines(of: .finished(played))
         #expect(lines == [
-            #"{"report":{"acked_us":1090,"index":0,"scheduled_us":1000,"sent_us":1050}}"#,
-            #"{"report":{"acked_us":2600,"index":1,"scheduled_us":2000,"sent_us":2500}}"#,
+            #"{"report":{"acked_us":1090,"index":0,"line":2,"scheduled_us":1000,"sent_us":1050}}"#,
+            #"{"report":{"acked_us":2600,"index":1,"line":4,"scheduled_us":2000,"sent_us":2500}}"#,
             #"{"done":{"late_us":{"max":500,"p50":50,"p90":500,"p99":500},"reports":2,"start_reports":4}}"#,
         ])
     }
@@ -34,7 +34,7 @@ import Testing
     /// no path that could print one. [LAW:dataflow-not-control-flow]
     @Test func aStoppedPlayPrintsItsReportsAndNoDoneLine() throws {
         let lines = try PlayCommand.lines(of: .stopped([Self.report(1_000, 1_050, 1_090)]))
-        #expect(lines == [#"{"report":{"acked_us":1090,"index":0,"scheduled_us":1000,"sent_us":1050}}"#])
+        #expect(lines == [#"{"report":{"acked_us":1090,"index":0,"line":2,"scheduled_us":1000,"sent_us":1050}}"#])
         #expect(!lines.contains { $0.contains("done") })
     }
 

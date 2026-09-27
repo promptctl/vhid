@@ -12,9 +12,6 @@ import Synchronization
 /// disagree with what the device is holding, and that disagreement has one shape: a key
 /// the driver believes is down that nobody remembers pressing, which macOS then repeats.
 struct KeyboardReport {
-    /// A report carries at most this many non-modifier usages; the field is fixed width.
-    static let capacity = 32
-
     let modifiers: UInt8
     let usages: [UInt16]
 
@@ -23,23 +20,17 @@ struct KeyboardReport {
         var usages: [UInt16] = []
         // Sorted so one set of held keys has one encoding: a report that varies with a
         // hash seed is a report no test can pin and no capture can be compared against.
-        for usage in held.sorted() {
+        for usage in try HeldKeys(held).usages.sorted() {
             if let bit = usage.modifierBit { modifiers |= bit } else { usages.append(usage.rawValue) }
         }
-        guard usages.count <= Self.capacity else { throw TooManyKeys(held: usages.count) }
         self.modifiers = modifiers
         self.usages = usages
     }
 
     var bytes: [UInt8] {
-        let padded = usages + Array(repeating: 0, count: Self.capacity - usages.count)
+        let padded = usages + Array(repeating: 0, count: HeldKeys.capacity - usages.count)
         return [1, modifiers, 0] + padded.flatMap { [UInt8($0 & 0xff), UInt8($0 >> 8)] }
     }
-}
-
-public struct TooManyKeys: Error, CustomStringConvertible {
-    public let held: Int
-    public var description: String { "\(held) keys are down, and one HID keyboard report carries \(KeyboardReport.capacity)" }
 }
 
 /// The virtual keyboard, spoken to in the device's own vocabulary: a usage goes down, a

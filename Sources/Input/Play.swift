@@ -1,17 +1,21 @@
 import Foundation
+import Keystrokes
 import Pointing
 
-/// A script of raw mouse reports at fixed times, for a harness that needs the same input
-/// to reach macOS on every run: one absolute starting point, then reports at offsets from
-/// a clock started once the cursor is there.
+/// A script of keyboard and mouse acts at fixed times on one clock: one absolute starting
+/// point, then acts at offsets from a clock started once the cursor is there.
+/// `docs/design/replay.md` is the design this follows.
 ///
-/// Raw and not corrected, because the point of a replay is that acceleration sees
-/// identical input each time; a path the pointer's loop corrected would ask for different
-/// counts on every run. The start is the one place the loop is used, before the clock.
+/// Keys and buttons are stated as the whole set held from that moment, never as a change,
+/// because a held set is what the device sends and a line that says it is true on its own.
+///
+/// Motion is `move`, raw counts that acceleration sees identically on every run, or `at`,
+/// a point the player steers to, which is what a recording can say. Never both in one
+/// script: a raw count is only the same input twice if nothing steered in between.
 ///
 /// [LAW:parse-dont-validate] A `Play` that exists is a script that can be played whole:
-/// at least one report, times that never go backwards, and no button left held at the
-/// end. Nothing downstream asks any of that again.
+/// at least one act, times that never go backwards, no more keys at once than a report
+/// carries, and nothing held at the end. Nothing downstream asks any of that again.
 public struct Play: Hashable, Sendable {
     public let start: ScreenPoint
     public let events: [Timed]
@@ -25,19 +29,27 @@ public struct Play: Hashable, Sendable {
     public struct Timed: Hashable, Sendable {
         public let at: Duration
         public let report: Report
+        /// The script line it was written on, so a refusal made after parsing still names
+        /// the line a person can find.
+        public let line: Int
     }
 
-    /// The four acts `PointingDevice` performs, as data. [LAW:one-type-per-behavior]
+    /// One act, as data. [LAW:one-type-per-behavior]
     public enum Report: Hashable, Sendable {
+        /// Exactly these keys are down from now.
+        case keys(HeldKeys)
+        /// Exactly these buttons are down from now.
+        case buttons(Set<Button>)
         case move(Move)
+        /// The cursor should be here now.
+        case at(ScreenPoint)
         case wheel(Scroll)
-        case down(Button)
-        case up
     }
 
-    /// Parses JSON Lines: `{"to":{"x":800,"y":500}}` first, then one report a line -
-    /// `{"t_ms":0,"down":"left"}`, `{"t_ms":8.3,"move":{"dx":4,"dy":0}}`,
-    /// `{"t_ms":16.7,"wheel":{"v":-1,"h":0}}`, `{"t_ms":1000,"up":true}`. Blank lines are
+    /// Parses JSON Lines: `{"to":{"x":800,"y":500}}` first, then one act a line -
+    /// `{"t_ms":0,"keys":["leftShift",4]}`, `{"t_ms":0,"buttons":["left"]}`,
+    /// `{"t_ms":8.3,"move":{"dx":4,"dy":0}}`, `{"t_ms":8.3,"at":{"x":810,"y":500}}`,
+    /// `{"t_ms":16.7,"wheel":{"v":-1,"h":0}}`. Blank lines are
     /// skipped. A key a line does not take is refused, so a misspelt report is never
     /// played as something else. [LAW:no-silent-failure]
     public static func parse(_ text: String) throws -> Play {
@@ -49,19 +61,30 @@ public struct Play: Hashable, Sendable {
             throw ScriptInvalid(line: lines.first?.number ?? 1, reason: "a script is a {\"to\":{\"x\":…,\"y\":…}} line and at least one report after it")
         }
         let start = try decode(StartLine.self, first).to
-        let events = try lines.dropFirst().map { try decode(ReportLine.self, $0).timed }
-        for (line, (previous, next)) in zip(lines.dropFirst(2), zip(events, events.dropFirst())) where next.at < previous.at {
-            throw ScriptInvalid(line: line.number, reason: "t_ms goes backwards: \(next.at) after \(previous.at)")
+        let events = try lines.dropFirst().map { line in try decode(ReportLine.self, line).timed(on: line.number) }
+        for (previous, next) in zip(events, events.dropFirst()) where next.at < previous.at {
+            throw ScriptInvalid(line: next.line, reason: "t_ms goes backwards: \(next.at) after \(previous.at)")
         }
-        let held = events.reduce(into: Set<Button>()) { held, event in
+        if let firstMove = events.first(where: { if case .move = $0.report { true } else { false } }),
+           let firstAt = events.first(where: { if case .at = $0.report { true } else { false } }) {
+            throw ScriptInvalid(line: max(firstMove.line, firstAt.line), reason: "a script moves the pointer with move lines or with at lines, and this one has both (move on line \(firstMove.line), at on line \(firstAt.line))")
+        }
+        // What each held set is at the end: the last line that states it, or nothing held
+        // when no line ever did.
+        var keys = HeldKeys.none
+        var buttons: Set<Button> = []
+        for event in events {
             switch event.report {
-            case .down(let button): held.insert(button)
-            case .up: held.removeAll()
-            case .move, .wheel: break
+            case .keys(let held): keys = held
+            case .buttons(let held): buttons = held
+            case .move, .at, .wheel: break
             }
         }
-        guard held.isEmpty else {
-            throw ScriptInvalid(line: last.number, reason: "the script ends with button \(held.sorted().map { "\($0.rawValue)" }.joined(separator: ", ")) held: end it with {\"t_ms\":…,\"up\":true}")
+        guard keys.usages.isEmpty else {
+            throw ScriptInvalid(line: last.number, reason: "the script ends with \(keys.usages.sorted().map(\.spelled).joined(separator: ", ")) held: end it with {\"t_ms\":…,\"keys\":[]}")
+        }
+        guard buttons.isEmpty else {
+            throw ScriptInvalid(line: last.number, reason: "the script ends with button \(buttons.sorted().map { "\($0.rawValue)" }.joined(separator: ", ")) held: end it with {\"t_ms\":…,\"buttons\":[]}")
         }
         return Play(start: start, events: events)
     }
@@ -120,15 +143,19 @@ private struct StartLine: Decodable {
     /// mistake one line later was refused by name. A misspelt key in a script is a report
     /// that does not do what it says, wherever in the line it sits.
     init(from decoder: Decoder) throws {
-        let line = try container(decoder, taking: ["to"])
-        let start = try container(line.superDecoder(forKey: AnyKey("to")), taking: ["x", "y"])
-        let x = try start.decode(Double.self, forKey: AnyKey("x"))
-        let y = try start.decode(Double.self, forKey: AnyKey("y"))
-        guard let point = ScreenPoint(x: x, y: y) else {
-            throw Refusal(reason: "to is (\(x.clean), \(y.clean)), which is not a place on the screen")
-        }
-        to = point
+        to = try point(try container(decoder, taking: ["to"]), AnyKey("to"))
     }
+}
+
+/// A place on the screen, as the start line and an `at` line both write one.
+private func point(_ line: KeyedDecodingContainer<AnyKey>, _ key: AnyKey) throws -> ScreenPoint {
+    let place = try container(line.superDecoder(forKey: key), taking: ["x", "y"])
+    let x = try place.decode(Double.self, forKey: AnyKey("x"))
+    let y = try place.decode(Double.self, forKey: AnyKey("y"))
+    guard let point = ScreenPoint(x: x, y: y) else {
+        throw Refusal(reason: "\(key.stringValue) is (\(x.clean), \(y.clean)), which is not a place on the screen")
+    }
+    return point
 }
 
 private extension Double {
@@ -137,51 +164,74 @@ private extension Double {
     var clean: String { self == rounded(.towardZero) && abs(self) < 1e15 ? String(Int(self)) : String(self) }
 }
 
-/// `t_ms` and exactly one of the four reports.
+/// `t_ms` and exactly one act.
 private struct ReportLine: Decodable {
-    static let reports: Set<String> = ["down", "move", "up", "wheel"]
-    let timed: Play.Timed
+    static let reports: Set<String> = ["at", "buttons", "keys", "move", "wheel"]
+    let at: Duration
+    let report: Play.Report
+
+    func timed(on line: Int) -> Play.Timed { Play.Timed(at: at, report: report, line: line) }
 
     init(from decoder: Decoder) throws {
         let line = try container(decoder, taking: Self.reports.union(["t_ms"]))
         let named = line.allKeys.map(\.stringValue).filter(Self.reports.contains).sorted()
-        guard named.count == 1, let report = named.first else {
+        guard named.count == 1, let kind = named.first else {
             throw Refusal(reason: "a line carries exactly one of \(Self.reports.sorted().joined(separator: ", ")), and this one has \(named.isEmpty ? "none" : named.joined(separator: " and "))")
         }
         let milliseconds = try line.decode(Double.self, forKey: AnyKey("t_ms"))
         guard (0...Play.longest).contains(milliseconds) else {
             throw Refusal(reason: "t_ms is \(milliseconds), and it is milliseconds from the start, 0 through \(Int(Play.longest)), an hour")
         }
-        let key = AnyKey(report)
+        let key = AnyKey(kind)
         let decoded: Play.Report
-        switch report {
+        switch kind {
         case "move":
             let (x, y) = try axes(line, key, "dx", "dy")
             decoded = .move(Move(x: x, y: y))
         case "wheel":
             let (vertical, horizontal) = try axes(line, key, "v", "h")
             decoded = .wheel(Scroll(vertical: vertical, horizontal: horizontal))
-        case "down":
-            decoded = .down(try button(line, key))
+        case "at":
+            decoded = .at(try point(line, key))
+        case "buttons":
+            decoded = .buttons(Set(try heldSet(line, key, button)))
         default:
-            guard try line.decode(Bool.self, forKey: key) else { throw Refusal(reason: "up releases every button and is written \"up\":true") }
-            decoded = .up
+            let usages = try heldSet(line, key, usage)
+            do {
+                decoded = .keys(try HeldKeys(Set(usages)))
+            } catch {
+                throw Refusal(reason: "keys holds \(error.held) keys besides the modifiers, and one report carries \(HeldKeys.capacity)")
+            }
         }
-        timed = Play.Timed(at: .nanoseconds(Int64((milliseconds * 1e6).rounded())), report: decoded)
+        at = .nanoseconds(Int64((milliseconds * 1e6).rounded()))
+        report = decoded
     }
 }
 
-/// The button a `down` line names, by word or by number.
+/// A held-set line's list, each entry read by `one`, with an entry named twice refused:
+/// a set written with a repeat is a script that says something other than it means.
+private func heldSet<T: Hashable>(_ line: KeyedDecodingContainer<AnyKey>, _ key: AnyKey, _ one: (inout UnkeyedDecodingContainer, String) throws -> T) throws -> [T] {
+    var list = try line.nestedUnkeyedContainer(forKey: key)
+    var held: [T] = []
+    while !list.isAtEnd {
+        let entry = try one(&list, key.stringValue)
+        guard !held.contains(entry) else { throw Refusal(reason: "\(key.stringValue) names one entry twice") }
+        held.append(entry)
+    }
+    return held
+}
+
+/// One button of a `buttons` list, by word or by number.
 ///
 /// Both spellings, because the device has thirty-two buttons and only three of them have a
-/// word. A script written for a mouse with a thumb button says `{"down":8}`; one a person
-/// wrote by hand says `{"down":"left"}`. [LAW:no-silent-failure] A word that names no
-/// button and a number outside 1...32 are each refused by name rather than defaulted to
-/// the left button, which would replay a different gesture than the script describes.
-private func button(_ line: KeyedDecodingContainer<AnyKey>, _ key: AnyKey) throws -> Button {
-    if let name = try? line.decode(String.self, forKey: key) {
+/// word. A script written for a mouse with a thumb button says `[8]`; one a person wrote by
+/// hand says `["left"]`. [LAW:no-silent-failure] A word that names no button and a number
+/// outside 1...32 are each refused by name rather than defaulted to the left button, which
+/// would replay a different gesture than the script describes.
+private func button(_ list: inout UnkeyedDecodingContainer, _ key: String) throws -> Button {
+    if let name = try? list.decode(String.self) {
         guard let button = Button(name: name) else {
-            throw Refusal(reason: "\(key.stringValue) is \(name.debugDescription), which names no button: use \(Button.named.keys.sorted().joined(separator: ", ")), or a number from 1 to 32")
+            throw Refusal(reason: "\(key) has \(name.debugDescription), which names no button: use \(Button.named.keys.sorted().joined(separator: ", ")), or a number from 1 to 32")
         }
         return button
     }
@@ -190,11 +240,43 @@ private func button(_ line: KeyedDecodingContainer<AnyKey>, _ key: AnyKey) throw
     // which reports "The given data was not valid JSON" - true of none of them, and no
     // help at all to whoever wrote the line. A Double takes every one of them, so the
     // refusal below is the one that knows what the mistake was. [LAW:no-silent-failure]
-    let number = try line.decode(Double.self, forKey: key)
+    let number = try list.decode(Double.self)
     guard number == number.rounded(.towardZero), number >= 1, number <= 32, let button = Button(rawValue: UInt8(number)) else {
-        throw Refusal(reason: "\(key.stringValue) is \(number.clean), and a button is a whole number from 1 to 32, or one of \(Button.named.keys.sorted().joined(separator: ", "))")
+        throw Refusal(reason: "\(key) has \(number.clean), and a button is a whole number from 1 to 32, or one of \(Button.named.keys.sorted().joined(separator: ", "))")
     }
     return button
+}
+
+/// The words a `keys` line may name a key by: a holdable modifier, or a key a chord names
+/// by name. [LAW:one-source-of-truth] Read both ways, so a refusal spells a key the way the
+/// script could have written it.
+private let keyWords: [String: Usage] = {
+    let modifiers = Modifier.holdable.compactMap { modifier in modifier.usage.map { (modifier.rawValue, $0) } }
+    let named = KeyChord.namedKeys.compactMap { name, key in Usage(virtualKeyCode: key.rawValue).map { (name, $0) } }
+    return Dictionary(uniqueKeysWithValues: modifiers + named)
+}()
+
+private extension Usage {
+    /// This key as a script would write it: its word when it has one, else its number.
+    var spelled: String { keyWords.first { $0.value == self }?.key ?? "\(rawValue)" }
+}
+
+/// One key of a `keys` list: a key by its HID usage, never by the character a layout puts
+/// on it, since a held set spelled in characters could name a different key on each line
+/// and on each layout. A name is a holdable modifier or a key a chord names by name; a
+/// number is any keyboard-page usage from 4 through 231, the range that names keys.
+private func usage(_ list: inout UnkeyedDecodingContainer, _ key: String) throws -> Usage {
+    if let name = try? list.decode(String.self) {
+        guard let usage = keyWords[name] else {
+            throw Refusal(reason: "\(key) has \(name.debugDescription), which names no key: use a modifier (\(Modifier.holdableNames)), one of \(KeyChord.keyNameList), or a usage number from \(Usage.keys.lowerBound) to \(Usage.keys.upperBound)")
+        }
+        return usage
+    }
+    let number = try list.decode(Double.self)
+    guard number == number.rounded(.towardZero), Double(Usage.keys.lowerBound) <= number, number <= Double(Usage.keys.upperBound) else {
+        throw Refusal(reason: "\(key) has \(number.clean), and a key is a usage number from \(Usage.keys.lowerBound) to \(Usage.keys.upperBound), or a name")
+    }
+    return Usage(rawValue: UInt16(number))
 }
 
 /// A report's two axes, each refused rather than clamped when the device cannot carry it:

@@ -1,7 +1,68 @@
 import Foundation
 import Pointing
 
-/// Plays a `Play` on a mouse: the pointer's loop to the start, then every report at its
+/// A script the mouse alone can play: the start, then one report per act.
+///
+/// [LAW:parse-dont-validate] Made from a `Play` before anything is connected, so a script
+/// this cannot hold is refused at its line and moves nothing. The mouse presses one button
+/// or releases every one, so a `buttons` line is one report when it adds one button to
+/// those held or releases them all. A line that adds several, one that lets go of some and
+/// keeps others, a `keys` line and an `at` line need device acts the mouse does not have;
+/// `docs/design/replay.md` gives them to `vhid play`. A line that restates the set already
+/// held sends nothing, so it is not an act.
+public struct MouseScript: Hashable, Sendable {
+    public let start: ScreenPoint
+    public let acts: [Act]
+
+    public struct Act: Hashable, Sendable {
+        public let at: Duration
+        public let report: Report
+        /// The script line it came from; a line that sends nothing has no act, so this and
+        /// not an act's place is how a report is matched to the script.
+        public let line: Int
+    }
+
+    /// What the mouse is asked to do, one report each.
+    public enum Report: Hashable, Sendable {
+        case move(Move)
+        case wheel(Scroll)
+        case press(Button)
+        case releaseAll
+    }
+
+    public init(_ play: Play) throws(Play.ScriptInvalid) {
+        var held: Set<Button> = []
+        var acts: [Act] = []
+        func refuse(_ event: Play.Timed, _ reason: String) -> Play.ScriptInvalid {
+            Play.ScriptInvalid(line: event.line, reason: "\(reason), which the mouse alone cannot play")
+        }
+        for event in play.events {
+            let report: Report
+            switch event.report {
+            case .move(let delta): report = .move(delta)
+            case .wheel(let delta): report = .wheel(delta)
+            case .buttons(let next) where next == held: continue
+            case .buttons(let next) where next.isEmpty: report = .releaseAll
+            case .buttons(let next) where next.isSuperset(of: held) && next.count == held.count + 1:
+                report = .press(next.subtracting(held).first!)
+            case .buttons(let next) where next.isSuperset(of: held): throw refuse(event, "this line presses \(next.count - held.count) buttons at once")
+            case .buttons(let next) where next.isDisjoint(with: held): throw refuse(event, "this line lets go of every held button and presses others")
+            case .buttons: throw refuse(event, "this line lets go of some buttons and keeps others held")
+            case .keys: throw refuse(event, "this is a keys line")
+            case .at: throw refuse(event, "this is an at line")
+            }
+            if case .buttons(let next) = event.report { held = next }
+            acts.append(Act(at: event.at, report: report, line: event.line))
+        }
+        guard !acts.isEmpty else {
+            throw Play.ScriptInvalid(line: play.events[0].line, reason: "no line of this script sends the mouse a report")
+        }
+        self.start = play.start
+        self.acts = acts
+    }
+}
+
+/// Plays a `MouseScript` on a mouse: the pointer's loop to the start, then every report at its
 /// offset from one start of the clock, recording when each was handed to the mouse and
 /// when the mouse acknowledged it.
 ///
@@ -35,14 +96,14 @@ public struct Player<C: Clock> where C.Duration == Duration {
         self.lead = lead
     }
 
-    public func play(_ play: Play, isolation: isolated (any Actor)? = #isolation) async throws -> Played {
+    public func play(_ play: MouseScript, isolation: isolated (any Actor)? = #isolation) async throws -> Played {
         var went: [Played.Report] = []
         do {
             let reports = try await pointer.move(to: play.start)
             let started = clock.now
             let epoch = wall()
             let at = { (offset: Duration) in epoch + offset.microseconds }
-            for event in play.events {
+            for event in play.acts {
                 let deadline = started.advanced(by: event.at)
                 let wake = deadline.advanced(by: .zero - lead)
                 // A wait of any length is slices, each asking whether the run was
@@ -83,20 +144,20 @@ public struct Player<C: Clock> where C.Duration == Duration {
                 try Task.checkCancellation()
                 let sent = started.duration(to: clock.now)
                 try await post(event.report)
-                went.append(Played.Report(scheduled: at(event.at), sent: at(sent), acked: at(started.duration(to: clock.now))))
+                went.append(Played.Report(line: event.line, scheduled: at(event.at), sent: at(sent), acked: at(started.duration(to: clock.now))))
             }
             return Played(startReports: reports, reports: went)
         } catch {
-            throw PlayStopped(played: went, of: play.events.count, cause: PointingStopped(cause: error, unreleased: await pointer.release()))
+            throw PlayStopped(played: went, of: play.acts.count, cause: PointingStopped(cause: error, unreleased: await pointer.release()))
         }
     }
 
-    private func post(_ report: Play.Report, isolation: isolated (any Actor)? = #isolation) async throws {
+    private func post(_ report: MouseScript.Report, isolation: isolated (any Actor)? = #isolation) async throws {
         switch report {
         case .move(let delta): try await pointer.mouse.move(by: delta)
         case .wheel(let delta): try await pointer.mouse.scroll(by: delta)
-        case .down(let button): try await pointer.mouse.down(button)
-        case .up: try await pointer.mouse.releaseAll()
+        case .press(let button): try await pointer.mouse.down(button)
+        case .releaseAll: try await pointer.mouse.releaseAll()
         }
     }
 }
@@ -108,10 +169,11 @@ public struct Played: Hashable, Sendable {
     public let reports: [Report]
 
     /// One report's times, each in microseconds since the Unix epoch: when it was due,
-    /// when it was handed to the mouse, and when the mouse acknowledged it. Its place in
-    /// the script is its place in the list, since reports go out in order and a stop ends
-    /// the list rather than leaving a gap in it.
+    /// when it was handed to the mouse, and when the mouse acknowledged it, with the script
+    /// line it came from. Reports go out in order and a stop ends the list rather than
+    /// leaving a gap in it.
     public struct Report: Hashable, Sendable {
+        public let line: Int
         public let scheduled: Int64
         public let sent: Int64
         public let acked: Int64
@@ -127,7 +189,7 @@ public struct Lateness: Hashable, Sendable, Encodable {
     public let p99: Int64
     public let max: Int64
 
-    /// [LAW:parse-dont-validate] A `Play` has at least one report, so a played one does too
+    /// [LAW:parse-dont-validate] A `MouseScript` has at least one act, so a played one does too
     /// and there is always a rank to read; the empty case is the caller's precondition.
     init(of lateness: [Int64]) {
         let sorted = lateness.sorted()
