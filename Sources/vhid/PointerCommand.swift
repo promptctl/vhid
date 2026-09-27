@@ -52,7 +52,7 @@ struct PlayCommand: AsyncParsableCommand {
             // script that cannot be played whole moves nothing.
             let play = try Play.parse(String(decoding: FileHandle.standardInput.readDataToEndOfFile(), as: UTF8.self))
             ending = .finished(try await Devices.using(try service.installation()) {
-                try await Player(pointer: $0.pointer, clock: WakingClock(), wall: Self.epochMicroseconds, lead: Self.lead).play(play)
+                try await Player(pointer: $0.pointer, clock: ContinuousClock(), wall: Self.epochMicroseconds, lead: Self.lead).play(play)
             })
         } catch {
             // The reports that did go out are printed even for a run that stopped, so a
@@ -127,6 +127,11 @@ struct PlayCommand: AsyncParsableCommand {
     /// the wait, and with how idle the core has gone: the same 5 ms wait measured 1255 us
     /// late in a loop that kept the CPU busy between sleeps and 2505 us late in one that
     /// did not.
+    ///
+    /// Nor is it the clock. A clock blocking a thread in `mach_wait_until` was kept for
+    /// this, and interleaved with `ContinuousClock.sleep` on battery on 2026-09-27 it came
+    /// back no sooner: p99 297 us against 382 us late at 1 ms, 1328 against 1305 at 5 ms,
+    /// 2151 against 2099 at 8 ms, 5117 against 5091 at 20 ms, within noise across runs.
     ///
     /// So no fixed number covers every gap a script can have, and this one does not
     /// pretend to. It is the measured p99 for the 5 ms neighbourhood most scripts sit in,
