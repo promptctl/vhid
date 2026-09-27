@@ -97,12 +97,18 @@ public struct Recorder {
     /// Takes one event, writing a line when it changed what the person holds or where
     /// they put the cursor.
     public mutating func take(_ event: TapEvent) {
+        // Never before the line before it: the tap can hand two devices' events over a
+        // hair out of order, and a script's times may not go backwards.
+        let event = TapEvent(at: max(event.at, lines.last?.at ?? .zero), sender: event.sender, location: event.location, kind: event.kind)
         let held = self.held
         if vhid.contains(event.sender) {
             takeVhid(event)
         } else {
             takePerson(event)
         }
+        // A modifier vhid let go of while the person held it stays down in the session;
+        // once its bit clears it is nobody's, and the person's next press of it is theirs.
+        vhidModifiers.formIntersection(session)
         last = event.location
         if self.held != held { lines.append(.keys(event.at, self.held)) }
     }
@@ -139,6 +145,10 @@ public struct Recorder {
             session = Self.modifiers(in: flags)
             lines.append(.keys(event.at, held.union([Self.capsLock])))
             lines.append(.keys(event.at, held))
+        case .flagsChanged(Self.fnCode, let flags):
+            // fn has no usage, so it is left out, and counted as it goes down.
+            unmapped += flags & Self.fnBit != 0 ? 1 : 0
+            session = Self.modifiers(in: flags)
         case .flagsChanged(_, let flags):
             session = Self.modifiers(in: flags)
         case .motion:
@@ -154,29 +164,30 @@ public struct Recorder {
 
     /// The script, stopped at `stop`.
     ///
-    /// The keys lines at the end, back to the last line with nothing held or the last
-    /// buttons line, whichever is later, are dropped when every key they hold is in
-    /// `stopKeys` - the Control keys and the key that types `c` - since they are the
-    /// chord that stopped the recording. Any other key in them was not the stop, and
-    /// keeps them all. Then every key and button comes up, at the stop or the last line,
+    /// The keys lines at the end that hold nothing but `stopKeys` - the Control keys and the
+    /// key that types `c` - are dropped, since they are the chord that stopped the
+    /// recording, pressed and let go. A line holding any other key was not the stop, and
+    /// the run ends there. Then every key and button comes up, at the stop or the last line,
     /// whichever is later, as a script has to end.
     public func script(stoppedAt stop: Duration, stopKeys: Set<Usage>) -> String {
-        let anchor = lines.lastIndex {
-            switch $0 {
-            case .keys(_, let held): held.isEmpty
-            case .buttons: true
-            case .at: false
+        // The stop chord is the run of keys lines at the end holding nothing but stop keys,
+        // its releases included, back to the last buttons line or keys line holding
+        // anything else. Pointer lines inside it are the person's and stay.
+        let chord = lines.indices.reversed().prefix { index in
+            switch lines[index] {
+            case .keys(_, let held): held.isSubset(of: stopKeys)
+            case .at: true
+            case .buttons: false
             }
-        } ?? -1
-        let trailing = lines.indices.filter { index in
-            guard index > anchor, case .keys = lines[index] else { return false }
-            return true
         }
-        let stopChord = trailing.allSatisfy { index in
-            guard case .keys(_, let held) = lines[index] else { return true }
-            return held.isSubset(of: stopKeys)
-        }
-        let kept = lines.enumerated().filter { !(stopChord && trailing.contains($0.offset)) }.map(\.element)
+        // The run's first keys line, when it holds nothing, is the release before the chord
+        // began, not part of it: dropped, the key before it would stay held to the stop.
+        let before = chord.last { index in if case .keys = lines[index] { true } else { false } }
+        let released = before.flatMap { index in if case .keys(_, let held) = lines[index], held.isEmpty { index } else { nil } }
+        let kept = lines.enumerated().filter { index, line in
+            guard chord.contains(index), case .keys = line else { return true }
+            return index == 0 || index == released
+        }.map(\.element)
         let end = max(stop, kept.last?.at ?? .zero)
         let written = kept + [.keys(end, []), .buttons(end, [])]
         return ([#"{"to":\#(Self.point(start))}"#] + written.map(Self.render)).joined(separator: "\n") + "\n"
@@ -209,7 +220,10 @@ public struct Recorder {
     }
 
     static let capsLockCode: UInt16 = 0x39
-    static let capsLock = Usage(rawValue: 0x39)
+    static let capsLock = Usage(virtualKeyCode: capsLockCode)!
+    static let fnCode: UInt16 = 63
+    /// `NX_SECONDARYFNMASK`: fn is down.
+    static let fnBit: UInt64 = 0x800000
 
     /// Each side's modifier bit in an event's flags, `NX_DEVICE*KEYMASK`. The side a
     /// modifier is on is only in these, never in the side-blind bits beside them.

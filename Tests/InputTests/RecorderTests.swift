@@ -67,6 +67,13 @@ import Testing
             (0, keys()), (10, keys(0x04)), (20, keys()), (150, keys()), (150, .buttons([])),
         ])
 
+        // Let go before the stop took effect: the releases are the chord's too.
+        stopped.take(event(110, .keyUp(keyCode: 8)))
+        stopped.take(event(112, .flagsChanged(keyCode: 59, flags: 0)))
+        expect(try replayed(stopped, stoppedAt: 150), [
+            (0, keys()), (10, keys(0x04)), (20, keys()), (150, keys()), (150, .buttons([])),
+        ])
+
         var cut = Recorder(start: Self.start, flags: 0, vhid: []) { _ in false }
         cut.take(event(100, .flagsChanged(keyCode: 59, flags: 0x40001)))
         cut.take(event(101, .keyDown(keyCode: 7, autorepeat: false)))
@@ -92,6 +99,22 @@ import Testing
         #expect(recorder.vhidAtEdge == 1)
     }
 
+    /// vhid letting go of a modifier the person also holds leaves it the person's: once it
+    /// comes up, their next press of it is recorded. Times that arrive out of order are
+    /// held to the line before.
+    @Test func aSharedModifierIsThePersonsOnceVhidLetsGo() throws {
+        var recorder = Recorder(start: Self.start, flags: 0, vhid: [Self.vhid]) { _ in false }
+        recorder.take(event(10, .flagsChanged(keyCode: 56, flags: 0x20002), from: Self.vhid))
+        recorder.take(event(20, .flagsChanged(keyCode: 56, flags: 0x20002)))
+        recorder.take(event(30, .flagsChanged(keyCode: 56, flags: 0x20002), from: Self.vhid))
+        recorder.take(event(40, .flagsChanged(keyCode: 56, flags: 0)))
+        recorder.take(event(50, .flagsChanged(keyCode: 56, flags: 0x20002)))
+        recorder.take(event(45, .flagsChanged(keyCode: 56, flags: 0)))
+        expect(try replayed(recorder, stoppedAt: 60), [
+            (0, keys()), (50, keys(0xE1)), (50, keys()), (60, keys()), (60, .buttons([])),
+        ])
+    }
+
     /// Caps Lock never comes up, so it is a press: with it, then without. A key with no
     /// usage is left out and counted. A modifier down when recording started is the first
     /// line, and comes up when it does.
@@ -99,7 +122,8 @@ import Testing
         var recorder = Recorder(start: Self.start, flags: 0x100008, vhid: []) { _ in false }
         recorder.take(event(10, .flagsChanged(keyCode: 55, flags: 0)))
         recorder.take(event(20, .flagsChanged(keyCode: 0x39, flags: 0x10000)))
-        recorder.take(event(30, .keyDown(keyCode: 63, autorepeat: false)))
+        recorder.take(event(30, .flagsChanged(keyCode: 63, flags: 0x800100)))
+        recorder.take(event(35, .flagsChanged(keyCode: 63, flags: 0)))
         expect(try replayed(recorder, stoppedAt: 40), [
             (0, keys(0xE3)), (10, keys()), (20, keys(0x39)), (20, keys()), (40, keys()), (40, .buttons([])),
         ])
