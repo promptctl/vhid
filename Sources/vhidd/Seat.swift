@@ -92,6 +92,12 @@ final class Seat: NSObject, HelperService, @unchecked Sendable {
         }
     }
 
+    /// The daemon's last failure, answered whether or not the devices are up.
+    func lastFailure(reply: @escaping (String?, Date?) -> Void) {
+        let last = vhidd.lastFailure.current
+        reply(last?.text, last?.at)
+    }
+
     /// A call on a seat whose devices were lost under it.
     struct Lost: Error, CustomStringConvertible {
         var description: String { "the devices this connection held were lost and brought up again, releasing everything it held; connect again" }

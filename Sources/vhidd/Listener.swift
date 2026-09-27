@@ -23,7 +23,7 @@ final class Listener: NSObject, NSXPCListenerDelegate {
             guard let token = connection.callerAuditToken else { throw CallerIdentity.Refused.noAuditToken }
             try callers.check(auditToken: token)
         } catch {
-            log("refused a connection from pid \(connection.processIdentifier): \(error)")
+            logFailure("refused a connection from pid \(connection.processIdentifier): \(error)")
             return false
         }
         let id = ObjectIdentifier(connection)

@@ -44,3 +44,19 @@ elif grep -q "Could not find service" <<<"$record"; then
 else
   fail "could not read whether $service is loaded: $record"
 fi
+
+# The menu bar item a previous install started in the logged-in person's session, stopped
+# for the same reason: postinstall starts the new one under the same label. A session
+# with nobody in it has no item to stop. Launched at login in every other session, which
+# picks up the new binary at its next login.
+agent="$service.menubar"
+console=$(stat -f %Su /dev/console)
+case "$console" in
+  root|loginwindow|_mbsetupuser) ;;
+  *)
+    domain="gui/$(id -u "$console")"
+    if launchctl print "$domain/$agent" >/dev/null 2>&1; then
+      launchctl bootout "$domain/$agent" || fail "launchd would not unload $agent for $console"
+      echo "vhid preinstall: stopped the menu bar item for $console"
+    fi ;;
+esac

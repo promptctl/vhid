@@ -17,6 +17,7 @@ let package = Package(
         .library(name: "Doctor", targets: ["Doctor"]),
         .executable(name: "vhidd", targets: ["vhidd"]),
         .executable(name: "vhid", targets: ["vhid"]),
+        .executable(name: "vhid-menubar", targets: ["vhid-menubar"]),
     ],
     // The dependencies stop at the leaf. Every library target below still links
     // nothing outside this package; what takes these is the CLI, which is the end of the
@@ -111,6 +112,15 @@ let package = Package(
         // [LAW:effects-at-boundaries]
         .target(name: "Doctor", dependencies: ["DriverExtension", "Installations", "Helper"]),
         .testTarget(name: "DoctorTests", dependencies: ["Doctor", "DriverExtension", "Installations", "Helper"]),
+        // What vhid's menu bar item shows, as a value built from doctor's readings and the
+        // daemon's last failure, so every menu is one a test constructs. It reads nothing.
+        // [LAW:effects-at-boundaries]
+        .target(name: "MenuBar", dependencies: ["Doctor", "Helper", "Installations"]),
+        .testTarget(name: "MenuBarTests", dependencies: ["MenuBar", "Doctor", "Helper", "Installations", "DriverExtension"]),
+        // The menu bar item itself: AppKit, the readings, and a click that copies a row.
+        // A view of vhid and not a way to drive it, so it links no device vocabulary and
+        // nothing that sends one. [LAW:one-way-deps]
+        .executableTarget(name: "vhid-menubar", dependencies: ["MenuBar", "Doctor", "Helper", "Installations"]),
         // The root daemon that owns the devices. It links DriverExtension for the identity
         // the keyboard files its Keyboard Setup Assistant answer under, and deliberately
         // not KeyboardLayouts: text never reaches this process. [LAW:one-way-deps]

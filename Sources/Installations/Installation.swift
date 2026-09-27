@@ -98,6 +98,29 @@ public extension Installation {
     /// two, which is a different and smaller claim.
     static let vhids: [Installation] = [.release, .development]
 
+    /// The installation a program of this package belongs to when nobody says otherwise:
+    /// the one it was built for.
+    ///
+    /// **Which one that is was settled when it was built.** `make` builds debug, and what
+    /// it builds is the copy built from the working tree, signed with the dev identity
+    /// beside the daemon built with it; reaching into the installed copy from there would
+    /// be the surprising direction, and the installed copy is the one a person is least
+    /// willing to have surprised. `scripts/make-pkg` builds release, and what it installs
+    /// is the installed copy - where a default of the development daemon would dial a
+    /// service nothing on that Mac has registered.
+    ///
+    /// The build configuration decides rather than a flag passed to the release build,
+    /// because a flag is a step that can be left off, and a release binary built without it
+    /// would ship dialling the development daemon with nothing to say so. Here and not in
+    /// each program, so the CLI and the menu bar item cannot be built for two different
+    /// copies. `scripts/make-pkg` reads it back out of the packed CLI through `vhid service`
+    /// and writes the launchd plists from it. [LAW:one-source-of-truth]
+    #if DEBUG
+    static let thisBuild = development
+    #else
+    static let thisBuild = release
+    #endif
+
     /// Where a daemon that could not name itself says so.
     ///
     /// Every other subsystem a daemon logs under is its own installation's service name,

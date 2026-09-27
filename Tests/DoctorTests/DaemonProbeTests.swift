@@ -49,6 +49,8 @@ import Testing
             }
         }
 
+        func lastFailure(reply: @escaping (String?, Date?) -> Void) { Issue.record("doctor asked for the last failure"); reply(nil, nil) }
+
         // A status call is all doctor sends; any device act reaching here is a failure.
         func down(usage: UInt16, reply: @escaping (Error?) -> Void) { Issue.record("doctor pressed a key"); reply(nil) }
         func releaseAll(reply: @escaping (Error?) -> Void) { Issue.record("doctor released keys"); reply(nil) }

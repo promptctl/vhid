@@ -51,6 +51,14 @@ func log(_ message: String) {
     logger.notice("\(message, privacy: .public)")
 }
 
+/// Said as `log` says it, at error level, and kept as the daemon's last failure for a
+/// client to read. [LAW:single-enforcer] The one way a failure of the daemon's own is
+/// told, so none reaches the log without also reaching `lastFailure`.
+func logFailure(_ message: String) {
+    logger.error("\(message, privacy: .public)")
+    lastFailure.record(message)
+}
+
 do {
     let callers = try CallerIdentity.sameSignerAsThisProcess()
     log("callers must satisfy: \(callers.text)")
@@ -75,7 +83,7 @@ do {
         let filing = try KeyboardTypeAnswer.file()
         log("this keyboard's answer \(filing) with Keyboard Setup Assistant under \(VirtualKeyboardIdentity.keyboardTypeKey)")
     } catch {
-        log("\(error)")
+        logFailure("\(error)")
     }
 
     // Listening comes first, and bringing the devices up after, on a thread of its own:
@@ -130,9 +138,9 @@ do {
     // The installation is wrong and starting again will not fix it. launchd cannot be
     // told EX_CONFIG: KeepAlive restarts on anything but a successful exit, so 0 is the
     // one code that says do not start this again. The reason is in the log.
-    log("will not start: \(refused)")
+    logFailure("will not start: \(refused)")
     exit(0)
 } catch {
-    log("could not start: \(error)")
+    logFailure("could not start: \(error)")
     exit(1)
 }

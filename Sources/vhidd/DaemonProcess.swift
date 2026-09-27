@@ -277,11 +277,11 @@ extension DaemonProcess.Effects {
                 // daemon started here is stopped so the next attempt starts it afresh.
                 stop(reached.daemon)
                 failures = now() - since >= backoff.most ? 1 : failures + 1
-                log("the devices went down (\(why)); bringing them up again in \(backoff.after(failures))")
+                logFailure("the devices went down (\(why)); bringing them up again in \(backoff.after(failures))")
             } catch {
                 failures += 1
                 readiness.failed(BringUpFailure(error, driver: driver()))
-                log("could not bring the devices up (\(error)); trying again in \(backoff.after(failures))")
+                logFailure("could not bring the devices up (\(error)); trying again in \(backoff.after(failures))")
             }
             try pause(backoff.after(failures))
         }
