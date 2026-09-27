@@ -9,6 +9,17 @@ import Input
     static let us = try! KeyboardLayout.named("com.apple.keylayout.US")
     static let dvorak = try! KeyboardLayout.named("com.apple.keylayout.Dvorak")
 
+    @Test func keyNamesAreListedInNaturalOrder() throws {
+        let names = KeyChord.keyNameList.components(separatedBy: ", ")
+        #expect(try #require(names.firstIndex(of: "f2")) < #require(names.firstIndex(of: "f10")))
+        #expect(names.suffix(20) == (1...20).map { "f\($0)" })
+    }
+
+    @Test func anUnknownKeyNameListsTheNamesInTheirOrder() {
+        let error = #expect(throws: ChordSpellingError.self) { try KeyChord(spelled: "leftCommand+f21", on: Self.us) }
+        #expect(error?.description.contains(KeyChord.keyNameList) == true)
+    }
+
     @Test func modifiersAndACharacterNameTheKeyThatCharacterIsOn() throws {
         let chord = try KeyChord(spelled: "leftCommand+s", on: Self.us)
         #expect(chord == KeyChord(key: Key(rawValue: UInt16(kVK_ANSI_S)), modifiers: [.leftCommand]))
