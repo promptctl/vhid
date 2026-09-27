@@ -344,6 +344,6 @@ public struct PointingStopped: StoppedPartWay, CustomStringConvertible {
     }
 
     public var description: String {
-        "\(cause.reported)" + (unreleased.map { ". The mouse was not released afterwards: \($0). A button may be left held" } ?? "")
+        unreleased.map { cause.reported.then("The mouse was not released afterwards: \($0.reported)").then("A button may be left held") } ?? cause.reported
     }
 }

@@ -42,7 +42,11 @@ import VirtualHID
                     return try self.bringUp.get()
                 },
                 launch: { self.launched += 1; return World.pid },
-                terminate: { self.terminated.append($0) }
+                terminate: {
+                    self.terminated.append($0)
+                    // A stopped daemon closes its connection on the way down.
+                    self.lost?(.closed)
+                }
             )
         }
     }
@@ -110,6 +114,16 @@ import VirtualHID
         let world = World(connections: [.failure(.noSocket(path: "nowhere")), .success(Device())], bringUp: .failure(.silent))
         #expect(throws: DaemonError.silent) { try world.effects.reach(within: .seconds(1)) { _, _ in } }
         #expect(world.terminated == [World.pid])
+    }
+
+    /// The close of a daemon stopped for failing is not a loss: told, it would replace the
+    /// failure - and the driver step it carries - as every client's refusal.
+    @Test func theDaemonAFailedReachStopsIsNotReportedLost() throws {
+        let world = World(connections: [.failure(.noSocket(path: "nowhere")), .success(Device())], bringUp: .failure(.silent))
+        let told = Told()
+        #expect(throws: DaemonError.silent) { try world.effects.reach(within: .seconds(1), whenLost: told.record) }
+        #expect(world.terminated == [World.pid])
+        #expect(told.heard.isEmpty)
     }
 
     @Test func aDeviceThatWillNotComeUpLeavesADaemonSomebodyElseRuns() throws {

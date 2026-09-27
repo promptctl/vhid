@@ -54,6 +54,27 @@ import Testing
         #expect(!"\(stopped)".contains("not released"))
     }
 
+    /// A cause that already ends a sentence gets no second full stop, and one that ends on
+    /// a step over several lines - a command to copy among them - has the count on a line
+    /// of its own.
+    @Test(arguments: [
+        ("turn on the switch.", "turn on the switch. 0 of 1 characters"),
+        ("refused", "refused. 0 of 1 characters"),
+        ("refused\nrun:\n    vhid driver state", "refused\nrun:\n    vhid driver state\n0 of 1 characters"),
+    ])
+    func theCountIsItsOwnSentenceAfterTheCause(cause: String, opening: String) {
+        struct Said: Error, CustomStringConvertible { let description: String }
+        #expect("\(TypingStopped(typed: 0, of: 1, cause: Said(description: cause)))".hasPrefix(opening))
+    }
+
+    /// The release's failure is joined by the same rule, so a refusal ending on a step
+    /// reads once through either sentence.
+    @Test func aFailedReleaseEndingInAFullStopIsNotGivenAnother() {
+        struct Said: Error, CustomStringConvertible { let description: String }
+        let said = "\(ChordStopped(cause: Said(description: "refused."), unreleased: Said(description: "refused.")))"
+        #expect(said == "refused. The keyboard was not released afterwards: refused. A key may be left held")
+    }
+
     /// A release that fails after the stop is said beside the stop, not instead of it:
     /// the operator is told the count and that a key may be held.
     @Test func aReleaseThatFailsAfterTheStopIsReported() async throws {
