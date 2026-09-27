@@ -27,12 +27,14 @@ struct PlayCommand: AsyncParsableCommand {
             before the clock starts: {"to":{"x":800,"y":500}}, in \(Help.place). \
             Every line after it is one report at t_ms milliseconds from the clock's \
             start, in order:
-              {"t_ms":0,"down":"left"}               a button down: left, right, middle, or 1 to 32
+              {"t_ms":0,"buttons":["left"]}          exactly these buttons held from now: left, right, middle, or 1 to 32
               {"t_ms":8.3,"move":{"dx":4,"dy":-2}}   relative motion in counts, -127 to 127, uncorrected
               {"t_ms":16.7,"wheel":{"v":-1,"h":0}}   wheel ticks, -127 to 127; v positive rolls away from the hand
-              {"t_ms":1000,"up":true}                every button up
+              {"t_ms":1000,"buttons":[]}             every button up
             A script is refused whole, before the cursor moves, if a line is malformed, t_ms goes \
-            backwards or past an hour, or it ends with a button held.
+            backwards or past an hour, it ends with a button held, or a buttons line lets go of \
+            some buttons and keeps others. keys and at lines are refused here; the mouse alone \
+            cannot play them.
 
             Stdout is JSON Lines: one {"report":{"index":…,"scheduled_us":…,"sent_us":…,"acked_us":…}} \
             per report, times in microseconds since the Unix epoch, then \

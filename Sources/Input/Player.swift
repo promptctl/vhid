@@ -36,13 +36,16 @@ public struct Player<C: Clock> where C.Duration == Duration {
     }
 
     public func play(_ play: Play, isolation: isolated (any Actor)? = #isolation) async throws -> Played {
+        // [LAW:parse-dont-validate] Before the cursor moves, so a script this player cannot
+        // play whole moves nothing.
+        let steps = try Self.steps(of: play)
         var went: [Played.Report] = []
         do {
             let reports = try await pointer.move(to: play.start)
             let started = clock.now
             let epoch = wall()
             let at = { (offset: Duration) in epoch + offset.microseconds }
-            for event in play.events {
+            for (event, step) in zip(play.events, steps) {
                 let deadline = started.advanced(by: event.at)
                 let wake = deadline.advanced(by: .zero - lead)
                 // A wait of any length is slices, each asking whether the run was
@@ -82,7 +85,7 @@ public struct Player<C: Clock> where C.Duration == Duration {
                 }
                 try Task.checkCancellation()
                 let sent = started.duration(to: clock.now)
-                try await post(event.report)
+                try await post(step)
                 went.append(Played.Report(scheduled: at(event.at), sent: at(sent), acked: at(started.duration(to: clock.now))))
             }
             return Played(startReports: reports, reports: went)
@@ -91,14 +94,56 @@ public struct Player<C: Clock> where C.Duration == Duration {
         }
     }
 
-    private func post(_ report: Play.Report, isolation: isolated (any Actor)? = #isolation) async throws {
-        switch report {
+    /// What the mouse is asked to do for one act of a script.
+    enum Step: Equatable {
+        case move(Move)
+        case wheel(Scroll)
+        /// Press these buttons, adding to those already held.
+        case press([Button])
+        case releaseAll
+    }
+
+    /// Each act of `play` as a step the mouse can take, or the act it cannot take.
+    ///
+    /// The mouse presses a button or releases every button, so a `buttons` line is played
+    /// as the buttons it adds to those held, or as a release when it holds none. A line
+    /// that lets go of some buttons and keeps others, a `keys` line and an `at` line need
+    /// device acts this player does not have yet; `docs/design/replay.md` gives them to
+    /// `vhid play`. Refused here, whole, rather than played as something else.
+    static func steps(of play: Play) throws(Unplayable) -> [Step] {
+        var held: Set<Button> = []
+        var steps: [Step] = []
+        for (index, event) in play.events.enumerated() {
+            switch event.report {
+            case .move(let delta): steps.append(.move(delta))
+            case .wheel(let delta): steps.append(.wheel(delta))
+            case .buttons(let next) where next.isEmpty: steps.append(.releaseAll)
+            case .buttons(let next) where next.isSuperset(of: held): steps.append(.press(next.subtracting(held).sorted()))
+            case .buttons: throw Unplayable(act: index + 1, reason: "it lets go of some buttons and keeps others held")
+            case .keys: throw Unplayable(act: index + 1, reason: "it is a keys line")
+            case .at: throw Unplayable(act: index + 1, reason: "it is an at line")
+            }
+            if case .buttons(let next) = event.report { held = next }
+        }
+        return steps
+    }
+
+    private func post(_ step: Step, isolation: isolated (any Actor)? = #isolation) async throws {
+        switch step {
         case .move(let delta): try await pointer.mouse.move(by: delta)
         case .wheel(let delta): try await pointer.mouse.scroll(by: delta)
-        case .down(let button): try await pointer.mouse.down(button)
-        case .up: try await pointer.mouse.releaseAll()
+        case .press(let buttons): for button in buttons { try await pointer.mouse.down(button) }
+        case .releaseAll: try await pointer.mouse.releaseAll()
         }
     }
+}
+
+/// An act of a script the mouse alone cannot play, counted from the first act after the
+/// start line.
+public struct Unplayable: Error, CustomStringConvertible {
+    public let act: Int
+    public let reason: String
+    public var description: String { "act \(act) of the script cannot be played on the mouse alone: \(reason)" }
 }
 
 /// A play that went out whole: how many reports the loop took to reach the start, and
