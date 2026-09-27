@@ -1,0 +1,47 @@
+#!/bin/bash
+# Assembles vhid-record.app, the bundle `vhid record` runs its tap in, around a built
+# vhid-record binary, and prints its path. Signing is the caller's: the dev identity for
+# `make`, the Developer ID for scripts/make-pkg.
+#
+#   scripts/record-app <vhid-record binary> <app path> <version> <bundle identifier>
+#
+# The identifier is the caller's, because Input Monitoring holds one grant per identifier
+# tied to the signing certificate: a dev bundle and the release one under one identifier
+# would each invalidate the other's grant. `make` passes ai.promptctl.vhid.record.dev,
+# scripts/make-pkg ai.promptctl.vhid.record.
+#
+# A bundle and not a bare binary because Input Monitoring is granted to the responsible
+# process, and a bundle launched with `open` is its own: listed under its identifier and
+# granted once, whatever launched vhid (docs/design/replay.md, "The grant recording needs").
+# LSBackgroundOnly, so it never takes a Dock icon or the menu bar from what is being recorded.
+#
+# Held to bash 3.2, like every script here.
+set -euo pipefail
+binary=${1:?usage: scripts/record-app <vhid-record binary> <output directory> <version>}
+app=${2:?usage: scripts/record-app <vhid-record binary> <app path> <version> <bundle identifier>}
+version=${3:?usage: scripts/record-app <vhid-record binary> <app path> <version> <bundle identifier>}
+identifier=${4:?usage: scripts/record-app <vhid-record binary> <app path> <version> <bundle identifier>}
+[ -f "$binary" ] || { echo "record-app: $binary was not built" >&2; exit 1; }
+
+# Updated in place rather than removed and made again, so the bundle a person has granted
+# Input Monitoring to is never missing while a build runs.
+mkdir -p "$app/Contents/MacOS"
+ditto "$binary" "$app/Contents/MacOS/vhid-record"
+cat >"$app/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key><string>$identifier</string>
+    <key>CFBundleName</key><string>vhid record</string>
+    <key>CFBundleExecutable</key><string>vhid-record</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>$version</string>
+    <key>CFBundleVersion</key><string>$version</string>
+    <key>LSMinimumSystemVersion</key><string>15.0</string>
+    <key>LSBackgroundOnly</key><true/>
+</dict>
+</plist>
+PLIST
+plutil -lint "$app/Contents/Info.plist" >&2
+echo "$app"

@@ -39,7 +39,7 @@ eyes=$x/vhid.pkg/Payload/usr/local/bin/eyes
 if [ -x "$eyes" ]; then
   said=$("$eyes" --help 2>&1) || fail "the packed eyes does not run: $said"
 fi
-for binary in usr/local/bin/vhid usr/local/bin/eyes usr/local/libexec/vhidd usr/local/libexec/vhid-menubar; do
+for binary in usr/local/bin/vhid usr/local/bin/eyes usr/local/libexec/vhidd usr/local/libexec/vhid-menubar usr/local/libexec/vhid-record.app/Contents/MacOS/vhid-record; do
   [ -f "$x/vhid.pkg/Payload/$binary" ] || continue
   archs=$(lipo -archs "$x/vhid.pkg/Payload/$binary" 2>&1) || archs="<lipo failed: $archs>"
   [ "$archs" = "x86_64 arm64" ] || fail "/$binary is built for '$archs', not x86_64 and arm64"
@@ -64,6 +64,13 @@ drwxr-xr-x root wheel ./usr/local/bin
 -rwxr-xr-x root wheel ./usr/local/bin/vhid
 drwxr-xr-x root wheel ./usr/local/libexec
 -rwxr-xr-x root wheel ./usr/local/libexec/vhid-menubar
+drwxr-xr-x root wheel ./usr/local/libexec/vhid-record.app
+drwxr-xr-x root wheel ./usr/local/libexec/vhid-record.app/Contents
+-rw-r--r-- root wheel ./usr/local/libexec/vhid-record.app/Contents/Info.plist
+drwxr-xr-x root wheel ./usr/local/libexec/vhid-record.app/Contents/MacOS
+-rwxr-xr-x root wheel ./usr/local/libexec/vhid-record.app/Contents/MacOS/vhid-record
+drwxr-xr-x root wheel ./usr/local/libexec/vhid-record.app/Contents/_CodeSignature
+-rw-r--r-- root wheel ./usr/local/libexec/vhid-record.app/Contents/_CodeSignature/CodeResources
 -rwxr-xr-x root wheel ./usr/local/libexec/vhid-uninstall
 -rwxr-xr-x root wheel ./usr/local/libexec/vhid-virtual-hid-driver
 -rwxr-xr-x root wheel ./usr/local/libexec/vhidd

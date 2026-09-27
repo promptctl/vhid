@@ -154,6 +154,19 @@ enum Help {
         session. This verb reaches no daemon at all.
         """)
 
+    static let record = VerbHelp(name: "record", abstract: "Record the physical keyboard and mouse as a script vhid play replays.", discussion: """
+        Prints the script on stdout when the recording stops: Control-C stops it and the \
+        Control-C is not in it; SIGTERM stops it and drops nothing; an hour stops it, the \
+        longest a script plays. Keys are recorded as the physical keys held, the pointer as \
+        at points, and anything vhid itself sends while recording is left out.
+
+        The tap runs in vhid-record.app, which needs Input Monitoring: the first run is \
+        refused and lists it in System Settings > Privacy & Security > Input Monitoring, \
+        where it is switched on once. Refused while another process holds the devices, and \
+        while Karabiner-Elements is running, whose keys come through vhid's driver and \
+        could not be told from vhid's.
+        """, commandLine: ["Notes, such as key presses with no HID usage left out, go to stderr."])
+
     static let doctor = VerbHelp(name: "doctor", abstract: "Name every requirement a verb needs, and the step left for any that is not met.", discussion: """
         First ready or not ready, then one row per requirement - the driver extension, the \
         daemon's launchd job, the daemon, its admitting this vhid, who holds the devices, the \

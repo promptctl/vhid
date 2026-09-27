@@ -1,3 +1,4 @@
+import KeyboardLayouts
 import Keystrokes
 import Pointing
 import Testing
@@ -165,5 +166,14 @@ import Testing
         let schedule = try Schedule(Play.parse(recorder.script(stoppedAt: .milliseconds(30), stopKeys: Self.stopKeys)))
         #expect(schedule.calibration != nil)
         #expect(schedule.reports == 3)
+    }
+}
+
+extension RecorderTests {
+    /// The stop chord's letter is the key that types c on the layout, not the key QWERTY
+    /// calls c.
+    @Test func theStopKeysFollowTheLayout() throws {
+        #expect(try Recorder.stopKeys(on: .named("com.apple.keylayout.US")) == [.leftControl, .rightControl, Usage(rawValue: 0x06)])
+        #expect(try Recorder.stopKeys(on: .named("com.apple.keylayout.Dvorak")) == [.leftControl, .rightControl, Usage(rawValue: 0x0C)])
     }
 }
