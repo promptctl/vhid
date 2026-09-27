@@ -24,8 +24,13 @@ env:
   DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
 
 jobs:
+  # The secrets are the release environment's, not the repository's, and the environment
+  # waits for a maintainer's approval before any run gets them: a tag pushed from a
+  # branch runs that branch's copy of this file, so the gates below cannot be what
+  # protects the Developer ID keys - they would be the first thing such a copy drops.
   release:
     runs-on: macos-26
+    environment: release
     timeout-minutes: 60
     env:
       TAG: ${{ github.ref_name }}

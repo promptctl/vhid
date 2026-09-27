@@ -205,7 +205,8 @@ commit is on master (a `-tag` pre-release may come from any branch) with its `vh
 It then runs `scripts/release` in a keychain `scripts/release-keychain` makes for the
 job and deletes at its end, and attaches the notarized pkg to a GitHub Release whose
 notes are that section, marked a pre-release when the version has a `-tag`. It reads
-five repository secrets:
+five secrets of the `release` environment, which admits only `v*` tags and waits for a
+maintainer to approve each run in the Actions tab before handing them over:
 
 | Secret | What it holds |
 | --- | --- |
@@ -219,7 +220,7 @@ Export each identity from Keychain Access (the certificate with its private key,
 .p12) on the Mac that holds it, then set the secret from the file:
 
 ```sh
-base64 -i application.p12 | gh secret set DEVELOPER_ID_APPLICATION_P12
+base64 -i application.p12 | gh secret set DEVELOPER_ID_APPLICATION_P12 --env release
 ```
 
 The same release can be made on that Mac directly:
