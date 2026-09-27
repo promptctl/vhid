@@ -3,9 +3,9 @@ import Input
 import KeyboardLayouts
 
 /// Presses chords on the virtual keyboard, in the order they were given.
-struct KeysCommand: AsyncParsableCommand {
+struct PressCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        commandName: "keys",
+        commandName: "press",
         abstract: "Press chords on the virtual keyboard.",
         discussion: """
             A chord is modifier names and one key joined by +, e.g. leftCommand+s or \

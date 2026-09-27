@@ -48,11 +48,11 @@ import Testing
         }
     }
 
-    /// A misspelt argument is refused, not ignored: `times` for `count` would otherwise
+    /// A misspelt argument is refused, not ignored: `count` for `times` would otherwise
     /// click once where three were asked for.
     @Test func anArgumentTheToolDoesNotTakeIsRefusedByName() async {
-        #expect(await Self.refusal(Tools.click, ["x": 1, "y": 2, "times": 3])
-            == "times is not an argument this tool takes: it takes x, y, button, count")
+        #expect(await Self.refusal(Tools.click, ["x": 1, "y": 2, "count": 3])
+            == "count is not an argument this tool takes: it takes x, y, button, times")
         #expect(await Self.refusal(Tools.cursor, ["x": 1]) == "x is not an argument this tool takes, and it takes none")
     }
 
@@ -65,8 +65,8 @@ import Testing
     }
 
     @Test func noClicksIsRefused() async {
-        #expect(await Self.refusal(Tools.click, ["x": 1, "y": 2, "count": 0])
-            == "count is 0, and it is how many presses without moving between them, at least 1")
+        #expect(await Self.refusal(Tools.click, ["x": 1, "y": 2, "times": 0])
+            == "times is 0, and it is how many presses without moving between them, at least 1")
     }
 
     @Test func aMissingCoordinateIsNamed() async {
