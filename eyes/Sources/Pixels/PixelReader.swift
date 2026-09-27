@@ -1,0 +1,213 @@
+import CoreGraphics
+import Eyes
+import Foundation
+import ImageIO
+import Vision
+
+/// Reads the screen as pixels: captures the region, recognises its text on-device with
+/// Vision, and hands the runs to the one judge every reader shares.
+///
+/// Everything here is the edge - the grant, the capture, the recogniser. What counts as a
+/// match lives in `Reading.judging`, so this type holds no opinion about the query beyond
+/// which rectangle it names. [LAW:effects-at-boundaries]
+public struct PixelReader: Reader {
+    public let source = SourceKind.pixels
+
+    public init() {}
+
+    public func read(_ query: Query) async throws -> Reading {
+        let region = try Self.resolve(query.region)
+        // [LAW:no-silent-failure] Preflight is asked explicitly because capturing without
+        // the grant does not fail - it returns the desktop wallpaper with every window
+        // blanked, and recognising that is a confident "nothing here".
+        guard CGPreflightScreenCaptureAccess() else { throw PixelsError.noGrant }
+        let image = try Self.capture(region)
+        // A run with no words in it is nil: examined, and counted as wordless.
+        var runs: [Found?] = []
+        for tile in Self.tiles(of: region) {
+            runs += try await Self.recognise(image, of: region, in: tile)
+        }
+
+        let readable = runs.compactMap { $0 }
+        let distinct = Self.distinct(readable)
+        let excluded = [
+            Exclusion(reason: .wordless, count: runs.count - readable.count),
+            Exclusion(reason: .duplicate, count: readable.count - distinct.count),
+        ].filter { $0.count > 0 }
+        return Reading.judging(
+            Self.readingOrder(distinct),
+            query: query,
+            region: region,
+            examined: runs.count,
+            excluded: excluded
+        )
+    }
+
+    /// The side of the largest piece Vision is handed at once, in points.
+    ///
+    /// Vision scales what it is given down to a working size of its own, and interface
+    /// text does not survive that from a large display: measured, a 2400x1600 display at
+    /// 1x with a TextEdit window on it recognised nothing at all, and an 1200x800 piece of
+    /// the same pixels recognised 16 runs. So the region is read in pieces. Upscaling the
+    /// image first was tried and recognised nothing; full-width strips were erratic and
+    /// merged unrelated runs.
+    nonisolated static let tileSide = 800.0
+
+    /// Overlapping pieces covering `region`, each at most `tileSide` square and stepped by
+    /// half of it, so any run up to half a tile wide lies whole inside at least one piece.
+    /// A region smaller than a tile is one piece: itself. [LAW:dataflow-not-control-flow]
+    nonisolated static func tiles(of region: ScreenRect) -> [ScreenRect] {
+        func starts(_ origin: Double, _ length: Double) -> [Double] {
+            let side = min(tileSide, length)
+            let steps = Int(((length - side) / (tileSide / 2)).rounded(.up))
+            return (0...steps).map { origin + min(Double($0) * tileSide / 2, length - side) }
+        }
+        let (w, h) = (min(tileSide, region.width), min(tileSide, region.height))
+        return starts(region.y, region.height).flatMap { y in
+            starts(region.x, region.width).map { x in ScreenRect(x: x, y: y, width: w, height: h) }
+        }
+    }
+
+    /// One run per piece of text, where overlapping pieces each read it. A run mostly
+    /// inside a larger one is the same text seen again, or a piece of it a seam cut, and
+    /// is dropped - counted by the caller as a duplicate, never lost silently.
+    nonisolated static func distinct(_ runs: [Found]) -> [Found] {
+        var kept: [Found] = []
+        for run in runs.sorted(by: { $0.frame.width * $0.frame.height > $1.frame.width * $1.frame.height }) {
+            let area = run.frame.width * run.frame.height
+            let covered = kept.contains { run.frame.cgRect.intersection($0.frame.cgRect).area >= area * 0.8 }
+            if !covered { kept.append(run) }
+        }
+        return kept
+    }
+
+    /// Top to bottom, then left to right. Vision's own order is not reading order - it put
+    /// a menu's third item after the window title below it. A run belongs to the line
+    /// above it while its centre falls inside that line's first run; a fixed grid split
+    /// one menu bar in two, because its items do not share a baseline to the point.
+    nonisolated static func readingOrder(_ runs: [Found]) -> [Found] {
+        var lines: [[Found]] = []
+        for run in runs.sorted(by: { $0.frame.centre.y < $1.frame.centre.y }) {
+            if let first = lines.last?.first, run.frame.centre.y < first.frame.y + first.frame.height {
+                lines[lines.count - 1].append(run)
+            } else {
+                lines.append([run])
+            }
+        }
+        return lines.flatMap { $0.sorted { $0.frame.x < $1.frame.x } }
+    }
+
+    /// The query's region as a rectangle in screen space, or a refusal naming what does not
+    /// exist - a display that is not attached reads as blindness, never as a blank screen.
+    @MainActor
+    static func resolve(_ region: Region) throws -> ScreenRect {
+        switch region {
+        case .rect(let rect):
+            guard !rect.isEmpty else { throw PixelsError.emptyRegion(rect) }
+            return rect
+        case .display(let id):
+            let bounds = CGDisplayBounds(id)
+            guard !bounds.isEmpty else { throw PixelsError.noSuchDisplay(id) }
+            return ScreenRect(bounds)
+        case .window(let id):
+            guard let window = try Geometry.onScreen().windows.first(where: { $0.id == id }) else {
+                throw PixelsError.noSuchWindow(id)
+            }
+            return window.frame
+        }
+    }
+
+    /// Captures exactly `region` with `screencapture`, in points of the global space it
+    /// already speaks.
+    ///
+    /// [LAW:no-silent-failure] Its exit status is not evidence: measured, it exits 0 having
+    /// written nothing when the path is unwritable. The file it wrote, decoded, is the only
+    /// proof a capture happened.
+    nonisolated static func capture(_ region: ScreenRect) throws -> CGImage {
+        let path = FileManager.default.temporaryDirectory
+            .appendingPathComponent("eyes-\(UUID().uuidString).png")
+        defer { try? FileManager.default.removeItem(at: path) }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        let r = region.cgRect.integral
+        process.arguments = ["-x", "-t", "png", "-R\(Int(r.minX)),\(Int(r.minY)),\(Int(r.width)),\(Int(r.height))", path.path]
+        let stderr = Pipe()
+        process.standardError = stderr
+        try process.run()
+        process.waitUntilExit()
+
+        guard let source = CGImageSourceCreateWithURL(path as CFURL, nil),
+              // Decoded now, not on first use: the image is lazy by default, and the file
+              // under it is deleted on the way out - measured, a lazy image read after
+              // that recognises nothing at all, which prints as a blank screen.
+              let image = CGImageSourceCreateImageAtIndex(
+                  source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary
+              )
+        else {
+            let said = String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            throw PixelsError.captureWroteNothing(region, said.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        return image
+    }
+
+    /// Vision's runs in one piece of the image, placed on the screen word by word. Runs
+    /// rather than one row per word, because a run is what a person reads as one label and
+    /// rows per word multiply what a caller pays for the same screen - but each run keeps
+    /// where its words sit, so a match inside one can be narrowed to them.
+    ///
+    /// Vision answers inside the region of interest as fractions of that region, so the
+    /// piece is the rectangle each box is converted on - the one conversion, applied to a
+    /// smaller display. [LAW:single-enforcer]
+    nonisolated static func recognise(_ image: CGImage, of region: ScreenRect, in tile: ScreenRect) async throws -> [Found?] {
+        var request = RecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.regionOfInterest = NormalizedRect(normalizedRect: tile.normalized(in: region))
+        return try await request.perform(on: image).map { observation in
+            guard let best = observation.topCandidates(1).first else { return nil }
+            guard let confidence = Confidence(Double(best.confidence)) else {
+                throw PixelsError.unreadableConfidence(best.string)
+            }
+            let words = best.string.split(whereSeparator: \.isWhitespace).compactMap { word -> Word? in
+                // A word Vision cannot place is placed as the whole run, which holds it.
+                let box = best.boundingBox(for: word.startIndex..<word.endIndex)?.boundingBox ?? observation.boundingBox
+                return Text(String(word)).map { Word(text: $0, frame: .fromImageSpace(normalized: box.cgRect, on: tile)) }
+            }
+            return words.first.map { Found(first: $0, rest: Array(words.dropFirst()), source: .pixels(confidence: confidence)) }
+        }
+    }
+}
+
+/// Everything that means the reader could not look, as opposed to having looked and found
+/// nothing. Each one throws, because a returned `Reading` is taken as proof of looking.
+public enum PixelsError: Error, CustomStringConvertible {
+    case noGrant
+    case emptyRegion(ScreenRect)
+    case noSuchDisplay(CGDirectDisplayID)
+    case noSuchWindow(UInt32)
+    case captureWroteNothing(ScreenRect, String)
+    case unreadableConfidence(String)
+
+    public var description: String {
+        switch self {
+        case .noGrant:
+            "Screen Recording is not granted to this process, so a capture would show only the wallpaper."
+                + " Grant it in System Settings > Privacy & Security > Screen Recording."
+        case .emptyRegion(let r):
+            "the region \(Int(r.x)),\(Int(r.y)) \(Int(r.width))x\(Int(r.height)) has no area to read"
+        case .noSuchDisplay(let id):
+            "no display with id \(id) is attached"
+        case .noSuchWindow(let id):
+            "no on-screen window has id \(id); `eyes windows` lists the ones that do"
+        case .captureWroteNothing(let r, let said):
+            "screencapture wrote no image of \(Int(r.x)),\(Int(r.y)) \(Int(r.width))x\(Int(r.height))"
+                + (said.isEmpty ? "" : ": \(said)")
+        case .unreadableConfidence(let text):
+            "Vision reported a confidence that is not a number for \"\(text)\""
+        }
+    }
+}
+
+private extension CGRect {
+    var area: Double { isNull ? 0 : width * height }
+}

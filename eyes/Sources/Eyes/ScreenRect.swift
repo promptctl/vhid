@@ -112,3 +112,18 @@ public extension ScreenRect {
         )
     }
 }
+
+public extension ScreenRect {
+    /// The inverse of `fromImageSpace`: where this rectangle sits in an image of `display`,
+    /// as a unit rectangle with the origin at the bottom-left - the space Vision's region
+    /// of interest is given in. Beside its inverse so the flip is written in one file and
+    /// tested as a round trip. [LAW:single-enforcer]
+    func normalized(in display: ScreenRect) -> CGRect {
+        CGRect(
+            x: (x - display.x) / display.width,
+            y: 1 - (y - display.y + height) / display.height,
+            width: width / display.width,
+            height: height / display.height
+        )
+    }
+}

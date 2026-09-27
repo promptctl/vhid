@@ -22,7 +22,7 @@ mention the second one.
 | | what it is | build and test |
 |---|---|---|
 | `.` | the devices: the keyboard, the mouse, and the root daemon that owns them | `make test` |
-| `eyes/` | reading the screen: where the windows are, and the vocabulary an accessibility reader and an OCR reader both speak | `cd eyes && swift build && swift test` |
+| `eyes/` | reading the screen: where the windows are, and where text is, as the points `vhid click` takes | `cd eyes && swift build && swift test` |
 
 `eyes` finds a coordinate; `vhid click` presses it. Nothing joins them in code — only that
 workflow. A target in the root manifest would be one `dependencies:` line away from
@@ -31,6 +31,18 @@ boundary rather than a rule someone has to remember.
 
 The cost of that isolation is this paragraph: `make test` at the root does not run
 `eyes`' tests.
+
+```sh
+eyes windows                      # owner, layer and bounds of each on-screen window
+eyes find Save                    # where "Save" is: the point to click, then the text
+eyes find Settings --exact --display 3
+eyes read --window 4127           # every run of text in one window, in reading order
+```
+
+`find` and `read` recognise pixels on-device with Vision and need Screen Recording. Each
+prints a scope line first — where it looked, how many runs it read, what it set aside,
+whether it read the whole region. A `find` that matches nothing prints the nearest runs
+and how many edits off each is, so a misread one edit away is not taken for an absence.
 
 ## Scope
 

@@ -1,3 +1,5 @@
+import CoreGraphics
+
 /// A string with something in it other than blank space.
 ///
 /// [LAW:parse-dont-validate] A caller holding one cannot be holding `""` or `"   "`, so
@@ -18,20 +20,57 @@ public struct Text: Sendable, Hashable, CustomStringConvertible {
     }
 
     public var description: String { value }
+
+    /// Words joined by a space, which cannot be blank because the first word is not.
+    init(joining words: [Text]) {
+        self.value = words.map(\.value).joined(separator: " ")
+    }
 }
 
-/// One piece of text on screen and where it is.
-public struct Found: Sendable, Hashable {
+/// One word on screen and where it is, the smallest piece a reader can place.
+public struct Word: Sendable, Hashable {
     public let text: Text
-    /// Global screen coordinates, top-left origin, points. Its centre is a click target
-    /// with no conversion.
     public let frame: ScreenRect
-    public let source: Source
 
-    public init(text: Text, frame: ScreenRect, source: Source) {
+    public init(text: Text, frame: ScreenRect) {
         self.text = text
         self.frame = frame
+    }
+}
+
+/// One piece of text on screen and where it is, as the words it is made of.
+///
+/// Words and not one rectangle, because a reader's run is not always one thing: measured,
+/// Vision reads a menu bar's "Shell Edit View Session" as a single run, and the centre of
+/// that run is on no menu at all. Carrying where each word sits is what lets a match be
+/// narrowed to the stretch that matched, so a found point lands on what was asked for.
+/// Never empty, for the reason `Matches` is not. [LAW:types-are-the-program]
+public struct Found: Sendable, Hashable {
+    public let first: Word
+    public let rest: [Word]
+    public let source: Source
+
+    /// One run the reader places as a whole - what the accessibility tree reports.
+    public init(text: Text, frame: ScreenRect, source: Source) {
+        self.init(first: Word(text: text, frame: frame), rest: [], source: source)
+    }
+
+    public init(first: Word, rest: [Word], source: Source) {
+        self.first = first
+        self.rest = rest
         self.source = source
+    }
+
+    public var words: [Word] { [first] + rest }
+
+    /// The words read as one line. Derived, like the frame, so neither can disagree with
+    /// the words. [LAW:one-source-of-truth]
+    public var text: Text { Text(joining: words.map(\.text)) }
+
+    /// Global screen coordinates, top-left origin, points. Its centre is a click target
+    /// with no conversion.
+    public var frame: ScreenRect {
+        ScreenRect(rest.reduce(first.frame.cgRect) { $0.union($1.frame.cgRect) })
     }
 }
 
