@@ -67,7 +67,7 @@ vhid scroll 800 500 --vertical 3
 vhid drag 100 100 400 300
 vhid cursor
 vhid play < script.jsonl
-vhid record > script.jsonl   # Control-C stops; needs Input Monitoring for vhid-record.app
+vhid record > script.jsonl   # Control-C stops; needs Input Monitoring for vhid-record.app (a working tree builds ~/Applications/vhid-record-dev.app)
 vhid doctor
 ```
 

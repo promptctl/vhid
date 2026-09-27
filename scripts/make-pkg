@@ -128,7 +128,7 @@ ditto "$bin/vhid" "$payload/usr/local/bin/vhid"
 ditto "$bin/vhidd" "$payload/usr/local/libexec/vhidd"
 ditto "$bin/vhid-menubar" "$payload/usr/local/libexec/vhid-menubar"
 ditto "$eyes_bin/eyes" "$payload/usr/local/bin/eyes"
-record_app=$(scripts/record-app "$bin/vhid-record" "$payload/usr/local/libexec" "$(scripts/version --base)" "$IDENTIFIER.record")
+record_app=$(scripts/record-app "$bin/vhid-record" "$payload/usr/local/libexec/vhid-record.app" "$(scripts/version --base)" "$IDENTIFIER.record")
 
 # What the notary service refuses, asked of one binary after signing it: no Developer
 # ID signature from the team, no Hardened Runtime, no secure timestamp, or the

@@ -34,11 +34,11 @@ SHELL := /bin/sh
 # this line would sign nothing and call it success. [LAW:no-silent-failure]
 SIGN := scripts/products | tr '\n' '\0' | xargs -0 scripts/sign "$(DEV_IDENTITY)"
 
-# vhid-record.app, the bundle `vhid record` finds beside vhid in the build tree, made
+# ~/Applications/vhid-record-dev.app, the bundle a working tree's `vhid record` runs, made
 # around the vhid-record just signed and signed itself. After $(SIGN) every time, because
 # a relinked binary has to reach the bundle too, and a bundle signed ad hoc would be a new
 # app to Input Monitoring on every build rather than the one granted.
-RECORD_APP := bin=$$(swift build --show-bin-path) && scripts/record-app "$$bin/vhid-record" "$$bin" "$$(scripts/version --base)" ai.promptctl.vhid.record.dev \
+RECORD_APP := bin=$$(swift build --show-bin-path) && scripts/record-app "$$bin/vhid-record" "$$HOME/Applications/vhid-record-dev.app" "$$(scripts/version --base)" ai.promptctl.vhid.record.dev \
 	| tr '\n' '\0' | xargs -0 scripts/sign "$(DEV_IDENTITY)"
 
 .PHONY: all build test check-pins sign signing-identity dev-daemon remove-dev-daemon clean

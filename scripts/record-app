@@ -3,7 +3,7 @@
 # vhid-record binary, and prints its path. Signing is the caller's: the dev identity for
 # `make`, the Developer ID for scripts/make-pkg.
 #
-#   scripts/record-app <vhid-record binary> <output directory> <version> <bundle identifier>
+#   scripts/record-app <vhid-record binary> <app path> <version> <bundle identifier>
 #
 # The identifier is the caller's, because Input Monitoring holds one grant per identifier
 # tied to the signing certificate: a dev bundle and the release one under one identifier
@@ -18,12 +18,11 @@
 # Held to bash 3.2, like every script here.
 set -euo pipefail
 binary=${1:?usage: scripts/record-app <vhid-record binary> <output directory> <version>}
-out=${2:?usage: scripts/record-app <vhid-record binary> <output directory> <version>}
-version=${3:?usage: scripts/record-app <vhid-record binary> <output directory> <version> <bundle identifier>}
-identifier=${4:?usage: scripts/record-app <vhid-record binary> <output directory> <version> <bundle identifier>}
+app=${2:?usage: scripts/record-app <vhid-record binary> <app path> <version> <bundle identifier>}
+version=${3:?usage: scripts/record-app <vhid-record binary> <app path> <version> <bundle identifier>}
+identifier=${4:?usage: scripts/record-app <vhid-record binary> <app path> <version> <bundle identifier>}
 [ -f "$binary" ] || { echo "record-app: $binary was not built" >&2; exit 1; }
 
-app=$out/vhid-record.app
 # Updated in place rather than removed and made again, so the bundle a person has granted
 # Input Monitoring to is never missing while a build runs.
 mkdir -p "$app/Contents/MacOS"

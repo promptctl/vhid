@@ -86,16 +86,19 @@ struct RecordCommand: ParsableCommand {
         return lines[(open + 1)..<close].compactMap { $0.split(whereSeparator: \.isWhitespace).last.map(String.init) }
     }
 
-    /// The tap app: installed in libexec beside vhid's bin, or in a build tree beside vhid.
+    /// The tap app, where this build's copy is: the pkg's in libexec, and a working tree's
+    /// in ~/Applications, where System Settings can add it to Input Monitoring - a bundle
+    /// inside `.build` cannot be. Chosen the way `Installation.thisBuild` is, so a dev vhid
+    /// never runs the installed tap or the other way round. [LAW:one-source-of-truth]
+    #if DEBUG
+    static let appPath = NSHomeDirectory() + "/Applications/vhid-record-dev.app"
+    #else
+    static let appPath = "/usr/local/libexec/vhid-record.app"
+    #endif
+
     static func app() throws -> URL {
-        // The executable's own path, not argv[0], which is a bare `vhid` when found on PATH.
-        guard let executable = Bundle.main.executableURL else { throw RecordRefusal.noApp(["(this vhid's own path is unknown)"]) }
-        let bin = executable.resolvingSymlinksInPath().deletingLastPathComponent()
-        let candidates = [bin.appendingPathComponent("../libexec/vhid-record.app").standardized, bin.appendingPathComponent("vhid-record.app")]
-        guard let app = candidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }) else {
-            throw RecordRefusal.noApp(candidates.map(\.path))
-        }
-        return app
+        guard FileManager.default.fileExists(atPath: appPath) else { throw RecordRefusal.noApp(appPath) }
+        return URL(fileURLWithPath: appPath)
     }
 
     /// `open -n`, so every recording is a fresh instance with its own arguments, and `-g`,
@@ -121,7 +124,7 @@ private final class Signals: @unchecked Sendable {
 enum RecordRefusal: Error, CustomStringConvertible, Equatable {
     case held(by: Int32)
     case pqrsServices([String])
-    case noApp([String])
+    case noApp(String)
     case app(String)
     case unreadable(String)
 
@@ -131,8 +134,8 @@ enum RecordRefusal: Error, CustomStringConvertible, Equatable {
             "process \(pid) holds the devices; vhid record starts when nothing does, so vhid's own modifiers cannot be mistaken for the person's"
         case .pqrsServices(let labels):
             "these launchd services post through the same driver as vhid, so what they post would be dropped as vhid's: \(labels.joined(separator: ", ")). Quit Karabiner-Elements and run again"
-        case .noApp(let places):
-            "the tap app vhid-record.app is at none of \(places.joined(separator: ", ")); build with make, or reinstall"
+        case .noApp(let path):
+            "the tap app is not at \(path); build with make, or reinstall"
         case .app(let reason), .unreadable(let reason):
             reason
         }
