@@ -51,6 +51,13 @@ func log(_ message: String) {
     logger.notice("\(message, privacy: .public)")
 }
 
+/// Said at info level: kept in memory and shown by `log show --info`, not persisted.
+/// For what happens routinely - vhid's menu bar item connects every few seconds - so it
+/// does not bury what `log` says.
+func logRoutine(_ message: String) {
+    logger.info("\(message, privacy: .public)")
+}
+
 /// Said as `log` says it, at error level, and kept as the daemon's last failure for a
 /// client to read. [LAW:single-enforcer] The one way a failure of the daemon's own is
 /// told, so none reaches the log without also reaching `lastFailure`.

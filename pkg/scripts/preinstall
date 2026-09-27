@@ -56,7 +56,10 @@ case "$console" in
   *)
     domain="gui/$(id -u "$console")"
     if launchctl print "$domain/$agent" >/dev/null 2>&1; then
-      stop "$domain/$agent"
-      echo "vhid preinstall: stopped the menu bar item for $console"
+      # A view of vhid, so a failure to stop it is said and not failed on, in a subshell
+      # because `stop` exits on failure.
+      ( stop "$domain/$agent" ) \
+        && echo "vhid preinstall: stopped the menu bar item for $console" \
+        || echo "vhid preinstall: could not stop the menu bar item for $console; it is replaced at the next login"
     fi ;;
 esac

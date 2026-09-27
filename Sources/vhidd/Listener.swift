@@ -48,7 +48,7 @@ final class Listener: NSObject, NSXPCListenerDelegate {
             _ = holder.whileHolding(id) { readiness.releaseEverything(because: "a client was interrupted") }
         }
         connection.resume()
-        log("accepted a connection from pid \(connection.processIdentifier)")
+        logRoutine("accepted a connection from pid \(connection.processIdentifier)")
         return true
     }
 }
