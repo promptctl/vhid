@@ -184,6 +184,8 @@ public struct Player<C: Clock> where C.Duration == Duration {
     public func play(_ play: Schedule, isolation: isolated (any Actor)? = #isolation) async throws -> Played {
         var went: [Played.Report] = []
         var reached = 0
+        // The act being waited on or played, which a stop names.
+        var line: Int?
         do {
             var reports = try await pointer.move(to: play.start)
             // Measured before the clock starts, from the start, and the cursor brought back
@@ -191,8 +193,10 @@ public struct Player<C: Clock> where C.Duration == Duration {
             // at act can ask for it.
             var course: Course?
             if let calibration = play.calibration {
-                course = Course(steering: try await pointer.calibrate(calibration, from: play.start, clock: clock), at: play.start)
+                let steering = try await pointer.calibrate(calibration, from: play.start, clock: clock)
                 reports += try await pointer.move(to: play.start)
+                // Read back: the loop stops beside a point it cannot land on.
+                course = Course(steering: steering, interval: calibration.interval, at: try pointer.cursor())
             }
             let started = clock.now
             let epoch = wall()
@@ -201,6 +205,7 @@ public struct Player<C: Clock> where C.Duration == Duration {
             // between clicks, not across them.
             var delay = Duration.zero
             for (index, event) in play.acts.enumerated() {
+                line = event.line
                 let due = event.at + delay
                 let deadline = started.advanced(by: due)
                 let wake = deadline.advanced(by: .zero - lead)
@@ -243,23 +248,35 @@ public struct Player<C: Clock> where C.Duration == Duration {
                 let sent = started.duration(to: clock.now)
                 // Counted before the post: one that throws may still have reached the driver.
                 reached = index + 1
+                // How many device reports this act sent: an at line sends what its step
+                // takes, which may be none. [LAW:one-source-of-truth] The count a report
+                // line stands for is what went to the device.
+                var sentReports = 1
                 switch event.report {
                 case .steer(let point):
+                    let current = try steered(course)
                     let began = clock.now
                     try await pointer.move(to: point)
                     delay += began.duration(to: clock.now)
-                    course = Course(steering: try steered(course).steering, at: try pointer.cursor())
+                    course = Course(steering: current.steering, interval: current.interval, at: try pointer.cursor())
                 case .at(let point):
-                    let (moves, lands) = try steered(course).steering.reports(from: try steered(course).at, to: point)
-                    for move in moves { try await pointer.mouse.move(by: move) }
-                    course = Course(steering: try steered(course).steering, at: lands)
+                    let current = try steered(course)
+                    let (moves, lands) = current.steering.reports(from: current.at, to: point)
+                    // A step longer than one report is paced as the table was measured, so
+                    // macOS accelerates each report as the table says.
+                    for (number, move) in moves.enumerated() {
+                        if number > 0 { try await clock.sleep(until: clock.now.advanced(by: current.interval), tolerance: .zero) }
+                        try await pointer.mouse.move(by: move)
+                    }
+                    sentReports = moves.count
+                    course = Course(steering: current.steering, interval: current.interval, at: lands)
                 case .keys(let held), .keepAlive(let held): try await keyboard.hold(held)
                 case .buttons(let held): try await pointer.mouse.hold(held)
                 case .move(let delta): try await pointer.mouse.move(by: delta)
                 case .wheel(let delta): try await pointer.mouse.scroll(by: delta)
                 }
                 let played = Played.Report(line: event.line, scheduled: at(due), sent: at(sent), acked: at(started.duration(to: clock.now)))
-                went += event.report.isReport ? [played] : []
+                went += event.report.isReport && sentReports > 0 ? [played] : []
             }
             return Played(startReports: reports, reports: went)
         } catch {
@@ -271,14 +288,15 @@ public struct Player<C: Clock> where C.Duration == Duration {
             // that were sent, as `Pointer.holding` chooses its own.
             let letGo: () async throws -> Void = play.holdsKeys(in: reached) ? { try await keyboard.releaseAll() } : {}
             let keys = await failure(of: letGo)
-            throw PlayStopped(played: went, of: play.reports, line: reached > 0 ? play.acts[reached - 1].line : nil,
+            throw PlayStopped(played: went, of: play.reports, line: line,
                               cause: error, unreleasedKeys: keys, unreleasedButtons: await pointer.release())
         }
     }
 
-    /// Where the table thinks the cursor is, and the table.
+    /// Where the table thinks the cursor is, the table, and the pace it was measured at.
     private struct Course {
         let steering: Steering
+        let interval: Duration
         let at: ScreenPoint
     }
 

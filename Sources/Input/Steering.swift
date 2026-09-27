@@ -17,6 +17,9 @@ import Pointing
 public struct Steering: Hashable, Sendable {
     /// Ascending by `counts`.
     public let samples: [Sample]
+    /// Points a report of each length from 0 through 127 counts is expected to carry the
+    /// cursor, worked out once: the table is fixed, and it is read on every at line.
+    private let covers: [Double]
 
     public struct Sample: Hashable, Sendable {
         /// The report's length, in counts.
@@ -36,6 +39,7 @@ public struct Steering: Hashable, Sendable {
         let moved = samples.filter { $0.perCount > 0 }.sorted { $0.counts < $1.counts }
         guard !moved.isEmpty else { throw Unmoved(reports: samples.count) }
         self.samples = moved
+        covers = (0...Int(Count.limit)).map { Double($0) * Self.perCount(Double($0), moved) }
     }
 
     /// No report of the calibration moved the cursor.
@@ -46,7 +50,9 @@ public struct Steering: Hashable, Sendable {
 
     /// Points per count for a report `counts` long: straight lines between the samples,
     /// and the nearest sample's value beyond them.
-    public func perCount(_ counts: Double) -> Double {
+    public func perCount(_ counts: Double) -> Double { Self.perCount(counts, samples) }
+
+    private static func perCount(_ counts: Double, _ samples: [Sample]) -> Double {
         guard counts > samples[0].counts else { return samples[0].perCount }
         for (low, high) in zip(samples, samples.dropFirst()) where counts <= high.counts {
             return low.perCount + (high.perCount - low.perCount) * (counts - low.counts) / (high.counts - low.counts)
@@ -62,36 +68,37 @@ public struct Steering: Hashable, Sendable {
         var at = (x: from.x, y: from.y)
         var reports: [Move] = []
         while true {
-            let (move, moved) = report(dx: to.x - at.x, dy: to.y - at.y)
+            let (move, counts, moved) = report(dx: to.x - at.x, dy: to.y - at.y)
             guard move != .none else { break }
             reports.append(move)
             at = (at.x + moved.x, at.y + moved.y)
-            guard max(abs(Int(move.x.value)), abs(Int(move.y.value))) == Count.limit else { break }
+            // The longest report there is, in any direction, and still short: another.
+            guard counts == Int(Count.limit) else { break }
         }
         return (reports, ScreenPoint(x: at.x, y: at.y) ?? from)
     }
 
-    /// The one report whose expected motion comes nearest `dx, dy`, and that motion.
-    private func report(dx: Double, dy: Double) -> (Move, (x: Double, y: Double)) {
+    /// The one report whose expected motion comes nearest `dx, dy`, its length in counts,
+    /// and that motion.
+    private func report(dx: Double, dy: Double) -> (Move, Int, (x: Double, y: Double)) {
         let distance = hypot(dx, dy)
-        guard distance > 0 else { return (.none, (0, 0)) }
-        let counts = (0...Int(Count.limit)).min { abs(covered($0) - distance) < abs(covered($1) - distance) } ?? 0
+        guard distance > 0 else { return (.none, 0, (0, 0)) }
+        let counts = covers.indices.min { abs(covers[$0] - distance) < abs(covers[$1] - distance) } ?? 0
         let move = Move(x: Count(clamping: Int((dx / distance * Double(counts)).rounded())),
                         y: Count(clamping: Int((dy / distance * Double(counts)).rounded())))
         let gain = perCount(hypot(Double(move.x.value), Double(move.y.value)))
-        return (move, (Double(move.x.value) * gain, Double(move.y.value) * gain))
+        return (move, counts, (Double(move.x.value) * gain, Double(move.y.value) * gain))
     }
-
-    private func covered(_ counts: Int) -> Double { Double(counts) * perCount(Double(counts)) }
 }
 
 extension Pointer {
     /// The report lengths calibration measures, shortest first, stopping at the first
     /// that covers the longest step the script asks for.
     static let ladder = [1, 2, 4, 8, 16, 32, 64, Int(Count.limit)]
-    /// Reports per measurement. The first of a burst comes after a pause and is accelerated
-    /// as a slow one; the second is at the script's own pace.
-    static let burst = 2
+    /// Reports in the longer of each length's two runs. The first report of a run comes
+    /// after a pause and is accelerated as a slow one, so a run of one is measured too and
+    /// taken away: what is left is what the reports at the script's own pace did.
+    static let burst = 3
 
     /// Measures what reports of each length do at `interval` apart, each burst starting
     /// from `start` and heading for `toward`, which is a point the script visits, so the
@@ -104,21 +111,28 @@ extension Pointer {
         let unit = away > 0 ? ((calibration.toward.x - start.x) / away, (calibration.toward.y - start.y) / away) : (1.0, 0.0)
         var samples: [Steering.Sample] = []
         for size in Self.ladder {
-            try await move(to: start)
-            let before = try cursor()
             let step = Move(x: Count(clamping: Int((unit.0 * Double(size)).rounded())), y: Count(clamping: Int((unit.1 * Double(size)).rounded())))
-            for _ in 0..<Self.burst {
-                try Task.checkCancellation()
-                try await mouse.move(by: step)
-                try await clock.sleep(until: clock.now.advanced(by: calibration.interval), tolerance: .zero)
-            }
-            try await clock.sleep(until: clock.now.advanced(by: Self.settle), tolerance: .zero)
-            let after = try cursor()
+            let paced = try await run(step, times: Self.burst, from: start, every: calibration.interval, clock: clock)
+                - (try await run(step, times: 1, from: start, every: calibration.interval, clock: clock))
             let counts = hypot(Double(step.x.value), Double(step.y.value))
-            let sample = Steering.Sample(counts: counts, perCount: hypot(after.x - before.x, after.y - before.y) / (counts * Double(Self.burst)))
+            let sample = Steering.Sample(counts: counts, perCount: paced / (counts * Double(Self.burst - 1)))
             samples.append(sample)
             if sample.counts * sample.perCount >= calibration.reach { break }
         }
         return try Steering(samples)
+    }
+
+    /// How far `times` reports of `step`, `every` apart from `start`, carried the cursor.
+    private func run<C: Clock>(_ step: Move, times: Int, from start: ScreenPoint, every interval: Duration, clock: C) async throws -> Double where C.Duration == Duration {
+        try await move(to: start)
+        let before = try cursor()
+        for _ in 0..<times {
+            try Task.checkCancellation()
+            try await mouse.move(by: step)
+            try await clock.sleep(until: clock.now.advanced(by: interval), tolerance: .zero)
+        }
+        try await clock.sleep(until: clock.now.advanced(by: Self.settle), tolerance: .zero)
+        let after = try cursor()
+        return hypot(after.x - before.x, after.y - before.y)
     }
 }

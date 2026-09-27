@@ -32,6 +32,14 @@ import Testing
         #expect(abs(lands.x - 500) <= 3)
     }
 
+    /// A diagonal step past one report's reach is split too: the cap is the report's
+    /// length, which a diagonal reaches with neither axis at 127.
+    @Test func aLongDiagonalStepIsSplitToo() {
+        let (reports, lands) = curve.reports(from: ScreenPoint(x: 0, y: 0)!, to: ScreenPoint(x: 500, y: 500)!)
+        #expect(reports.count > 1)
+        #expect(abs(lands.x - 500) <= 3 && abs(lands.y - 500) <= 3, "\(lands)")
+    }
+
     /// What no whole count covers is left in the prediction, where the next step makes it up.
     @Test func lessThanACountIsLeftForTheNextStep() {
         let (reports, lands) = curve.reports(from: ScreenPoint(x: 0, y: 0)!, to: ScreenPoint(x: 0.4, y: 0)!)
