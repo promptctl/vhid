@@ -100,7 +100,7 @@ import Testing
     @Test func everyVerbIsOnBothSurfacesOrListedAsCommandLineOnly() throws {
         let verbs = Set(try Self.commandLine().keys)
         #expect(Self.commandLineOnly.isSubset(of: verbs), "listed as command-line only but not a verb: \(Self.commandLineOnly.subtracting(verbs))")
-        #expect(Set(Tools.all.map(\.tool.name)) == verbs.subtracting(Self.commandLineOnly))
+        #expect(Tools.all.map(\.tool.name).sorted() == verbs.subtracting(Self.commandLineOnly).sorted())
     }
 
     @Test(arguments: Tools.all.map(\.tool.name))
