@@ -17,19 +17,28 @@ enum Answer: Equatable {
     case unanswered
 }
 
+/// What a read was for, which is the one thing that decides what a generic failure means.
+enum Part {
+    /// A value, title or description: what an element says.
+    case text
+    /// A role, position, size, children or window list: what holds the tree together.
+    case structure
+}
+
 extension Answer {
-    /// Every `AXError` a read can return, decided one value at a time: either this
-    /// element went unread and the walk goes on, or the reader could not look at all and
-    /// throws. [LAW:no-silent-failure] Nothing here is folded into absence except the two
-    /// codes that mean absence.
-    init(_ error: AXError) throws(TreeError) {
+    /// Every `AXError` a read can return, decided one value at a time: either this part
+    /// went unread and the walk goes on, or the reader could not look at all and throws.
+    /// [LAW:no-silent-failure] Nothing is folded into absence except the codes that mean it.
+    init(_ error: AXError, for part: Part) throws(TreeError) {
         switch error {
         case .success: self = .answered
-        // `failure` is how AppKit says an element has no such attribute: measured, TextEdit
-        // answers a description read on its text area with it every time, while the value
-        // beside it holds the whole document. Read as unanswered, every wordless AppKit
-        // element would make the region unread, and no absence could ever be proven.
-        case .noValue, .attributeUnsupported, .failure: self = .absent
+        case .noValue, .attributeUnsupported: self = .absent
+        // How AppKit says an element has no such text: measured, TextEdit answers a
+        // description read on its text area with it every time, while the value beside it
+        // holds the whole document. Read as unanswered, every wordless AppKit element would
+        // leave the region unread, and no absence could ever be proven. Only for text: a
+        // failed children read taken as "no children" would prune a subtree unseen.
+        case .failure: self = part == .text ? .absent : .unanswered
         // The app is busy past the messaging timeout, the element went away mid-walk, or
         // the app does not implement the API. Each is a fact about this element, and the
         // rest of the tree may answer.
@@ -67,12 +76,14 @@ enum Heard<Value> {
     }
 }
 
+extension Heard: Sendable where Value: Sendable {}
+extension Heard: Equatable where Value: Equatable {}
+
 /// What one element says about itself, each read as it came back.
 ///
 /// Reads are kept apart rather than failing the element together, because apps fail
-/// reads they have no use for: measured, TextEdit answers a description read on its text
-/// area with a failure, every time, while the value beside it holds the whole document.
-/// Whether a failed read matters is decided by what the element needed from it.
+/// reads they have no use for. Whether a failed read matters is decided by what the
+/// element needed from it.
 struct Facts {
     /// `AXUnknown` - the tree's own word - when the app would not name it.
     let role: Role
@@ -94,27 +105,40 @@ enum Candidate: Equatable {
     case excluded(Exclusion.Reason)
 }
 
+/// Whether nothing in `frame` can be clicked in `region`: the part of it inside the
+/// region is empty, or lies wholly under one window in front.
+///
+/// One rule for an element's subtree and for a window the tree cannot walk, so "could
+/// anything there be seen" means one thing. [LAW:single-enforcer]
+func hidden(_ frame: ScreenRect, in region: ScreenRect, under covers: [ScreenRect]) -> Bool {
+    let visible = frame.cgRect.intersection(region.cgRect)
+    return visible.isNull || visible.isEmpty || covers.contains { $0.cgRect.contains(visible) }
+}
+
 extension Facts {
     /// The element as a finding in `region`: its first text that is not blank, at its own
     /// frame, if the centre of that frame - the point a click lands on - is in the region
-    /// and under none of the windows in front of this one. An element is unanswered only
-    /// when a read it needed failed: no text answered and one would not say, or its frame
-    /// would not say. [LAW:no-silent-failure]
-    /// [LAW:effects-at-boundaries] Pure, so every rule an element is kept or dropped by is
-    /// tested with facts a test wrote.
+    /// and under none of the windows in front of this one.
+    ///
+    /// Placement is decided before text, so an element that could never be a finding here
+    /// is unplaced or covered whatever its text reads did - a busy element off the region
+    /// does not make the region unread. An element is unanswered only when a read it needed
+    /// failed: its frame would not say, or no text answered and one would not say.
+    /// [LAW:no-silent-failure] [LAW:effects-at-boundaries] Pure, so every rule an element
+    /// is kept or dropped by is tested with facts a test wrote.
     func candidate(in region: ScreenRect, under covers: [ScreenRect]) -> Candidate {
+        if case .answered(let placed) = frame {
+            guard let placed, !placed.isEmpty, region.contains(placed.centre) else { return .excluded(.unplaced) }
+            guard !covers.contains(where: { $0.contains(placed.centre) }) else { return .excluded(.covered) }
+        }
         guard let text = texts.lazy.compactMap({ $0.answer.flatMap { $0 }.flatMap(Text.init) }).first else {
             return .excluded(texts.contains(.unanswered) ? .unanswered : .wordless)
         }
-        guard case .answered(let placed) = frame else { return .excluded(.unanswered) }
-        guard let placed, !placed.isEmpty, region.contains(placed.centre) else { return .excluded(.unplaced) }
-        guard !covers.contains(where: { $0.contains(placed.centre) }) else { return .excluded(.covered) }
+        guard case .answered(let placed?) = frame else { return .excluded(.unanswered) }
         return .found(Found(text: text, frame: placed, source: .tree(role: role)))
     }
 
-    /// Whether nothing under this element can be a finding: the part of its frame inside
-    /// the region is empty, or lies wholly under one window in front. The walk does not
-    /// descend there.
+    /// Whether nothing under this element can be a finding, so the walk does not descend.
     ///
     /// Measured, this is what lets a walk reach a window at all: a full-screen terminal in
     /// front held four thousand elements, every one of them off the region asked about,
@@ -124,8 +148,7 @@ extension Facts {
     /// nothing about where its children are, so the walk goes on into it.
     func screensOff(_ region: ScreenRect, under covers: [ScreenRect]) -> Bool {
         guard case .answered(let placed?) = frame, !placed.isEmpty else { return false }
-        let visible = placed.cgRect.intersection(region.cgRect)
-        return visible.isNull || visible.isEmpty || covers.contains { $0.cgRect.contains(visible) }
+        return hidden(placed, in: region, under: covers)
     }
 }
 
@@ -145,64 +168,107 @@ struct Walked: Equatable {
 }
 
 /// How much one walk may read. A tree is read one synchronous call into another process
-/// per attribute, and a browser's is tens of thousands wide, so a walk stops at these and
+/// per element, and a browser's is tens of thousands wide, so a walk stops at these and
 /// says so in its reach rather than outlasting its caller.
 struct Bounds {
     let elements: Limit
     let time: Duration
 }
 
-/// Breadth first from `roots`, every element read once, until the tree runs out or a
-/// bound is hit. The roots come front to back, so a walk cut short by a bound has spent
-/// it on what is most visible. `unansweredRoots` counts windows that could not be found
-/// because their app would not list them - never read, and so never whole. [LAW:dataflow-not-control-flow] An element that will not answer is a
-/// value the walk carries on past - counted, and its subtree unread - not an abort: the
-/// text is usually in another branch.
+/// One text at one place, whatever role said it: a button and the label inside it are two
+/// elements and one thing on screen.
+private struct Place: Hashable {
+    let text: String
+    let frame: ScreenRect
+}
+
+/// Each root in turn, front to back, breadth first within it, every element read once,
+/// until the roots run out or a bound is hit - so a walk cut short has spent its bounds on
+/// the windows in front, never on the shallow levels of one behind.
+///
+/// [LAW:dataflow-not-control-flow] An element that will not answer is a value the walk
+/// carries on past - counted, and its subtree unread - not an abort: the text is usually
+/// in another branch. `unwalked` counts on-screen windows in the region with no element to
+/// start from; they were never read, so the region was not read whole.
 ///
 /// Held apart from every accessibility call so the walk, its bounds and its counts are
 /// checked with no app to read from. [LAW:effects-at-boundaries]
 func walk<Element>(
     from roots: [Root<Element>],
-    unansweredRoots: Int,
+    unwalked: Int,
     in region: ScreenRect,
     within bounds: Bounds,
     elapsed: () -> Duration,
     read: (Element) throws -> Node<Element>
 ) rethrows -> Walked {
-    var queue = roots[...]
     var found: [Found] = []
-    var seen: Set<Found> = []
-    var counts: [Exclusion.Reason: Int] = unansweredRoots > 0 ? [.unanswered: unansweredRoots] : [:]
+    var seen: Set<Place> = []
+    var counts: [Exclusion.Reason: Int] = unwalked > 0 ? [.unwalked: unwalked] : [:]
     var examined = 0
     var stop: Stop?
 
-    while let root = queue.popFirst() {
-        guard examined < bounds.elements.count else { stop = .elementLimit(bounds.elements); break }
-        guard elapsed() < bounds.time else { stop = .timeBudget(bounds.time); break }
-        let node = try read(root.element)
-        examined += 1
-        let candidate = node.facts.candidate(in: region, under: root.covers)
-        switch candidate {
-        // A button and the label inside it are two elements with one text at one place.
-        case .found(let run) where !seen.insert(run).inserted: counts[.duplicate, default: 0] += 1
-        case .found(let run): found.append(run)
-        case .excluded(let reason): counts[reason, default: 0] += 1
-        }
-        switch node.children {
-        case .answered(let children) where !node.facts.screensOff(region, under: root.covers):
-            queue.append(contentsOf: children.map { Root(element: $0, covers: root.covers) })
-        case .answered: break
-        // A subtree unread is one more unanswered part, unless this element was already
-        // counted as one.
-        case .unanswered where candidate != .excluded(.unanswered): counts[.unanswered, default: 0] += 1
-        case .unanswered: break
+    roots: for start in roots {
+        var queue = [start][...]
+        while let root = queue.popFirst() {
+            guard examined < bounds.elements.count else { stop = .elementLimit(bounds.elements); break roots }
+            guard elapsed() < bounds.time else { stop = .timeBudget(bounds.time); break roots }
+            let node = try read(root.element)
+            examined += 1
+            let candidate = node.facts.candidate(in: region, under: root.covers)
+            switch candidate {
+            case .found(let run) where !seen.insert(Place(text: run.text.value, frame: run.frame)).inserted:
+                counts[.duplicate, default: 0] += 1
+            case .found(let run): found.append(run)
+            case .excluded(let reason): counts[reason, default: 0] += 1
+            }
+            let screened = node.facts.screensOff(region, under: root.covers)
+            switch node.children {
+            case .answered(let children) where !screened:
+                queue.append(contentsOf: children.map { Root(element: $0, covers: root.covers) })
+            case .answered: break
+            // A subtree unread is one more unanswered part - unless nothing in it could be
+            // seen, or this element was already counted as one.
+            case .unanswered where !screened && candidate != .excluded(.unanswered):
+                counts[.unanswered, default: 0] += 1
+            case .unanswered: break
+            }
         }
     }
 
     // Ordered by the reason's spelling so one screen always reports the same way.
     let excluded = counts.map { Exclusion(reason: $0.key, count: $0.value) }.sorted { $0.reason.rawValue < $1.reason.rawValue }
-    let reach: Reach = stop.map(Reach.stopped) ?? (counts[.unanswered] == nil ? .whole : .stopped(.unanswered))
+    let unread = counts[.unanswered] != nil || counts[.unwalked] != nil
+    let reach: Reach = stop.map(Reach.stopped) ?? (unread ? .stopped(.unread) : .whole)
     return Walked(found: found, examined: examined, excluded: excluded, reach: reach)
+}
+
+/// The on-screen windows meeting `region`, front to back, as roots to walk and a count of
+/// the ones with nothing to walk.
+///
+/// `matched` holds the accessibility element found for each window id. A window with none
+/// is one of two things. Inside a matched window of its own app, it is that window's sheet
+/// or drawer: its elements are under the parent's, so it covers nothing and is not
+/// counted. Otherwise it is an open menu, a system surface, or a window whose app would
+/// not list it: unwalked, and counted whenever any of it can be seen in the region.
+/// [LAW:no-silent-failure] Pure, so the rule is tested with windows a test wrote.
+func plan<Element>(_ windows: [Window], in region: ScreenRect, matched: [UInt32: Element]) -> (roots: [Root<Element>], unwalked: Int) {
+    let attached = Set(windows.filter { window in
+        matched[window.id] == nil && windows.contains {
+            $0.pid == window.pid && matched[$0.id] != nil && $0.frame.cgRect.contains(window.frame.cgRect)
+        }
+    }.map(\.id))
+    var roots: [Root<Element>] = []
+    var unwalked = 0
+    for (index, window) in windows.enumerated() where !attached.contains(window.id) {
+        let covers = windows[..<index].filter { !attached.contains($0.id) }.map(\.frame)
+        guard !hidden(window.frame, in: region, under: covers) else { continue }
+        if let element = matched[window.id] {
+            roots.append(Root(element: element, covers: covers))
+        } else {
+            unwalked += 1
+        }
+    }
+    return (roots, unwalked)
 }
 
 /// Everything that means the tree reader could not look, as opposed to having looked and
@@ -222,6 +288,3 @@ public enum TreeError: Error, CustomStringConvertible {
         }
     }
 }
-
-extension Heard: Sendable where Value: Sendable {}
-extension Heard: Equatable where Value: Equatable {}

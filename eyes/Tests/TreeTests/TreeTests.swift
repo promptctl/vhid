@@ -9,15 +9,23 @@ import Eyes
     /// mapping has not been checked for.
     @Test(arguments: [
         (AXError.success, Answer.answered),
-        (.noValue, .absent), (.attributeUnsupported, .absent), (.failure, .absent),
+        (.noValue, .absent), (.attributeUnsupported, .absent),
         (.cannotComplete, .unanswered), (.invalidUIElement, .unanswered), (.notImplemented, .unanswered),
     ])
-    func aReadIsAnsweredAbsentOrUnanswered(error: AXError, answer: Answer) throws {
-        #expect(try Answer(error) == answer)
+    func aReadIsAnsweredAbsentOrUnansweredWhateverItWasFor(error: AXError, answer: Answer) throws {
+        #expect(try Answer(error, for: .text) == answer)
+        #expect(try Answer(error, for: .structure) == answer)
+    }
+
+    /// Measured on TextEdit: a text read an element has no use for fails. A failed
+    /// children read is never taken as "no children", which would prune a subtree unseen.
+    @Test func aFailureIsAbsentTextButUnansweredStructure() throws {
+        #expect(try Answer(.failure, for: .text) == .absent)
+        #expect(try Answer(.failure, for: .structure) == .unanswered)
     }
 
     @Test func noGrantThrowsByName() {
-        #expect { try Answer(.apiDisabled) } throws: { ($0 as? TreeError).map { if case .noGrant = $0 { true } else { false } } ?? false }
+        #expect { try Answer(.apiDisabled, for: .structure) } throws: { ($0 as? TreeError).map { if case .noGrant = $0 { true } else { false } } ?? false }
     }
 
     @Test(arguments: [
@@ -25,7 +33,7 @@ import Eyes
         .notificationAlreadyRegistered, .notificationNotRegistered, .parameterizedAttributeUnsupported, .notEnoughPrecision,
     ])
     func aCodeNoAttributeReadReturnsIsABugNotAFact(error: AXError) {
-        #expect { try Answer(error) } throws: {
+        #expect { try Answer(error, for: .text) } throws: {
             ($0 as? TreeError).map { if case .unexpected(error.rawValue) = $0 { true } else { false } } ?? false
         }
     }
@@ -64,6 +72,13 @@ func facts(_ texts: [Heard<String?>] = [.answered("OK")], frame: Heard<ScreenRec
     /// No text answered and one read would not say: whether it had text is unknown.
     @Test func noTextAndAnUnansweredReadIsUnansweredNotWordless() {
         #expect(facts([.answered(nil), .unanswered, .answered(nil)]).candidate(in: region, under: []) == .excluded(.unanswered))
+    }
+
+    /// A busy element off the region could never have been a finding, so it does not
+    /// leave the region unread.
+    @Test func anUnansweredTextOffTheRegionIsUnplacedNotUnanswered() {
+        let off = ScreenRect(x: 2000, y: 100, width: 80, height: 30)
+        #expect(facts([.unanswered], frame: .answered(off)).candidate(in: region, under: []) == .excluded(.unplaced))
     }
 
     @Test func aFrameThatWouldNotSayIsUnanswered() {
@@ -113,11 +128,11 @@ struct FakeTree {
 
     func read(_ name: String) -> Node<String> { nodes[name]! }
 
-    func walked(_ roots: [String] = ["window"], covers: [ScreenRect] = [], unansweredRoots: Int = 0,
+    func walked(_ roots: [String] = ["window"], covers: [ScreenRect] = [], unwalked: Int = 0,
                 limit: Int = 100, elapsed: Duration = .zero) -> Walked {
         walk(
             from: roots.map { Root(element: $0, covers: covers) },
-            unansweredRoots: unansweredRoots,
+            unwalked: unwalked,
             in: region,
             within: Bounds(elements: Limit(limit)!, time: .seconds(5)),
             elapsed: { elapsed },
@@ -126,8 +141,8 @@ struct FakeTree {
     }
 }
 
-func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[String]> = .answered([]), texts: [Heard<String?>]? = nil) -> Node<String> {
-    Node(facts: facts(texts ?? [.answered(text)], frame: .answered(frame)), children: children)
+func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[String]> = .answered([]), role: String = "AXButton") -> Node<String> {
+    Node(facts: facts([.answered(text)], frame: .answered(frame), role: role), children: children)
 }
 
 @Suite struct WalkTests {
@@ -135,8 +150,8 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
         "window": node("Save changes?", region, children: .answered(["group", "busy"])),
         "group": node(nil, ScreenRect(x: 50, y: 50, width: 400, height: 200), children: .answered(["ok", "label"])),
         "ok": node("OK"),
-        // The label inside the button: one text at one place, twice.
-        "label": node("OK"),
+        // The label inside the button: one text at one place, twice, whatever the roles.
+        "label": node("OK", role: "AXStaticText"),
         "busy": node("Cancel", ScreenRect(x: 300, y: 100, width: 80, height: 30), children: .unanswered),
     ])
 
@@ -152,17 +167,42 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
     /// A subtree that went unread keeps the region from having been read whole, so a busy
     /// app can never prove an absence.
     @Test func anUnreadSubtreeStopsTheReachShort() {
-        #expect(dialog.walked().reach == .stopped(.unanswered))
+        #expect(dialog.walked().reach == .stopped(.unread))
         var answering = dialog
         answering.nodes["busy"] = node("Cancel")
         #expect(answering.walked().reach == .whole)
     }
 
-    @Test func aWindowThatCouldNotBeListedIsUnansweredToo() {
+    @Test func aWindowWithNothingToWalkLeavesTheRegionUnread() {
         let tree = FakeTree(nodes: ["window": node("Hello")])
-        let w = tree.walked(unansweredRoots: 2)
-        #expect(w.excluded == [Exclusion(reason: .unanswered, count: 2)])
-        #expect(w.reach == .stopped(.unanswered))
+        let w = tree.walked(unwalked: 2)
+        #expect(w.excluded == [Exclusion(reason: .unwalked, count: 2)])
+        #expect(w.reach == .stopped(.unread))
+    }
+
+    /// A subtree that would not answer, off the region, could not have held a finding.
+    @Test func anUnreadSubtreeOffTheRegionLeavesTheReachWhole() {
+        let tree = FakeTree(nodes: [
+            "window": node(nil, region, children: .answered(["far"])),
+            "far": node(nil, ScreenRect(x: 3000, y: 0, width: 100, height: 100), children: .unanswered),
+        ])
+        #expect(tree.walked().reach == .whole)
+    }
+
+    /// Each window is walked to the end before the next, so a bound spends itself on the
+    /// window in front and not on the shallow levels of one behind.
+    @Test func theFrontWindowIsWalkedWholeBeforeTheNext() {
+        let tree = FakeTree(nodes: [
+            "front": node(nil, region, children: .answered(["deep"])),
+            "deep": node(nil, region, children: .answered(["text"])),
+            "text": node("Delete"),
+            "behind": node(nil, region, children: .answered(["b1", "b2"])),
+            "b1": node("One", ScreenRect(x: 500, y: 500, width: 20, height: 20)),
+            "b2": node("Two", ScreenRect(x: 600, y: 500, width: 20, height: 20)),
+        ])
+        let w = tree.walked(["front", "behind"], limit: 4)
+        #expect(w.found.map(\.text.value) == ["Delete"])
+        #expect(w.reach == .stopped(.elementLimit(Limit(4)!)))
     }
 
     @Test func theElementBoundStopsTheWalkAndSaysSo() {
@@ -193,5 +233,50 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
         let w = dialog.walked(covers: [ScreenRect(x: 0, y: 0, width: 1000, height: 120)])
         #expect(w.found.map(\.text.value) == ["Save changes?"])
         #expect(w.excluded.contains(Exclusion(reason: .covered, count: 3)))
+    }
+}
+
+@Suite struct PlanTests {
+    func window(_ id: UInt32, pid: Int32 = 1, _ frame: ScreenRect) -> Window {
+        Window(id: id, owner: "App", pid: pid, frame: frame, layer: 0)
+    }
+
+    let document = ScreenRect(x: 100, y: 100, width: 600, height: 400)
+
+    @Test func eachMatchedWindowIsARootCoveredByTheOnesInFront() {
+        let front = window(1, pid: 2, ScreenRect(x: 0, y: 0, width: 300, height: 300))
+        let (roots, unwalked) = plan([front, window(2, document)], in: region, matched: [1: "front", 2: "doc"])
+        #expect(roots.map(\.element) == ["front", "doc"])
+        #expect(roots.map(\.covers) == [[], [front.frame]])
+        #expect(unwalked == 0)
+    }
+
+    /// A sheet is its own window to the window server and a child of its window to the
+    /// tree: walked there, and covering nothing - else its own buttons read as covered.
+    @Test func aSheetInsideItsWindowIsWalkedThroughItAndCoversNothing() {
+        let sheet = window(9, ScreenRect(x: 200, y: 100, width: 300, height: 150))
+        let (roots, unwalked) = plan([sheet, window(2, document)], in: region, matched: [2: "doc"])
+        #expect(roots.map(\.element) == ["doc"])
+        #expect(roots[0].covers == [])
+        #expect(unwalked == 0)
+    }
+
+    /// An open menu is another app's surface, or this app's with no window element: it is
+    /// on screen, nothing in it is read, and it says so.
+    @Test func aVisibleWindowWithNothingToWalkIsCounted() {
+        let menu = window(5, pid: 3, ScreenRect(x: 150, y: 120, width: 200, height: 300))
+        let (roots, unwalked) = plan([menu, window(2, document)], in: region, matched: [2: "doc"])
+        #expect(roots.map(\.element) == ["doc"])
+        #expect(roots[0].covers == [menu.frame])
+        #expect(unwalked == 1)
+    }
+
+    /// Off the region or wholly behind a window in front, a window holds nothing to read.
+    @Test func aWindowNothingOfWhichCanBeSeenIsNeitherWalkedNorCounted() {
+        let full = window(1, pid: 2, region)
+        let (roots, unwalked) = plan([full, window(2, document), window(3, pid: 4, ScreenRect(x: 2000, y: 0, width: 10, height: 10))],
+                                     in: region, matched: [1: "full", 2: "doc"])
+        #expect(roots.map(\.element) == ["full"])
+        #expect(unwalked == 0)
     }
 }

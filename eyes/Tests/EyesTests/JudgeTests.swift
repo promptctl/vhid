@@ -133,8 +133,8 @@ import Testing
     @Test func aReadersOwnStopOutlastsTheLimit() {
         let read = Reading.judging(["OK", "OK"].enumerated().map { found($1, y: Double($0) * 20) },
                                    query: Query(match: nil, region: .rect(Self.region), limit: Limit(1)!),
-                                   region: Self.region, examined: 2, excluded: [], reach: .stopped(.unanswered))
-        #expect(read.scope.reach == .stopped(.unanswered))
+                                   region: Self.region, examined: 2, excluded: [], reach: .stopped(.unread))
+        #expect(read.scope.reach == .stopped(.unread))
         #expect(read.scope.excluded == [Exclusion(reason: .ranked, count: 1)])
     }
 }
