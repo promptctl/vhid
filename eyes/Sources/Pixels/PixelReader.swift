@@ -70,17 +70,44 @@ public struct PixelReader: Reader {
         }
     }
 
-    /// One run per piece of text, where overlapping pieces each read it. A run mostly
-    /// inside a larger one is the same text seen again, or a piece of it a seam cut, and
-    /// is dropped - counted by the caller as a duplicate, never lost silently.
+    /// One run per stretch of text, where overlapping pieces each read some of it.
+    ///
+    /// Pieces of one line read by different tiles are one line, so they are joined, never
+    /// chosen between: a line wider than half a tile comes back as overlapping partial runs,
+    /// and keeping only the larger lost the words only the smaller held while the scope
+    /// still said the whole region was read. Runs join when they share a line and their
+    /// spans overlap; within a joined run, a word mostly inside a wider word at the same
+    /// place is the same word read again or cut by a seam, and only the widest is kept.
+    /// Labels side by side do not overlap, so they stay apart. [LAW:no-silent-failure]
     nonisolated static func distinct(_ runs: [Found]) -> [Found] {
-        var kept: [Found] = []
-        for run in runs.sorted(by: { $0.frame.width * $0.frame.height > $1.frame.width * $1.frame.height }) {
-            let area = run.frame.width * run.frame.height
-            let covered = kept.contains { run.frame.cgRect.intersection($0.frame.cgRect).area >= area * 0.8 }
-            if !covered { kept.append(run) }
+        var groups: [[Found]] = []
+        for run in runs {
+            let joined = groups.indices.filter { i in groups[i].contains { sameStretch($0.frame, run.frame) } }
+            let merged = joined.flatMap { groups[$0] } + [run]
+            groups = groups.indices.filter { !joined.contains($0) }.map { groups[$0] } + [merged]
         }
-        return kept
+        return groups.map(joining)
+    }
+
+    /// One line, overlapping: the vertical spans share at least half the shorter height and
+    /// the horizontal spans overlap at all.
+    nonisolated static func sameStretch(_ a: ScreenRect, _ b: ScreenRect) -> Bool {
+        let shared = min(a.y + a.height, b.y + b.height) - max(a.y, b.y)
+        return shared >= min(a.height, b.height) / 2 && a.x < b.x + b.width && b.x < a.x + a.width
+    }
+
+    nonisolated static func joining(_ pieces: [Found]) -> Found {
+        var kept: [Word] = []
+        for word in pieces.flatMap(\.words).sorted(by: { $0.frame.width > $1.frame.width }) {
+            let area = word.frame.width * word.frame.height
+            if !kept.contains(where: { word.frame.cgRect.intersection($0.frame.cgRect).area >= area / 2 }) {
+                kept.append(word)
+            }
+        }
+        let ordered = kept.sorted { $0.frame.x < $1.frame.x }
+        // The least sure piece speaks for the whole: a joined run is no surer than its weakest reading.
+        let confidence = pieces.compactMap { if case .pixels(let c) = $0.source { c } else { nil } }.min()!
+        return Found(first: ordered[0], rest: Array(ordered.dropFirst()), source: .pixels(confidence: confidence))
     }
 
     /// Top to bottom, then left to right. Vision's own order is not reading order - it put

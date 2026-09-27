@@ -83,4 +83,48 @@ import Testing
             try PixelReader.onOneDisplay(ScreenRect(x: 9000, y: 9000, width: 40, height: 30), displays: [Self.main, Self.left])
         }
     }
+
+    /// A line of words, one every 50 points from `from`, as the tile that read them saw it.
+    private func line(_ words: [String], from: Double, y: Double = 100) -> Found {
+        let placed = words.enumerated().map { i, w in
+            Word(text: Text(w)!, frame: ScreenRect(x: from + Double(i) * 50, y: y, width: 44, height: 14))
+        }
+        return Found(first: placed[0], rest: Array(placed.dropFirst()), source: .pixels(confidence: Confidence(0.9)!))
+    }
+
+    /// The reviewer's first case: a line from 300 to 1000 read in three overlapping pieces.
+    /// Keeping only the larger piece lost the words from 300 to 400. Joined, every word is
+    /// there once.
+    @Test func aLineCutByTwoSeamsComesBackWholeAndOnce() {
+        let all = (0..<14).map { "w\($0)" }       // x 300 ... 950
+        let pieces = [
+            line(Array(all[0..<10]), from: 300),  // tile 0-800
+            line(Array(all[2..<14]), from: 400),  // tile 400-1200
+            line(Array(all[10..<14]), from: 800), // tile 800-1600
+        ]
+        let kept = PixelReader.distinct(pieces)
+        #expect(kept.count == 1)
+        #expect(kept.first?.words.map(\.text.value) == all)
+    }
+
+    /// The second case: pieces overlapping by only half used to both survive, doubling
+    /// every shared word. Joined, none is doubled.
+    @Test func overlappingPiecesOfOneLineDoNotDoubleItsWords() {
+        let all = (0..<20).map { "w\($0)" }
+        let kept = PixelReader.distinct([line(Array(all[0..<14]), from: 100), line(Array(all[6..<20]), from: 400)])
+        #expect(kept.map { $0.words.map(\.text.value) } == [all])
+    }
+
+    /// A seam fragment of a word is dropped in favour of the whole word at the same spot.
+    @Test func aSeamFragmentGivesWayToTheWholeWord() {
+        let whole = line(["Open", "Settings"], from: 100)
+        let fragment = Found(text: Text("Sett")!, frame: ScreenRect(x: 150, y: 100, width: 24, height: 14),
+                             source: .pixels(confidence: Confidence(0.5)!))
+        #expect(PixelReader.distinct([whole, fragment]).map(\.text.value) == ["Open Settings"])
+    }
+
+    /// Two lines stacked do not join, however they overlap sideways.
+    @Test func linesAboveOneAnotherStayApart() {
+        #expect(PixelReader.distinct([line(["a", "b"], from: 0, y: 0), line(["c", "d"], from: 0, y: 16)]).count == 2)
+    }
 }
