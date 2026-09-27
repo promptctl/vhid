@@ -10,6 +10,15 @@ import Pointing
 /// behind the real listener through this.
 protocol ServedDevices: DeviceService {
     func releaseEverything(because reason: String)
+    /// Releases the keyboard when a key has been down past the limit with no keyboard
+    /// report, answering with what that let go of, or nil when nothing was due.
+    func releaseKeysHeldPastLimit() -> KeysLetGo?
+}
+
+/// Keys the deadline released, or the reason the release failed.
+struct KeysLetGo: Equatable {
+    let usages: [UInt16]
+    let failure: String?
 }
 
 /// The keyboard and the mouse, held open for as long as their connection to the daemon
@@ -36,9 +45,27 @@ final class Devices: NSObject, ServedDevices, @unchecked Sendable {
     /// hop and take away the ability to answer on the thread that asked.
     private let device = NSLock()
 
-    init(keyboard: any KeyPress, mouse: any PointingDevice) {
+    /// How long a key may stay down with no keyboard report before the daemon lets it go.
+    ///
+    /// A stopped client that is still connected - suspended mid-chord, paused in a
+    /// debugger, a hung MCP host - keeps its key down, and macOS repeats it into whatever
+    /// app is in front. No verb holds a key across idle time: a modifier held for a click,
+    /// scroll or drag spans a pointer gesture measured at about 150ms across a whole desk.
+    /// Buttons are not timed, because a replayed pointer script holds one across gaps.
+    static let keyLimit: Duration = .seconds(2)
+
+    private let limit: Duration
+    private let now: () -> ContinuousClock.Instant
+    /// Keys down, and when the last keyboard report was posted; both under `device`.
+    private var keysDown: Set<Usage> = []
+    private var lastKeyReport: ContinuousClock.Instant?
+
+    init(keyboard: any KeyPress, mouse: any PointingDevice, limit: Duration = keyLimit,
+         now: @escaping () -> ContinuousClock.Instant = { .now }) {
         self.keyboard = keyboard
         self.mouse = mouse
+        self.limit = limit
+        self.now = now
     }
 
     /// [LAW:dataflow-not-control-flow] Every call is the same act - take the devices, do
@@ -61,11 +88,34 @@ final class Devices: NSObject, ServedDevices, @unchecked Sendable {
     }
 
     func down(usage: UInt16, reply: @escaping (Error?) -> Void) {
-        attempt({ try keyboard.down(Usage(rawValue: usage)) }, reply)
+        attempt({ try pressKey(Usage(rawValue: usage)) }, reply)
     }
 
     func releaseAll(reply: @escaping (Error?) -> Void) {
-        attempt({ try keyboard.releaseAll() }, reply)
+        attempt({ try releaseKeys() }, reply)
+    }
+
+    /// The keyboard's two acts, each noting what is down and when it was last reported;
+    /// the caller holds `device`. [LAW:single-enforcer]
+    private func pressKey(_ usage: Usage) throws {
+        lastKeyReport = now()
+        try keyboard.down(usage)
+        keysDown.insert(usage)
+    }
+
+    private func releaseKeys() throws {
+        lastKeyReport = now()
+        try keyboard.releaseAll()
+        keysDown = []
+    }
+
+    func releaseKeysHeldPastLimit() -> KeysLetGo? {
+        device.lock()
+        defer { device.unlock() }
+        guard !keysDown.isEmpty, let last = lastKeyReport, now() - last >= limit else { return nil }
+        let usages = keysDown.sorted().map(\.rawValue)
+        // A release that failed is tried again on the next sweep: the keys stay noted.
+        return KeysLetGo(usages: usages, failure: outcome(of: releaseKeys).map { "\($0)" })
     }
 
     func buttonDown(_ button: UInt8, reply: @escaping (Error?) -> Void) {
@@ -98,7 +148,7 @@ final class Devices: NSObject, ServedDevices, @unchecked Sendable {
     func releaseEverything(because reason: String) {
         device.lock()
         defer { device.unlock() }
-        let key = outcome(of: keyboard.releaseAll)
+        let key = outcome(of: releaseKeys)
         log(key.map { "\(reason), and the keyboard would not release: \($0)" } ?? "\(reason); every key is up")
         let button = outcome(of: mouse.releaseAll)
         log(button.map { "\(reason), and the mouse would not release: \($0)" } ?? "\(reason); every button is up")

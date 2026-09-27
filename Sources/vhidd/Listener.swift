@@ -12,10 +12,16 @@ final class Listener: NSObject, NSXPCListenerDelegate {
     private let readiness: Readiness
     private let callers: CallerIdentity
     private let holder = Holder()
+    /// Checks for keys held past the limit a few times a second.
+    private let sweep = DispatchSource.makeTimerSource(queue: .global())
 
     init(readiness: Readiness, callers: CallerIdentity) {
         self.readiness = readiness
         self.callers = callers
+        super.init()
+        sweep.schedule(deadline: .now(), repeating: .milliseconds(250))
+        sweep.setEventHandler { [readiness, holder] in releaseKeysHeldPastLimit(readiness, holder).map(log) }
+        sweep.resume()
     }
 
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
@@ -51,4 +57,14 @@ final class Listener: NSObject, NSXPCListenerDelegate {
         logRoutine("accepted a connection from pid \(connection.processIdentifier)")
         return true
     }
+}
+
+/// Lets go of keys a client has held past the limit and says whose they were. The holder
+/// keeps the devices: the client's next act still works, and its own key-up is harmless.
+func releaseKeysHeldPastLimit(_ readiness: Readiness, _ holder: Holder) -> String? {
+    guard let (letGo, attempt) = readiness.releaseKeysHeldPastLimit() else { return nil }
+    let whose = holder.pid(on: attempt).map { "pid \($0)" } ?? "no client"
+    let keys = letGo.usages.map { String(format: "0x%02X", $0) }.joined(separator: ", ")
+    return "\(whose) held \(keys) past \(Devices.keyLimit) with no keyboard report; "
+        + (letGo.failure.map { "the keyboard would not release: \($0)" } ?? "released")
 }
