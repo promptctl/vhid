@@ -66,7 +66,7 @@ vhid move 800 500
 vhid scroll 800 500 --vertical 3
 vhid drag 100 100 400 300
 vhid cursor
-vhid pointer play < script.jsonl
+vhid play < script.jsonl
 vhid doctor
 ```
 
@@ -88,7 +88,8 @@ left of or above it has negative ones, which follow `--` after every option:
 ## Over MCP
 
 `vhid mcp` serves the same verbs as MCP tools over stdio: `type`, `press`, `click`,
-`move`, `scroll`, `drag`, `cursor` and `doctor`, run as `vhid mcp`.
+`move`, `scroll`, `drag`, `play`, `cursor` and `doctor`, run as `vhid mcp`. `play` takes
+the script as its `script` argument where the command line reads it from stdin.
 
 Each tool call connects to the daemon and leaves when it returns, so a session holds
 nothing between calls and a `vhid click` from a shell still gets through. Stdout carries

@@ -1,6 +1,6 @@
 import Keystrokes
 
-/// The keyboard as a client reaches it: the same two acts, with a root process in the
+/// The keyboard as a client reaches it: the acts of `KeyPress`, with a root process in the
 /// middle instead of the driver. A value over the connection, so a typist holds a
 /// `KeyPress` and not a connection. [LAW:composability]
 public struct HelperKeyboard: KeyPress {

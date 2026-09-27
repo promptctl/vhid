@@ -1,14 +1,14 @@
 import Keystrokes
 
-/// The keyboard one character is typed on: keys that go down, and a release that takes
-/// them all back up.
+/// The keyboard one character is typed on: keys that go down, a release that takes them
+/// all back up, and a set held at once.
 ///
 /// [LAW:effects-at-boundaries] Posting a key is an effect against the driver, so it sits
 /// behind this seam - which is what lets a test throw at the third keystroke of a
 /// four-keystroke character and read back the score the run would have reported, with no
 /// driver in front.
 ///
-/// **Two members, and neither of them is a veto.** What this protocol had besides these
+/// **None of its members is a veto.** What this protocol had besides these
 /// was a `check()` a caller could fail: the run was refused because the operator had
 /// interrupted, or because the app that was in front no longer was. Both are gone. A
 /// driver says what the device did and what it could not do; it does not hold an opinion
@@ -21,6 +21,8 @@ import Keystrokes
 public protocol Keyboard: Sendable {
     func down(_ usage: Usage) async throws
     func releaseAll() async throws
+    /// Exactly `keys` down from now, whatever was down before.
+    func hold(_ keys: HeldKeys) async throws
 }
 
 /// A keyboard whose reports are posted on the device queue.
@@ -41,4 +43,5 @@ public struct QueuedKeyboard: Keyboard {
 
     public func down(_ usage: Usage) async throws { try await queue.run { [keyboard] in try keyboard.down(usage) } }
     public func releaseAll() async throws { try await queue.run { [keyboard] in try keyboard.releaseAll() } }
+    public func hold(_ keys: HeldKeys) async throws { try await queue.run { [keyboard] in try keyboard.hold(keys) } }
 }

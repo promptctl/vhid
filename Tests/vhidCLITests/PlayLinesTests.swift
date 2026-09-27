@@ -2,7 +2,7 @@ import Testing
 @testable import Input
 @testable import vhid
 
-/// The lines `pointer play` prints, which are the largest contract this CLI makes and the
+/// The lines `play` prints, which are the largest contract this CLI makes and the
 /// only one another program parses. Asserted whole rather than by key, because a harness
 /// reads the whole line: the envelope names, the snake_case, the percentile keys and the
 /// ordering are all part of what was promised.

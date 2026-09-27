@@ -33,6 +33,7 @@ final class RefusingKeyboard: Keyboard {
 
     func down(_ usage: Usage) throws { try record("down \(String(usage.rawValue, radix: 16))") }
     func releaseAll() throws { try record("up") }
+    func hold(_ keys: HeldKeys) throws { try record("hold \(keys.logged)") }
 }
 
 /// A keyboard whose keys will not go down but whose release still answers: the daemon
@@ -48,9 +49,20 @@ final class StuckKeyboard: Keyboard {
     }
 
     func releaseAll() throws { recorded.withLock { $0.append("up") } }
+    func hold(_ keys: HeldKeys) throws { recorded.withLock { $0.append("hold \(keys.logged)") } }
 }
 
 struct Refused: Error {}
+
+extension HeldKeys {
+    /// The set as a fake's log writes it: usages in hex, in order.
+    var logged: String { "[" + usages.map(\.rawValue).sorted().map { String($0, radix: 16) }.joined(separator: " ") + "]" }
+}
+
+extension Set<Button> {
+    /// The set as a fake's log writes it: button numbers, in order.
+    var logged: String { "[" + map(\.rawValue).sorted().map(String.init).joined(separator: " ") + "]" }
+}
 
 /// A pointing device that records every report reaching it. Where `FakeMouse` stands in
 /// for the whole mouse, this stands under one - so a test can ask not only whether a
@@ -62,6 +74,7 @@ final class RecordingPointing: PointingDevice {
 
     func down(_ button: Button) throws { recorded.withLock { $0.append("down \(button.rawValue)") } }
     func releaseAll() throws { recorded.withLock { $0.append("up") } }
+    func hold(_ buttons: Set<Button>) throws { recorded.withLock { $0.append("hold \(buttons.logged)") } }
     func move(by delta: Move) throws { recorded.withLock { $0.append("move \(delta.x.value) \(delta.y.value)") } }
     func scroll(by delta: Scroll) throws { recorded.withLock { $0.append("scroll \(delta.vertical.value) \(delta.horizontal.value)") } }
 }
@@ -75,6 +88,7 @@ final class RecordingKeyPress: KeyPress {
 
     func down(_ usage: Usage) throws { recorded.withLock { $0.append("down \(String(usage.rawValue, radix: 16))") } }
     func releaseAll() throws { recorded.withLock { $0.append("up") } }
+    func hold(_ keys: HeldKeys) throws { recorded.withLock { $0.append("hold \(keys.logged)") } }
 }
 
 /// A mouse on a screen of its own, recording every report. The cursor moves by what a
@@ -121,6 +135,7 @@ final class FakeMouse: Mouse {
 
     func down(_ button: Button) throws { try state.withLock { try record(&$0, "down \(button.rawValue)") } }
     func releaseAll() throws { try state.withLock { try record(&$0, "up") } }
+    func hold(_ buttons: Set<Button>) throws { try state.withLock { try record(&$0, "hold \(buttons.logged)") } }
 
     func move(by delta: Move) throws {
         try state.withLock {
@@ -152,6 +167,7 @@ final class FakeMouse: Mouse {
         let mouse: FakeMouse
         func down(_ usage: Usage) throws { try mouse.state.withLock { try mouse.record(&$0, "key down \(String(usage.rawValue, radix: 16))") } }
         func releaseAll() throws { try mouse.state.withLock { try mouse.record(&$0, "keys up") } }
+        func hold(_ keys: HeldKeys) throws { try mouse.state.withLock { try mouse.record(&$0, "keys hold \(keys.logged)") } }
     }
 }
 
@@ -180,6 +196,7 @@ final class CancellingKeyboard: Keyboard {
     }
 
     func releaseAll() throws { state.withLock { $0.log.append("up") } }
+    func hold(_ keys: HeldKeys) throws { state.withLock { $0.log.append("hold \(keys.logged)") } }
 }
 
 /// A mouse whose acceleration curve is one number, whatever the report asks for.
@@ -202,6 +219,7 @@ final class SteadyGainMouse: Mouse {
 
     func down(_ button: Button) throws { state.withLock { $0.log.append("down \(button.rawValue)") } }
     func releaseAll() throws { state.withLock { $0.log.append("up") } }
+    func hold(_ buttons: Set<Button>) throws { state.withLock { $0.log.append("hold \(buttons.logged)") } }
     func scroll(by delta: Scroll) throws { state.withLock { $0.log.append("scroll \(delta.vertical.value) \(delta.horizontal.value)") } }
 
     func move(by delta: Move) throws {

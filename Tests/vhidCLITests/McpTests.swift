@@ -11,7 +11,7 @@ import Testing
 /// daemon: every refusal here is one that comes back before a connection is made.
 @Suite struct McpTests {
     @Test func theToolsAreListedInOrder() {
-        #expect(Tools.all.map(\.tool.name) == ["type", "press", "click", "move", "scroll", "drag", "cursor", "doctor"])
+        #expect(Tools.all.map(\.tool.name) == ["type", "press", "click", "move", "scroll", "drag", "play", "cursor", "doctor"])
     }
 
     /// Only cursor and doctor promise to change nothing: cursor reaches no device, and
@@ -79,6 +79,15 @@ import Testing
             let said = await Self.refusal(Tools.click, ["x": 1, "y": 2, "button": button])
             #expect(said?.hasPrefix("button is ") == true, "\(button) was not refused: \(said ?? "accepted")")
         }
+    }
+
+    /// A script that cannot be played whole is refused at its line before any connection
+    /// is made: the service here is one nobody registers, so reaching it would say so.
+    @Test func aScriptThatCannotBePlayedIsRefusedAtItsLine() async {
+        let script = #"{"to":{"x":1,"y":1}}"# + "\n" + #"{"t_ms":0,"keys":["leftShift"]}"#
+        let refused = await #expect(throws: Play.ScriptInvalid.self) { try await Tools.play.call(["script": .string(script)], on: Installation.nobody) }
+        #expect(refused?.line == 2)
+        #expect(refused?.reason.hasPrefix("the script ends with leftShift held") == true, "\(String(describing: refused))")
     }
 
     @Test func noClicksIsRefused() async {

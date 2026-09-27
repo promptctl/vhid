@@ -1,70 +1,101 @@
 import Foundation
+import Keystrokes
 import Pointing
 
-/// A script the mouse alone can play: the start, then one report per act.
+/// What `vhid play` sends and when: a `Play` as one act per device call, on one clock.
 ///
 /// [LAW:parse-dont-validate] Made from a `Play` before anything is connected, so a script
-/// this cannot hold is refused at its line and moves nothing. The mouse presses one button
-/// or releases every one, so a `buttons` line is one report when it adds one button to
-/// those held or releases them all. A line that adds several, one that lets go of some and
-/// keeps others, a `keys` line and an `at` line need device acts the mouse does not have;
-/// `docs/design/replay.md` gives them to `vhid play`. A line that restates the set already
-/// held sends nothing, so it is not an act.
-public struct MouseScript: Hashable, Sendable {
+/// this cannot play is refused at its line and moves nothing. A line that restates the set
+/// already held sends nothing, so it is not an act.
+///
+/// **Keys held through a quiet stretch are kept alive here, as acts.** vhidd lets go of
+/// every key `HeldKeys.silenceLimit` after the client last spoke, so
+/// Shift held for three seconds with nothing else happening would be cut. Wherever a key
+/// is held and no act comes for `keepAlive`, the schedule repeats the held set; the daemon
+/// counts the call as the client being alive and posts nothing for it, since the driver
+/// already holds that set. A player stalled past the limit - stopped in a debugger, a Mac
+/// asleep - has had its keys let go, and its next keep-alive presses them again, as a
+/// report no report line shows. [LAW:dataflow-not-control-flow] The keep-alives are values in
+/// the schedule the player walks like any other act, not a timer running beside it.
+public struct Schedule: Hashable, Sendable {
     public let start: ScreenPoint
     public let acts: [Act]
 
     public struct Act: Hashable, Sendable {
         public let at: Duration
         public let report: Report
-        /// The script line it came from; a line that sends nothing has no act, so this and
-        /// not an act's place is how a report is matched to the script.
+        /// The script line it came from; a keep-alive carries the line of the keys it
+        /// repeats. A line that sends nothing has no act, so this and not an act's place is
+        /// how a report is matched to the script.
         public let line: Int
     }
 
-    /// What the mouse is asked to do, one report each.
+    /// One device call each.
     public enum Report: Hashable, Sendable {
+        case keys(HeldKeys)
+        case buttons(Set<Button>)
         case move(Move)
         case wheel(Scroll)
-        case press(Button)
-        case releaseAll
+        /// The keys already held, said again so the daemon keeps them. Not a report: the
+        /// driver is sent nothing while it still holds them.
+        case keepAlive(HeldKeys)
+
+        var isReport: Bool {
+            if case .keepAlive = self { false } else { true }
+        }
+    }
+
+    /// The longest a held key goes without a call: half vhidd's limit, so a keep-alive that
+    /// goes out late still lands well inside it.
+    public static let keepAlive: Duration = HeldKeys.silenceLimit / 2
+
+    /// How many of the acts are reports, which is what a play that stops is counted against.
+    public var reports: Int { acts.filter(\.report.isReport).count }
+
+    /// Whether any of the first `count` acts holds a key, and so whether a play stopped
+    /// there has a keyboard to let go of.
+    func holdsKeys(in count: Int) -> Bool {
+        acts.prefix(count).contains { if case .keys = $0.report { true } else { false } }
     }
 
     public init(_ play: Play) throws(Play.ScriptInvalid) {
-        var held: Set<Button> = []
+        var keys = (held: HeldKeys.none, line: 0)
+        var buttons: Set<Button> = []
         var acts: [Act] = []
-        func refuse(_ event: Play.Timed, _ reason: String) -> Play.ScriptInvalid {
-            Play.ScriptInvalid(line: event.line, reason: "\(reason), which the mouse alone cannot play")
-        }
         for event in play.events {
+            var quiet = acts.last?.at ?? .zero
+            while !keys.held.usages.isEmpty, event.at - quiet > Self.keepAlive {
+                quiet += Self.keepAlive
+                acts.append(Act(at: quiet, report: .keepAlive(keys.held), line: keys.line))
+            }
             let report: Report
             switch event.report {
+            case .keys(let next) where next == keys.held: continue
+            case .keys(let next):
+                keys = (next, event.line)
+                report = .keys(next)
+            case .buttons(let next) where next == buttons: continue
+            case .buttons(let next):
+                buttons = next
+                report = .buttons(next)
             case .move(let delta): report = .move(delta)
             case .wheel(let delta): report = .wheel(delta)
-            case .buttons(let next) where next == held: continue
-            case .buttons(let next) where next.isEmpty: report = .releaseAll
-            case .buttons(let next) where next.isSuperset(of: held) && next.count == held.count + 1:
-                report = .press(next.subtracting(held).first!)
-            case .buttons(let next) where next.isSuperset(of: held): throw refuse(event, "this line presses \(next.count - held.count) buttons at once")
-            case .buttons(let next) where next.isDisjoint(with: held): throw refuse(event, "this line lets go of every held button and presses others")
-            case .buttons: throw refuse(event, "this line lets go of some buttons and keeps others held")
-            case .keys: throw refuse(event, "this is a keys line")
-            case .at: throw refuse(event, "this is an at line")
+            case .at:
+                throw Play.ScriptInvalid(line: event.line, reason: "vhid play does not steer to at lines; move the pointer with move lines")
             }
-            if case .buttons(let next) = event.report { held = next }
             acts.append(Act(at: event.at, report: report, line: event.line))
         }
         guard !acts.isEmpty else {
-            throw Play.ScriptInvalid(line: play.events[0].line, reason: "no line of this script sends the mouse a report")
+            throw Play.ScriptInvalid(line: play.events[0].line, reason: "no line of this script sends a report")
         }
         self.start = play.start
         self.acts = acts
     }
 }
 
-/// Plays a `MouseScript` on a mouse: the pointer's loop to the start, then every report at its
-/// offset from one start of the clock, recording when each was handed to the mouse and
-/// when the mouse acknowledged it.
+/// Plays a `Schedule` on the keyboard and the mouse: the pointer's loop to the start, then
+/// every act at its offset from one start of the clock, recording when each report was
+/// handed to its device and when the device acknowledged it.
 ///
 /// [LAW:no-ambient-temporal-coupling] Each report waits for its own deadline measured
 /// from the one start, never for a sleep after the report before it, so a report that
@@ -76,6 +107,7 @@ public struct MouseScript: Hashable, Sendable {
 /// test moves by hand. [LAW:effects-at-boundaries]
 public struct Player<C: Clock> where C.Duration == Duration {
     public let pointer: Pointer
+    public let keyboard: any Keyboard
     public let clock: C
     /// Microseconds since the Unix epoch, read once, at the clock's start. Every time the
     /// run reports is that reading plus the monotonic clock's own elapsed time, so the
@@ -89,21 +121,23 @@ public struct Player<C: Clock> where C.Duration == Duration {
     /// The longest a wait goes without asking whether the play may go on.
     static var slice: Duration { .milliseconds(50) }
 
-    public init(pointer: Pointer, clock: C, wall: @escaping () -> Int64, lead: Duration) {
+    public init(pointer: Pointer, keyboard: any Keyboard, clock: C, wall: @escaping () -> Int64, lead: Duration) {
         self.pointer = pointer
+        self.keyboard = keyboard
         self.clock = clock
         self.wall = wall
         self.lead = lead
     }
 
-    public func play(_ play: MouseScript, isolation: isolated (any Actor)? = #isolation) async throws -> Played {
+    public func play(_ play: Schedule, isolation: isolated (any Actor)? = #isolation) async throws -> Played {
         var went: [Played.Report] = []
+        var reached = 0
         do {
             let reports = try await pointer.move(to: play.start)
             let started = clock.now
             let epoch = wall()
             let at = { (offset: Duration) in epoch + offset.microseconds }
-            for event in play.acts {
+            for (index, event) in play.acts.enumerated() {
                 let deadline = started.advanced(by: event.at)
                 let wake = deadline.advanced(by: .zero - lead)
                 // A wait of any length is slices, each asking whether the run was
@@ -143,21 +177,32 @@ public struct Player<C: Clock> where C.Duration == Duration {
                 }
                 try Task.checkCancellation()
                 let sent = started.duration(to: clock.now)
+                // Counted before the post: one that throws may still have reached the driver.
+                reached = index + 1
                 try await post(event.report)
-                went.append(Played.Report(line: event.line, scheduled: at(event.at), sent: at(sent), acked: at(started.duration(to: clock.now))))
+                let played = Played.Report(line: event.line, scheduled: at(event.at), sent: at(sent), acked: at(started.duration(to: clock.now)))
+                went += event.report.isReport ? [played] : []
             }
             return Played(startReports: reports, reports: went)
         } catch {
-            throw PlayStopped(played: went, of: play.acts.count, cause: PointingStopped(cause: error, unreleased: await pointer.release()))
+            // Both devices, whatever either answers, because a stop can land with a key and
+            // a button both held. [LAW:no-silent-failure] A script that holds no key has no
+            // keyboard to let go of, nor does one stopped before its first keys line, and a
+            // failed release there would report a key held that never went down.
+            // [LAW:dataflow-not-control-flow] The release is a value chosen from the acts
+            // that were sent, as `Pointer.holding` chooses its own.
+            let letGo: () async throws -> Void = play.holdsKeys(in: reached) ? { try await keyboard.releaseAll() } : {}
+            let keys = await failure(of: letGo)
+            throw PlayStopped(played: went, of: play.reports, cause: error, unreleasedKeys: keys, unreleasedButtons: await pointer.release())
         }
     }
 
-    private func post(_ report: MouseScript.Report, isolation: isolated (any Actor)? = #isolation) async throws {
+    private func post(_ report: Schedule.Report, isolation: isolated (any Actor)? = #isolation) async throws {
         switch report {
+        case .keys(let held), .keepAlive(let held): try await keyboard.hold(held)
+        case .buttons(let held): try await pointer.mouse.hold(held)
         case .move(let delta): try await pointer.mouse.move(by: delta)
         case .wheel(let delta): try await pointer.mouse.scroll(by: delta)
-        case .press(let button): try await pointer.mouse.down(button)
-        case .releaseAll: try await pointer.mouse.releaseAll()
         }
     }
 }
@@ -169,7 +214,7 @@ public struct Played: Hashable, Sendable {
     public let reports: [Report]
 
     /// One report's times, each in microseconds since the Unix epoch: when it was due,
-    /// when it was handed to the mouse, and when the mouse acknowledged it, with the script
+    /// when it was handed to its device, and when the device acknowledged it, with the script
     /// line it came from. Reports go out in order and a stop ends the list rather than
     /// leaving a gap in it.
     public struct Report: Hashable, Sendable {
@@ -189,7 +234,7 @@ public struct Lateness: Hashable, Sendable, Encodable {
     public let p99: Int64
     public let max: Int64
 
-    /// [LAW:parse-dont-validate] A `MouseScript` has at least one act, so a played one does too
+    /// [LAW:parse-dont-validate] A `Schedule` has at least one report, so a played one does too
     /// and there is always a rank to read; the empty case is the caller's precondition.
     init(of lateness: [Int64]) {
         let sorted = lateness.sorted()
@@ -202,13 +247,19 @@ public struct Lateness: Hashable, Sendable, Encodable {
 }
 
 /// A play that stopped part way: the reports that went out before it did, of how many,
-/// and why, with whether the buttons were released afterwards under the cause.
+/// and why, with whether each device was released afterwards.
 public struct PlayStopped: StoppedPartWay, CustomStringConvertible {
     public let played: [Played.Report]
     public let of: Int
     public let cause: any Error
+    /// The failures of the releases that followed the stop, when they failed too. Nil says
+    /// that device holds nothing; anything else says a key or a button may be held.
+    public let unreleasedKeys: (any Error)?
+    public let unreleasedButtons: (any Error)?
 
-    public var description: String { "the play stopped after \(played.count) of \(of) reports: \(cause.reported)" }
+    public var description: String {
+        PointingStopped.unreleased(unreleasedButtons, after: TypingStopped.unreleased(unreleasedKeys, after: "the play stopped after \(played.count) of \(of) reports: \(cause.reported)"))
+    }
 }
 
 extension Duration {

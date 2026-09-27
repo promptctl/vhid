@@ -41,7 +41,7 @@ import Testing
         }
     }
 
-    final class RecordingMouse: HeldPointing {
+    final class RecordingMouse: PointingDevice {
         private let recorded = Mutex<[String]>([])
 
         var log: [String] { recorded.withLock { $0 } }

@@ -40,6 +40,7 @@ private final class BlockingKeyPress: KeyPress {
     }
 
     func releaseAll() throws { journal.record("up") }
+    func hold(_ keys: HeldKeys) throws { journal.record("hold") }
 }
 
 /// A pointing device that answers at once, into the journal a keyboard writes.
@@ -48,6 +49,7 @@ private struct JournalPointing: PointingDevice {
 
     func down(_ button: Button) throws { journal.record("down button \(button.rawValue)") }
     func releaseAll() throws { journal.record("release") }
+    func hold(_ buttons: Set<Button>) throws { journal.record("hold buttons") }
     func move(by delta: Move) throws { journal.record("move \(delta.x.value) \(delta.y.value)") }
     func scroll(by delta: Scroll) throws { journal.record("scroll \(delta.vertical.value) \(delta.horizontal.value)") }
 }

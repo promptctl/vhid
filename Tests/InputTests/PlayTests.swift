@@ -130,7 +130,7 @@ import Testing
             {"t_ms":1,"move":{"dx":5,"dy":0}}
             {"t_ms":10,"buttons":[]}
             """)
-        let played = try await Player(pointer: Pointer(mouse: mouse, cursor: fake.cursor), clock: clock, wall: { Self.epoch }, lead: .zero).play(MouseScript(play))
+        let played = try await Player(pointer: Pointer(mouse: mouse, cursor: fake.cursor), keyboard: fake.keyboard, clock: clock, wall: { Self.epoch }, lead: .zero).play(Schedule(play))
         #expect(played.startReports == 0)
         #expect(played.reports == [
             Played.Report(line: 2, scheduled: Self.epoch, sent: Self.epoch, acked: Self.epoch + 3000),
@@ -138,14 +138,15 @@ import Testing
             Played.Report(line: 4, scheduled: Self.epoch + 10000, sent: Self.epoch + 10000, acked: Self.epoch + 13000),
         ])
         #expect(played.lateness.ranks == [0, 2000, 2000, 2000])
-        #expect(fake.log == ["down 1", "move 5 0", "up"])
+        #expect(fake.log == ["hold [1]", "move 5 0", "hold []"])
         // Only the last report was still ahead of the clock: the first was due at the
         // start and the second overdue, and neither paid for a sleep.
         #expect(clock.sleeps == 1)
     }
 
     /// A long wait asks whether the run was cancelled every slice, so a cancel during a
-    /// minute's hold ends it one slice in and releases the button, not a minute later.
+    /// minute's hold ends it one slice in and releases the button, not a minute later. The
+    /// script holds no key, so the keyboard is not touched on the way out.
     ///
     /// Aimed at the clock rather than at a report, because the hold is where the cancel has
     /// to land: a cancel raised at the button-down would prove nothing about the wait. The
@@ -161,14 +162,14 @@ import Testing
             {"t_ms":60000,"buttons":[]}
             """)
         let run = Task { @MainActor in
-            try await Player(pointer: fake.pointer, clock: clock, wall: { Self.epoch }, lead: .zero).play(MouseScript(play))
+            try await Player(pointer: fake.pointer, keyboard: fake.keyboard, clock: clock, wall: { Self.epoch }, lead: .zero).play(Schedule(play))
         }
         clock.cancel(afterSleeps: 1) { run.cancel() }
         let stopped = try await #require(throws: PlayStopped.self) { try await run.value }
         #expect(stopped.played.count == 1)
         #expect(stopped.causes.contains { $0 is CancellationError })
         #expect(clock.now.offset == Player<ManualClock>.slice)
-        #expect(fake.log == ["down 1", "up"])
+        #expect(fake.log == ["hold [1]", "up"])
     }
 
     /// A lead, watched out on a clock that only moves when something sleeps on it.
@@ -187,11 +188,57 @@ import Testing
             {"t_ms":0,"buttons":["left"]}
             {"t_ms":10,"buttons":[]}
             """)
-        let played = try await Player(pointer: fake.pointer, clock: clock, wall: { Self.epoch }, lead: .milliseconds(2)).play(MouseScript(play))
+        let played = try await Player(pointer: fake.pointer, keyboard: fake.keyboard, clock: clock, wall: { Self.epoch }, lead: .milliseconds(2)).play(Schedule(play))
         #expect(played.reports.map(\.scheduled) == [Self.epoch, Self.epoch + 10_000])
         // The watch put the clock exactly on the deadline, so nothing went out late.
         #expect(played.lateness.max == 0)
-        #expect(fake.log == ["down 1", "up"])
+        #expect(fake.log == ["hold [1]", "hold []"])
+    }
+
+    /// A script over both devices goes out in its order on one clock: a key held through a
+    /// drag is said again each quiet second without a report of its own, and every set is
+    /// posted whole.
+    @Test func aMixedScriptGoesOutInOrderOnOneClock() async throws {
+        let clock = ManualClock()
+        let fake = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
+        let play = try Play.parse("""
+            {"to":{"x":0,"y":0}}
+            {"t_ms":0,"keys":["leftShift"]}
+            {"t_ms":10,"buttons":["left"]}
+            {"t_ms":20,"move":{"dx":5,"dy":0}}
+            {"t_ms":1500,"wheel":{"v":-1,"h":0}}
+            {"t_ms":1600,"buttons":["left","right"]}
+            {"t_ms":1700,"buttons":["right"]}
+            {"t_ms":1800,"keys":["leftShift",4]}
+            {"t_ms":1900,"keys":[]}
+            {"t_ms":2000,"buttons":[]}
+            """)
+        let played = try await Player(pointer: fake.pointer, keyboard: fake.keyboard, clock: clock, wall: { Self.epoch }, lead: .zero).play(Schedule(play))
+        #expect(fake.log == [
+            "keys hold [e1]", "hold [1]", "move 5 0", "keys hold [e1]", "scroll -1 0",
+            "hold [1 2]", "hold [2]", "keys hold [4 e1]", "keys hold []", "hold []",
+        ])
+        #expect(played.reports.map(\.line) == [2, 3, 4, 5, 6, 7, 8, 9, 10])
+        #expect(played.reports.map(\.scheduled) == [0, 10, 20, 1500, 1600, 1700, 1800, 1900, 2000].map { Self.epoch + $0 * 1000 })
+    }
+
+    /// A play stopped before its first keys line never pressed a key, so the keyboard is
+    /// not asked to let go of one, and nothing says a key may be held.
+    @Test func aStopBeforeAnyKeyLeavesTheKeyboardAlone() async throws {
+        let fake = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
+        fake.refused = 0 ..< 1
+        let play = try Play.parse("""
+            {"to":{"x":0,"y":0}}
+            {"t_ms":0,"buttons":["left"]}
+            {"t_ms":1,"keys":["leftShift"]}
+            {"t_ms":2,"keys":[]}
+            {"t_ms":3,"buttons":[]}
+            """)
+        let stopped = try await #require(throws: PlayStopped.self) {
+            try await Player(pointer: fake.pointer, keyboard: fake.keyboard, clock: ManualClock(), wall: { Self.epoch }, lead: .zero).play(Schedule(play))
+        }
+        #expect(fake.log == ["hold [1]", "up"])
+        #expect(!"\(stopped)".contains("key"))
     }
 
     @Test func latenessIsReadByNearestRank() {
@@ -199,27 +246,30 @@ import Testing
         #expect(Lateness(of: [7]).ranks == [7, 7, 7, 7])
     }
 
-    /// A refused report stops the play with what went out before it, releases every
-    /// button, and says when that release was refused too.
+    /// A refused report stops the play with what went out before it, releases every key
+    /// and button, and says when a release was refused too.
     @Test func aStopSaysHowFarThePlayGotAndReleases() async throws {
         let clock = ManualClock()
         let fake = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
         fake.refused = 1 ..< .max
         let play = try Play.parse("""
             {"to":{"x":0,"y":0}}
+            {"t_ms":0,"keys":["leftShift"]}
             {"t_ms":0,"buttons":["left"]}
             {"t_ms":1,"move":{"dx":5,"dy":0}}
             {"t_ms":2,"buttons":[]}
+            {"t_ms":2,"keys":[]}
             """)
         let stopped = try await #require(throws: PlayStopped.self) {
-            try await Player(pointer: fake.pointer, clock: clock, wall: { Self.epoch }, lead: .zero).play(MouseScript(play))
+            try await Player(pointer: fake.pointer, keyboard: fake.keyboard, clock: clock, wall: { Self.epoch }, lead: .zero).play(Schedule(play))
         }
         #expect(stopped.played.count == 1)
-        #expect(stopped.of == 3)
+        #expect(stopped.of == 5)
         #expect(stopped.causes.contains { $0 is Refused })
-        #expect("\(stopped)".contains("after 1 of 3 reports"))
+        #expect("\(stopped)".contains("after 1 of 5 reports"))
+        #expect("\(stopped)".contains("A key may be left held"))
         #expect("\(stopped)".contains("A button may be left held"))
-        #expect(fake.log == ["down 1", "move 5 0", "up"])
+        #expect(fake.log == ["keys hold [e1]", "hold [1]", "keys up", "up"])
     }
 }
 
@@ -235,6 +285,7 @@ struct CostlyMouse: Mouse {
 
     func down(_ button: Button) async throws { clock.advance(by: cost); try mouse.down(button) }
     func releaseAll() async throws { clock.advance(by: cost); try mouse.releaseAll() }
+    func hold(_ buttons: Set<Button>) async throws { clock.advance(by: cost); try mouse.hold(buttons) }
     func move(by delta: Move) async throws { clock.advance(by: cost); try mouse.move(by: delta) }
     func scroll(by delta: Scroll) async throws { clock.advance(by: cost); try mouse.scroll(by: delta) }
 }
@@ -274,39 +325,72 @@ final class ManualClock: Clock {
     }
 }
 
-/// What the mouse alone can play of a script, decided before anything is connected.
-@Suite struct MouseScriptTests {
+/// What `vhid play` sends of a script, decided before anything is connected.
+@Suite struct ScheduleTests {
     static let start = #"{"to":{"x":1,"y":1}}"#
 
-    /// A held set that grows by one presses it; an empty one releases everything; one that
-    /// restates what is held sends nothing.
-    @Test func buttonSetsBecomeOneReportEach() throws {
-        let script = try MouseScript(Play.parse("""
-            \(Self.start)
-            {"t_ms":0,"buttons":["left"]}
-            {"t_ms":1,"buttons":["left"]}
-            {"t_ms":2,"buttons":["left",8]}
-            {"t_ms":3,"buttons":[]}
-            """))
-        #expect(script.acts == [
-            MouseScript.Act(at: .zero, report: .press(.left), line: 2),
-            MouseScript.Act(at: .milliseconds(2), report: .press(Button(rawValue: 8)!), line: 4),
-            MouseScript.Act(at: .milliseconds(3), report: .releaseAll, line: 5),
-        ])
+    private func schedule(_ lines: String) throws -> Schedule {
+        try Schedule(Play.parse(Self.start + "\n" + lines))
     }
 
-    /// Acts the mouse has no report for are refused at the line that asks for them.
+    /// Every held set is one act, whatever it adds or lets go of; a line that restates
+    /// what is held sends nothing.
+    @Test func heldSetsAreOneActEach() throws {
+        let script = try schedule("""
+            {"t_ms":0,"buttons":["left","right"]}
+            {"t_ms":1,"buttons":["left","right"]}
+            {"t_ms":2,"buttons":["left"]}
+            {"t_ms":3,"keys":["leftShift",4]}
+            {"t_ms":4,"keys":["leftShift"]}
+            {"t_ms":5,"keys":["leftShift"]}
+            {"t_ms":6,"keys":[]}
+            {"t_ms":7,"buttons":[]}
+            """)
+        #expect(script.acts == [
+            Schedule.Act(at: .zero, report: .buttons([.left, .right]), line: 2),
+            Schedule.Act(at: .milliseconds(2), report: .buttons([.left]), line: 4),
+            Schedule.Act(at: .milliseconds(3), report: .keys(try HeldKeys([.leftShift, Usage(rawValue: 4)])), line: 5),
+            Schedule.Act(at: .milliseconds(4), report: .keys(try HeldKeys([.leftShift])), line: 6),
+            Schedule.Act(at: .milliseconds(6), report: .keys(.none), line: 8),
+            Schedule.Act(at: .milliseconds(7), report: .buttons([]), line: 9),
+        ])
+        #expect(script.reports == 6)
+    }
+
+    /// A key held through a quiet stretch is said again every second of it, carrying the
+    /// line that pressed it, so vhidd's two-second limit never cuts it; a held button, which
+    /// vhidd does not time, is not.
+    @Test func aKeyHeldThroughAQuietStretchIsKeptAlive() throws {
+        let script = try schedule("""
+            {"t_ms":0,"keys":["leftShift"]}
+            {"t_ms":0,"buttons":["left"]}
+            {"t_ms":2500,"buttons":[]}
+            {"t_ms":3000,"keys":[]}
+            {"t_ms":3000,"buttons":["right"]}
+            {"t_ms":9000,"buttons":[]}
+            """)
+        let shift = try HeldKeys([.leftShift])
+        #expect(script.acts == [
+            Schedule.Act(at: .zero, report: .keys(shift), line: 2),
+            Schedule.Act(at: .zero, report: .buttons([.left]), line: 3),
+            Schedule.Act(at: .seconds(1), report: .keepAlive(shift), line: 2),
+            Schedule.Act(at: .seconds(2), report: .keepAlive(shift), line: 2),
+            Schedule.Act(at: .milliseconds(2500), report: .buttons([]), line: 4),
+            Schedule.Act(at: .seconds(3), report: .keys(.none), line: 5),
+            Schedule.Act(at: .seconds(3), report: .buttons([.right]), line: 6),
+            Schedule.Act(at: .seconds(9), report: .buttons([]), line: 7),
+        ])
+        #expect(script.reports == 6)
+    }
+
+    /// What the player does not send is refused at the line that asks for it.
     @Test(arguments: [
-        ("\n" + #"{"t_ms":0,"buttons":["left","right"]}"# + "\n" + #"{"t_ms":1,"buttons":[]}"#, 3, "2 buttons at once"),
-        (#"{"t_ms":0,"buttons":["left"]}"# + "\n" + #"{"t_ms":0,"buttons":["left","right"]}"# + "\n" + #"{"t_ms":1,"buttons":["left"]}"# + "\n" + #"{"t_ms":2,"buttons":[]}"#, 4, "keeps others"),
-        (#"{"t_ms":0,"keys":["leftShift"]}"# + "\n" + #"{"t_ms":1,"keys":[]}"#, 2, "keys line"),
-        (#"{"t_ms":0,"at":{"x":5,"y":5}}"#, 2, "at line"),
-        (#"{"t_ms":0,"buttons":["left"]}"# + "\n" + #"{"t_ms":1,"buttons":["right"]}"# + "\n" + #"{"t_ms":2,"buttons":[]}"#, 3, "every held button"),
-        (#"{"t_ms":0,"buttons":[]}"#, 2, "no line of this script"),
+        (#"{"t_ms":0,"at":{"x":5,"y":5}}"#, 2, "does not steer to at lines"),
+        (#"{"t_ms":0,"buttons":[]}"# + "\n" + #"{"t_ms":1,"keys":[]}"#, 2, "no line of this script"),
     ])
-    func actsTheMouseCannotTakeAreRefusedAtTheirLine(lines: String, line: Int, saying: String) throws {
+    func whatThePlayerDoesNotSendIsRefusedAtItsLine(lines: String, line: Int, saying: String) throws {
         let play = try Play.parse(Self.start + "\n" + lines)
-        let refused = try #require(throws: Play.ScriptInvalid.self) { try MouseScript(play) }
+        let refused = try #require(throws: Play.ScriptInvalid.self) { try Schedule(play) }
         #expect(refused.line == line)
         #expect(refused.reason.contains(saying), "\(refused)")
     }
