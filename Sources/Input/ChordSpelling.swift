@@ -46,21 +46,27 @@ public extension KeyChord {
         self.init(modifiers: modifiers, key: key)!
     }
 
-    /// The keys named by a word, from Carbon's own key code constants. Only keys that type
-    /// no character a shell can pass as an argument are here; a key that types one is
-    /// spelled by that character, on the layout.
-    static let namedKeys: [String: Key] = {
-        let named: [String: Int] = [
-            "return": kVK_Return, "tab": kVK_Tab, "space": kVK_Space, "delete": kVK_Delete,
-            "forwardDelete": kVK_ForwardDelete, "escape": kVK_Escape, "help": kVK_Help,
-            "home": kVK_Home, "end": kVK_End, "pageUp": kVK_PageUp, "pageDown": kVK_PageDown,
-            "left": kVK_LeftArrow, "right": kVK_RightArrow, "up": kVK_UpArrow, "down": kVK_DownArrow,
+    // [LAW:one-source-of-truth] the help and the chord error both list these names from here.
+    /// The keys named by a word, from Carbon's own key code constants, in the order a person
+    /// reads them: f2 before f10. Only keys that type no character a shell can pass as an
+    /// argument are here; a key that types one is spelled by that character, on the layout.
+    private static let keyNames: [(name: String, key: Key)] = {
+        let named: [(String, Int)] = [
+            ("return", kVK_Return), ("tab", kVK_Tab), ("space", kVK_Space), ("delete", kVK_Delete),
+            ("forwardDelete", kVK_ForwardDelete), ("escape", kVK_Escape), ("help", kVK_Help),
+            ("home", kVK_Home), ("end", kVK_End), ("pageUp", kVK_PageUp), ("pageDown", kVK_PageDown),
+            ("left", kVK_LeftArrow), ("right", kVK_RightArrow), ("up", kVK_UpArrow), ("down", kVK_DownArrow),
         ]
         let functionRow = [kVK_F1, kVK_F2, kVK_F3, kVK_F4, kVK_F5, kVK_F6, kVK_F7, kVK_F8, kVK_F9, kVK_F10,
                            kVK_F11, kVK_F12, kVK_F13, kVK_F14, kVK_F15, kVK_F16, kVK_F17, kVK_F18, kVK_F19, kVK_F20]
-        let functionKeys = Dictionary(uniqueKeysWithValues: functionRow.enumerated().map { ("f\($0.offset + 1)", $0.element) })
-        return named.merging(functionKeys) { named, _ in named }.mapValues { Key(rawValue: UInt16($0)) }
+        let functionKeys = functionRow.enumerated().map { ("f\($0.offset + 1)", $0.element) }
+        return (named + functionKeys).map { (name: $0.0, key: Key(rawValue: UInt16($0.1))) }
     }()
+
+    static let namedKeys = Dictionary(uniqueKeysWithValues: keyNames.map { ($0.name, $0.key) })
+
+    /// The key names, comma separated, as the help and the chord error show them.
+    static let keyNameList = keyNames.map(\.name).joined(separator: ", ")
 
     /// A term that is not a modifier, in whichever of the three spellings it is written in.
     private enum KeyTerm {
@@ -107,7 +113,7 @@ public enum ChordSpellingError: Error, CustomStringConvertible, Equatable {
     public var description: String {
         switch self {
         case .unknownTerm(let term, let spelling):
-            "\(term.debugDescription) in \(spelling.debugDescription) is not a modifier (\(Modifier.allCases.map(\.rawValue).joined(separator: ", "))), a key name (\(KeyChord.namedKeys.keys.sorted().joined(separator: ", "))), a key code written key 0x24, or a single character"
+            "\(term.debugDescription) in \(spelling.debugDescription) is not a modifier (\(Modifier.allCases.map(\.rawValue).joined(separator: ", "))), a key name (\(KeyChord.keyNameList)), a key code written key 0x24, or a single character"
         case .notOneKey(let character, let layout, let layers):
             "\(layout) does not type \(character.debugDescription) with one key and \(layers.map(\.description).joined(separator: " or ")); name the key it is on, and the modifiers as modifiers"
         case .moreThanOneKey(let spelling):

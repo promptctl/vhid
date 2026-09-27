@@ -59,7 +59,7 @@ enum Help {
 
     static let press = VerbHelp(name: "press", abstract: "Press chords on the virtual keyboard, one after another.", discussion: """
         A chord is modifier names and one key joined by +, e.g. leftCommand+s or \
-        leftShift+leftCommand+left. A key is a name (\(KeyChord.namedKeys.keys.sorted().joined(separator: ", "))), \
+        leftShift+leftCommand+left. A key is a name (\(KeyChord.keyNameList)), \
         the character the layout types with it (with Command held first, in a chord that holds Command), \
         or a key code written key 0x24.
 

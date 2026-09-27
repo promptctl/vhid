@@ -97,6 +97,11 @@ import Testing
 
     private static func sentence(_ phrase: String) -> String { Help.sentence(phrase).abstract }
 
+    /// Both surfaces show `Help.press`, so its key names reach both in natural order.
+    @Test func pressListsTheKeyNamesInNaturalOrder() {
+        #expect(Help.press.discussion.contains("f9, f10"))
+    }
+
     @Test func everyVerbIsOnBothSurfacesOrListedAsCommandLineOnly() throws {
         let verbs = Set(try Self.commandLine().keys)
         #expect(Self.commandLineOnly.isSubset(of: verbs), "listed as command-line only but not a verb: \(Self.commandLineOnly.subtracting(verbs))")
