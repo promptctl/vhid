@@ -40,6 +40,19 @@ import Testing
         }
     }
 
+    /// What doctor's residue step rests on: an install lays down both payload trees and the
+    /// receipt, and from there the only residue left is a registration or a loaded driver
+    /// that macOS clears at a restart - never a mess another install would not settle.
+    @Test func anInstallLeavesResidueOnlyWhereARestartIsOwed() {
+        for registration in Registration.allCases where registration != .unknown && registration != .ambiguous {
+            for ioNode in [false, true] {
+                let installed = DriverFacts(payload: .both, receipt: "8.4.0", registration: registration, ioNode: ioNode, elementsReceipt: .absent)
+                let restartOwed = registration == .pendingReboot || (ioNode && registration != .enabled)
+                #expect((DriverState(installed) == .residue) == restartOwed, "\(installed)")
+            }
+        }
+    }
+
     /// The receipt's version never moves a verdict; only whether one is held does. A
     /// table that read the version would make every package upgrade a new state.
     @Test func theReceiptVersionChangesNoVerdict() {
