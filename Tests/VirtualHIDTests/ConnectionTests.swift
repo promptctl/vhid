@@ -119,21 +119,26 @@ import Testing
     /// request ends in the same loss, rather than blocking the writer and, through the
     /// lock, every waiter, for good. [LAW:no-ambient-temporal-coupling]
     ///
-    /// The frames are the largest this side sends, against 8 KB of send space and 8 KB of
-    /// receive space on a local stream socket (`sysctl net.local.stream`): the first few
-    /// are written and time out unanswered, and the one that finds the buffers full is the
-    /// loss. Sixteen would be four times the buffers, so one of them stalls.
+    /// The frames are the largest this side sends, against the 8 KB of send space and 8 KB
+    /// of receive space the test sets on the pair: the first few are written and time out
+    /// unanswered, and the one that finds the buffers full is the loss. Sixteen would be
+    /// four times the buffers, so one of them stalls.
+    ///
+    /// The patience is fifty heartbeats long. The same patience ends a quiet read, so a
+    /// shorter one lets a runner that stalls the fake's thread end the connection on the
+    /// reading side before any write has stalled, one way to lose after a single request.
     @Test func aWriteThePeerStopsDrainingEndsAsSilenceWithinThePatience() throws {
-        // Reads one frame, then talks without listening: a heartbeat every 50 ms for two
+        // Reads one frame, then talks without listening: a heartbeat every 20 ms for five
         // seconds, and not one more read. The loop ends early when the client has hung up.
         let fake = FakeDaemon { _, daemon in
-            for _ in 0..<40 {
+            for _ in 0..<250 {
                 do { try daemon.send(.control(.heartbeat, payload: [])) } catch { return }
-                Thread.sleep(forTimeInterval: 0.05)
+                Thread.sleep(forTimeInterval: 0.02)
             }
         }
+        fake.limitBuffers(to: 8192)
         let lost = Lost()
-        let connection = try DaemonConnection(fileDescriptor: fake.clientDescriptor, patience: .milliseconds(200), whenLost: lost.record)
+        let connection = try DaemonConnection(fileDescriptor: fake.clientDescriptor, patience: .seconds(1), whenLost: lost.record)
         #expect(throws: DaemonError.silent) { try connection.request(.keyboardInitialize, by: .now + .milliseconds(50)) }
 
         let payload = [UInt8](repeating: 0, count: Frame.largestBody - 12)
@@ -147,7 +152,7 @@ import Testing
             }
             ended.signal()
         }.start()
-        #expect(ended.wait(timeout: .now() + .seconds(2)) == .success, "the stalled write did not end within 2 s")
+        #expect(ended.wait(timeout: .now() + .seconds(4)) == .success, "the stalled write did not end within 4 s")
         #expect(lost.await(within: .zero) == .silent)
         #expect(lost.count == 1)
         #expect(thrown.all.allSatisfy { $0 == .silent })
