@@ -159,10 +159,20 @@ public final class CommandWatch: @unchecked Sendable {
         source = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: queue)
         source.setEventHandler(handler: ended)
         source.resume()
-        // A source on a pid that has already gone never fires, so it is asked once after
+        // A source on a pid that has already ended never fires, so it is asked once after
         // the source is registered: a pid that ended before this is caught here, and one
         // that ends after it by the source.
-        if kill(pid, 0) != 0, errno == ESRCH { queue.async(execute: ended) }
+        if Self.ended(pid) { queue.async(execute: ended) }
+    }
+
+    /// Whether `pid` has ended: gone, or a zombie its parent has not reaped yet, which
+    /// `kill(pid, 0)` still answers for and a process source never fires on.
+    static func ended(_ pid: pid_t) -> Bool {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.size
+        var name = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        guard sysctl(&name, 4, &info, &size, nil, 0) == 0 else { return true }
+        return size == 0 || info.kp_proc.p_stat == SZOMB
     }
 
     deinit { source.cancel() }

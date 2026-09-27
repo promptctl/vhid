@@ -51,8 +51,8 @@ import Testing
         withExtendedLifetime(watch) {}
     }
 
-    /// The command gone before the watch was set: it still fires, where a process source
-    /// alone would wait forever.
+    /// The command ended before the watch was set - reaped, or a zombie not yet reaped: it
+    /// still fires, where a process source alone would wait forever.
     @Test func theWatchFiresForACommandAlreadyGone() throws {
         let command = try Process.run(URL(fileURLWithPath: "/usr/bin/true"), arguments: [])
         command.waitUntilExit()
@@ -60,6 +60,18 @@ import Testing
         let watch = CommandWatch(pid: command.processIdentifier, queue: .global()) { ended.signal() }
         #expect(ended.wait(.seconds(5)))
         withExtendedLifetime(watch) {}
+    }
+
+    /// An ended child its parent has not reaped is ended, although `kill(pid, 0)` still
+    /// finds it.
+    @Test func aZombieIsEnded() throws {
+        var pid: pid_t = 0
+        let argv: [UnsafeMutablePointer<CChar>?] = [strdup("/usr/bin/true"), nil]
+        #expect(posix_spawn(&pid, "/usr/bin/true", nil, nil, argv, nil) == 0)
+        defer { var status: Int32 = 0; waitpid(pid, &status, 0) }
+        while !CommandWatch.ended(pid) { usleep(1000) }
+        #expect(kill(pid, 0) == 0)
+        #expect(CommandWatch.ended(pid))
     }
 
     private final class Ended: @unchecked Sendable {
