@@ -224,7 +224,7 @@ but Accepted, staples the ticket, and requires Gatekeeper to assess the pkg as
 ## License
 
 Apache License 2.0; see [LICENSE](LICENSE). [NOTICE](NOTICE) lists the third-party software
-the binaries link and the pqrs driver package the installer carries, with their terms.
+the `vhid` tool links and the pqrs driver package the installer carries, with their terms.
 
 ## Status
 

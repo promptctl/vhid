@@ -130,6 +130,7 @@ plutil -lint "$agent" >&2
 # fetches by: postinstall reaches the Manager through this binary's pins, and the pkg
 # carries the package the script's pins name. [LAW:single-enforcer]
 scripts/check-driver-pins "$payload/usr/local/bin/vhid" >&2
+scripts/check-notice "$payload/usr/local/bin/vhid" >&2
 
 staged="$work/scripts"
 ditto pkg/scripts "$staged"
@@ -210,10 +211,8 @@ XML
 # The license page is vhid's LICENSE followed by its NOTICE, which names the bundled
 # driver's terms and those of everything linked into the binaries.
 resources="$work/resources"
-cp -R pkg/resources "$resources"
-cat LICENSE - NOTICE >"$resources/license.txt" <<<"
--------------------------------------------------------------------------------
-"
+ditto pkg/resources "$resources"
+{ cat LICENSE; printf '\n%s\n\n' "$(printf '%.0s-' {1..79})"; cat NOTICE; } >"$resources/license.txt"
 
 product="$out/vhid-$version.pkg"
 rm -f "$product"

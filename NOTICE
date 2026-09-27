@@ -6,11 +6,16 @@ This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 -------------------------------------------------------------------------------
 Third-party software
 
-The vhid binaries statically link the components below. The installer package
-also carries pqrs.org's Karabiner-DriverKit-VirtualHIDDevice package, unmodified.
+The installer package carries pqrs.org's Karabiner-DriverKit-VirtualHIDDevice
+package, unmodified, as a separate component:
 
 * Karabiner-DriverKit-VirtualHIDDevice (pqrs.org) - The Unlicense
   https://github.com/pqrs-org/Karabiner-DriverKit-VirtualHIDDevice
+  Its daemon contains spdlog (MIT License below; Copyright (c) 2016 Gabi Melman)
+  and asio (Boost Software License 1.0; Copyright (c) Christopher M. Kohlhoff).
+
+The vhid command-line tool statically links the components below. vhidd and
+vhid-menubar link none of them.
 
 * swift-argument-parser (Apple Inc.) - Apache License 2.0
   https://github.com/apple/swift-argument-parser
@@ -37,7 +42,7 @@ also carries pqrs.org's Karabiner-DriverKit-VirtualHIDDevice package, unmodified
   https://github.com/mattt/eventsource
   Copyright 2025 Mattt (https://mat.tt)
 
-MIT License, as it applies to the MCP Swift SDK and eventsource:
+MIT License, as it applies to spdlog, the MCP Swift SDK and eventsource:
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

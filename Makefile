@@ -63,13 +63,14 @@ build: signing-identity
 # whenever the tests passed, reporting success over exactly the unsigned tree this
 # target exists to prevent.
 #
-# The two driver-script checks come after the signing, because neither links anything
-# and so neither can undo it: the pins against the CLI just built, then the script's own
-# contracts against a stubbed one.
+# The driver-script checks and the NOTICE check come after the signing, because none
+# links anything and so none can undo it: the pins against the CLI just built, NOTICE
+# against what that CLI links, then the driver script's own contracts against a stubbed one.
 test: signing-identity
 	swift build
 	swift test; status=$$?; $(SIGN) || exit $$?; exit $$status
 	scripts/check-driver-pins
+	scripts/check-notice
 	scripts/virtual-hid-driver-test
 
 # The driver pins scripts/virtual-hid-driver acts on, held to the ones the CLI was built

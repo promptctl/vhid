@@ -1,0 +1,39 @@
+#!/bin/bash
+# Fails when NOTICE and what vhid links disagree: a package in Package.resolved that
+# NOTICE does not name and that is not listed below as resolved-but-unlinked, or an
+# unlinked package whose module turns up in the vhid binary after all.
+#
+#   scripts/check-notice [vhid]     defaults to the working tree's debug build
+#
+# NOTICE is hand-written, so this is what makes a new dependency, or an SDK upgrade that
+# starts linking one it only resolved before, a red build instead of a license page that
+# leaves out terms the pkg is obliged to carry.
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+binary=${1:-.build/debug/vhid}
+
+# Resolved for MCP swift-sdk targets vhid does not use. Each maps to a mangled module
+# prefix whose presence in the binary means it is linked after all.
+unlinked() {
+  case $1 in
+    https://github.com/apple/swift-nio.git) echo '7NIOCore' ;;
+    https://github.com/apple/swift-atomics.git) echo '7Atomics' ;;
+    https://github.com/apple/swift-collections.git) echo '11DequeModule|18OrderedCollections' ;;
+  esac
+}
+
+failed=0
+symbols=$(nm "$binary")
+while read -r url; do
+  probe=$(unlinked "$url")
+  if [[ -n $probe ]]; then
+    if grep -qE "$probe" <<<"$symbols"; then
+      echo "check-notice: $url is listed as unlinked but $binary links it; name it in NOTICE" >&2
+      failed=1
+    fi
+  elif ! grep -qF "${url%.git}" NOTICE; then
+    echo "check-notice: $url is in Package.resolved but NOTICE does not name it" >&2
+    failed=1
+  fi
+done < <(sed -n 's/.*"location" : "\(.*\)".*/\1/p' Package.resolved)
+exit $failed
