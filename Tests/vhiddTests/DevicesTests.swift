@@ -158,13 +158,15 @@ import Testing
         #expect(mouse.log == ["down 1"])
     }
 
-    /// A release the keyboard refused is reported and due again on the very next sweep.
-    @Test func aRefusedReleaseIsReportedAndRetriedAtOnce() {
+    /// A release the keyboard refused is reported and tried again one limit later.
+    @Test func aRefusedReleaseIsReportedAndRetriedAfterTheLimit() {
         let (devices, clock) = timed(RecordingKeyboard(refusesRelease: true))
         _ = answer { devices.down(usage: 0x04, reply: $0) }
         clock.advance(.seconds(2))
         #expect(devices.releaseKeysHeldPastLimit()?.failure != nil)
         clock.advance(.milliseconds(250))
+        #expect(devices.releaseKeysHeldPastLimit() == nil)
+        clock.advance(.milliseconds(1750))
         #expect(devices.releaseKeysHeldPastLimit()?.usages == [0x04])
     }
 

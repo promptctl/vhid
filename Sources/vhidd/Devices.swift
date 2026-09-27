@@ -90,8 +90,12 @@ final class Devices: NSObject, ServedDevices, @unchecked Sendable {
     private func attempt(_ act: () throws -> Void, _ reply: (Error?) -> Void) {
         device.lock()
         defer { device.unlock() }
+        // Both ends: a report the driver took seconds to answer is the client being active
+        // throughout, not idle.
         lastReport = now()
-        reply(outcome(of: act))
+        let answered = outcome(of: act)
+        lastReport = now()
+        reply(answered)
     }
 
     /// The lock is the caller's to hold, so an act made of several is still one sequence.
@@ -112,15 +116,17 @@ final class Devices: NSObject, ServedDevices, @unchecked Sendable {
         attempt({ try keyboard.releaseAll() }, reply)
     }
 
-    /// Not a client's report, so it does not move `lastReport`: a release the keyboard
-    /// refused is due again on the very next sweep.
+    /// A release the keyboard refused is tried again one limit later, not on every sweep:
+    /// a hung driver would otherwise hold every client's act behind a timed-out release
+    /// four times a second, and log each one.
     func releaseKeysHeldPastLimit() -> KeysLetGo? {
         device.lock()
         defer { device.unlock() }
         let held = keyboard.keysDown
         guard !held.isEmpty, now() - lastReport >= limit else { return nil }
-        return KeysLetGo(usages: held.sorted().map(\.rawValue), limit: limit,
-                         failure: outcome(of: keyboard.releaseAll).map { "\($0)" })
+        let failure = outcome(of: keyboard.releaseAll).map { "\($0)" }
+        if failure != nil { lastReport = now() }
+        return KeysLetGo(usages: held.sorted().map(\.rawValue), limit: limit, failure: failure)
     }
 
     func buttonDown(_ button: UInt8, reply: @escaping (Error?) -> Void) {
