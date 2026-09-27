@@ -107,14 +107,18 @@ final class FakeDaemon: @unchecked Sendable {
         try send(.request(id: id, payload: statuses.flatMap { [$0.0.rawValue, $0.1 ? 1 : 0] }))
     }
 
-    /// Sets the kernel's send and receive space on both ends of the pair to `bytes`, so a
-    /// test that fills them knows how much fits from what it set rather than from whatever
-    /// the machine running it defaults to (`sysctl net.local.stream`).
-    func limitBuffers(to bytes: Int32) {
+    /// Sets the kernel's send space on both ends of the pair to `bytes`, so a test that
+    /// fills it knows how much fits from what it set rather than from whatever the machine
+    /// running it defaults to (`sysctl net.local.stream`). On a local stream the sender's
+    /// send space is the whole bound: the receiver's receive space limits nothing.
+    ///
+    /// Before any bytes are in flight: the kernel counts what the peer holds unread against
+    /// the sender's space, and setting it afresh forgets that count.
+    func limitSendSpace(to bytes: Int32) throws {
         var size = bytes
         for end in [clientDescriptor, descriptor] {
-            for option in [SO_SNDBUF, SO_RCVBUF] {
-                precondition(setsockopt(end, SOL_SOCKET, option, &size, socklen_t(MemoryLayout<Int32>.size)) == 0, "setsockopt \(option): errno \(errno)")
+            guard setsockopt(end, SOL_SOCKET, SO_SNDBUF, &size, socklen_t(MemoryLayout<Int32>.size)) == 0 else {
+                throw DaemonError.socket("setsockopt(SO_SNDBUF)", errno)
             }
         }
     }
