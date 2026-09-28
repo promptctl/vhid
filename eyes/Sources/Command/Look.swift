@@ -140,7 +140,8 @@ enum Report {
     private static func part(_ part: Part) -> String {
         switch part {
         case .read(let kind, let r): "\(kind.rawValue) \(reach(r))"
-        case .blind(let kind, let why): "\(kind.rawValue) could not look (\(why))"
+        // One line whatever the error printed, since the scope is one line.
+        case .blind(let kind, let why): "\(kind.rawValue) could not look (\(why.split(whereSeparator: \.isNewline).joined(separator: " ")))"
         }
     }
 

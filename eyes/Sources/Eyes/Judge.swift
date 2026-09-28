@@ -6,7 +6,33 @@
 /// reader later reconciles two answers that were judged by the same rule.
 /// [LAW:effects-at-boundaries] Pure: no capture, no display, so every verdict a caller
 /// acts on is checked by a test with a list a test wrote.
+/// What a reader saw in a region, before it is judged against a query.
+public struct Candidates: Sendable, Hashable {
+    /// Everything recognised in `region`, in reading order.
+    public let found: [Found]
+    /// The rectangle that was looked at, resolved from the query's region.
+    public let region: ScreenRect
+    /// How many runs the reader looked at, including ones it could not use.
+    public let examined: Int
+    /// What the reader dropped before judging, and why.
+    public let excluded: [Exclusion]
+    /// How far the reader itself got.
+    public let reach: Reach
+
+    public init(found: [Found], region: ScreenRect, examined: Int, excluded: [Exclusion], reach: Reach) {
+        self.found = found
+        self.region = region
+        self.examined = examined
+        self.excluded = excluded
+        self.reach = reach
+    }
+}
+
 public extension Reading {
+    static func judging(_ seen: Candidates, query: Query) -> Reading {
+        judging(seen.found, query: query, region: seen.region, examined: seen.examined, excluded: seen.excluded, reach: seen.reach)
+    }
+
     /// How many near misses a failed query carries: enough to tell a slip from an absence,
     /// few enough to cost a handful of rows.
     static let nearestShown = 3

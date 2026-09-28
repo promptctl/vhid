@@ -31,7 +31,7 @@ public struct TreeReader: Reader {
 
     public init() {}
 
-    public func read(_ query: Query) async throws -> Reading {
+    public func look(_ query: Query) async throws -> Candidates {
         // [LAW:no-silent-failure] Asked first: without the grant, every read fails, and a
         // walk that counted them as unanswered would report a looked-at, empty screen.
         guard AXIsProcessTrusted() else { throw TreeError.noGrant }
@@ -49,9 +49,8 @@ public struct TreeReader: Reader {
             elapsed: { clock.now - start },
             read: Self.node
         )
-        return Reading.judging(
-            walked.found.inReadingOrder,
-            query: query,
+        return Candidates(
+            found: walked.found.inReadingOrder,
             region: region,
             examined: walked.examined,
             excluded: walked.excluded,

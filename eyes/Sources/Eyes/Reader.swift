@@ -8,18 +8,29 @@
 ///
 /// Main-actor because reading the screen is a question about the user's session.
 @MainActor
-public protocol Reader {
+public protocol Reader: Sendable {
     /// What this reader is, for a finding to carry and a caller to read back.
     var source: SourceKind { get }
 
-    /// Answers the query, or throws when it could not look at all.
+    /// Everything the reader saw in the query's region, before any of it is judged
+    /// against the query, or a throw when it could not look at all. `read` judges it.
     ///
-    /// A query that matched nothing is an answer and comes back as one, carrying its
+    /// Unjudged so a merged reader reconciles what two readers saw rather than what
+    /// survived each one's match and limit, and judges the union once. [LAW:single-enforcer]
+    ///
+    /// A region with nothing in it is an answer and comes back as one, carrying its
     /// scope. Throwing is for a reader that could not see - no grant, no such display, a
     /// capture that wrote nothing - because those are facts about the tool and not about
     /// the screen, and a caller told "nothing matched" would take them for an absence.
     /// [LAW:no-silent-failure]
-    func read(_ query: Query) async throws -> Reading
+    func look(_ query: Query) async throws -> Candidates
+}
+
+public extension Reader {
+    /// Answers the query: what the reader saw, judged by the one rule every reader shares.
+    func read(_ query: Query) async throws -> Reading {
+        Reading.judging(try await look(query), query: query)
+    }
 }
 
 /// Which kind of reader, without the per-finding payload `Source` carries.

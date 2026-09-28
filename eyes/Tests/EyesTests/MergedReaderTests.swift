@@ -10,15 +10,13 @@ import Testing
         let found: [Found]
         var reach = Reach.whole
         var fails = false
+        var region = MergedReaderTests.region
 
         struct Blind: Error, CustomStringConvertible { var description: String { "no grant" } }
 
-        func read(_ query: Query) async throws -> Reading {
+        func look(_ query: Query) async throws -> Candidates {
             if fails { throw Blind() }
-            return Reading.judging(
-                found, query: query, region: MergedReaderTests.region,
-                examined: found.count, excluded: [], reach: reach
-            )
+            return Candidates(found: found, region: region, examined: found.count, excluded: [], reach: reach)
         }
     }
 
@@ -131,5 +129,58 @@ import Testing
         #expect(all(r).map(\.text.value) == ["a"])
         #expect(r.scope.reach == .stopped(.resultLimit(Limit(1)!)))
         #expect(r.scope.excluded == [Exclusion(reason: .ranked, count: 1)])
+    }
+
+    /// A run as Vision places it: each word at its own spot along one line, from `x`.
+    private func run(_ text: String, _ x: Double, _ y: Double) -> Found {
+        let words = text.split(separator: " ").enumerated().map { i, w in
+            Word(text: Text(String(w))!, frame: ScreenRect(x: x + Double(i) * 50, y: y, width: 45, height: 20))
+        }
+        return Found(first: words[0], rest: Array(words.dropFirst()), source: Self.seen)
+    }
+
+    @Test func aContainsQueryFindsOneButtonOnceWhateverEachReaderDividedItInto() async throws {
+        let r = try await read(
+            Fake(source: .tree, found: [at("Save As…", 100, 100, Self.role, width: 95)]),
+            Fake(source: .pixels, found: [run("Save As…", 100, 100)]),
+            .contains("save")
+        )
+        #expect(all(r).count == 1)
+        #expect(all(r).first?.source == .merged(Self.role, Self.seen))
+    }
+
+    @Test func aRunCoveringSeveralElementsMergesWithEachAndKeepsTheRest() async throws {
+        let r = try await read(
+            Fake(source: .tree, found: [at("Shell", 0, 0, Self.role, width: 45), at("Edit", 50, 0, Self.role, width: 45)]),
+            Fake(source: .pixels, found: [run("Shell Edit View", 0, 0)])
+        )
+        #expect(all(r).map(\.text.value) == ["Shell", "Edit", "View"])
+        #expect(all(r).map(\.source.kind) == [.merged, .merged, .pixels])
+        #expect(r.scope.excluded == [Exclusion(reason: .duplicate, count: 2)])
+    }
+
+    @Test func aRecogniserSlipAtTheSamePlaceIsTheSameThing() async throws {
+        let r = try await read(
+            Fake(source: .tree, found: [at("Allow", 100, 100, Self.role)]),
+            Fake(source: .pixels, found: [at("A1low", 100, 100, Self.seen)]),
+            .within(edits: Edits(1)!, of: "Allow")
+        )
+        #expect(all(r).map(\.text.value) == ["Allow"])
+    }
+
+    @Test func twoFindsOfTheSecondReaderAreNeverMergedWithEachOther() async throws {
+        let r = try await read(
+            Fake(source: .pixels, found: []),
+            Fake(source: .tree, found: [at("OK", 100, 100, Self.role), at("OK", 104, 102, .tree(role: Role(rawValue: "AXStaticText")))])
+        )
+        #expect(all(r).map(\.source.kind) == [.tree, .tree])
+        #expect(r.scope.excluded.isEmpty)
+    }
+
+    @Test func theRegionIsWhereBothLooked() async throws {
+        var clipped = Fake(source: .pixels, found: [])
+        clipped.region = ScreenRect(x: 0, y: 0, width: 500, height: 800)
+        let r = try await read(Fake(source: .tree, found: []), clipped)
+        #expect(r.scope.region == ScreenRect(x: 0, y: 0, width: 500, height: 800))
     }
 }
