@@ -45,4 +45,17 @@ import Testing
         #expect(line.hasPrefix("1 run in display 12"))
         #expect(line.contains("8 ranked; stopped at the limit of 1"))
     }
+
+    /// A merge that did not read whole names each reader's reach, a blind one on one line,
+    /// so an absence it cannot prove is never printed as one.
+    @Test func aMergedReadingNamesEachReadersReach() {
+        let reading = Reading(
+            outcome: .nearest([]),
+            scope: Scope(region: Self.display, examined: 5,
+                         reach: .stopped(.merged(.blind(.tree, "no grant\nask again"), .read(.pixels, .whole))))
+        )
+        let line = Report.scope(reading, query: Query(match: .exact("OK"), region: .display(12)))
+        #expect(line.contains("tree could not look (no grant ask again), pixels whole region read"))
+        #expect(!line.contains("\n"))
+    }
 }

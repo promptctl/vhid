@@ -15,7 +15,7 @@ public struct PixelReader: Reader {
 
     public init() {}
 
-    public func read(_ query: Query) async throws -> Reading {
+    public func look(_ query: Query) async throws -> Candidates {
         let region = try Self.resolve(query.region)
         // [LAW:no-silent-failure] Preflight is asked explicitly because capturing without
         // the grant does not fail - it returns the desktop wallpaper with every window
@@ -38,9 +38,8 @@ public struct PixelReader: Reader {
             Exclusion(reason: .wordless, count: runs.count - readable.count),
             Exclusion(reason: .duplicate, count: readable.count - distinct.count),
         ].filter { $0.count > 0 }
-        return Reading.judging(
-            distinct.inReadingOrder,
-            query: query,
+        return Candidates(
+            found: distinct.inReadingOrder,
             region: region,
             examined: runs.count,
             excluded: excluded,
