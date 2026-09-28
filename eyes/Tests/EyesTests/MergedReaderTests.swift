@@ -183,4 +183,13 @@ import Testing
         let r = try await read(Fake(source: .tree, found: []), clipped)
         #expect(r.scope.region == ScreenRect(x: 0, y: 0, width: 500, height: 800))
     }
+
+    @Test func aWordOnlyTheSecondReaderSawIsNotCarriedAwayAsASlip() async throws {
+        let r = try await read(
+            Fake(source: .tree, found: [at("Downloads", 0, 0, Self.role, width: 95)]),
+            Fake(source: .pixels, found: [run("Downloads 3", 0, 0)])
+        )
+        #expect(all(r).map(\.text.value) == ["Downloads", "3"])
+        #expect(r.scope.excluded == [Exclusion(reason: .duplicate, count: 1)])
+    }
 }

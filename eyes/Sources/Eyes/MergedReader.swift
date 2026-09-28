@@ -90,11 +90,14 @@ public extension Candidates {
             let words = run.words
             var i = 0
             while i < words.count {
-                let hit = (i..<words.count).reversed().lazy.compactMap { j -> (Int, Int)? in
+                // The closest-saying stretch from here, the longer on a tie: the longest
+                // one within the slip allowance would carry a neighbour along - "Downloads 3"
+                // is one edit from "Downloads", and the badge only the pixels saw is lost.
+                let hit = (i..<words.count).flatMap { j in
                     let stretch = Found(first: words[i], rest: Array(words[(i + 1)..<(j + 1)]), source: run.source)
-                    return (0..<firsts).first { kept[$0].saysTheSame(as: stretch) }.map { ($0, j) }
-                }.first
-                guard let (index, end) = hit else {
+                    return (0..<firsts).compactMap { k in kept[k].edits(to: stretch).map { (index: k, end: j, edits: $0) } }
+                }.min { ($0.edits, -$0.end) < ($1.edits, -$1.end) }
+                guard let (index, end, _) = hit else {
                     loose.append(words[i])
                     i += 1
                     continue
@@ -122,11 +125,13 @@ public extension Candidates {
 }
 
 private extension Found {
-    /// The same text, forgiving one edit in five characters, at an intersecting place.
-    func saysTheSame(as other: Found) -> Bool {
-        guard frame.intersects(other.frame) else { return false }
+    /// Edits between the two texts, whitespace ignored, when they say the same thing at an
+    /// intersecting place - one edit in five characters forgiven - and nil when they do not.
+    func edits(to other: Found) -> Int? {
+        guard frame.intersects(other.frame) else { return nil }
         let a = text.value.filter { !$0.isWhitespace }, b = other.text.value.filter { !$0.isWhitespace }
-        return Match.edits(from: a, to: b, anywhere: false) <= max(a.count, b.count) / 5
+        let edits = Match.edits(from: a, to: b, anywhere: false)
+        return edits <= max(a.count, b.count) / 5 ? edits : nil
     }
 }
 
