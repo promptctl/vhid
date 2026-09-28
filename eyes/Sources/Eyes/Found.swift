@@ -86,6 +86,9 @@ public enum Source: Sendable, Hashable {
     /// Recognised from pixels, which know nothing of elements and answer with how sure
     /// the recogniser was.
     case pixels(confidence: Confidence)
+    /// Found by both readers of a merged read at the same place, first reader first -
+    /// each still carrying what only it can know.
+    indirect case merged(Source, Source)
 }
 
 /// An accessibility role string such as `AXButton`. Apps define their own, so this is an

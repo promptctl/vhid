@@ -266,6 +266,18 @@ public enum Stop: Sendable, Hashable {
     /// says only that the region was not read whole, which is what keeps a busy app or an
     /// open menu from proving an absence.
     case unread
+    /// Two readers of a merged read were asked and not both read the region whole. Each
+    /// one's own reach, in the merged reader's order.
+    indirect case merged(Part, Part)
+}
+
+/// One reader's share of a merged read.
+public enum Part: Sendable, Hashable {
+    case read(SourceKind, Reach)
+    /// It threw instead of reading, for the reason given. [LAW:no-silent-failure]
+    case blind(SourceKind, String)
+
+    var isWhole: Bool { if case .read(_, .whole) = self { true } else { false } }
 }
 
 public extension Reading {

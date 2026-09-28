@@ -133,6 +133,14 @@ enum Report {
         case .stopped(.elementLimit(let l)): "stopped at \(l.count) elements"
         case .stopped(.timeBudget(let d)): "stopped after \(d)"
         case .stopped(.unread): "parts left unread"
+        case .stopped(.merged(let a, let b)): "\(part(a)), \(part(b))"
+        }
+    }
+
+    private static func part(_ part: Part) -> String {
+        switch part {
+        case .read(let kind, let r): "\(kind.rawValue) \(reach(r))"
+        case .blind(let kind, let why): "\(kind.rawValue) could not look (\(why))"
         }
     }
 

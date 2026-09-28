@@ -35,6 +35,7 @@ public extension Source {
         switch self {
         case .tree: .tree
         case .pixels: .pixels
+        case .merged: .merged
         }
     }
 }
