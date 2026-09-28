@@ -302,10 +302,11 @@ maintainer to approve each run in the Actions tab before handing them over:
 
 Export each identity from Keychain Access (the certificate with its private key, as
 .p12) on the Mac that holds it, then set the secret from the file. The input is
-redirected because GNU base64, first on some PATHs, has no `-i`:
+redirected and the line breaks dropped because GNU base64, first on some PATHs, has
+no `-i` and wraps its output:
 
 ```sh
-base64 <application.p12 | gh secret set DEVELOPER_ID_APPLICATION_P12 --env release
+base64 <application.p12 | tr -d '\n' | gh secret set DEVELOPER_ID_APPLICATION_P12 --env release
 ```
 
 The same release can be made on that Mac directly:
