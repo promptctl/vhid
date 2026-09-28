@@ -92,6 +92,9 @@ struct Facts {
     let texts: [Heard<String?>]
     /// Where it is: nil inside when it has no position or no size.
     let frame: Heard<ScreenRect?>
+    /// Whether the app answered its role. Apart from `role` because `AXUnknown` is also a
+    /// role apps answer - measured, Safari names elements that - and the two are not one fact.
+    var named = true
 }
 
 /// One element read: what it says, and what is under it.
@@ -159,24 +162,51 @@ extension Node {
     }
 }
 
+/// What the walk does under an element: how its children are read.
+enum Descent: Equatable {
+    /// Walk them in this clip. `hard` when the clip is a scroll area's: nothing under it is
+    /// drawn outside it, so nothing under it that cannot be seen is probed.
+    case descend(ScreenRect, hard: Bool)
+    /// The element cannot be seen, but its children may be drawn where they can - a web
+    /// page's dropdown hangs below a header scrolled off the region. Read them, in this
+    /// clip, counting each only if it is seen.
+    case probe(ScreenRect)
+    /// Nothing under it can be seen: it is off a hard clip, or it is a scroll area.
+    case prune
+    /// It cannot be seen, and its role read failed, so whether it is a scroll area
+    /// hiding its children or a group whose children hang out is unknown: its children are
+    /// not read, and they are counted as a part left unread. [LAW:no-silent-failure]
+    case unsure
+}
+
 extension Facts {
-    /// Where this element's children can be clicked, nil when nothing of its frame is left
-    /// to see in `clip`, so the walk does not descend.
+    /// How the walk goes on under this element, given the clip it was read in.
     ///
     /// Only a scroll area cuts the clip down to its frame: a row scrolled out of its list
     /// is hidden by it, so no click reaches the row, and its centre lies under the toolbar.
-    /// Any other element may draw its children outside its own frame - a web page's
-    /// dropdown hangs below its header - so they keep the clip it was given, but only while
-    /// some of that element can be seen: one wholly off the clip or covered is not
-    /// descended into - the walk reads its children once each, to catch one hanging into
-    /// the clip, and goes no deeper. That bet is what lets a walk reach a window at
-    /// all: measured, a full-screen terminal in front held four thousand elements, every
-    /// one off the region, and walking them spent the whole element bound. An element with no frame, or an empty one, says nothing
-    /// about where its children are, so the walk goes on into it.
-    func inner(_ clip: ScreenRect, under covers: [ScreenRect]) -> ScreenRect? {
-        guard case .answered(let placed?) = frame, !placed.isEmpty else { return clip }
-        guard let shown = visible(placed, in: clip, under: covers) else { return nil }
-        return role == Role(rawValue: kAXScrollAreaRole) ? shown : clip
+    /// Any other element may draw its children outside its own frame, so they keep the clip
+    /// it was given, and when it cannot be seen at all its children are probed rather than
+    /// skipped - a skipped dropdown is a false proof of absence. Probing reads each child,
+    /// but counts it only if it is seen, and nothing under a scroll area is probed: that
+    /// is what keeps a walk affordable. Measured, a full-screen terminal in front held four
+    /// thousand elements, every one off the region. An element with no frame, or an empty
+    /// one, says nothing about where its children are, so the walk goes on into it.
+    ///
+    /// The one place the descend, probe and prune decision is made. [LAW:single-enforcer]
+    func descent(_ clip: ScreenRect, hard: Bool, under covers: [ScreenRect]) -> Descent {
+        let scroll = role == Role(rawValue: kAXScrollAreaRole)
+        guard case .answered(let placed?) = frame, !placed.isEmpty else { return .descend(clip, hard: hard) }
+        if let shown = visible(placed, in: clip, under: covers) {
+            return scroll ? .descend(shown, hard: true) : .descend(clip, hard: hard)
+        }
+        if hard || scroll { return .prune }
+        return named ? .probe(clip) : .unsure
+    }
+
+    /// Whether this element's own frame can be seen in `clip`, or says nothing about it.
+    func isSeen(in clip: ScreenRect, under covers: [ScreenRect]) -> Bool {
+        guard case .answered(let placed?) = frame, !placed.isEmpty else { return true }
+        return visible(placed, in: clip, under: covers) != nil
     }
 }
 
@@ -187,8 +217,10 @@ struct Root<Element> {
     let element: Element
     let clip: ScreenRect
     let covers: [ScreenRect]
-    /// Read only to see whether it hangs into the clip from a parent that could not be
-    /// seen: when it does not, nothing under it is read.
+    /// The clip is a scroll area's. See `Descent.descend`.
+    var hard = false
+    /// Read under an element that could not be seen, to find what hangs into the clip:
+    /// counted only if seen. See `Descent.probe`.
     var probe = false
 }
 
@@ -247,29 +279,29 @@ func walk<Element>(
             let node = try read(root.element)
             examined += 1
             let candidate = node.candidate(in: root.clip, under: root.covers)
+            // A probe not seen was never in the region: nothing to count, unless a read it
+            // needed failed, which leaves unknown whether it was.
+            let quiet = root.probe && !node.facts.isSeen(in: root.clip, under: root.covers) && candidate != .excluded(.unanswered)
             switch candidate {
+            case _ where quiet: break
             case .found(let run) where !seen.insert(Place(text: run.text.value, frame: run.frame)).inserted:
                 counts[.duplicate, default: 0] += 1
             case .found(let run): found.append(run)
             case .excluded(let reason): counts[reason, default: 0] += 1
             }
-            let inner = node.facts.inner(root.clip, under: root.covers)
-            switch (node.children, inner) {
-            case (.answered(let children), let inner?):
-                queue.append(contentsOf: children.map { Root(element: $0, clip: inner, covers: root.covers) })
-            // An element that cannot be seen may still draw its children where they can - a
-            // web page's dropdown hangs below a header scrolled off the region - so its
-            // children are read once each, and walked on only if they are seen. One level
-            // and no further: the pruning is what keeps a full-screen window of elements
-            // off the region from spending the bound. A scroll area hides what hangs off it.
-            case (.answered(let children), nil) where !root.probe && node.facts.role != Role(rawValue: kAXScrollAreaRole):
-                queue.append(contentsOf: children.map { Root(element: $0, clip: root.clip, covers: root.covers, probe: true) })
-            case (.answered, nil): break
+            let unread = candidate == .excluded(.unanswered)
+            switch (node.children, node.facts.descent(root.clip, hard: root.hard, under: root.covers)) {
+            case (.answered(let children), .descend(let clip, let hard)):
+                queue.append(contentsOf: children.map { Root(element: $0, clip: clip, covers: root.covers, hard: hard) })
+            case (.answered(let children), .probe(let clip)):
+                queue.append(contentsOf: children.map { Root(element: $0, clip: clip, covers: root.covers, probe: true) })
             // A subtree unread is one more unanswered part - unless nothing in it could be
             // seen, or this element was already counted as one.
-            case (.unanswered, _?) where candidate != .excluded(.unanswered):
-                counts[.unanswered, default: 0] += 1
-            case (.unanswered, _): break
+            case (.unanswered, .descend), (.unanswered, .probe), (.unanswered, .unsure):
+                if !unread { counts[.unanswered, default: 0] += 1 }
+            case (.answered(let children), .unsure) where !children.isEmpty:
+                if !unread { counts[.unanswered, default: 0] += 1 }
+            case (_, .prune), (.answered, .unsure): break
             }
         }
     }

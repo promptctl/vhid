@@ -132,7 +132,8 @@ public struct TreeReader: Reader {
             facts: Facts(
                 role: Role(rawValue: reads[0].answer.flatMap { $0 as? String } ?? kAXUnknownRole),
                 texts: reads[1...3].map { $0.map { $0 as? String } },
-                frame: frame
+                frame: frame,
+                named: reads[0].answer.flatMap { $0 as? String } != nil
             ),
             children: reads[6].map(elements)
         )

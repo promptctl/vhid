@@ -128,30 +128,49 @@ extension Facts {
     }
 }
 
-@Suite struct InnerTests {
-    @Test func aFrameOffTheClipLeavesNothingToDescendInto() {
-        #expect(facts(frame: .answered(ScreenRect(x: 2000, y: 0, width: 50, height: 50))).inner(region, under: []) == nil)
+@Suite struct DescentTests {
+    let far = ScreenRect(x: 2000, y: 0, width: 50, height: 50)
+
+    /// An element that cannot be seen has its children probed, in the clip it was given:
+    /// they may hang where they can be.
+    @Test func aFrameOffTheClipHasItsChildrenProbed() {
+        #expect(facts(frame: .answered(far), role: "AXGroup").descent(region, hard: false, under: []) == .probe(region))
+    }
+
+    /// Nothing is probed under a scroll area, or once one has cut the clip.
+    @Test func aScrollAreaOrAHardClipPrunes() {
+        #expect(facts(frame: .answered(far), role: "AXScrollArea").descent(region, hard: false, under: []) == .prune)
+        #expect(facts(frame: .answered(far), role: "AXGroup").descent(region, hard: true, under: []) == .prune)
+    }
+
+    /// Unseen, and would not say its role: not read, and counted as unread. An app that
+    /// answers `AXUnknown` has said it, and its children are probed.
+    @Test func anUnseenElementWhoseRoleWouldNotAnswerIsUnsure() {
+        var unnamed = facts(frame: .answered(far), role: "AXUnknown")
+        unnamed.named = false
+        #expect(unnamed.descent(region, hard: false, under: []) == .unsure)
+        #expect(facts(frame: .answered(far), role: "AXUnknown").descent(region, hard: false, under: []) == .probe(region))
     }
 
     /// Only the part inside the clip matters: a window mostly off it, whose visible part is
-    /// under a window in front, holds nothing to click.
-    @Test func theVisiblePartUnderOneWindowInFrontHoldsNothing() {
+    /// under a window in front, cannot be seen.
+    @Test func theVisiblePartUnderOneWindowInFrontCannotBeSeen() {
         let wide = ScreenRect(x: -500, y: 0, width: 800, height: 400)
-        #expect(facts(frame: .answered(wide)).inner(region, under: [ScreenRect(x: 0, y: 0, width: 300, height: 400)]) == nil)
-        #expect(facts(frame: .answered(wide)).inner(region, under: [ScreenRect(x: 0, y: 0, width: 200, height: 400)]) == region)
+        #expect(facts(frame: .answered(wide)).descent(region, hard: true, under: [ScreenRect(x: 0, y: 0, width: 300, height: 400)]) == .prune)
+        #expect(facts(frame: .answered(wide)).descent(region, hard: true, under: [ScreenRect(x: 0, y: 0, width: 200, height: 400)]) == .descend(region, hard: true))
     }
 
     /// A scroll area hides what lies outside it; anything else hands on the clip it was given.
     @Test func onlyAScrollAreaCutsTheClipToItsFrame() {
         let list = ScreenRect(x: 100, y: 100, width: 300, height: 200)
-        #expect(facts(frame: .answered(list), role: "AXScrollArea").inner(region, under: []) == list)
-        #expect(facts(frame: .answered(list), role: "AXGroup").inner(region, under: []) == region)
+        #expect(facts(frame: .answered(list), role: "AXScrollArea").descent(region, hard: false, under: []) == .descend(list, hard: true))
+        #expect(facts(frame: .answered(list), role: "AXGroup").descent(region, hard: false, under: []) == .descend(region, hard: false))
     }
 
     /// No frame says nothing about where the children are, so they keep the clip given.
     @Test(arguments: [Heard<ScreenRect?>.unanswered, .answered(nil), .answered(ScreenRect(x: 5, y: 5, width: 0, height: 0))])
     func anElementWithNoUsableFrameHandsOnItsClip(frame: Heard<ScreenRect?>) {
-        #expect(facts(frame: frame).inner(region, under: []) == region)
+        #expect(facts(frame: frame).descent(region, hard: false, under: []) == .descend(region, hard: false))
     }
 }
 
@@ -212,13 +231,30 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
         #expect(w.reach == .stopped(.unread))
     }
 
-    /// A subtree that would not answer, off the region, could not have held a finding.
-    @Test func anUnreadSubtreeOffTheRegionLeavesTheReachWhole() {
+    /// A subtree that would not answer under a scroll area off the region could not have
+    /// held a finding; under any other element it could have hung into the region.
+    @Test func anUnreadSubtreeOffTheRegionIsUnreadUnlessAScrollAreaHidesIt() {
+        let far = ScreenRect(x: 3000, y: 0, width: 100, height: 100)
+        for (role, reach): (String, Reach) in [("AXScrollArea", .whole), ("AXGroup", .stopped(.unread))] {
+            let tree = FakeTree(nodes: [
+                "window": node(nil, region, children: .answered(["far"])),
+                "far": node(nil, far, children: .unanswered, role: role),
+            ])
+            #expect(tree.walked().reach == reach)
+        }
+    }
+
+    /// Unseen, with a role it would not say: whether it hides its children is unknown.
+    @Test func anUnseenElementWhoseRoleWouldNotAnswerLeavesItsChildrenUnread() {
+        var far = node(nil, ScreenRect(x: 3000, y: 0, width: 100, height: 100), children: .answered(["x"]), role: "AXUnknown")
+        far = Node(facts: Facts(role: far.facts.role, texts: far.facts.texts, frame: far.facts.frame, named: false), children: far.children)
         let tree = FakeTree(nodes: [
             "window": node(nil, region, children: .answered(["far"])),
-            "far": node(nil, ScreenRect(x: 3000, y: 0, width: 100, height: 100), children: .unanswered),
+            "far": far,
         ])
-        #expect(tree.walked().reach == .whole)
+        let w = tree.walked()
+        #expect(w.examined == 2)
+        #expect(w.reach == .stopped(.unread))
     }
 
     /// Each window is walked to the end before the next, so a bound spends itself on the
@@ -249,18 +285,34 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
         #expect(w.reach == .stopped(.timeBudget(.seconds(5))))
     }
 
-    /// Under a container off the region, only its children are read, to see whether any
-    /// hangs into the region; one that does not is not descended into.
-    @Test func aContainerOffTheRegionIsNotDescendedInto() {
+    /// Under a container off the region everything is read, to find what hangs into the
+    /// region, and nothing that does not is counted.
+    @Test func whatIsProbedAndNotSeenIsNotCounted() {
         let far = ScreenRect(x: 3000, y: 0, width: 100, height: 100)
         let tree = FakeTree(nodes: [
             "window": node(nil, region, children: .answered(["offscreen"])),
-            "offscreen": node(nil, far, children: .answered(["child"])),
-            "child": node(nil, far, children: .answered(["never"])),
+            "offscreen": node("Far", far, children: .answered(["child"]), role: "AXGroup"),
+            "child": node(nil, far, children: .answered(["leaf"]), role: "AXGroup"),
+            "leaf": node("Also far", far),
         ])
         let w = tree.walked()
-        #expect(w.examined == 3)
+        #expect(w.examined == 4)
+        #expect(w.excluded == [Exclusion(reason: .unplaced, count: 1), Exclusion(reason: .wordless, count: 1)])
         #expect(w.reach == .whole)
+    }
+
+    /// A dropdown nested under a wrapper that is off the region too is still found.
+    @Test func aChildHangingIntoTheRegionTwoLevelsDownIsFound() {
+        let tree = FakeTree(nodes: [
+            "window": node(nil, region, children: .answered(["header"]), role: "AXWindow"),
+            "header": node(nil, ScreenRect(x: 0, y: 0, width: 400, height: 50), children: .answered(["nav"]), role: "AXGroup"),
+            "nav": node(nil, ScreenRect(x: 0, y: 0, width: 200, height: 50), children: .answered(["item"]), role: "AXGroup"),
+            "item": node("Sign out", ScreenRect(x: 0, y: 60, width: 120, height: 24), role: "AXMenuItem"),
+        ])
+        let below = ScreenRect(x: 0, y: 55, width: 1000, height: 745)
+        let w = walk(from: [Root(element: "window", clip: below, covers: [])], unwalked: 0,
+                     within: Bounds(elements: Limit(100)!, time: .seconds(5)), elapsed: { .zero }, read: tree.read)
+        #expect(w.found.map(\.text.value) == ["Sign out"])
     }
 
     /// The repro: a region starting below a header, whose dropdown item hangs into it.
@@ -309,9 +361,8 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
         ])
         let w = tree.walked()
         #expect(w.found.map(\.text.value) == ["Back", "Kept"])
-        // The row's cell is read to see whether it hangs into the list's clip; it does not.
-        #expect(w.examined == 6)
-        #expect(w.excluded.contains(Exclusion(reason: .unplaced, count: 2)))
+        #expect(w.examined == 5)
+        #expect(w.excluded.contains(Exclusion(reason: .unplaced, count: 1)))
     }
 
     /// Only a scroll area clips: a dropdown hanging below the header that holds it is on
