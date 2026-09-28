@@ -301,10 +301,11 @@ maintainer to approve each run in the Actions tab before handing them over:
 | `NOTARY_PASSWORD` | an app-specific password for that Apple ID, made at account.apple.com |
 
 Export each identity from Keychain Access (the certificate with its private key, as
-.p12) on the Mac that holds it, then set the secret from the file:
+.p12) on the Mac that holds it, then set the secret from the file. The input is
+redirected because GNU base64, first on some PATHs, has no `-i`:
 
 ```sh
-base64 -i application.p12 | gh secret set DEVELOPER_ID_APPLICATION_P12 --env release
+base64 <application.p12 | gh secret set DEVELOPER_ID_APPLICATION_P12 --env release
 ```
 
 The same release can be made on that Mac directly:
