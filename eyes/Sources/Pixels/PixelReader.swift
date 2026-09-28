@@ -227,13 +227,15 @@ struct Piece {
 
 /// Everything that means the reader could not look, as opposed to having looked and found
 /// nothing. Each one throws, because a returned `Reading` is taken as proof of looking.
-public enum PixelsError: Error, CustomStringConvertible {
+public enum PixelsError: ReaderError, CustomStringConvertible {
     case noGrant
     case offScreen(ScreenRect)
     case spansDisplays(ScreenRect)
     case captureWrongShape(ScreenRect, width: Int, height: Int)
     case captureWroteNothing(ScreenRect, String)
     case unreadableConfidence(String)
+
+    public var missingGrant: Bool { if case .noGrant = self { true } else { false } }
 
     public var description: String {
         switch self {

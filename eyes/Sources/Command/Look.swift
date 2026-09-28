@@ -2,6 +2,7 @@ import ArgumentParser
 import CoreGraphics
 import Eyes
 import Pixels
+import Tree
 
 /// How a caller spells an argument's name in a refusal: `--limit` on the command line,
 /// `limit` to an MCP client.
@@ -20,6 +21,31 @@ enum Help {
     static let display = "Read this display, by its window-server id, which `eyes displays` lists and every scope line names. Defaults to the main display."
     static let window = "Read this window's bounds, by the id `eyes windows` prints."
     static let rect = "Read this rectangle: x,y,width,height in the points vhid clicks."
+    static let source = "Which reader looks: tree (the accessibility tree: exact text and roles, needs Accessibility),"
+        + " pixels (recognised text, anything drawn, needs Screen Recording), or merged (both, each thing reported once;"
+        + " answers with either grant, naming a reader that could not look). Defaults to merged."
+}
+
+/// Which reader a verb or tool reads with: every kind a reader can be. [LAW:one-source-of-truth]
+extension SourceKind: ExpressibleByArgument {
+    /// The reader of this kind. Merged puts the tree first, so where both saw a thing its
+    /// exact frame and role are the ones kept.
+    @MainActor var reader: any Reader {
+        switch self {
+        case .tree: TreeReader()
+        case .pixels: PixelReader()
+        case .merged: MergedReader(TreeReader(), PixelReader())
+        }
+    }
+
+    /// The scope line's name for who looked.
+    var looked: String {
+        switch self {
+        case .tree: "by the tree"
+        case .pixels: "by pixels"
+        case .merged: "by tree and pixels, merged"
+        }
+    }
 }
 
 /// Where `find` and `read` look, shared so the two verbs cannot disagree about it.
@@ -75,13 +101,15 @@ struct Where: ParsableArguments {
 /// What `find` and `read` print. Pure, so the sentences a caller trusts are tested.
 /// [LAW:effects-at-boundaries]
 enum Report {
-    static func lines(_ reading: Reading, query: Query) -> [String] {
-        [scope(reading, query: query)] + rows(reading.outcome)
+    /// `grantNote` follows each missing grant named: where the grant is held, when that is
+    /// not the process printing - an MCP server's host app.
+    static func lines(_ reading: Reading, query: Query, source: SourceKind, grantNote: String = "") -> [String] {
+        [scope(reading, query: query, source: source, grantNote: grantNote)] + rows(reading.outcome)
     }
 
     /// Names where it looked, how much it read, and every narrowing, before any row.
     /// [LAW:no-silent-failure]
-    static func scope(_ reading: Reading, query: Query) -> String {
+    static func scope(_ reading: Reading, query: Query, source: SourceKind, grantNote: String = "") -> String {
         let s = reading.scope
         let asked = query.match.map(wanted)
         let head: String = switch reading.outcome {
@@ -91,10 +119,10 @@ enum Report {
             asked.map { "\($0) not found" } ?? "no text"
         }
         let clauses: [String?] = [
-            "\(head) in \(place(query.region)) \(s.region)",
+            "\(head) in \(place(query.region)) \(s.region) \(looked(source, s.reach))",
             "\(s.examined) run\(s.examined == 1 ? "" : "s") read",
             s.excluded.isEmpty ? nil : s.excluded.map { "\($0.count) \($0.reason.rawValue)" }.joined(separator: ", "),
-            reach(s.reach),
+            reach(s.reach, grantNote),
             reading.outcome == .nearest([]) || reading.outcome.isMatched ? nil : "nearest follow",
         ]
         return clauses.compactMap { $0 }.joined(separator: "; ") + ". Points are centres, vhid click coordinates."
@@ -126,22 +154,30 @@ enum Report {
         }
     }
 
-    private static func reach(_ reach: Reach) -> String {
+    /// Who looked, as it happened rather than as asked: a merge one of whose readers was
+    /// blind was read by the other alone.
+    private static func looked(_ source: SourceKind, _ reach: Reach) -> String {
+        guard case .stopped(.merged(let a, let b)) = reach, a.isBlind != b.isBlind else { return source.looked }
+        return "by \((a.isBlind ? b : a).kind.rawValue) alone"
+    }
+
+    private static func reach(_ reach: Reach, _ grantNote: String = "") -> String {
         switch reach {
         case .whole: "whole region read"
         case .stopped(.resultLimit(let l)): "stopped at the limit of \(l.count)"
         case .stopped(.elementLimit(let l)): "stopped at \(l.count) elements"
         case .stopped(.timeBudget(let d)): "stopped after \(d)"
         case .stopped(.unread): "parts left unread"
-        case .stopped(.merged(let a, let b)): "\(part(a)), \(part(b))"
+        case .stopped(.merged(let a, let b)): "\(part(a, grantNote)), \(part(b, grantNote))"
         }
     }
 
-    private static func part(_ part: Part) -> String {
+    private static func part(_ part: Part, _ grantNote: String) -> String {
         switch part {
-        case .read(let kind, let r): "\(kind.rawValue) \(reach(r))"
+        case .read(let kind, let r): "\(kind.rawValue) \(reach(r, grantNote))"
         // One line whatever the error printed, since the scope is one line.
-        case .blind(let kind, let why): "\(kind.rawValue) could not look (\(why.split(whereSeparator: \.isNewline).joined(separator: " ")))"
+        case .blind(let kind, let why, let grant):
+            "\(kind.rawValue) could not look (\(why.split(whereSeparator: \.isNewline).joined(separator: " "))\(grant ? grantNote : ""))"
         }
     }
 
@@ -152,16 +188,18 @@ private extension Outcome {
     var isMatched: Bool { if case .matched = self { true } else { false } }
 }
 
-/// Reads with the pixel reader and prints. The one place the verbs meet the screen.
+/// Reads with the chosen reader and prints. The one place the verbs meet the screen.
 @MainActor
-func look(_ query: Query) async throws {
-    print(try await Report.text(query, reading: PixelReader().read))
+func look(_ query: Query, source: SourceKind) async throws {
+    print(try await Report.text(query, source: source) { @MainActor in try await $0.reader.read($1) })
 }
 
 extension Report {
     /// A query's reading as the text the verbs print and the MCP tools answer.
     /// [LAW:one-source-of-truth]
-    static func text(_ query: Query, reading read: (Query) async throws -> Reading) async throws -> String {
-        lines(try await read(query), query: query).joined(separator: "\n")
+    static func text(
+        _ query: Query, source: SourceKind, grantNote: String = "", reading read: @Sendable (SourceKind, Query) async throws -> Reading
+    ) async throws -> String {
+        lines(try await read(source, query), query: query, source: source, grantNote: grantNote).joined(separator: "\n")
     }
 }

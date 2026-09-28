@@ -85,7 +85,7 @@ import Testing
             .exact("Allow")
         )
         #expect(!r.provesAbsence)
-        #expect(r.scope.reach == .stopped(.merged(.blind(.tree, "no grant"), .read(.pixels, .whole))))
+        #expect(r.scope.reach == .stopped(.merged(.blind(.tree, "no grant", missingGrant: false), .read(.pixels, .whole))))
         guard case .nearest(let near) = r.outcome else { Issue.record("\(r)"); return }
         #expect(near.map(\.found.text.value) == ["Elsewhere"])
     }
@@ -97,7 +97,7 @@ import Testing
             .exact("Allow")
         )
         #expect(all(r).map(\.text.value) == ["Allow"])
-        #expect(r.scope.reach == .stopped(.merged(.read(.tree, .whole), .blind(.pixels, "no grant"))))
+        #expect(r.scope.reach == .stopped(.merged(.read(.tree, .whole), .blind(.pixels, "no grant", missingGrant: false))))
     }
 
     @Test func bothThrowingThrows() async {
@@ -191,5 +191,25 @@ import Testing
         )
         #expect(all(r).map(\.text.value) == ["Downloads", "3"])
         #expect(r.scope.excluded == [Exclusion(reason: .duplicate, count: 1)])
+    }
+
+    struct NoGrant: ReaderError { var missingGrant: Bool { true } }
+
+    struct Refusing: Reader {
+        let source = SourceKind.tree
+        func look(_ query: Query) async throws -> Candidates { throw NoGrant() }
+    }
+
+    @Test func aBlindReadersMissingGrantIsCarriedInItsPart() async throws {
+        let r = try await MergedReader(Refusing(), Fake(source: .pixels, found: [])).read(Query(match: nil, region: .rect(Self.region)))
+        guard case .stopped(.merged(.blind(.tree, _, let grant), _)) = r.scope.reach else { Issue.record("\(r)"); return }
+        #expect(grant)
+    }
+
+    @Test func aRegionThatNamesNowhereIsRefusedOnceBeforeEitherReader() async {
+        await #expect(throws: NoSuchPlace.self) {
+            try await MergedReader(Fake(source: .tree, found: []), Fake(source: .pixels, found: []))
+                .read(Query(match: nil, region: .display(4_000_000_000)))
+        }
     }
 }

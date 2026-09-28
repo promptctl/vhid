@@ -34,7 +34,7 @@ public extension Reader {
 }
 
 /// Which kind of reader, without the per-finding payload `Source` carries.
-public enum SourceKind: String, Sendable, Hashable {
+public enum SourceKind: String, Sendable, Hashable, CaseIterable {
     case tree
     case pixels
     /// Both, reconciled.

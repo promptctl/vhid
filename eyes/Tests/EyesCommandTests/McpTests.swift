@@ -1,6 +1,7 @@
 import Eyes
 import MCP
 import Pixels
+import Tree
 import Testing
 @testable import EyesCommand
 
@@ -19,14 +20,21 @@ import Testing
     /// Every query the fake reader was handed, so a test can check what reached it.
     actor Asked {
         var queries: [Query] = []
-        func add(_ q: Query) { queries.append(q) }
+        var sources: [SourceKind] = []
+        func add(_ q: Query, _ s: SourceKind) { queries.append(q); sources.append(s) }
     }
     private static let asked = Asked()
 
     /// A reader that sees one run, "Save", everywhere but display 666, where it has no grant.
-    private static let look: EyesTools.Look = { query in
-        await asked.add(query)
+    private static let look: EyesTools.Look = { source, query in
+        await asked.add(query, source)
         if query.region == .display(666) { throw PixelsError.noGrant }
+        if query.region == .display(667), source == .tree { throw TreeError.noGrant }
+        if query.region == .display(669) {
+            return Reading(outcome: .nearest([]), scope: Scope(region: ScreenRect(x: 0, y: 0, width: 10, height: 10), examined: 0,
+                reach: .stopped(.merged(.blind(.tree, "\(TreeError.noGrant)", missingGrant: true), .read(.pixels, .whole)))))
+        }
+        if query.region == .display(668) { throw BothBlind(first: TreeError.noGrant, second: PixelsError.noGrant) }
         let save = Found(text: Text("Save")!, frame: ScreenRect(x: -300, y: 40, width: 40, height: 20), source: .pixels(confidence: Confidence(1)!))
         return Reading(outcome: .matched(Matches([save])!), scope: Scope(region: ScreenRect(x: -1512, y: 316, width: 1512, height: 982), examined: 1, reach: .whole))
     }
@@ -106,8 +114,48 @@ import Testing
             let (said, isError) = try await call(arguments, tool: tool)
             #expect(isError != true)
             #expect(await Self.asked.queries.last == query)
-            #expect(said == (try await Report.text(query, reading: Self.look)))
+            #expect(await Self.asked.sources.last == .merged)
+            #expect(said == (try await Report.text(query, source: .merged, reading: Self.look)))
         }
+    }
+
+    /// Each tool reads with the source it is given, and names it.
+    @Test func findAndReadReadWithTheSourceGiven() async throws {
+        for kind in SourceKind.allCases {
+            for (tool, arguments): (String, [String: Value]) in [
+                ("find", ["text": "save", "display": 1, "source": .string(kind.rawValue)]),
+                ("read", ["display": 1, "source": .string(kind.rawValue)]),
+            ] {
+                let (said, isError) = try await call(arguments, tool: tool)
+                #expect(isError != true)
+                #expect(await Self.asked.sources.last == kind)
+                #expect(said.contains(kind.looked))
+            }
+        }
+    }
+
+    /// Each reader's missing grant, and a merge with neither, is a tool error naming the grant.
+    @Test func everyReadersMissingGrantIsAToolErrorNamingIt() async throws {
+        let served = " Under eyes mcp the grant is the app's that runs this server, not eyes'."
+        for (display, expected): (Int, String) in [
+
+            (668, "Neither reader could look. \(TreeError.noGrant)\(served) \(PixelsError.noGrant)\(served)"),
+        ] {
+            let (said, isError) = try await call(["display": .int(display)], tool: "read")
+            #expect(isError == true)
+            #expect(said == expected)
+        }
+        let (said, isError) = try await call(["display": 667, "source": "tree"], tool: "read")
+        #expect(isError == true)
+        #expect(said == "\(TreeError.noGrant)\(served)")
+    }
+
+    /// A merge with one reader blind for want of a grant answers, and says where that grant is held.
+    @Test func aMergeWithOneReaderBlindAnswersAndNamesWhereItsGrantIsHeld() async throws {
+        let (said, isError) = try await call(["display": 669], tool: "read")
+        #expect(isError != true)
+        #expect(said.contains("by pixels alone"))
+        #expect(said.contains("tree could not look (\(TreeError.noGrant) Under eyes mcp the grant is the app's that runs this server, not eyes'.)"))
     }
 
     /// A reader that could not look is a tool error that names the grant, never an empty answer.
@@ -131,7 +179,8 @@ import Testing
             ("read", ["display": -1], "display is -1, which is not a window-server id (0 to 4294967295)"),
             ("read", ["window": 4_294_967_296], "window is 4294967296, which is not a window-server id (0 to 4294967295)"),
             ("read", ["rect": "1,2,3"], "rect wants x,y,width,height in points - a positive size, nothing past a million - got 1,2,3"),
-            ("read", ["text": "a"], "text is not an argument this tool takes: it takes display, window, rect, limit"),
+            ("read", ["text": "a"], "text is not an argument this tool takes: it takes display, window, rect, limit, source"),
+            ("read", ["source": "ocr"], "source is ocr, and it takes one of tree, pixels, merged"),
         ] {
             let (said, isError) = try await call(arguments, tool: tool)
             #expect(isError == true, "\(tool) \(arguments)")
@@ -148,14 +197,14 @@ import Testing
             func leave() { now -= 1 }
         }
         let gauge = Gauge()
-        let serial = OneAtATime { query in
+        let serial = OneAtATime { _, query in
             await gauge.enter()
             try await Task.sleep(for: .milliseconds(20))
             await gauge.leave()
             return Reading(outcome: .nearest([]), scope: Scope(region: ScreenRect(x: 0, y: 0, width: 1, height: 1), examined: 0, reach: .whole))
         }
         try await withThrowingTaskGroup(of: Reading.self) { group in
-            for _ in 0..<5 { group.addTask { try await serial.read(Query(match: nil, region: .display(1))) } }
+            for _ in 0..<5 { group.addTask { try await serial.read(.pixels, Query(match: nil, region: .display(1))) } }
             for try await _ in group {}
         }
         #expect(await gauge.most == 1)
@@ -168,7 +217,7 @@ import Testing
         let count = Count()
         let (started, starting) = AsyncStream.makeStream(of: Void.self)
         let (gate, open) = AsyncStream.makeStream(of: Void.self)
-        let serial = OneAtATime { _ in
+        let serial = OneAtATime { _, _ in
             if await count.add() == 1 {
                 starting.yield()
                 for await _ in gate { break }
@@ -176,9 +225,9 @@ import Testing
             return Reading(outcome: .nearest([]), scope: Scope(region: ScreenRect(x: 0, y: 0, width: 1, height: 1), examined: 0, reach: .whole))
         }
         let query = Query(match: nil, region: .display(1))
-        let first = Task { try await serial.read(query) }
+        let first = Task { try await serial.read(.pixels, query) }
         for await _ in started { break }
-        let second = Task { try await serial.read(query) }
+        let second = Task { try await serial.read(.pixels, query) }
         second.cancel()
         open.yield()
         _ = try await first.value

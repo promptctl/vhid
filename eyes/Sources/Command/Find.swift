@@ -22,6 +22,9 @@ struct Find: AsyncParsableCommand {
 
     @OptionGroup var place: Where
 
+    @Option(help: .init(stringLiteral: Help.source))
+    var source = SourceKind.merged
+
     func validate() throws {
         _ = try Self.match(text, exact: exact, edits: edits, as: .flag)
         _ = try Where.limit(limit, as: .flag)
@@ -30,7 +33,7 @@ struct Find: AsyncParsableCommand {
     @MainActor
     func run() async throws {
         try await look(Query(match: Self.match(text, exact: exact, edits: edits, as: .flag),
-                             region: place.region, limit: Where.limit(limit, as: .flag)))
+                             region: place.region, limit: Where.limit(limit, as: .flag)), source: source)
     }
 
     /// What to match, or the refusal - one rule for the verb and the MCP tool, each naming
@@ -55,12 +58,15 @@ struct Read: AsyncParsableCommand {
 
     @OptionGroup var place: Where
 
+    @Option(help: .init(stringLiteral: Help.source))
+    var source = SourceKind.merged
+
     func validate() throws {
         _ = try Where.limit(limit, as: .flag)
     }
 
     @MainActor
     func run() async throws {
-        try await look(Query(match: nil, region: place.region, limit: Where.limit(limit, as: .flag)))
+        try await look(Query(match: nil, region: place.region, limit: Where.limit(limit, as: .flag)), source: source)
     }
 }
