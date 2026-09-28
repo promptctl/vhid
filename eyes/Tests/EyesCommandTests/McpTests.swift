@@ -2,6 +2,7 @@ import Eyes
 import MCP
 import Pixels
 import Tree
+import Version
 import Testing
 @testable import EyesCommand
 
@@ -61,6 +62,24 @@ import Testing
         let (content, isError) = try await connected { try await $0.callTool(name: tool, arguments: arguments) }
         guard case .text(let said, _, _) = content.first else { return ("no text: \(content)", isError) }
         return (said, isError)
+    }
+
+    /// The binary and the server report the one stamped version. [LAW:one-source-of-truth]
+    @Test func theVersionIsTheStampedOne() async throws {
+        #expect(Eye.configuration.version == Version.current)
+        let (clientSide, serverSide) = await InMemoryTransport.createConnectedPair()
+        let server = await Mcp.server(EyesTools.all(windows: { Self.listing }, frontmost: { Self.front }, displays: { DisplaysCommandTests.desk }, reading: Self.look))
+        try await server.start(transport: serverSide)
+        let result: Initialize.Result
+        do {
+            result = try await Client(name: "test", version: "0").connect(transport: clientSide)
+        } catch {
+            await server.stop()
+            throw error
+        }
+        await server.stop()
+        #expect(result.serverInfo.name == "eyes")
+        #expect(result.serverInfo.version == Version.current)
     }
 
     @Test func theToolsAreListedAndReadOnly() async throws {

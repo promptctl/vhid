@@ -5,6 +5,7 @@ import Foundation
 import MCP
 import Pixels
 import System
+import Version
 
 /// eyes' verbs as MCP tools, over stdio, for an agent that sees the screen in one session
 /// and acts on it through `vhid mcp` in another.
@@ -25,7 +26,7 @@ struct Mcp: AsyncParsableCommand {
 
     /// The server as a client's initialize finds it, with its tools attached.
     static func server(_ tools: [EyesTool] = EyesTools.all()) async -> Server {
-        let server = Server(name: "eyes", version: "0", capabilities: .init(tools: .init(listChanged: false)))
+        let server = Server(name: "eyes", version: Version.current, capabilities: .init(tools: .init(listChanged: false)))
         await server.withMethodHandler(ListTools.self) { _ in .init(tools: tools.map(\.tool)) }
         await server.withMethodHandler(CallTool.self) { request in
             guard let verb = tools.first(where: { $0.tool.name == request.name }) else {

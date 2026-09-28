@@ -354,4 +354,6 @@ the `vhid` tool links and the pqrs driver package the installer carries, with th
 
 ## Status
 
-Under construction. Nothing here is released yet.
+Releases, each with its pkg and notes, are on the
+[Releases page](https://github.com/promptctl/vhid/releases); [CHANGELOG.md](CHANGELOG.md)
+holds the same notes.
