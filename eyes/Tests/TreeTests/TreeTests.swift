@@ -137,9 +137,10 @@ extension Facts {
         #expect(facts(frame: .answered(far), role: "AXGroup").descent(region, hard: false, under: []) == .probe(region))
     }
 
-    /// Nothing is probed under a scroll area, or once one has cut the clip.
+    /// Nothing is probed under a scroll area or a web area, or once one has cut the clip.
     @Test func aScrollAreaOrAHardClipPrunes() {
         #expect(facts(frame: .answered(far), role: "AXScrollArea").descent(region, hard: false, under: []) == .prune)
+        #expect(facts(frame: .answered(far), role: "AXWebArea").descent(region, hard: false, under: []) == .prune)
         #expect(facts(frame: .answered(far), role: "AXGroup").descent(region, hard: true, under: []) == .prune)
     }
 
@@ -385,6 +386,20 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
         let w = tree.walked()
         #expect(w.found.map(\.frame) == [ScreenRect(x: 400, y: 0, width: 200, height: 28)])
         #expect(w.excluded == [Exclusion(reason: .area, count: 1)])
+    }
+
+    /// A frameless wrapper under a probe goes on probing: what is under it is not counted.
+    @Test func aFramelessWrapperDoesNotEndAProbe() {
+        let far = ScreenRect(x: 3000, y: 0, width: 100, height: 100)
+        let tree = FakeTree(nodes: [
+            "window": node(nil, region, children: .answered(["header"])),
+            "header": node(nil, far, children: .answered(["wrapper"]), role: "AXGroup"),
+            "wrapper": node(nil, nil, children: .answered(["leaf"]), role: "AXGroup"),
+            "leaf": node("Far", far),
+        ])
+        let w = tree.walked()
+        #expect(w.examined == 4)
+        #expect(w.excluded == [Exclusion(reason: .unplaced, count: 1), Exclusion(reason: .wordless, count: 1)])
     }
 }
 

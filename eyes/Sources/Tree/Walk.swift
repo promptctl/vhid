@@ -162,6 +162,11 @@ extension Node {
     }
 }
 
+/// Roles that draw nothing outside their own frame: a scroll area's rows, and a web page
+/// inside its viewport - which is also what keeps a probe out of a page's scrolled-off
+/// content, in apps whose page scrolls without an `AXScrollArea`.
+let clips: Set<Role> = Set([kAXScrollAreaRole, "AXWebArea"].map { Role(rawValue: $0) })
+
 /// What the walk does under an element: how its children are read.
 enum Descent: Equatable {
     /// Walk them in this clip. `hard` when the clip is a scroll area's: nothing under it is
@@ -194,7 +199,7 @@ extension Facts {
     ///
     /// The one place the descend, probe and prune decision is made. [LAW:single-enforcer]
     func descent(_ clip: ScreenRect, hard: Bool, under covers: [ScreenRect]) -> Descent {
-        let scroll = role == Role(rawValue: kAXScrollAreaRole)
+        let scroll = clips.contains(role)
         guard case .answered(let placed?) = frame, !placed.isEmpty else { return .descend(clip, hard: hard) }
         if let shown = visible(placed, in: clip, under: covers) {
             return scroll ? .descend(shown, hard: true) : .descend(clip, hard: hard)
@@ -202,6 +207,9 @@ extension Facts {
         if hard || scroll { return .prune }
         return named ? .probe(clip) : .unsure
     }
+
+    /// Whether its frame says where it is: answered, and not empty.
+    var isPlaced: Bool { if case .answered(let placed?) = frame { !placed.isEmpty } else { false } }
 
     /// Whether this element's own frame can be seen in `clip`, or says nothing about it.
     func isSeen(in clip: ScreenRect, under covers: [ScreenRect]) -> Bool {
@@ -279,9 +287,11 @@ func walk<Element>(
             let node = try read(root.element)
             examined += 1
             let candidate = node.candidate(in: root.clip, under: root.covers)
-            // A probe not seen was never in the region: nothing to count, unless a read it
-            // needed failed, which leaves unknown whether it was.
-            let quiet = root.probe && !node.facts.isSeen(in: root.clip, under: root.covers) && candidate != .excluded(.unanswered)
+            // A probe not seen - off the clip, or with a frame that says nothing - was never
+            // placed in the region: nothing to count, unless a read it needed failed, which
+            // leaves unknown whether it was.
+            let shown = node.facts.isPlaced && node.facts.isSeen(in: root.clip, under: root.covers)
+            let quiet = root.probe && !shown && candidate != .excluded(.unanswered)
             switch candidate {
             case _ where quiet: break
             case .found(let run) where !seen.insert(Place(text: run.text.value, frame: run.frame)).inserted:
@@ -291,8 +301,10 @@ func walk<Element>(
             }
             let unread = candidate == .excluded(.unanswered)
             switch (node.children, node.facts.descent(root.clip, hard: root.hard, under: root.covers)) {
+            // An element whose frame says nothing about where it is does not end a probe.
             case (.answered(let children), .descend(let clip, let hard)):
-                queue.append(contentsOf: children.map { Root(element: $0, clip: clip, covers: root.covers, hard: hard) })
+                let probe = root.probe && !node.facts.isPlaced
+                queue.append(contentsOf: children.map { Root(element: $0, clip: clip, covers: root.covers, hard: hard, probe: probe) })
             case (.answered(let children), .probe(let clip)):
                 queue.append(contentsOf: children.map { Root(element: $0, clip: clip, covers: root.covers, probe: true) })
             // A subtree unread is one more unanswered part - unless nothing in it could be
