@@ -5,7 +5,6 @@ import Foundation
 import MCP
 import Pixels
 import System
-import Tree
 
 /// eyes' verbs as MCP tools, over stdio, for an agent that sees the screen in one session
 /// and acts on it through `vhid mcp` in another.
@@ -112,7 +111,11 @@ enum EyesTools {
     /// Reading needs a grant - Accessibility for the tree, Screen Recording for pixels -
     /// which macOS asks of the process responsible for this one: for an MCP server, the
     /// app hosting it.
-    private static let grant = " Needs Accessibility (tree) and Screen Recording (pixels), granted to the app that runs this server."
+    private static let grant = " The tree needs Accessibility and pixels Screen Recording, granted to the app that runs this server;"
+        + " merged answers with either."
+
+    /// Where a missing grant is held, for a server: the app hosting it, not eyes.
+    static let grantNote = " Under eyes mcp the grant is the app's that runs this server, not eyes'."
 
     static func find(_ look: @escaping Look) -> EyesTool { EyesTool(
         tool: Tool(
@@ -173,7 +176,7 @@ enum EyesTools {
     /// Which reader, as `--source` takes it.
     private static func source(_ given: [String: Value]) throws -> SourceKind {
         guard let named = try argument("source", in: given, \.stringValue, "a string") else { return .merged }
-        guard let kind = SourceKind(rawValue: named) else {
+        guard let kind = SourceKind(argument: named) else {
             throw ArgumentRefused(description: "source is \(named), and it takes one of \(SourceKind.allCases.map(\.rawValue).joined(separator: ", "))")
         }
         return kind
@@ -184,22 +187,17 @@ enum EyesTools {
     /// look says so for each. [LAW:no-silent-failure]
     private static func answer(_ query: Query, _ source: SourceKind, _ look: Look) async throws -> String {
         do {
-            return try await Report.text(query, source: source, reading: look)
+            return try await Report.text(query, source: source, grantNote: grantNote, reading: look)
         } catch let both as BothBlind {
             throw ArgumentRefused(description: "Neither reader could look. \(served(both.first)) \(served(both.second))")
-        } catch PixelsError.noGrant {
-            throw ArgumentRefused(description: served(PixelsError.noGrant))
-        } catch TreeError.noGrant {
-            throw ArgumentRefused(description: served(TreeError.noGrant))
+        } catch let error as ReaderError where error.missingGrant {
+            throw ArgumentRefused(description: served(error))
         }
     }
 
     /// An error as a server says it: a missing grant names the app that must hold it.
     private static func served(_ error: any Error) -> String {
-        switch error {
-        case PixelsError.noGrant, TreeError.noGrant: "\(error) Under eyes mcp the grant is the app's that runs this server, not eyes'."
-        default: String(describing: error)
-        }
+        "\(error)\((error as? ReaderError)?.missingGrant == true ? grantNote : "")"
     }
 
     static func displays(_ list: @escaping DisplayList) -> EyesTool { EyesTool(

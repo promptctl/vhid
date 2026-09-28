@@ -1,4 +1,4 @@
-import Eyes
+@testable import Eyes
 import Testing
 @testable import EyesCommand
 
@@ -52,10 +52,11 @@ import Testing
         let reading = Reading(
             outcome: .nearest([]),
             scope: Scope(region: Self.display, examined: 5,
-                         reach: .stopped(.merged(.blind(.tree, "no grant\nask again"), .read(.pixels, .whole))))
+                         reach: .stopped(.merged(.blind(.tree, "no grant\nask again", missingGrant: false), .read(.pixels, .whole))))
         )
         let line = Report.scope(reading, query: Query(match: .exact("OK"), region: .display(12)), source: .merged)
         #expect(line.contains("tree could not look (no grant ask again), pixels whole region read"))
+        #expect(line.contains("by pixels alone;"))
         #expect(!line.contains("\n"))
     }
 
@@ -76,5 +77,14 @@ import Testing
         #expect(try Find.parse(["OK"]).source == .merged)
         #expect(try Read.parse([]).source == .merged)
         #expect(throws: (any Error).self) { try Read.parse(["--source", "ocr"]) }
+    }
+
+    /// Each kind names the reader that runs, and merged asks the tree first, so its exact
+    /// frames and roles are the ones kept.
+    @MainActor @Test func eachSourceIsTheReaderOfThatKind() throws {
+        for kind in SourceKind.allCases { #expect(kind.reader.source == kind) }
+        let merged = try #require(SourceKind.merged.reader as? MergedReader)
+        #expect(merged.first.source == .tree)
+        #expect(merged.second.source == .pixels)
     }
 }

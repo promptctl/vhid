@@ -274,10 +274,26 @@ public enum Stop: Sendable, Hashable {
 /// One reader's share of a merged read.
 public enum Part: Sendable, Hashable {
     case read(SourceKind, Reach)
-    /// It threw instead of reading, for the reason given. [LAW:no-silent-failure]
-    case blind(SourceKind, String)
+    /// It threw instead of reading, for the reason given, and whether that reason is a
+    /// grant the process lacks - which a caller can act on. [LAW:no-silent-failure]
+    case blind(SourceKind, String, missingGrant: Bool)
 
     var isWhole: Bool { if case .read(_, .whole) = self { true } else { false } }
+
+    public var kind: SourceKind {
+        switch self {
+        case .read(let kind, _), .blind(let kind, _, _): kind
+        }
+    }
+
+    public var isBlind: Bool { if case .blind = self { true } else { false } }
+}
+
+/// An error a reader throws when it could not look, saying whether the reason is a grant
+/// the process lacks, so a missing grant is told apart from a broken read without knowing
+/// which reader threw it.
+public protocol ReaderError: Error {
+    var missingGrant: Bool { get }
 }
 
 public extension Reading {

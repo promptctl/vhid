@@ -300,8 +300,10 @@ func plan<Element>(_ seen: [Seen], matched: [UInt32: Element]) -> (roots: [Root<
 /// Everything that means the tree reader could not look, as opposed to having looked and
 /// found nothing. Each one throws, because a returned `Reading` is taken as proof of
 /// looking.
-public enum TreeError: Error, CustomStringConvertible {
+public enum TreeError: ReaderError, CustomStringConvertible {
     case noGrant
+
+    public var missingGrant: Bool { self == .noGrant }
 
     public var description: String {
         switch self {

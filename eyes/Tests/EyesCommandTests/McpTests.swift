@@ -29,7 +29,11 @@ import Testing
     private static let look: EyesTools.Look = { source, query in
         await asked.add(query, source)
         if query.region == .display(666) { throw PixelsError.noGrant }
-        if query.region == .display(667) { throw TreeError.noGrant }
+        if query.region == .display(667), source == .tree { throw TreeError.noGrant }
+        if query.region == .display(669) {
+            return Reading(outcome: .nearest([]), scope: Scope(region: ScreenRect(x: 0, y: 0, width: 10, height: 10), examined: 0,
+                reach: .stopped(.merged(.blind(.tree, "\(TreeError.noGrant)", missingGrant: true), .read(.pixels, .whole)))))
+        }
         if query.region == .display(668) { throw BothBlind(first: TreeError.noGrant, second: PixelsError.noGrant) }
         let save = Found(text: Text("Save")!, frame: ScreenRect(x: -300, y: 40, width: 40, height: 20), source: .pixels(confidence: Confidence(1)!))
         return Reading(outcome: .matched(Matches([save])!), scope: Scope(region: ScreenRect(x: -1512, y: 316, width: 1512, height: 982), examined: 1, reach: .whole))
@@ -134,13 +138,24 @@ import Testing
     @Test func everyReadersMissingGrantIsAToolErrorNamingIt() async throws {
         let served = " Under eyes mcp the grant is the app's that runs this server, not eyes'."
         for (display, expected): (Int, String) in [
-            (667, "\(TreeError.noGrant)\(served)"),
+
             (668, "Neither reader could look. \(TreeError.noGrant)\(served) \(PixelsError.noGrant)\(served)"),
         ] {
             let (said, isError) = try await call(["display": .int(display)], tool: "read")
             #expect(isError == true)
             #expect(said == expected)
         }
+        let (said, isError) = try await call(["display": 667, "source": "tree"], tool: "read")
+        #expect(isError == true)
+        #expect(said == "\(TreeError.noGrant)\(served)")
+    }
+
+    /// A merge with one reader blind for want of a grant answers, and says where that grant is held.
+    @Test func aMergeWithOneReaderBlindAnswersAndNamesWhereItsGrantIsHeld() async throws {
+        let (said, isError) = try await call(["display": 669], tool: "read")
+        #expect(isError != true)
+        #expect(said.contains("by pixels alone"))
+        #expect(said.contains("tree could not look (\(TreeError.noGrant) Under eyes mcp the grant is the app's that runs this server, not eyes'.)"))
     }
 
     /// A reader that could not look is a tool error that names the grant, never an empty answer.

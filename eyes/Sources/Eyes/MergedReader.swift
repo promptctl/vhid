@@ -14,12 +14,14 @@ public struct MergedReader: Reader {
         self.second = second
     }
 
-    /// Asks both at once, so the screen has as little time as possible to change between
-    /// the two looks, and a reader's work off the main actor - Vision's - overlaps the
-    /// other's. Throws only when neither could look, or when the task was cancelled: one
-    /// reader that could not look is part of the answer, carried in the scope, and never
-    /// proof of absence.
+    /// Asks both as child tasks: both readers are main-actor, so they overlap only where
+    /// one leaves it - Vision's recognition does, the tree's walk does not - and the screen
+    /// has less time to change between the two looks than asking one after the other.
+    /// Throws when the region names nowhere, once, before either reader is asked; when
+    /// neither could look; or when the task was cancelled. One reader that could not look
+    /// is part of the answer, carried in the scope, and never proof of absence.
     public func look(_ query: Query) async throws -> Candidates {
+        _ = try query.region.bounds()
         async let a = Self.attempt(first, query)
         async let b = Self.attempt(second, query)
         return try Candidates.merging(try await a, try await b)
@@ -44,7 +46,7 @@ public enum Attempt: Sendable {
     var part: Part {
         switch self {
         case .looked(let kind, let seen): .read(kind, seen.reach)
-        case .blind(let kind, let error): .blind(kind, String(describing: error))
+        case .blind(let kind, let error): .blind(kind, String(describing: error), missingGrant: (error as? ReaderError)?.missingGrant ?? false)
         }
     }
 
