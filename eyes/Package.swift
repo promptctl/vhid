@@ -52,7 +52,7 @@ let package = Package(
         .executableTarget(
             name: "EyesCommand",
             dependencies: [
-                "Eyes", "Pixels",
+                "Eyes", "Pixels", "Tree",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "MCP", package: "swift-sdk"),
                 .product(name: "Logging", package: "swift-log"),
@@ -63,7 +63,7 @@ let package = Package(
         // is checked here rather than read off a terminal by eye. [LAW:verifiable-goals]
         .testTarget(
             name: "EyesCommandTests",
-            dependencies: ["EyesCommand", "Eyes", "Pixels", .product(name: "MCP", package: "swift-sdk")]
+            dependencies: ["EyesCommand", "Eyes", "Pixels", "Tree", .product(name: "MCP", package: "swift-sdk")]
         ),
     ]
 )

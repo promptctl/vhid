@@ -57,6 +57,11 @@ public struct BothBlind: Error, CustomStringConvertible {
     public let first: any Error
     public let second: any Error
 
+    public init(first: any Error, second: any Error) {
+        self.first = first
+        self.second = second
+    }
+
     public var description: String { "neither reader could look: \(first); \(second)" }
 }
 

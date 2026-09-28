@@ -38,12 +38,16 @@ eyes displays                     # each display's id, bounds and scale, main fi
 eyes find Save                    # where "Save" is: the point to click, then the text
 eyes find Settings --exact --display 3
 eyes read --window 4127           # every run of text in one window, in reading order
+eyes find OK --source tree        # only the accessibility tree: exact text, no Screen Recording
 eyes mcp                          # the verbs as MCP tools over stdio: windows, displays, find, read
 ```
 
-`find` and `read` recognise pixels on-device with Vision and need Screen Recording. Each
-prints a scope line first — where it looked, how many runs it read, what it set aside,
-whether it read the whole region. A `find` that matches nothing prints the nearest runs
+`find` and `read` read with `--source`: `tree` walks the accessibility tree (exact text
+and roles; needs Accessibility), `pixels` recognises text on-device with Vision (anything
+drawn; needs Screen Recording), and `merged`, the default, asks both and reports a thing
+both saw once. A merge with one grant missing still answers from the other and says which
+reader could not look. Each prints a scope line first — where it looked, which reader
+looked, how many runs it read, what it set aside, whether it read the whole region. A `find` that matches nothing prints the nearest runs
 and how many edits off each is, so a misread one edit away is not taken for an absence.
 
 ## Scope
@@ -121,12 +125,14 @@ already there), then quit and reopen it:
 ```
 
 vhid's tools need what `vhid doctor` checks and no grant of the client's. eyes'
-`windows` and `displays` need nothing. `find` and `read` need Screen Recording, held by
+`windows` and `displays` need nothing. `find` and `read` need Accessibility for the tree
+and Screen Recording for pixels, held by
 the app macOS counts as responsible for the server: Claude Desktop, or the terminal app
 running `claude` - under tmux, SSH or an editor's terminal, whichever app started that.
-eyes never prompts for it: add the app under **System Settings > Privacy & Security >
-Screen Recording**, then quit and reopen it, since a running server keeps the answer it
-started with. Until then `find` and `read` answer with a tool error saying so.
+eyes never prompts for either: add the app under **System Settings > Privacy & Security >
+Accessibility** and **Screen Recording**, then quit and reopen it, since a running server
+keeps the answer it started with. A reader without its grant is named in the scope line;
+with neither, `find` and `read` answer with a tool error saying so.
 
 Every coordinate either server prints or takes is the same screen point, so one loop
 closes without conversion:
@@ -149,7 +155,7 @@ vhid ships as one signed, notarized pkg. It installs:
 | path | what it is |
 |---|---|
 | `/usr/local/bin/vhid` | the CLI |
-| `/usr/local/bin/eyes` | the screen reader: `windows` and `displays` need no grant; `find` and `read` need Screen Recording ([Over MCP](#over-mcp) says whose) |
+| `/usr/local/bin/eyes` | the screen reader: `windows` and `displays` need no grant; `find` and `read` need Accessibility and Screen Recording ([Over MCP](#over-mcp) says whose) |
 | `/usr/local/libexec/vhidd` | the root daemon that owns the devices |
 | `/Library/LaunchDaemons/ai.promptctl.vhid.vhidd.plist` | the daemon's launchd job, loaded as the install finishes |
 | `/usr/local/libexec/vhid-menubar` | the menu bar item |
