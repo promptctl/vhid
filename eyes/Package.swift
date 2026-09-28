@@ -29,6 +29,10 @@ let package = Package(
         // share one language without either having to link the other.
         // [LAW:one-way-deps]
         .target(name: "Eyes"),
+        // The version eyes reports, stamped at build time from the repository's VERSION
+        // and git by the plugin, the way vhid's is. [LAW:one-source-of-truth]
+        .target(name: "Version", plugins: ["VersionStamp"]),
+        .plugin(name: "VersionStamp", capability: .buildTool()),
         // Every type here is a value, so the whole vocabulary is exercised with no
         // display, no capture and no accessibility grant. [LAW:effects-at-boundaries]
         .testTarget(name: "EyesTests", dependencies: ["Eyes"]),
@@ -52,7 +56,7 @@ let package = Package(
         .executableTarget(
             name: "EyesCommand",
             dependencies: [
-                "Eyes", "Pixels", "Tree",
+                "Eyes", "Pixels", "Tree", "Version",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "MCP", package: "swift-sdk"),
                 .product(name: "Logging", package: "swift-log"),
@@ -63,7 +67,7 @@ let package = Package(
         // is checked here rather than read off a terminal by eye. [LAW:verifiable-goals]
         .testTarget(
             name: "EyesCommandTests",
-            dependencies: ["EyesCommand", "Eyes", "Pixels", "Tree", .product(name: "MCP", package: "swift-sdk")]
+            dependencies: ["EyesCommand", "Eyes", "Pixels", "Tree", "Version", .product(name: "MCP", package: "swift-sdk")]
         ),
     ]
 )
