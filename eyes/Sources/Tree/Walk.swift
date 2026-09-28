@@ -168,7 +168,8 @@ extension Facts {
     /// Any other element may draw its children outside its own frame - a web page's
     /// dropdown hangs below its header - so they keep the clip it was given, but only while
     /// some of that element can be seen: one wholly off the clip or covered is not
-    /// descended into, whatever hangs off it. That bet is what lets a walk reach a window at
+    /// descended into - the walk reads its children once each, to catch one hanging into
+    /// the clip, and goes no deeper. That bet is what lets a walk reach a window at
     /// all: measured, a full-screen terminal in front held four thousand elements, every
     /// one off the region, and walking them spent the whole element bound. An element with no frame, or an empty one, says nothing
     /// about where its children are, so the walk goes on into it.
@@ -186,6 +187,9 @@ struct Root<Element> {
     let element: Element
     let clip: ScreenRect
     let covers: [ScreenRect]
+    /// Read only to see whether it hangs into the clip from a parent that could not be
+    /// seen: when it does not, nothing under it is read.
+    var probe = false
 }
 
 /// What a walk established, ready to be judged.
@@ -253,6 +257,13 @@ func walk<Element>(
             switch (node.children, inner) {
             case (.answered(let children), let inner?):
                 queue.append(contentsOf: children.map { Root(element: $0, clip: inner, covers: root.covers) })
+            // An element that cannot be seen may still draw its children where they can - a
+            // web page's dropdown hangs below a header scrolled off the region - so its
+            // children are read once each, and walked on only if they are seen. One level
+            // and no further: the pruning is what keeps a full-screen window of elements
+            // off the region from spending the bound. A scroll area hides what hangs off it.
+            case (.answered(let children), nil) where !root.probe && node.facts.role != Role(rawValue: kAXScrollAreaRole):
+                queue.append(contentsOf: children.map { Root(element: $0, clip: root.clip, covers: root.covers, probe: true) })
             case (.answered, nil): break
             // A subtree unread is one more unanswered part - unless nothing in it could be
             // seen, or this element was already counted as one.

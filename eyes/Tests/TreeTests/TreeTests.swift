@@ -249,15 +249,43 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
         #expect(w.reach == .stopped(.timeBudget(.seconds(5))))
     }
 
-    /// Nothing under a container off the region is read at all.
+    /// Under a container off the region, only its children are read, to see whether any
+    /// hangs into the region; one that does not is not descended into.
     @Test func aContainerOffTheRegionIsNotDescendedInto() {
+        let far = ScreenRect(x: 3000, y: 0, width: 100, height: 100)
         let tree = FakeTree(nodes: [
             "window": node(nil, region, children: .answered(["offscreen"])),
-            "offscreen": node(nil, ScreenRect(x: 3000, y: 0, width: 100, height: 100), children: .answered(["never"])),
+            "offscreen": node(nil, far, children: .answered(["child"])),
+            "child": node(nil, far, children: .answered(["never"])),
         ])
         let w = tree.walked()
-        #expect(w.examined == 2)
+        #expect(w.examined == 3)
         #expect(w.reach == .whole)
+    }
+
+    /// The repro: a region starting below a header, whose dropdown item hangs into it.
+    /// The header is off the region, and its item is still read and found.
+    @Test func aChildHangingIntoTheRegionFromAHeaderOffItIsFound() {
+        let tree = FakeTree(nodes: [
+            "window": node(nil, region, children: .answered(["header"]), role: "AXWindow"),
+            "header": node(nil, ScreenRect(x: 0, y: 0, width: 400, height: 50), children: .answered(["menu"]), role: "AXGroup"),
+            "menu": node(nil, ScreenRect(x: 0, y: 60, width: 120, height: 60), children: .answered(["item"]), role: "AXMenu"),
+            "item": node("Sign out", ScreenRect(x: 0, y: 60, width: 120, height: 24), role: "AXMenuItem"),
+        ])
+        let below = ScreenRect(x: 0, y: 55, width: 1000, height: 745)
+        let w = walk(from: [Root(element: "window", clip: below, covers: [])], unwalked: 0,
+                     within: Bounds(elements: Limit(100)!, time: .seconds(5)), elapsed: { .zero }, read: tree.read)
+        #expect(w.found.map(\.text.value) == ["Sign out"])
+        #expect(w.reach == .whole)
+    }
+
+    /// A scroll area hides what hangs off it, so nothing under one off the region is read.
+    @Test func nothingUnderAScrollAreaOffTheRegionIsRead() {
+        let tree = FakeTree(nodes: [
+            "window": node(nil, region, children: .answered(["list"])),
+            "list": node(nil, ScreenRect(x: 3000, y: 0, width: 100, height: 100), children: .answered(["row"]), role: "AXScrollArea"),
+        ])
+        #expect(tree.walked().examined == 2)
     }
 
     /// The covers a root starts with reach everything under it.
@@ -281,8 +309,9 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
         ])
         let w = tree.walked()
         #expect(w.found.map(\.text.value) == ["Back", "Kept"])
-        #expect(w.examined == 5)
-        #expect(w.excluded.contains(Exclusion(reason: .unplaced, count: 1)))
+        // The row's cell is read to see whether it hangs into the list's clip; it does not.
+        #expect(w.examined == 6)
+        #expect(w.excluded.contains(Exclusion(reason: .unplaced, count: 2)))
     }
 
     /// Only a scroll area clips: a dropdown hanging below the header that holds it is on
