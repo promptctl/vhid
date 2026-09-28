@@ -70,7 +70,7 @@ enum Heard<Value> {
     }
 
     /// What it said, flattened: nil when it did not answer. Only where a failed read costs
-    /// nothing - the role, which names an element and never places or hides one, or a text
+    /// nothing - the role's name, whose failure `Facts.named` keeps apart, or a text
     /// already beaten by one that did answer.
     var answer: Value? {
         if case .answered(let value) = self { value } else { nil }
@@ -92,9 +92,10 @@ struct Facts {
     let texts: [Heard<String?>]
     /// Where it is: nil inside when it has no position or no size.
     let frame: Heard<ScreenRect?>
-    /// Whether the app answered its role. Apart from `role` because `AXUnknown` is also a
-    /// role apps answer - measured, Safari names elements that - and the two are not one fact.
-    var named = true
+    /// Whether the app answered its role, even with nothing. Apart from `role` because
+    /// `AXUnknown` is also a role apps answer - measured, Safari names elements that - and
+    /// the two are not one fact. No default: a caller building one says which it is.
+    let named: Bool
 }
 
 /// One element read: what it says, and what is under it.
@@ -143,7 +144,8 @@ extension Node {
     /// whose text would not answer never leaves the region unread over words that could
     /// not have been a finding. Placement is decided before text, so an element that could
     /// never be a finding here is unplaced or covered whatever its text reads did - a busy
-    /// element off the region does not make the region unread. An element is unanswered
+    /// element's own text off the region does not make the region unread; what is under
+    /// it is `descent`'s to decide. An element is unanswered
     /// only when a read it needed failed: its frame would not say, or no text answered and
     /// one would not say. [LAW:no-silent-failure] [LAW:effects-at-boundaries] Pure, so
     /// every rule an element is kept or dropped by is tested with facts a test wrote.
@@ -163,72 +165,68 @@ extension Node {
 }
 
 /// Roles that draw nothing outside their own frame: a scroll area's rows, and a web page
-/// inside its viewport - which is also what keeps a probe out of a page's scrolled-off
-/// content, in apps whose page scrolls without an `AXScrollArea`.
+/// inside its viewport.
 let clips: Set<Role> = Set([kAXScrollAreaRole, "AXWebArea"].map { Role(rawValue: $0) })
 
 /// What the walk does under an element: how its children are read.
 enum Descent: Equatable {
-    /// Walk them in this clip. `hard` when the clip is a scroll area's: nothing under it is
-    /// drawn outside it, so nothing under it that cannot be seen is probed.
-    case descend(ScreenRect, hard: Bool)
-    /// The element cannot be seen, but its children may be drawn where they can - a web
-    /// page's dropdown hangs below a header scrolled off the region. Read them, in this
-    /// clip, counting each only if it is seen.
-    case probe(ScreenRect)
-    /// Nothing under it can be seen: it is off a hard clip, or it is a scroll area.
+    /// Walk them, counting in `clip` - what can be clicked in the region - and drawn no
+    /// further than `bound`.
+    case descend(clip: ScreenRect, bound: ScreenRect)
+    /// The element is not seen in the region, but its children may be: a web page's
+    /// dropdown hangs below a header scrolled off it. Read them, counting each only if it
+    /// is seen.
+    case probe
+    /// Nothing under it can be seen.
     case prune
-    /// It cannot be seen, and its role read failed, so whether it is a scroll area
-    /// hiding its children or a group whose children hang out is unknown: its children are
-    /// not read, and they are counted as a part left unread. [LAW:no-silent-failure]
+    /// It is not seen, it could still hold something that is, and its role read failed -
+    /// so whether it clips its children is unknown. They are not read, and are counted as a
+    /// part left unread. [LAW:no-silent-failure]
     case unsure
 }
 
 extension Facts {
-    /// How the walk goes on under this element, given the clip it was read in.
+    /// How the walk goes on under this element.
     ///
-    /// Only a scroll area cuts the clip down to its frame: a row scrolled out of its list
-    /// is hidden by it, so no click reaches the row, and its centre lies under the toolbar.
-    /// Any other element may draw its children outside its own frame, so they keep the clip
-    /// it was given, and when it cannot be seen at all its children are probed rather than
-    /// skipped - a skipped dropdown is a false proof of absence. Probing reads each child,
-    /// but counts it only if it is seen, and nothing under a scroll area is probed: that
-    /// is what keeps a walk affordable. Measured, a full-screen terminal in front held four
-    /// thousand elements, every one off the region. An element with no frame, or an empty
-    /// one, says nothing about where its children are, so the walk goes on into it.
+    /// Two rectangles come down the walk, because two questions are asked. `clip` is what
+    /// can be clicked in the region, and a finding is judged against it. `bound` is where
+    /// anything under the element can be drawn at all, whatever the region: the window, cut
+    /// down by each element that clips what it holds - a scroll area to its viewport, a web
+    /// page to its own. A row scrolled wholly out of its list is outside the list's bound,
+    /// so nothing under it is drawn anywhere and it is pruned. A header just above the
+    /// region is inside its page's bound, so what hangs off it may be in the region, and it
+    /// is probed rather than skipped - a skipped dropdown is a false proof of absence. An
+    /// element with no frame, or an empty one, says nothing about where its children are,
+    /// so the walk goes on into it.
+    ///
+    /// Probing reads what the region does not show: measured on Safari and Finder, up to
+    /// 2.7 times the elements pruning at the region read, and at most a fifth of a second
+    /// more. The walk's own bounds cap it, and say so in the reach.
     ///
     /// The one place the descend, probe and prune decision is made. [LAW:single-enforcer]
-    func descent(_ clip: ScreenRect, hard: Bool, under covers: [ScreenRect]) -> Descent {
-        let scroll = clips.contains(role)
-        guard case .answered(let placed?) = frame, !placed.isEmpty else { return .descend(clip, hard: hard) }
+    func descent(clip: ScreenRect, bound: ScreenRect, under covers: [ScreenRect]) -> Descent {
+        guard case .answered(let placed?) = frame, !placed.isEmpty else { return .descend(clip: clip, bound: bound) }
+        let clipping = clips.contains(role)
         if let shown = visible(placed, in: clip, under: covers) {
-            return scroll ? .descend(shown, hard: true) : .descend(clip, hard: hard)
+            guard clipping else { return .descend(clip: clip, bound: bound) }
+            return .descend(clip: shown, bound: ScreenRect(bound.cgRect.intersection(placed.cgRect)))
         }
-        if hard || scroll { return .prune }
-        return named ? .probe(clip) : .unsure
-    }
-
-    /// Whether its frame says where it is: answered, and not empty.
-    var isPlaced: Bool { if case .answered(let placed?) = frame { !placed.isEmpty } else { false } }
-
-    /// Whether this element's own frame can be seen in `clip`, or says nothing about it.
-    func isSeen(in clip: ScreenRect, under covers: [ScreenRect]) -> Bool {
-        guard case .answered(let placed?) = frame, !placed.isEmpty else { return true }
-        return visible(placed, in: clip, under: covers) != nil
+        guard !clipping, placed.intersects(bound) else { return .prune }
+        return named ? .probe : .unsure
     }
 }
 
 /// Where a walk starts: one window's element, the part of the screen a click inside it can
 /// reach, and the frames of every window in front of it. Everything under it inherits the
-/// covers, and the clip narrowed by each frame on the way down.
+/// covers, and the clip and bound narrowed by what clips on the way down.
 struct Root<Element> {
     let element: Element
     let clip: ScreenRect
+    /// Where anything under it can be drawn. See `Facts.descent`.
+    let bound: ScreenRect
     let covers: [ScreenRect]
-    /// The clip is a scroll area's. See `Descent.descend`.
-    var hard = false
-    /// Read under an element that could not be seen, to find what hangs into the clip:
-    /// counted only if seen. See `Descent.probe`.
+    /// Read under an element not seen in the region, to find what hangs into it: counted
+    /// only if seen. See `Descent.probe`.
     var probe = false
 }
 
@@ -290,8 +288,10 @@ func walk<Element>(
             // A probe not seen - off the clip, or with a frame that says nothing - was never
             // placed in the region: nothing to count, unless a read it needed failed, which
             // leaves unknown whether it was.
-            let shown = node.facts.isPlaced && node.facts.isSeen(in: root.clip, under: root.covers)
-            let quiet = root.probe && !shown && candidate != .excluded(.unanswered)
+            let quiet = root.probe && candidate != .excluded(.unanswered) && {
+                guard case .answered(let placed?) = node.facts.frame, !placed.isEmpty else { return true }
+                return visible(placed, in: root.clip, under: root.covers) == nil
+            }()
             switch candidate {
             case _ where quiet: break
             case .found(let run) where !seen.insert(Place(text: run.text.value, frame: run.frame)).inserted:
@@ -300,13 +300,13 @@ func walk<Element>(
             case .excluded(let reason): counts[reason, default: 0] += 1
             }
             let unread = candidate == .excluded(.unanswered)
-            switch (node.children, node.facts.descent(root.clip, hard: root.hard, under: root.covers)) {
+            switch (node.children, node.facts.descent(clip: root.clip, bound: root.bound, under: root.covers)) {
             // An element whose frame says nothing about where it is does not end a probe.
-            case (.answered(let children), .descend(let clip, let hard)):
-                let probe = root.probe && !node.facts.isPlaced
-                queue.append(contentsOf: children.map { Root(element: $0, clip: clip, covers: root.covers, hard: hard, probe: probe) })
-            case (.answered(let children), .probe(let clip)):
-                queue.append(contentsOf: children.map { Root(element: $0, clip: clip, covers: root.covers, probe: true) })
+            case (.answered(let children), .descend(let clip, let bound)):
+                let probe = root.probe && quiet
+                queue.append(contentsOf: children.map { Root(element: $0, clip: clip, bound: bound, covers: root.covers, probe: probe) })
+            case (.answered(let children), .probe):
+                queue.append(contentsOf: children.map { Root(element: $0, clip: root.clip, bound: root.bound, covers: root.covers, probe: true) })
             // A subtree unread is one more unanswered part - unless nothing in it could be
             // seen, or this element was already counted as one.
             case (.unanswered, .descend), (.unanswered, .probe), (.unanswered, .unsure):
@@ -348,7 +348,7 @@ struct Seen {
 /// an open menu, a system surface, a window whose app would not list it. Those were on
 /// screen and never read. [LAW:no-silent-failure]
 func plan<Element>(_ seen: [Seen], matched: [UInt32: Element]) -> (roots: [Root<Element>], unwalked: Int) {
-    let roots = seen.compactMap { entry in matched[entry.window.id].map { Root(element: $0, clip: entry.clip, covers: entry.covers) } }
+    let roots = seen.compactMap { entry in matched[entry.window.id].map { Root(element: $0, clip: entry.clip, bound: entry.window.frame, covers: entry.covers) } }
     return (roots, seen.count - roots.count)
 }
 
