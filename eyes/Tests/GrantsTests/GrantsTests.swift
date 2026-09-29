@@ -1,4 +1,5 @@
 import Foundation
+import Eyes
 import Grants
 import Testing
 
@@ -59,5 +60,15 @@ struct GrantsTests {
         }
         #expect(try await GrantReading.taken(by: sh, ["-c", "head -c 200000 /dev/zero >&2; echo screenRecording=true accessibility=true"])
             == GrantReading { _ in true })
+    }
+}
+
+/// Which reader needs which grant is said once, and read back the same way.
+struct GrantMappingTests {
+    @Test func eachReaderNeedsTheGrantThatNamesIt() {
+        #expect(Grant(neededBy: .tree) == .accessibility)
+        #expect(Grant(neededBy: .pixels) == .screenRecording)
+        #expect(Grant(neededBy: .merged) == nil)
+        for grant in Grant.allCases { #expect(Grant(neededBy: grant.reader) == grant) }
     }
 }

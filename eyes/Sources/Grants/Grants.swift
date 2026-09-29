@@ -1,6 +1,7 @@
 import ApplicationServices
 import CoreGraphics
 import Darwin
+import Eyes
 import Foundation
 
 /// The two privacy grants eyes' readers need.
@@ -22,12 +23,20 @@ public enum Grant: String, CaseIterable, Sendable {
         }
     }
 
-    /// The reader that cannot look without it.
-    public var reader: String {
+    /// The reader that cannot look without it. [LAW:one-source-of-truth] The one mapping
+    /// between readers and grants: each reader gates on it, and every sentence naming a
+    /// reader's grant is built from it.
+    public var reader: SourceKind {
         switch self {
-        case .screenRecording: "pixels"
-        case .accessibility: "tree"
+        case .screenRecording: .pixels
+        case .accessibility: .tree
         }
+    }
+
+    /// The grant `reader` cannot look without; none for merged, which looks with either.
+    public init?(neededBy reader: SourceKind) {
+        guard let grant = Grant.allCases.first(where: { $0.reader == reader }) else { return nil }
+        self = grant
     }
 
     public var pane: String { "System Settings > Privacy & Security > \(name)" }
@@ -55,6 +64,10 @@ public enum Grant: String, CaseIterable, Sendable {
         }
     }
 }
+
+/// Whether a grant is held, asked by a reader before it looks. In the binary it is a fresh
+/// reading, because a long-lived process's own answer goes stale; see `GrantReading.here()`.
+public typealias Gate = @Sendable (Grant) async throws -> Bool
 
 /// Which grants are held, at one moment.
 public struct GrantReading: Sendable, Equatable {

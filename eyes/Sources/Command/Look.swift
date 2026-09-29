@@ -1,6 +1,7 @@
 import ArgumentParser
 import CoreGraphics
 import Eyes
+import Grants
 import Pixels
 import Tree
 
@@ -36,11 +37,16 @@ extension SourceKind: ExpressibleByArgument {
     /// exact frame and role are the ones kept.
     @MainActor var reader: any Reader {
         switch self {
-        case .tree: TreeReader()
-        case .pixels: PixelReader()
-        case .merged: MergedReader(TreeReader(), PixelReader())
+        case .tree: TreeReader(granted: Self.granted)
+        case .pixels: PixelReader(granted: Self.granted)
+        case .merged: MergedReader(TreeReader(granted: Self.granted), PixelReader(granted: Self.granted))
         }
     }
+
+    /// Every reader's gate: a fresh reading, the one `eyes grants` prints, so a reader and
+    /// the grants tool cannot disagree - and a grant switched on under a running `eyes mcp`
+    /// is seen by its next read. [LAW:one-source-of-truth]
+    private static let granted: Gate = { try await GrantsVerb.reading().holds($0) }
 
     /// The scope line's name for who looked.
     var looked: String {

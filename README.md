@@ -143,9 +143,9 @@ running `claude` - under tmux, SSH or an editor's terminal, whichever app starte
 The `grants` tool says whether each is held and names that app, read fresh on every call
 and never prompting; `eyes grants --ask`, run by a person, is the only thing that raises
 macOS's dialog. Add the app under **System Settings > Privacy & Security >
-Accessibility** and **Screen Recording**. If `grants` says held and `find` or `read` still
-refuse, quit and reopen the app: a running server's readers may keep the answer they
-started with. A reader without its grant is named in the scope line;
+Accessibility** and **Screen Recording**; `find` and `read` read the grants the same fresh
+way, so a grant switched on while the server runs counts from its next call. A reader
+without its grant is named in the scope line;
 with neither, `find` and `read` answer with a tool error saying so.
 
 Every coordinate either server prints or takes is the same screen point, so one loop

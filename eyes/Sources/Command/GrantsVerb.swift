@@ -65,7 +65,7 @@ struct GrantsVerb: AsyncParsableCommand {
 
     /// One grant: its name, held or not, the reader it serves, and where to fix it.
     static func row(_ grant: Grant, held: Bool, holder: Holder) -> String {
-        "\(grant.name)\t\(held ? "granted" : "not granted")\t\(grant.reader)"
+        "\(grant.name)\t\(held ? "granted" : "not granted")\t\(grant.reader.rawValue)"
             + (held ? "" : "\tturn on \(holder.name) in \(grant.pane)")
     }
 }

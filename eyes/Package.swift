@@ -39,18 +39,19 @@ let package = Package(
         // The pixel reader: the grant, the capture and Vision. Its own target so the
         // vocabulary above stays linking nothing, and the accessibility reader can sit
         // beside it without either linking the other. [LAW:one-way-deps]
-        .target(name: "Pixels", dependencies: ["Eyes"]),
+        .target(name: "Pixels", dependencies: ["Eyes", "Grants"]),
         // How a capture is cut into pieces and put back together, with no capture at all.
-        .testTarget(name: "PixelsTests", dependencies: ["Pixels", "Eyes"]),
+        .testTarget(name: "PixelsTests", dependencies: ["Pixels", "Eyes", "Grants"]),
         // The tree reader: the accessibility grant and the element reads. Its own target
         // for the reason Pixels is one - neither reader links the other. [LAW:one-way-deps]
-        .target(name: "Tree", dependencies: ["Eyes"]),
+        .target(name: "Tree", dependencies: ["Eyes", "Grants"]),
         // The error mapping, the element rules and the walk, with trees a test wrote.
-        .testTarget(name: "TreeTests", dependencies: ["Tree", "Eyes"]),
+        .testTarget(name: "TreeTests", dependencies: ["Tree", "Eyes", "Grants"]),
         // Whether the readers' grants are held and which app holds them. Apart from both
-        // readers, because the answer is about the process, not about any reading.
-        .target(name: "Grants"),
-        .testTarget(name: "GrantsTests", dependencies: ["Grants"]),
+        // readers, because the answer is about the process, not about any reading; each
+        // reader asks it before looking. [LAW:one-way-deps]
+        .target(name: "Grants", dependencies: ["Eyes"]),
+        .testTarget(name: "GrantsTests", dependencies: ["Grants", "Eyes"]),
         // The binary. Every line it prints describes the screen and the scope that was
         // looked at, which is what lets the reading below it be narrow and still be
         // trusted. [LAW:no-silent-failure]

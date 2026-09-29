@@ -426,8 +426,8 @@ public enum TreeError: ReaderError, CustomStringConvertible {
     public var description: String {
         switch self {
         case .noGrant:
-            "Accessibility is not granted to this process, so no app's elements can be read."
-                + " Grant it in System Settings > Privacy & Security > Accessibility."
+            "\(TreeReader.grant.name) is not granted to the app responsible for eyes, so no app's elements can be read."
+                + " Grant it in \(TreeReader.grant.pane)."
         }
     }
 }
