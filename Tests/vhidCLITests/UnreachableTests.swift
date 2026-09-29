@@ -102,7 +102,7 @@ import Testing
     /// machine's: this Mac answers 4099 at once, and the CI runner answered nothing until
     /// the deadline.
     @Test func aServiceNobodyHoldsIsNamedAndNoKeyIsClaimedHeld() async {
-        let unreachable = "no launchd job answers \(Self.far) (NSCocoaErrorDomain 4099): the daemon is not installed or not loaded"
+        let unreachable = "no launchd job answers \(Self.far) (NSCocoaErrorDomain 4099): vhidd is not installed or not loaded"
         func helper() -> HelperConnection { HelperConnection(connection: Unanswered(), service: Self.far, replyTimeout: .seconds(20)) }
         let at = ScreenPoint(x: 5, y: 5)!
         let typed = await Self.failure { try await Devices.using(helper()) { try await TypeCommand.type("ab", on: VerbTests.us, with: $0.typist) } }
@@ -115,7 +115,7 @@ import Testing
 
     @Test func aRefusedSignatureIsNamedAndNoKeyIsClaimedHeld() async {
         let said = await Self.said(.unadmitting)
-        let refused = "\(Self.far) ended the connection (NSCocoaErrorDomain 4097): the daemon refused this binary's signature, or exited while the call was in flight"
+        let refused = "\(Self.far) ended the connection (NSCocoaErrorDomain 4097): vhidd refused this binary's signature, or exited while the call was in flight"
         #expect(said.typed == "\(refused). 0 of 2 characters had been posted and acknowledged before this, and the rest were not sent")
         #expect(said.clicked == refused)
     }

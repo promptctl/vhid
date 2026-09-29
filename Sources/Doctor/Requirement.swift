@@ -386,7 +386,7 @@ public extension Requirement {
     private static func signatureReads(_ reading: DaemonReading) -> String {
         switch reading {
         case .answered, .devicesDown: "admitted"
-        case .refusedThisVhid: "refused: the daemon ended this vhid's connection"
+        case .refusedThisVhid: "refused: vhidd ended this vhid's connection"
         case .unreachable, .silent, .failed: "not asked"
         }
     }
