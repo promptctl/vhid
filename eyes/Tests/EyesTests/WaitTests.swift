@@ -82,6 +82,24 @@ import Testing
         #expect(script.asked.dropFirst().allSatisfy { $0 == Query(match: .contains("Save"), region: .rect(Self.region)) })
     }
 
+    /// A display keeps its id on every read: its old rectangle may be another monitor.
+    @Test func aDisplayIsReadByItsIdEveryTime() async throws {
+        let query = Query(match: .contains("Save"), region: .display(3))
+        let script = Script([Self.present, Self.absent])
+        _ = try await waiting(for: Wait(until: .absent, seconds: 5)!, on: query, every: .milliseconds(1)) { try script.read($0) }
+        #expect(script.asked.allSatisfy { $0 == query })
+    }
+
+    /// A merge whose tree could not look never reads the region whole; waiting for an
+    /// absence ends with that reader's error instead of running out the clock.
+    @Test func aMergeWithABlindReaderEndsAnAbsenceWait() async throws {
+        let halfBlind = Reading(outcome: .nearest([]), scope: Scope(region: Self.region, examined: 0,
+            reach: .stopped(.merged(.blind(.tree, "no grant", missingGrant: true), .read(.pixels, .whole)))))
+        let script = Script([Self.present, halfBlind])
+        await #expect(throws: WaitBlind.self) { try await wait(.absent, 5, script) }
+        #expect(script.reads == 2)
+    }
+
     /// A timeout is an answer: the last reading, marked as not settled, not an error.
     @Test func aTimeoutAnswersWithTheLastReading() async throws {
         let clock = ContinuousClock()

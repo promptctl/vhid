@@ -59,6 +59,24 @@ public struct Waited: Sendable, Hashable {
     public let settled: Bool
 }
 
+/// A wait for an absence that one of a merge's readers could not look for.
+public struct WaitBlind: Error, CustomStringConvertible {
+    public let part: Part
+
+    public var description: String {
+        guard case .blind(let kind, let why, _) = part else { return "\(part)" }
+        return "\(kind.rawValue) could not look, so an absence cannot be proven: \(why)"
+    }
+}
+
+extension Reach {
+    /// The first reader of a merge that could not look, if one could not.
+    var blindPart: Part? {
+        guard case .stopped(.merged(let a, let b)) = self else { return nil }
+        return [a, b].first(where: \.isBlind)
+    }
+}
+
 /// The pause between reads. Short, because the read is the cost: measured on studious, one
 /// tree read of a whole display took about 0.9 s with process start. The gap only keeps a
 /// fast read - a small window, a blank region - from spinning.
@@ -68,8 +86,8 @@ public let waitInterval: Duration = .milliseconds(100)
 /// once. It reports; it retries no action. A read that throws ends the wait with that
 /// error: a reader that could not look has not seen the text go. [LAW:no-silent-failure]
 ///
-/// Every read after the first looks at the rectangle the first one resolved, so the wait
-/// re-reads the same place: a window that closes is its region with the text gone, not a
+/// For a window, every read after the first looks at the rectangle the first one
+/// resolved, so the wait re-reads the same place: a window that closes is its region with the text gone, not a
 /// window that can no longer be found. Measured on studious, waiting on a dialog by its
 /// window id threw "no on-screen window" the moment the dialog closed.
 ///
@@ -86,8 +104,18 @@ public func waiting(
     while true {
         let began = clock.now
         let reading = try await read(asked)
-        asked = Query(match: query.match, region: .rect(reading.scope.region), limit: query.limit)
         reads += 1
+        // Only a window is pinned. A display keeps its id, which follows the monitor
+        // through sleep and rearrangement where its old rectangle would not.
+        if case .window = query.region {
+            asked = Query(match: query.match, region: .rect(reading.scope.region), limit: query.limit)
+        }
+        // A merge one of whose readers could not look can never read the region whole,
+        // so an absence it waits for would only ever time out: that reader's error ends
+        // the wait instead. [LAW:no-silent-failure]
+        if wait.until == .absent, let blind = reading.scope.reach.blindPart {
+            throw WaitBlind(part: blind)
+        }
         inARow = wait.until.holds(in: reading) ? inARow + 1 : 0
         let settled = inARow >= wait.until.readsInARow
         // The next read, taking as long as this one did, would end past the deadline: this

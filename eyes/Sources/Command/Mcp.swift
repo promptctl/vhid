@@ -150,7 +150,7 @@ enum EyesTools {
                 }
                 return until
             }
-            let wait = try Find.wait(until, timeout: try argument("timeout", in: given, { $0.doubleValue ?? $0.intValue.map(Double.init) }, "a number"),
+            let wait = try Find.wait(until, timeout: try argument("timeout", in: given, { Double($0) }, "a number"),
                                      as: .argument)
             return try await answer(try query(match, given), try source(given), look, wait: wait)
         }) }
@@ -286,6 +286,11 @@ actor OneAtATime {
     init(_ look: @escaping EyesTools.Look) { self.look = look }
 
     func read(_ source: SourceKind, _ query: Query) async throws -> Reading {
+        // A call withdrawn before it got here never joins the queue. The check inside the
+        // task below cannot see it: that task is not cancelled until the handler at the
+        // bottom is installed, and with nothing ahead of it, it reads first. Measured: 1 run
+        // in 8 of aWithdrawnCallLeavesTheQueueWithoutReading read the withdrawn call.
+        try Task.checkCancellation()
         let before = tail
         let look = look
         let mine = Task {
