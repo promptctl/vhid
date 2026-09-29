@@ -3,6 +3,7 @@ import CoreGraphics
 import Darwin
 import Eyes
 import Foundation
+import Telemetry
 
 /// The two privacy grants eyes' readers need.
 ///
@@ -79,10 +80,22 @@ public actor SharedReading {
         self.take = take
     }
 
+    /// One event per gate asked: which grant, whether its reading was shared or taken,
+    /// and how long the gate waited. The child's own event is `grant_child`, on this trace.
+    /// [LAW:nothing-unseen]
     public func holds(_ grant: Grant) async throws -> Bool {
+        try await Telemetry.unit("grant_reading", outcome: { $0 ? "held" : "not_held" }) {
+            Telemetry.note("grant", grant.rawValue)
+            return try await reading(grant)
+        }
+    }
+
+    private func reading(_ grant: Grant) async throws -> Bool {
         if let latest, latest.finished.map({ ContinuousClock.now - $0 < fresh }) ?? true {
+            Telemetry.note("reading", "shared")
             return try await Self.waited(latest.reading).holds(grant)
         }
+        Telemetry.note("reading", "taken")
         taking += 1
         let reading = Task { [take, taking] in
             // Stamped when the reading ends, not when a gate stops waiting: a cancelled
@@ -159,7 +172,15 @@ public struct GrantReading: Sendable, Equatable {
     ///
     /// - Parameter deadline: past this the child is stuck, and is killed. A read takes
     ///   milliseconds; a new binary's first launch is checked by macOS first.
+    /// One event per child, however its gates end: how long the child took and why it failed,
+    /// apart from how long any gate waited on it. [LAW:nothing-unseen]
     public static func taken(by reader: URL, _ arguments: [String], within deadline: Duration = .seconds(10)) async throws(GrantReadingFailure) -> GrantReading {
+        try await Telemetry.unit("grant_child") { () async throws(GrantReadingFailure) -> GrantReading in
+            try await child(reader, arguments, within: deadline)
+        }
+    }
+
+    private static func child(_ reader: URL, _ arguments: [String], within deadline: Duration) async throws(GrantReadingFailure) -> GrantReading {
         let command = ([reader.path] + arguments).joined(separator: " ")
         let process = Process()
         process.executableURL = reader

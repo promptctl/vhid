@@ -115,6 +115,12 @@ a tool error naming it, before anything is connected.
 `eyes mcp` serves `windows`, `displays`, `find`, `read` and `grants` the same way. The two are
 separate servers, and a client runs both.
 
+Every look (`find`, `read`, and each wait), every grant check a reader makes, and every
+grants reading taken from a child emits one JSON event, from the verbs and the tools alike. Events go to the OTLP collector that
+`OTEL_EXPORTER_OTLP_ENDPOINT` names. With no collector set, or one that can't take them,
+they're appended to `~/Library/Logs/eyes/events.jsonl`. An event appended because the
+collector failed carries `sink_error`.
+
 In Claude Code:
 
 ```sh

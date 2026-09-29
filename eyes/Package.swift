@@ -50,8 +50,15 @@ let package = Package(
         // Whether the readers' grants are held and which app holds them. Apart from both
         // readers, because the answer is about the process, not about any reading; each
         // reader asks it before looking. [LAW:one-way-deps]
-        .target(name: "Grants", dependencies: ["Eyes"]),
-        .testTarget(name: "GrantsTests", dependencies: ["Grants", "Eyes"]),
+        .target(name: "Grants", dependencies: ["Eyes", "Telemetry"]),
+        // One event per unit of work and the one edge it leaves by. Links nothing of
+        // eyes', so every target can report through it. [LAW:nothing-unseen]
+        .target(name: "Telemetry"),
+        // What every test target that runs units of work shares: a collector for their
+        // events, and the trait that keeps them off the real edge.
+        .target(name: "TelemetryTesting", dependencies: ["Telemetry"], path: "Tests/TelemetryTesting"),
+        .testTarget(name: "TelemetryTests", dependencies: ["Telemetry", "TelemetryTesting"]),
+        .testTarget(name: "GrantsTests", dependencies: ["Grants", "Eyes", "Telemetry", "TelemetryTesting"]),
         // The binary. Every line it prints describes the screen and the scope that was
         // looked at, which is what lets the reading below it be narrow and still be
         // trusted. [LAW:no-silent-failure]
@@ -61,7 +68,7 @@ let package = Package(
         .executableTarget(
             name: "EyesCommand",
             dependencies: [
-                "Eyes", "Pixels", "Tree", "Grants", "Version",
+                "Eyes", "Pixels", "Tree", "Grants", "Telemetry", "Version",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "MCP", package: "swift-sdk"),
                 .product(name: "Logging", package: "swift-log"),
@@ -72,7 +79,7 @@ let package = Package(
         // is checked here rather than read off a terminal by eye. [LAW:verifiable-goals]
         .testTarget(
             name: "EyesCommandTests",
-            dependencies: ["EyesCommand", "Eyes", "Pixels", "Tree", "Grants", "Version", .product(name: "MCP", package: "swift-sdk")]
+            dependencies: ["EyesCommand", "Eyes", "Pixels", "Tree", "Grants", "Telemetry", "TelemetryTesting", "Version", .product(name: "MCP", package: "swift-sdk")]
         ),
     ]
 )

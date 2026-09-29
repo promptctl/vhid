@@ -1,4 +1,5 @@
 import ArgumentParser
+import Telemetry
 import Version
 
 /// The binary.
@@ -14,4 +15,19 @@ struct Eye: AsyncParsableCommand {
         version: Version.current,
         subcommands: [Windows.self, Displays.self, Find.self, Read.self, GrantsVerb.self, Mcp.self]
     )
+
+    /// ArgumentParser's own entry point, with the events still on their way out waited on
+    /// before the process exits, however the verb ended. [LAW:nothing-unseen]
+    static func main() async {
+        let failure: (any Error)?
+        do {
+            var command = try parseAsRoot()
+            if var command = command as? any AsyncParsableCommand { try await command.run() } else { try command.run() }
+            failure = nil
+        } catch {
+            failure = error
+        }
+        await Telemetry.drained()
+        exit(withError: failure)
+    }
 }

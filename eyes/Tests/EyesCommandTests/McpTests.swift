@@ -4,13 +4,15 @@ import MCP
 import Pixels
 import Tree
 import Version
+import Telemetry
+import TelemetryTesting
 import Testing
 @testable import EyesCommand
 
 /// What `eyes mcp` offers, asked through a client over an in-memory transport, with a
 /// listing written here in place of the window server.
 /// Serialized: the fake reader records into one shared `asked`.
-@Suite(.serialized) struct McpTests {
+@Suite(.serialized, .eventsKept) struct McpTests {
     private static let listing = WindowListing(
         windows: [
             Window(id: 1, owner: "Safari", pid: 400, frame: ScreenRect(x: 0, y: 33, width: 1512, height: 949), layer: 0),
@@ -267,6 +269,29 @@ import Testing
             for try await _ in group {}
         }
         #expect(await gauge.most == 1)
+    }
+
+    /// Time spent queued is summed across a look's reads, so a wait whose early polls
+    /// queued behind another call says so even when its last poll did not.
+    @Test func queuedTimeIsSummedAcrossALooksReads() async throws {
+        let blank = Reading(outcome: .nearest([]), scope: Scope(region: ScreenRect(x: 0, y: 0, width: 1, height: 1), examined: 0, reach: .whole))
+        let (reading, started) = AsyncStream.makeStream(of: Void.self)
+        let serial = OneAtATime { _, query in
+            if query.match != nil { started.finish(); try await Task.sleep(for: .milliseconds(100)) }
+            return blank
+        }
+        let events = Collected()
+        let blocker = Task { try await serial.read(.pixels, Query(match: .contains("slow"), region: .display(1))) }
+        // The look queues only once the slow read is underway, not by a race to the queue.
+        for await _ in reading {}
+        try await Telemetry.$export.withValue(events.export) {
+            try await Telemetry.unit("look") {
+                _ = try await serial.read(.pixels, Query(match: nil, region: .display(1)))
+                _ = try await serial.read(.pixels, Query(match: nil, region: .display(1)))
+            }
+        }
+        _ = try await blocker.value
+        #expect((events.all[0].counts["queued_ms"] ?? -1) >= 50)
     }
 
     /// A call withdrawn while it waits its turn never reads. The first read is held open

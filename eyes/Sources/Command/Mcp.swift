@@ -6,6 +6,7 @@ import Grants
 import MCP
 import Pixels
 import System
+import Telemetry
 import Version
 
 /// eyes' verbs as MCP tools, over stdio, for an agent that sees the screen in one session
@@ -319,8 +320,12 @@ actor OneAtATime {
         try Task.checkCancellation()
         let before = tail
         let look = look
+        let queued = ContinuousClock.now
         let mine = Task {
             _ = await before?.value
+            // [LAW:nothing-unseen] Summed on the look's event across a wait's polls, so a
+            // queued look is told from a slow read.
+            Telemetry.tally("queued_ms", by: Int((ContinuousClock.now - queued) / .milliseconds(1)))
             // A call withdrawn while it waited leaves without reading. [LAW:no-silent-failure]
             try Task.checkCancellation()
             return try await look(source, query)
