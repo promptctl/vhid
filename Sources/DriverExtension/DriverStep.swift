@@ -6,6 +6,16 @@
 /// is a reader who stops.
 private let loginItemsPane = "System Settings > General > Login Items & Extensions"
 
+/// Said beside every step that ends in macOS asking to activate the driver, because that
+/// dialog names another product: the package's own Manager app files the request, so it
+/// reads "Karabiner-VirtualHIDDevice-Manager" would like to use a new driver extension -
+/// measured on studious (macOS 15.0.1) 2026-09-24. A person told only of "the driver" meets
+/// a name they never installed.
+private let managerNotice = """
+    macOS then asks about "Karabiner-VirtualHIDDevice-Manager": the driver is
+    the open-source Karabiner virtual keyboard, and that is its installer.
+    """
+
 public extension DriverState {
     /// What installs the package, for both readers there are: someone with a clone of this
     /// repo, for whom the script does it, and someone who installed vhid's pkg, which
@@ -33,6 +43,7 @@ public extension DriverState {
             """
             The driver package (\(DriverPackage.version)) is not on this Mac.
             \(Self.install)
+            \(managerNotice)
             """
         case .installedInactive:
             """
@@ -40,6 +51,7 @@ public extension DriverState {
             so the activation request never landed. Ask for it again, as you
             and not under sudo - macOS attributes the request to whoever asks:
                 \(DriverProbe.managerExecutable) activate
+            \(managerNotice)
             """
         case .awaitingApproval:
             """
@@ -69,6 +81,7 @@ public extension DriverState {
             back down. If the driver still reads residue after that, what is
             left is something macOS lets go of only at a restart: restart the
             Mac, then run vhid doctor again.
+            \(managerNotice)
             """
         // A registration this build cannot name, or two at once. What was read is in the
         // fact table `vhid driver state` prints, and pointing there beats inventing a step

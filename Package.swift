@@ -123,10 +123,11 @@ let package = Package(
         // [LAW:effects-at-boundaries]
         .target(name: "MenuBar", dependencies: ["Doctor", "Helper", "Installations"]),
         .testTarget(name: "MenuBarTests", dependencies: ["MenuBar", "Doctor", "Helper", "Installations", "DriverExtension"]),
-        // The menu bar item itself: AppKit, the readings, and a click that copies a row.
-        // A view of vhid and not a way to drive it, so it links no device vocabulary and
-        // nothing that sends one. [LAW:one-way-deps]
-        .executableTarget(name: "vhid-menubar", dependencies: ["MenuBar", "Doctor", "Helper", "Installations"]),
+        // The menu bar item itself: AppKit, the readings, a click that copies a row, and the
+        // set-up walk, which links DriverExtension for the one request it makes - the
+        // driver's activation. Not a way to drive vhid, so it links no device vocabulary
+        // and nothing that sends one. [LAW:one-way-deps]
+        .executableTarget(name: "vhid-menubar", dependencies: ["MenuBar", "Doctor", "DriverExtension", "Helper", "Installations"]),
         // What `vhid record` and its tap app say over the socket between them, and the
         // app's watch on the command. It links nothing, so both ends speak one vocabulary
         // without either linking the other. [LAW:one-way-deps]

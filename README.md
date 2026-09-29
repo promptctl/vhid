@@ -233,8 +233,12 @@ launchd has a job for but has not started is started by its question, as by any 
 
 The menu bar item shows the same reading at a glance, every five seconds: a keyboard when
 doctor would print `ready`, a warning triangle when it would not. Its menu lists doctor's
-rows and the daemon's most recent failure, and clicking a row copies its full text. It
-only reads; Quit stops it until the next login. The item from a build of this tree,
+rows and the daemon's most recent failure, and clicking a row copies its full text.
+**Set Up vhid…** walks the unmet rows one page at a time, each with why vhid needs it and
+what skipping it costs. It reads the Mac again every time you come back to the window, so
+turning the driver on in System Settings moves the walk on by itself. Apart from the
+driver's activation, which it asks macOS for as you, it only reads. Quit stops it until
+the next login. The item from a build of this tree,
 `.build/debug/vhid-menubar`, shows the development copy and says `dev` beside its icon.
 
 ## Uninstalling

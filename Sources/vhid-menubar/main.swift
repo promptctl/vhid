@@ -8,8 +8,8 @@ import MenuBar
 /// vhid's menu bar item: whether this copy of vhid is ready, doctor's rows, and the
 /// daemon's last failure.
 ///
-/// A view of vhid and never a second way to drive it: the only things it does are read
-/// and copy a row's text. [LAW:decomposition] What the menu says is `Glance`, a value;
+/// A view of vhid and never a second way to drive it: it reads, copies a row's text, and
+/// opens the set-up walk, whose one request - the driver's activation - makes macOS ask. [LAW:decomposition] What the menu says is `Glance`, a value;
 /// this file is the edge that reads the Mac, draws the value and answers a click.
 ///
 /// It serves the installation it was built for, as the CLI beside it does, so the copy
@@ -28,6 +28,7 @@ final class Item: NSObject {
     /// One menu for the item's life, its items replaced on each reading, so a reading that
     /// lands while it is open updates it rather than swapping it out from under a click.
     private let menu = NSMenu()
+    private let setUp = SetUpWindow(installation: installation, readNow: readNow)
 
     /// Shown from launch until the first reading lands, which a silent daemon delays by
     /// doctor's whole deadline: an item with no image has no width and is not there at all.
@@ -39,7 +40,8 @@ final class Item: NSObject {
         status.button!.image?.isTemplate = true
     }
 
-    func show(_ glance: Glance) {
+    func show(_ glance: Glance, _ readiness: Readiness) {
+        setUp.update(readiness)
         let button = status.button!
         button.image = symbol(glance.ready ? "keyboard" : "exclamationmark.triangle", described: glance.ready ? "vhid is ready" : "vhid is not ready")
         button.image?.isTemplate = true
@@ -57,8 +59,13 @@ final class Item: NSObject {
             menu.addItem(item)
         }
         menu.addItem(.separator())
+        let walk = NSMenuItem(title: Walk.title, action: #selector(openSetUp), keyEquivalent: "")
+        walk.target = self
+        menu.addItem(walk)
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
+
+    @objc private func openSetUp() { setUp.show() }
 
     /// The row's whole text, which the menu may have cut short. The person asked for it,
     /// so replacing what they had copied is the point.
@@ -97,28 +104,37 @@ final class Item: NSObject {
 /// failure. In that order, because doctor's status call may be what starts the daemon.
 /// The failure's deadline is short: a daemon that just answered doctor answers at once,
 /// and one that did not has already cost doctor's full deadline. [LAW:effects-at-boundaries]
-func read(_ installation: Installation) -> Glance {
+func read(_ installation: Installation) -> (Glance, Readiness) {
     let readiness = Readiness.read(for: installation)
     let lastFailure = Result { try HelperConnection(installation: installation, replyTimeout: .seconds(1)).lastFailure() }
-    return Glance(installation: installation, readiness: readiness, lastFailure: lastFailure, readAt: Date())
+    return (Glance(installation: installation, readiness: readiness, lastFailure: lastFailure, readAt: Date()), readiness)
 }
 
+// [LAW:no-ambient-temporal-coupling] One serial queue owns the readings - the menu's and
+// the set-up window's - so a slow one (a silent daemon takes the status call's full
+// deadline) delays the next rather than overlapping it, and each surface is only ever
+// drawn from its newest.
+let readings = DispatchQueue(label: "\(installation.service).menubar.readings")
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 let item = Item()
 
-// [LAW:no-ambient-temporal-coupling] One serial queue owns the readings, so a slow one -
-// a silent daemon takes the status call's full deadline - delays the next rather than
-// overlapping it, and the menu is only ever drawn from the newest. The handler is
-// `@Sendable` and takes what it needs by value: written here, in top-level code, it would
-// otherwise be the main actor's, and run on this queue it traps.
-let readings = DispatchQueue(label: "\(installation.service).menubar.readings")
+/// One reading, drawn by the menu and the set-up window when it lands. Run on the readings
+/// queue only: the timer runs it there directly, so a reading slower than the interval
+/// delays the next rather than stacking one behind another.
+/// `@Sendable`: written here, in top-level code, it would otherwise be the main actor's,
+/// and run on this queue it traps.
+let readAndShow: @Sendable () -> Void = { [installation, item] in
+    let (glance, readiness) = read(installation)
+    DispatchQueue.main.async { MainActor.assumeIsolated { item.show(glance, readiness) } }
+}
+
+/// A reading at once, for the set-up window, queued behind any the timer is taking.
+func readNow() { readings.async(execute: readAndShow) }
+
 let timer = DispatchSource.makeTimerSource(queue: readings)
 timer.schedule(deadline: .now(), repeating: interval)
-timer.setEventHandler { @Sendable [installation, item] in
-    let glance = read(installation)
-    DispatchQueue.main.async { MainActor.assumeIsolated { item.show(glance) } }
-}
+timer.setEventHandler(handler: readAndShow)
 timer.resume()
 
 withExtendedLifetime(timer) { app.run() }
