@@ -57,7 +57,8 @@ locked=$(echo "$sessions" | grep -A1 CGSSessionScreenIsLocked | grep -c true)
 secure=$(echo "$sessions" | grep -A1 kCGSSessionSecureInputPID | grep -c integer)
 echo "sessions   console $console; $me has $mine session(s); $locked locked; $secure holding secure input"
 
-# The place is arranged before any cell below can speak for it.
+# The place is arranged before anything is typed or clicked: on the wrong screen the
+# keystrokes would go to whatever is there, and no cell below could speak for the place.
 case $place in
   console) wanted="$me in Terminal, unlocked"; [ "$console" = "$me" ] && [ "$front" = Terminal ] && [ "$locked" = 0 ] ;;
   secure-input) wanted="$me in Terminal, secure input"; [ "$console" = "$me" ] && [ "$front" = Terminal ] && [ "$secure" -gt 0 ] ;;
@@ -69,6 +70,7 @@ esac
 rc=$?
 
 cell arranged "$wanted" "$console in $front, $locked locked, $secure secure" $rc
+[ $rc = 0 ] || exit 1
 
 doctor=$(on 'vhid doctor' 2>&1)
 [ "$(echo "$doctor" | head -n 1)" = ready ]; rc=$?
@@ -106,7 +108,7 @@ cursor=$(on 'vhid cursor' 2>&1)
 case $readable in
   yes)
     # The pointer settles within two points of its target, not on it.
-    echo "$cursor" | tr -d '(),' | awk -v x=$x -v y=$y '{ dx = $5 - x; dy = $6 - y; exit !(dx * dx < 4 && dy * dy < 4) }'; rc=$?
+    echo "$cursor" | tr -d '(),' | awk -v x=$x -v y=$y '{ dx = $5 - x; dy = $6 - y; exit !(dx * dx <= 4 && dy * dy <= 4) }'; rc=$?
     cell cursor "($x, $y) after the click" "$cursor" $rc
     cell click 'placed, exit 0' "exit $clicked_rc" $clicked_rc
     ;;
