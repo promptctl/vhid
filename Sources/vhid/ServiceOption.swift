@@ -17,7 +17,7 @@ struct ServiceOption: ParsableArguments {
     @Option(
         name: .customLong("service"),
         help: ArgumentHelp(
-            "The Mach service of the vhidd to talk to.",
+            "The Mach service of the vhidd installation to talk to.",
             discussion: "Defaults to \(ServiceOption.byDefault), the installation this vhid was built for. "
                 + "vhid's installed copy is \(Installation.release); "
                 + "the copy built from a working tree is \(Installation.development)."))
