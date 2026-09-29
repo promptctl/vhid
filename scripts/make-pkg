@@ -175,9 +175,12 @@ packed=$("$payload/usr/local/bin/vhid" --version)
 [ "$packed" = "$version" ] \
   || fail "the packed vhid reports version '$packed', not '$version'"
 
-# The packed eyes, run: a binary lipo joined and codesign rewrote is only known to start
-# once it has.
-"$payload/usr/local/bin/eyes" --help >/dev/null || fail "the packed eyes does not run"
+# The packed eyes, run and held to the same version: a binary lipo joined and codesign
+# rewrote is only known to start once it has, and eyes is a package of its own, stamped
+# by a plugin of its own, so its version is checked here rather than assumed.
+packed=$("$payload/usr/local/bin/eyes" --version) || fail "the packed eyes does not run"
+[ "$packed" = "$version" ] \
+  || fail "the packed eyes reports version '$packed', not '$version'"
 
 scripts/stage-uninstall "$service" "$IDENTIFIER" >"$payload/usr/local/libexec/vhid-uninstall"
 ditto scripts/virtual-hid-driver "$payload/usr/local/libexec/vhid-virtual-hid-driver"
