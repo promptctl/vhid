@@ -104,6 +104,30 @@ import Testing
         done.finish()
         try await session.value
         #expect(stdio.sent.isEmpty, "a withdrawn call's answer was written: \(stdio.sent)")
+        #expect(said.lines.contains { $0.hasPrefix("answer to a withdrawn call not written") && $0.contains("id=3") })
+    }
+
+    /// A call cancelled twice is withdrawn once: a later call that reuses its id is answered.
+    @Test func aCancelSentTwiceWithdrawsOnlyTheCallItNames() async throws {
+        let stdio = Stdio(), transport = AnsweringTransport(stdio)
+        let (read, next) = AsyncStream<Void>.makeStream()
+        let session = Task {
+            for try await _ in await transport.receive() { next.yield() }
+        }
+        let answer = Data(#"{"jsonrpc":"2.0","id":5,"result":{}}"#.utf8)
+        stdio.call(5, then: [.cancel(5), .cancel(5)])
+        for await _ in read.prefix(1) {}
+        // Both cancels are read once one is withdrawn and a probe sent after them is read.
+        for _ in 0..<200 where await transport.withdrawing(5) == 0 { try await Task.sleep(for: .milliseconds(10)) }
+        stdio.lines.yield(Data(#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#.utf8))
+        for await _ in read.prefix(1) {}
+        #expect(await transport.withdrawing(5) == 1)
+        try await transport.send(answer)
+        stdio.call(5, then: [.end])
+        for await _ in read.prefix(1) {}
+        try await transport.send(answer)
+        try await session.value
+        #expect(stdio.sent.count == 1, "the reused id's answer was dropped as withdrawn")
     }
 
     /// A call withdrawn in the same breath as it was asked, before its handler could have

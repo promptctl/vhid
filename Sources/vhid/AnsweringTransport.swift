@@ -75,6 +75,9 @@ actor AnsweringTransport: Transport, HTTPContextProviding {
         let ids = Exchange.answered(in: data)
         let dropped = ids.filter(takeWithdrawn)
         settle(ids)
+        // A withdrawn call can have done all it was asked before its withdrawal was read,
+        // and its answer is then the one report of it. [LAW:no-silent-failure]
+        for id in dropped { logger.notice("answer to a withdrawn call not written", metadata: ["id": "\(id)", "answer": "\(String(decoding: data, as: UTF8.self))"]) }
         // Written unless every id it answers was withdrawn.
         if ids.isEmpty || dropped.count < ids.count { try await inner.send(data) }
     }
@@ -92,7 +95,9 @@ actor AnsweringTransport: Transport, HTTPContextProviding {
 
     /// A withdrawn call is stopped now if its handler is running, and when it starts if not.
     private func withdraw(_ ids: [ID]) {
-        for id in ids where owed[id] != nil {
+        // No more withdrawn under an id than are owed under it, so a cancel sent twice
+        // cannot drop the answer to a later call that reuses the id.
+        for id in ids where withdrawn[id, default: 0] < owed[id, default: 0] {
             withdrawn[id, default: 0] += 1
             running[id]?.values.forEach { $0() }
         }
@@ -105,7 +110,10 @@ actor AnsweringTransport: Transport, HTTPContextProviding {
     }
 
     private func settle(_ ids: [ID]) {
-        for id in ids { owed[id] = owed[id].flatMap { $0 > 1 ? $0 - 1 : nil } }
+        for id in ids {
+            owed[id] = owed[id].flatMap { $0 > 1 ? $0 - 1 : nil }
+            withdrawn[id] = withdrawn[id].flatMap { min($0, owed[id] ?? 0) }.flatMap { $0 > 0 ? $0 : nil }
+        }
         if owed.isEmpty { release() }
     }
 
@@ -150,6 +158,9 @@ actor AnsweringTransport: Transport, HTTPContextProviding {
 
     /// How many requests read under `id` are not yet answered.
     func owing(_ id: ID) -> Int { owed[id] ?? 0 }
+
+    /// How many of those were withdrawn, and so will not be written.
+    func withdrawing(_ id: ID) -> Int { withdrawn[id] ?? 0 }
 
     /// Returns once nothing is owed, or once the wait is cancelled: a session stopped from
     /// inside, as `server.stop` does, will never send the answers it would be waiting on.
