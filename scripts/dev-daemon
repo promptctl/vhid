@@ -71,13 +71,14 @@ fi
 
 # The same stop pkg/scripts/preinstall makes, for the same reason: launchd adds no second
 # job under one label, and bootout answers 36 while the daemon is still releasing what it
-# holds. The label is watched until launchd lets go of it. [LAW:no-ambient-temporal-coupling]
+# holds. The label is watched until launchd lets go of it, after a 0 as well: a bootout
+# that answered 0 has been seen followed by a bootstrap refused with 5, the label not yet
+# released. [LAW:no-ambient-temporal-coupling]
 stop() {
   local status=0 tries=0
   sudo launchctl bootout "system/$service" || status=$?
   case $status in
-    0) return ;;
-    36) ;;
+    0|36) ;;
     *) fail "launchd would not unload $service (bootout exited $status)" ;;
   esac
   while loaded; do

@@ -8,6 +8,8 @@
 # still unwinding - the daemon releases every key and stops the pqrs daemon it started
 # before it exits. That is a stop under way, not a refusal, so the label is watched until
 # launchd lets go of it, for as long as a clean exit could take and no longer.
+# A 0 is watched the same way: a bootout that answered 0 has been seen followed by a
+# bootstrap refused with 5, launchd not yet done with the label.
 # [LAW:no-ambient-temporal-coupling] The condition waited on is launchd's own answer.
 #
 # Held to bash 3.2, like every script here.
@@ -15,8 +17,7 @@ stop_job() {
   local target=$1 status=0 tries=0
   launchctl bootout "$target" >/dev/null 2>&1 || status=$?
   case $status in
-    0) return 0 ;;
-    36) ;;
+    0|36) ;;
     *) echo "launchd would not unload $target (bootout exited $status)"; return 1 ;;
   esac
   while launchctl print "$target" >/dev/null 2>&1; do
