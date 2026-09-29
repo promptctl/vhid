@@ -150,6 +150,36 @@ closes without conversion:
 Neither server decides the next step. `click` presses the point it is given whatever is
 there, and `find` reports what is on screen, not whether the click did what was meant.
 
+## Over SSH, at the login window and the lock screen
+
+Because the input comes from a device, it reaches places software input cannot. Measured
+over SSH on macOS 15 with vhid 0.1.0:
+
+| Where | typing | cursor and clicks |
+|---|---|---|
+| Logged in, SSH as the user in front | yes | yes |
+| That user's lock screen | yes | yes |
+| Terminal with Secure Keyboard Entry on | yes | yes |
+| A system password prompt | yes | yes |
+| The login window, nobody logged in | yes | no |
+| The login window after fast user switching, SSH as a user in the background | yes | no |
+| FileVault's unlock screen before boot | no | no |
+
+- **Clicks need the user in front.** vhid steers the pointer by reading the cursor back,
+  and macOS answers (0, 0) to a caller who is not the user in front. `click`, `move` and
+  `drag` then stop with `the cursor would not reach`, except for a target within half a point
+  of (0, 0), which counts as reached: the click reports success and presses wherever
+  the pointer really is. With another user in front, the device still moves the pointer;
+  only reading it back fails.
+- **Name the layout at the login window.** `type` and `press` use the SSH user's
+  layout, not the one on screen. When they differ, pass `--layout`.
+- **FileVault cannot be reached.** Before the disk is unlocked, neither the daemon nor
+  the driver is running.
+
+[docs/design/remote-hands.md](docs/design/remote-hands.md) has the evidence for each
+cell. `scripts/reach <host> <place>` checks one row again on a real Mac; with no place,
+it lists what to put on screen for each.
+
 ## Installing
 
 vhid ships as one signed, notarized pkg. It installs:
