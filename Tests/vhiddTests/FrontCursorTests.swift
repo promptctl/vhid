@@ -96,6 +96,14 @@ import Testing
         #expect(throws: (any Error).self) { try reader.read() }
     }
 
+    @Test func stoppingAChildEndsItAndStoppingItAgainSignalsNobody() throws {
+        let reader = try child("trap '' TERM; sleep 30")
+        reader.stop()
+        Thread.sleep(forTimeInterval: 0.2)
+        #expect(throws: (any Error).self) { try reader.read() }
+        reader.stop()
+    }
+
     @Test func aChildThatDoesNotAnswerIsGivenUpOnInTime() throws {
         let reader = try child("sleep 30")
         defer { reader.stop() }

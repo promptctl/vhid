@@ -183,10 +183,11 @@ final class ChildReader: FrontCursor.Reader {
     }
 
     /// SIGKILL, not `terminate()`: the daemon ignores SIGTERM and a child inherits that, so
-    /// a child stuck in the window server would outlive every attempt to end it.
+    /// a child stuck in the window server would outlive every attempt to end it. Only a
+    /// child still running: one that has ended was reaped, and its pid may be anyone's now.
     func stop() {
         try? requests.fileHandleForWriting.close()
-        kill(process.processIdentifier, SIGKILL)
+        if process.isRunning { kill(process.processIdentifier, SIGKILL) }
     }
 }
 
