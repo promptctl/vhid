@@ -121,29 +121,39 @@ struct Cover: Equatable {
 /// A frame says only where a window could be drawn, not that it is drawn there. Measured on
 /// studious: Notification Center holds a window over the whole screen at layer 23 that
 /// draws nothing but its desktop widgets, and taken as opaque it hid every window from the
-/// tree. So a window covers a point only when a click there lands in its process - the hit
-/// test the system routes clicks by, about 2 ms a point, asked only where a frame is in
-/// front. [LAW:one-source-of-truth]
+/// tree. So a window in front covers a point unless a click there lands in the covered
+/// window's own process - the hit test the system routes clicks by, about 2 ms a point,
+/// asked only where a frame is in front. Landing in any other process covers, whether or
+/// not a front window of that process is listed there: the menu bar is owned by the
+/// Window Server but a click on it lands in the front app, and a sandboxed app's open panel
+/// lands in its service. A window in front from the covered window's own process covers by
+/// its frame, since a click landing there cannot tell the two apart. [LAW:one-source-of-truth]
 struct Covers {
     let windows: [Cover]
-    /// The process a click at a point lands in: nil when nothing is there.
-    let hit: (ScreenPoint) -> Heard<Int32?>
+    /// The process of the window these are in front of.
+    let owner: Int32
+    /// The process a click at a point lands in.
+    let hit: (ScreenPoint) -> Heard<Int32>
 
-    /// Whether a click at `point` lands on a window in front of this one.
+    /// Whether a click at `point` lands on something in front of this window.
     func hide(_ point: ScreenPoint) -> Heard<Bool> {
         let over = windows.filter { $0.frame.contains(point) }
         guard !over.isEmpty else { return .answered(false) }
-        return hit(point).map { pid in over.contains { $0.pid == pid } }
+        guard !over.contains(where: { $0.pid == owner }) else { return .answered(true) }
+        return hit(point).map { $0 != owner }
     }
 
-    /// Whether all of `rect` is under one window in front that a click at its centre lands
-    /// on. The centre stands for the rest: a window wholly inside a front one that draws
-    /// only in places is read whole or not at all by where its middle is. Unanswered is
-    /// not hidden - what is under it is read, and each finding asks for itself.
+    /// Whether all of `rect` is under one window in front, and a click at its centre lands
+    /// outside this window's process. The centre stands for the rest: a window wholly
+    /// inside a front one that draws only in places is read whole or not at all by where
+    /// its middle is. Unanswered is not hidden - what is under it is read, and each
+    /// finding asks for itself.
     func hide(_ rect: ScreenRect) -> Bool {
         let whole = windows.filter { $0.frame.cgRect.contains(rect.cgRect) }
-        guard !whole.isEmpty, case .answered(let pid?) = hit(rect.centre) else { return false }
-        return whole.contains { $0.pid == pid }
+        guard !whole.isEmpty else { return false }
+        guard !whole.contains(where: { $0.pid == owner }) else { return true }
+        guard case .answered(let pid) = hit(rect.centre) else { return false }
+        return pid != owner
     }
 }
 
@@ -180,27 +190,31 @@ extension Node {
     /// the thing its label names, and its centre is where it is pressed. It is decided first, from reads that arrive with the role, so an area
     /// whose text would not answer never leaves the region unread over words that could
     /// not have been a finding. Placement is decided before text, so an element that could
-    /// never be a finding here is unplaced or covered whatever its text reads did - a busy
+    /// never be a finding here is unplaced whatever its text reads did - a busy
     /// element's own text off the region does not make the region unread; what is under
     /// it is `descent`'s to decide. An element is unanswered
     /// only when a read it needed failed: its frame would not say, or no text answered and
-    /// one would not say. [LAW:no-silent-failure] [LAW:effects-at-boundaries] Pure, so
-    /// every rule an element is kept or dropped by is tested with facts a test wrote.
+    /// one would not say. Whether it is covered is asked only of an element with words or
+    /// words it could not read, since the hit test is a call into another process and a
+    /// wordless element could never be a finding. [LAW:no-silent-failure]
+    /// [LAW:effects-at-boundaries] Decided from facts and a hit test handed in, so every
+    /// rule an element is kept or dropped by is tested with both written by a test.
     func candidate(in clip: ScreenRect, under covers: Covers) -> Candidate {
         let leaf = if case .answered(let children) = children { children.isEmpty } else { false }
         guard leaf || !areas.contains(facts.role) else { return .excluded(.area) }
         if case .answered(let placed) = facts.frame {
             guard let placed, !placed.isEmpty, clip.contains(placed.centre) else { return .excluded(.unplaced) }
+        }
+        let text = facts.texts.lazy.compactMap({ $0.answer.flatMap { $0 }.flatMap(Text.init) }).first
+        guard text != nil || facts.texts.contains(.unanswered) else { return .excluded(.wordless) }
+        if case .answered(let placed?) = facts.frame {
             switch covers.hide(placed.centre) {
             case .answered(false): break
             case .answered(true): return .excluded(.covered)
             case .unanswered: return .excluded(.unanswered)
             }
         }
-        guard let text = facts.texts.lazy.compactMap({ $0.answer.flatMap { $0 }.flatMap(Text.init) }).first else {
-            return .excluded(facts.texts.contains(.unanswered) ? .unanswered : .wordless)
-        }
-        guard case .answered(let placed?) = facts.frame else { return .excluded(.unanswered) }
+        guard let text, case .answered(let placed?) = facts.frame else { return .excluded(.unanswered) }
         return .found(Found(text: text, frame: placed, source: .tree(role: facts.role)))
     }
 }
@@ -303,8 +317,9 @@ private struct Place: Hashable {
 /// in another branch. `unwalked` counts on-screen windows in the region with no element to
 /// start from; they were never read, so the region was not read whole.
 ///
-/// Held apart from every accessibility call so the walk, its bounds and its counts are
-/// checked with no app to read from. [LAW:effects-at-boundaries]
+/// Every accessibility call - the reads and the hit tests in each root's covers - is
+/// handed in, so the walk, its bounds and its counts are checked with no app to read
+/// from. [LAW:effects-at-boundaries]
 func walk<Element>(
     from roots: [Root<Element>],
     unwalked: Int,
@@ -370,10 +385,11 @@ func walk<Element>(
 /// the part of it that can be seen there and the frames of every window in front of it -
 /// every layer, so the menu bar and the Dock cover what they cover. A window off the
 /// region or wholly behind one in front holds nothing to read, so it is never matched,
-/// walked or counted. Pure, so the rule is tested with windows and a hit test a test wrote.
-func seen(_ windows: [Window], in region: ScreenRect, hit: @escaping (ScreenPoint) -> Heard<Int32?>) -> [Seen] {
+/// walked or counted. The hit test is handed in, so the rule is tested with windows and a
+/// hit test a test wrote.
+func seen(_ windows: [Window], in region: ScreenRect, hit: @escaping (ScreenPoint) -> Heard<Int32>) -> [Seen] {
     windows.enumerated().compactMap { index, window in
-        let covers = Covers(windows: windows[..<index].map { Cover(frame: $0.frame, pid: $0.pid) }, hit: hit)
+        let covers = Covers(windows: windows[..<index].map { Cover(frame: $0.frame, pid: $0.pid) }, owner: window.pid, hit: hit)
         return visible(window.frame, in: region, under: covers).map { Seen(window: window, clip: $0, covers: covers) }
     }
 }

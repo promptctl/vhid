@@ -132,9 +132,30 @@ extension Facts {
     /// that does not answer leaves the element unread, never found or covered by guess.
     @Test func aWindowInFrontCoversOnlyWhereTheHitTestLandsInIt() {
         let overlay = [Cover(frame: region, pid: 9)]
-        #expect(facts().candidate(in: region, under: Covers(windows: overlay, hit: { _ in .answered(1) })) == .found(Found(text: Text("OK")!, frame: button, source: .tree(role: Role(rawValue: "AXButton")))))
-        #expect(facts().candidate(in: region, under: Covers(windows: overlay, hit: { _ in .answered(9) })) == .excluded(.covered))
-        #expect(facts().candidate(in: region, under: Covers(windows: overlay, hit: { _ in .unanswered })) == .excluded(.unanswered))
+        #expect(facts().candidate(in: region, under: Covers(windows: overlay, owner: 1, hit: { _ in .answered(1) })) == .found(Found(text: Text("OK")!, frame: button, source: .tree(role: Role(rawValue: "AXButton")))))
+        #expect(facts().candidate(in: region, under: Covers(windows: overlay, owner: 1, hit: { _ in .answered(9) })) == .excluded(.covered))
+        #expect(facts().candidate(in: region, under: Covers(windows: overlay, owner: 1, hit: { _ in .unanswered })) == .excluded(.unanswered))
+    }
+
+    /// The menu bar is the Window Server's, but a click on it lands in the front app: a
+    /// click landing in any process but the element's own covers it.
+    @Test func aClickLandingInAnotherProcessCoversWhateverOwnsTheFrameInFront() {
+        let menuBar = [Cover(frame: region, pid: 88)]
+        #expect(facts().candidate(in: region, under: Covers(windows: menuBar, owner: 1, hit: { _ in .answered(5) })) == .excluded(.covered))
+    }
+
+    /// A window of the element's own app in front covers by its frame: a click landing in
+    /// that app cannot say which of its windows it hit.
+    @Test func aWindowOfTheSameAppInFrontCoversByItsFrame() {
+        let sibling = [Cover(frame: region, pid: 1)]
+        #expect(facts().candidate(in: region, under: Covers(windows: sibling, owner: 1, hit: { _ in .unanswered })) == .excluded(.covered))
+    }
+
+    /// A wordless element could never be a finding, so a hit test that fails over it does
+    /// not leave the region unread.
+    @Test func aWordlessElementUnderAFrontWindowNeverAsksTheHitTest() {
+        let covers = Covers(windows: [Cover(frame: region, pid: 9)], owner: 1, hit: { _ in Issue.record("hit test asked"); return .unanswered })
+        #expect(facts([.answered(nil)], role: "AXGroup").candidate(in: region, under: covers) == .excluded(.wordless))
     }
 }
 
@@ -523,9 +544,9 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
 }
 
 extension Covers {
-    static var none: Covers { Covers(windows: [], hit: { _ in .answered(nil) }) }
+    static var none: Covers { Covers(windows: [], owner: 1, hit: { _ in .answered(1) }) }
     /// Windows in front that a click anywhere in them lands on.
     static func opaque(_ frames: [ScreenRect]) -> Covers {
-        Covers(windows: frames.map { Cover(frame: $0, pid: 0) }, hit: { _ in .answered(0) })
+        Covers(windows: frames.map { Cover(frame: $0, pid: 0) }, owner: 1, hit: { _ in .answered(0) })
     }
 }

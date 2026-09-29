@@ -113,10 +113,11 @@ public struct TreeReader: Reader {
 
     private static let systemWide = bounded(AXUIElementCreateSystemWide())
 
-    /// The process a click at `point` lands in, by the system's own hit test: nil when no
-    /// element is there. No grant reads as unanswered here, because the walk's next read
-    /// throws it by name. [LAW:single-enforcer]
-    static func hit(_ point: ScreenPoint) -> Heard<Int32?> {
+    /// The process a click at `point` lands in, by the system's own hit test. No element
+    /// there is unanswered, not empty: a front window whose app exposes none still draws.
+    /// No grant reads as unanswered too, because the walk's next read throws it by name.
+    /// [LAW:single-enforcer]
+    static func hit(_ point: ScreenPoint) -> Heard<Int32> {
         var element: AXUIElement?
         let call = AXUIElementCopyElementAtPosition(systemWide, Float(point.x), Float(point.y), &element)
         switch try? Answer(call, for: .structure) {
@@ -124,8 +125,7 @@ public struct TreeReader: Reader {
             var pid: pid_t = 0
             guard let element, AXUIElementGetPid(element, &pid) == .success else { return .unanswered }
             return .answered(pid)
-        case .absent?: return .answered(nil)
-        case .unanswered?, nil: return .unanswered
+        case .absent?, .unanswered?, nil: return .unanswered
         }
     }
 
