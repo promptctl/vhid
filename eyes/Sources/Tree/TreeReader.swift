@@ -40,7 +40,7 @@ public struct TreeReader: Reader {
         // Started before the windows are matched, because matching is reads too.
         let clock = ContinuousClock()
         let start = clock.now
-        let visible = seen(windows, in: region)
+        let visible = seen(windows, in: region, hit: Self.hit)
         let (roots, unwalked) = plan(visible, matched: try Self.match(visible.map(\.window)))
         let walked = try walk(
             from: roots,
@@ -109,6 +109,24 @@ public struct TreeReader: Reader {
             }
         }
         return windows
+    }
+
+    private static let systemWide = bounded(AXUIElementCreateSystemWide())
+
+    /// The process a click at `point` lands in, by the system's own hit test. No element
+    /// there is unanswered, not empty: a front window whose app exposes none still draws.
+    /// No grant reads as unanswered too, because the walk's next read throws it by name.
+    /// [LAW:single-enforcer]
+    static func hit(_ point: ScreenPoint) -> Heard<Int32> {
+        var element: AXUIElement?
+        let call = AXUIElementCopyElementAtPosition(systemWide, Float(point.x), Float(point.y), &element)
+        switch try? Answer(call, for: .structure) {
+        case .answered?:
+            var pid: pid_t = 0
+            guard let element, AXUIElementGetPid(element, &pid) == .success else { return .unanswered }
+            return .answered(pid)
+        case .absent?, .unanswered?, nil: return .unanswered
+        }
     }
 
     private static func elements(_ value: CFTypeRef?) -> [AXUIElement] {

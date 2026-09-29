@@ -48,7 +48,7 @@ func facts(_ texts: [Heard<String?>] = [.answered("OK")], frame: Heard<ScreenRec
 
 /// The facts of an element with nothing under it, which is most of what a candidate rule asks.
 extension Facts {
-    func candidate(in clip: ScreenRect, under covers: [ScreenRect]) -> Candidate {
+    func candidate(in clip: ScreenRect, under covers: Covers) -> Candidate {
         Node<String>(facts: self, children: .answered([])).candidate(in: clip, under: covers)
     }
 }
@@ -57,58 +57,58 @@ extension Facts {
     /// An area with nothing under it is the thing its label names; one holding something is not.
     @Test func aListWithNothingUnderItIsFoundAndOneHoldingSomethingIsAnArea() {
         let list = facts([.answered("Inbox")], role: "AXList")
-        #expect(list.candidate(in: region, under: []) != .excluded(.area))
-        #expect(Node(facts: list, children: .answered(["row"])).candidate(in: region, under: []) == .excluded(.area))
+        #expect(list.candidate(in: region, under: .none) != .excluded(.area))
+        #expect(Node(facts: list, children: .answered(["row"])).candidate(in: region, under: .none) == .excluded(.area))
     }
 
     /// A web page's labelled icon button is a group holding its image, pressed at its centre.
     @Test func aLabelledGroupHoldingAnIconIsFound() {
         let group = facts([.answered("Settings")], role: "AXGroup")
-        #expect(Node(facts: group, children: .answered(["icon"])).candidate(in: region, under: []) != .excluded(.area))
+        #expect(Node(facts: group, children: .answered(["icon"])).candidate(in: region, under: .none) != .excluded(.area))
     }
 
     /// An area's words could never be a finding, so a text read it failed leaves nothing unread.
     @Test func anAreaWhoseTextWouldNotAnswerIsAnAreaNotUnanswered() {
         let window = facts([.unanswered], frame: .unanswered, role: "AXWindow")
-        #expect(Node(facts: window, children: .answered(["title"])).candidate(in: region, under: []) == .excluded(.area))
+        #expect(Node(facts: window, children: .answered(["title"])).candidate(in: region, under: .none) == .excluded(.area))
     }
 
     @Test func anElementWithTextInTheRegionIsFoundAtItsFrameWithItsRole() {
-        #expect(facts().candidate(in: region, under: []) == .found(Found(text: Text("OK")!, frame: button, source: .tree(role: Role(rawValue: "AXButton")))))
+        #expect(facts().candidate(in: region, under: .none) == .found(Found(text: Text("OK")!, frame: button, source: .tree(role: Role(rawValue: "AXButton")))))
     }
 
     /// The first text that says something wins: an empty value gives way to the title.
     @Test func theFirstTextThatIsNotBlankIsTheOneReported() {
-        let c = facts([.answered(""), .answered("Save"), .answered("save the document")]).candidate(in: region, under: [])
+        let c = facts([.answered(""), .answered("Save"), .answered("save the document")]).candidate(in: region, under: .none)
         guard case .found(let run) = c else { Issue.record("\(c)"); return }
         #expect(run.text.value == "Save")
     }
 
     @Test func blankAndMissingTextIsWordless() {
-        #expect(facts([.answered("  "), .answered(nil), .answered(nil)]).candidate(in: region, under: []) == .excluded(.wordless))
+        #expect(facts([.answered("  "), .answered(nil), .answered(nil)]).candidate(in: region, under: .none) == .excluded(.wordless))
     }
 
     /// Measured on TextEdit: its text area fails the description read and holds the whole
     /// document in its value. The failed read it did not need costs it nothing.
     @Test func aFailedReadAfterTheTextDoesNotLoseTheText() {
-        let c = facts([.answered("the document"), .answered(nil), .unanswered]).candidate(in: region, under: [])
+        let c = facts([.answered("the document"), .answered(nil), .unanswered]).candidate(in: region, under: .none)
         guard case .found = c else { Issue.record("\(c)"); return }
     }
 
     /// No text answered and one read would not say: whether it had text is unknown.
     @Test func noTextAndAnUnansweredReadIsUnansweredNotWordless() {
-        #expect(facts([.answered(nil), .unanswered, .answered(nil)]).candidate(in: region, under: []) == .excluded(.unanswered))
+        #expect(facts([.answered(nil), .unanswered, .answered(nil)]).candidate(in: region, under: .none) == .excluded(.unanswered))
     }
 
     /// A busy element off the region could never have been a finding, so it does not
     /// leave the region unread.
     @Test func anUnansweredTextOffTheRegionIsUnplacedNotUnanswered() {
         let off = ScreenRect(x: 2000, y: 100, width: 80, height: 30)
-        #expect(facts([.unanswered], frame: .answered(off)).candidate(in: region, under: []) == .excluded(.unplaced))
+        #expect(facts([.unanswered], frame: .answered(off)).candidate(in: region, under: .none) == .excluded(.unplaced))
     }
 
     @Test func aFrameThatWouldNotSayIsUnanswered() {
-        #expect(facts(frame: .unanswered).candidate(in: region, under: []) == .excluded(.unanswered))
+        #expect(facts(frame: .unanswered).candidate(in: region, under: .none) == .excluded(.unanswered))
     }
 
     @Test(arguments: [
@@ -117,14 +117,46 @@ extension Facts {
         ScreenRect(x: 990, y: 100, width: 80, height: 30),
     ])
     func noFrameAnEmptyOneOrACentreOutsideTheRegionIsUnplaced(frame: ScreenRect?) {
-        #expect(facts(frame: .answered(frame)).candidate(in: region, under: []) == .excluded(.unplaced))
+        #expect(facts(frame: .answered(frame)).candidate(in: region, under: .none) == .excluded(.unplaced))
     }
 
     /// A click at its centre would land on the window in front, so it is not a finding.
     @Test func aCentreUnderAWindowInFrontIsCovered() {
         let front = ScreenRect(x: 120, y: 90, width: 300, height: 300)
-        #expect(facts().candidate(in: region, under: [front]) == .excluded(.covered))
-        #expect(facts().candidate(in: region, under: [ScreenRect(x: 400, y: 400, width: 10, height: 10)]) != .excluded(.covered))
+        #expect(facts().candidate(in: region, under: .opaque([front])) == .excluded(.covered))
+        #expect(facts().candidate(in: region, under: .opaque([ScreenRect(x: 400, y: 400, width: 10, height: 10)])) != .excluded(.covered))
+    }
+
+    /// A window in front covers only where a click lands in it: measured, Notification
+    /// Center's full-screen window at layer 23 draws nothing but its widgets. A hit test
+    /// that does not answer leaves the element unread, never found or covered by guess.
+    @Test func aWindowInFrontCoversOnlyWhereTheHitTestLandsInIt() {
+        let overlay = [Cover(frame: region, pid: 9)]
+        #expect(facts().candidate(in: region, under: Covers(windows: overlay, owner: 1, hit: { _ in .answered(1) })) == .found(Found(text: Text("OK")!, frame: button, source: .tree(role: Role(rawValue: "AXButton")))))
+        #expect(facts().candidate(in: region, under: Covers(windows: overlay, owner: 1, hit: { _ in .answered(9) })) == .excluded(.covered))
+        #expect(facts().candidate(in: region, under: Covers(windows: overlay, owner: 1, hit: { _ in .unanswered })) == .excluded(.overlaid))
+    }
+
+    /// The menu bar is the Window Server's but a click on it lands in the front app, and a
+    /// service's panel lands in the service: a click landing in a process neither the
+    /// element's nor a window's in front settles nothing, and leaves the region unread.
+    @Test func aClickLandingInAThirdProcessLeavesTheElementOverlaid() {
+        let menuBar = [Cover(frame: region, pid: 88)]
+        #expect(facts().candidate(in: region, under: Covers(windows: menuBar, owner: 1, hit: { _ in .answered(5) })) == .excluded(.overlaid))
+    }
+
+    /// A window of the element's own app in front covers by its frame: a click landing in
+    /// that app cannot say which of its windows it hit.
+    @Test func aWindowOfTheSameAppInFrontCoversByItsFrame() {
+        let sibling = [Cover(frame: region, pid: 1)]
+        #expect(facts().candidate(in: region, under: Covers(windows: sibling, owner: 1, hit: { _ in .unanswered })) == .excluded(.covered))
+    }
+
+    /// A wordless element could never be a finding, so a hit test that fails over it does
+    /// not leave the region unread.
+    @Test func aWordlessElementUnderAFrontWindowNeverAsksTheHitTest() {
+        let covers = Covers(windows: [Cover(frame: region, pid: 9)], owner: 1, hit: { _ in Issue.record("hit test asked"); return .unanswered })
+        #expect(facts([.answered(nil)], role: "AXGroup").candidate(in: region, under: covers) == .excluded(.wordless))
     }
 }
 
@@ -135,7 +167,7 @@ extension Facts {
     let outside = ScreenRect(x: 3000, y: 0, width: 50, height: 50)
 
     private func descent(_ frame: ScreenRect?, _ role: String = "AXGroup", named: Bool = true, bound: ScreenRect? = nil,
-                         covers: [ScreenRect] = []) -> Descent {
+                         covers: Covers = .none) -> Descent {
         facts(frame: .answered(frame), role: role, named: named).descent(clip: region, bound: bound ?? window, under: covers)
     }
 
@@ -173,13 +205,13 @@ extension Facts {
 
     /// Covered in the region, its children may still hang out from under the cover.
     @Test func aCoveredElementHasItsChildrenProbed() {
-        #expect(descent(button, covers: [region]) == .probe)
+        #expect(descent(button, covers: .opaque([region])) == .probe)
     }
 
     /// No frame says nothing about where the children are, so they keep what was given.
     @Test(arguments: [Heard<ScreenRect?>.unanswered, .answered(nil), .answered(ScreenRect(x: 5, y: 5, width: 0, height: 0))])
     func anElementWithNoUsableFrameHandsOnItsClip(frame: Heard<ScreenRect?>) {
-        #expect(facts(frame: frame).descent(clip: region, bound: window, under: []) == .descend(clip: region, bound: window))
+        #expect(facts(frame: frame).descent(clip: region, bound: window, under: .none) == .descend(clip: region, bound: window))
     }
 }
 
@@ -189,7 +221,7 @@ struct FakeTree {
 
     func read(_ name: String) -> Node<String> { nodes[name]! }
 
-    func walked(_ roots: [String] = ["window"], covers: [ScreenRect] = [], unwalked: Int = 0,
+    func walked(_ roots: [String] = ["window"], covers: Covers = .none, unwalked: Int = 0,
                 limit: Int = 100, elapsed: Duration = .zero) -> Walked {
         walk(
             from: roots.map { Root(element: $0, clip: region, bound: ScreenRect(x: 0, y: 0, width: 4000, height: 800), covers: covers) },
@@ -231,6 +263,15 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
         var answering = dialog
         answering.nodes["busy"] = node("Cancel")
         #expect(answering.walked().reach == .whole)
+    }
+
+    /// Words under a window in front that the hit test would not settle were not read as
+    /// seen or hidden, so they keep the region from having been read whole.
+    @Test func anOverlaidElementStopsTheReachShort() {
+        let tree = FakeTree(nodes: ["window": node("Hello")])
+        let w = tree.walked(covers: Covers(windows: [Cover(frame: region, pid: 9)], owner: 1, hit: { _ in .answered(5) }))
+        #expect(w.excluded == [Exclusion(reason: .overlaid, count: 1)])
+        #expect(w.reach == .stopped(.unread))
     }
 
     @Test func aWindowWithNothingToWalkLeavesTheRegionUnread() {
@@ -319,7 +360,7 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
             "item": node("Sign out", ScreenRect(x: 0, y: 60, width: 120, height: 24), role: "AXMenuItem"),
         ])
         let below = ScreenRect(x: 0, y: 55, width: 1000, height: 745)
-        let w = walk(from: [Root(element: "window", clip: below, bound: region, covers: [])], unwalked: 0,
+        let w = walk(from: [Root(element: "window", clip: below, bound: region, covers: .none)], unwalked: 0,
                      within: Bounds(elements: Limit(100)!, time: .seconds(5)), elapsed: { .zero }, read: tree.read)
         #expect(w.found.map(\.text.value) == ["Sign out"])
     }
@@ -334,7 +375,7 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
             "item": node("Sign out", ScreenRect(x: 0, y: 60, width: 120, height: 24), role: "AXMenuItem"),
         ])
         let below = ScreenRect(x: 0, y: 55, width: 1000, height: 745)
-        let w = walk(from: [Root(element: "window", clip: below, bound: region, covers: [])], unwalked: 0,
+        let w = walk(from: [Root(element: "window", clip: below, bound: region, covers: .none)], unwalked: 0,
                      within: Bounds(elements: Limit(100)!, time: .seconds(5)), elapsed: { .zero }, read: tree.read)
         #expect(w.found.map(\.text.value) == ["Sign out"])
         #expect(w.reach == .whole)
@@ -351,7 +392,7 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
 
     /// The covers a root starts with reach everything under it.
     @Test func windowsInFrontCoverEveryElementUnderTheRoot() {
-        let w = dialog.walked(covers: [ScreenRect(x: 0, y: 0, width: 1000, height: 120)])
+        let w = dialog.walked(covers: .opaque([ScreenRect(x: 0, y: 0, width: 1000, height: 120)]))
         #expect(w.found.map(\.text.value) == ["Save changes?"])
         #expect(w.excluded.contains(Exclusion(reason: .covered, count: 3)))
     }
@@ -420,7 +461,7 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
             "item": node("Sign out", ScreenRect(x: 0, y: 60, width: 120, height: 24), role: "AXMenuItem"),
         ])
         let below = ScreenRect(x: 0, y: 55, width: 1000, height: 745)
-        let w = walk(from: [Root(element: "window", clip: below, bound: region, covers: [])], unwalked: 0,
+        let w = walk(from: [Root(element: "window", clip: below, bound: region, covers: .none)], unwalked: 0,
                      within: Bounds(elements: Limit(100)!, time: .seconds(5)), elapsed: { .zero }, read: tree.read)
         #expect(w.found.map(\.text.value) == ["Sign out"])
     }
@@ -434,7 +475,7 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
             "pop": node("Rename", ScreenRect(x: 0, y: 300, width: 120, height: 40), role: "AXButton"),
         ])
         let below = ScreenRect(x: 0, y: 300, width: 1000, height: 500)
-        let w = walk(from: [Root(element: "window", clip: below, bound: region, covers: [])], unwalked: 0,
+        let w = walk(from: [Root(element: "window", clip: below, bound: region, covers: .none)], unwalked: 0,
                      within: Bounds(elements: Limit(100)!, time: .seconds(5)), elapsed: { .zero }, read: tree.read)
         #expect(w.found.map(\.text.value) == ["Rename"])
     }
@@ -460,7 +501,7 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
             "window": node(nil, ScreenRect(x: -1800, y: -250, width: 800, height: 600), children: .answered(["ok"]), role: "AXWindow"),
             "ok": node("OK", button),
         ])
-        let w = walk(from: [Root(element: "window", clip: left, bound: region, covers: [])], unwalked: 0,
+        let w = walk(from: [Root(element: "window", clip: left, bound: region, covers: .none)], unwalked: 0,
                      within: Bounds(elements: Limit(10)!, time: .seconds(5)), elapsed: { .zero }, read: tree.read)
         #expect(w.found.map(\.frame) == [button])
         #expect(w.reach == .whole)
@@ -476,9 +517,9 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
 
     @Test func eachMatchedWindowIsARootCoveredByTheOnesInFront() {
         let front = window(1, pid: 2, ScreenRect(x: 0, y: 0, width: 300, height: 300))
-        let (roots, unwalked) = plan(seen([front, window(2, document)], in: region), matched: [1: "front", 2: "doc"])
+        let (roots, unwalked) = plan(seen([front, window(2, document)], in: region, hit: { _ in .answered(1) }), matched: [1: "front", 2: "doc"])
         #expect(roots.map(\.element) == ["front", "doc"])
-        #expect(roots.map(\.covers) == [[], [front.frame]])
+        #expect(roots.map { $0.covers.windows.map(\.frame) } == [[], [front.frame]])
         #expect(roots.map(\.clip) == [front.frame, document])
         #expect(unwalked == 0)
     }
@@ -487,19 +528,52 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
     /// it read, and it says so - it also covers what is under it.
     @Test func aVisibleWindowWithNothingToWalkIsCountedAndCovers() {
         let menu = window(5, ScreenRect(x: 150, y: 120, width: 200, height: 300))
-        let (roots, unwalked) = plan(seen([menu, window(2, document)], in: region), matched: [2: "doc"])
+        let (roots, unwalked) = plan(seen([menu, window(2, document)], in: region, hit: { _ in .answered(1) }), matched: [2: "doc"])
         #expect(roots.map(\.element) == ["doc"])
-        #expect(roots[0].covers == [menu.frame])
+        #expect(roots[0].covers.windows.map(\.frame) == [menu.frame])
         #expect(unwalked == 1)
     }
 
     /// Off the region or wholly behind a window in front, a window holds nothing to read.
     @Test func aWindowNothingOfWhichCanBeSeenIsNeitherWalkedNorCounted() {
         let full = window(1, pid: 2, region)
-        let visible = seen([full, window(2, document), window(3, pid: 4, ScreenRect(x: 2000, y: 0, width: 10, height: 10))], in: region)
+        let visible = seen([full, window(2, document), window(3, pid: 4, ScreenRect(x: 2000, y: 0, width: 10, height: 10))], in: region, hit: { _ in .answered(2) })
         #expect(visible.map(\.window.id) == [1])
         let (roots, unwalked) = plan(visible, matched: [1: "full"])
         #expect(roots.map(\.element) == ["full"])
         #expect(unwalked == 0)
+    }
+
+    /// A click at a window's centre landing in a small window over its middle hides only
+    /// that middle, never the whole window, even under a full-screen window in front.
+    @Test func aSmallWindowOverTheMiddleDoesNotHideTheWholeWindow() {
+        let overlay = window(1, pid: 9, region)
+        let small = window(3, pid: 5, ScreenRect(x: 350, y: 250, width: 100, height: 100))
+        let visible = seen([overlay, small, window(2, document)], in: region, hit: { _ in .answered(5) })
+        #expect(visible.map(\.window.id) == [1, 3, 2])
+    }
+
+    /// A click at a window's centre landing in the window in front that holds all of it
+    /// hides the whole window: the centre stands for the rest.
+    @Test func aClickAtTheCentreLandingInTheWholeWindowInFrontHidesIt() {
+        let overlay = window(1, pid: 9, region)
+        let visible = seen([overlay, window(2, document)], in: region, hit: { _ in .answered(9) })
+        #expect(visible.map(\.window.id) == [1])
+    }
+
+    /// A window over the whole screen that a click passes through hides nothing behind it.
+    @Test func aWindowInFrontAClickPassesThroughHidesNothing() {
+        let overlay = window(1, pid: 9, region)
+        let visible = seen([overlay, window(2, document)], in: region, hit: { _ in .answered(1) })
+        #expect(visible.map(\.window.id) == [1, 2])
+        #expect(visible.map(\.clip) == [region, document])
+    }
+}
+
+extension Covers {
+    static var none: Covers { Covers(windows: [], owner: 1, hit: { _ in .answered(1) }) }
+    /// Windows in front that a click anywhere in them lands on.
+    static func opaque(_ frames: [ScreenRect]) -> Covers {
+        Covers(windows: frames.map { Cover(frame: $0, pid: 0) }, owner: 1, hit: { _ in .answered(0) })
     }
 }
