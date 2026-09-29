@@ -1,0 +1,97 @@
+#!/bin/bash
+# Walks one row of the matrix in docs/design/remote-hands.md on a real Mac: calls the
+# installed vhid over SSH, as the matrix was measured, and checks each column against the
+# cell the table states. CI cannot reach a login window, so a person arranges the place
+# first; the setup line of each place below says what to put on screen.
+#
+#   scripts/reach <host> <place>      prints one line per column; exits 1 if any differs
+#   scripts/reach <host>              lists the places and what to arrange for each
+#
+# SSH as the user the matrix says. A keystroke is shown landed by its effect: a file the
+# typed shell command made, or the system logging the wrong password vhid typed. FileVault
+# pre-boot is not a place here: nothing of vhid is running to probe.
+#
+# Held to bash 3.2, like every script here.
+set -uo pipefail
+
+# [LAW:one-source-of-truth] The expected cells, one row per place, in the table's order:
+# name | how a keystroke shows it landed | whether the cursor reads | what to arrange.
+places='console|shell|yes|Terminal frontmost, logged in as the SSH user
+secure-input|shell|yes|as console, with Terminal > Secure Keyboard Entry on
+password-prompt|auth|yes|a system password prompt focused, e.g. osascript -e '"'"'do shell script "true" with administrator privileges'"'"'
+lock-screen|auth|yes|the SSH user'"'"'s lock screen, its password field focused (Control-Command-Q)
+login-window|auth|no|the login window with nobody logged in, a user'"'"'s password field focused
+fast-user-switch|auth|no|the login window after fast user switching, the SSH user in the background, a password field focused'
+
+host=${1:?usage: scripts/reach <host> [place]}
+if [ $# -lt 2 ]; then
+  echo "$places" | awk -F'|' '{ printf "%-17s %s\n", $1, $4 }'
+  exit 0
+fi
+row=$(echo "$places" | grep "^$2|") || { echo "reach: no place '$2'; scripts/reach $host lists them" >&2; exit 2; }
+IFS='|' read -r place evidence readable setup <<EOF
+$row
+EOF
+
+# Every call runs on the target, where vhid is installed and not on a non-login PATH.
+on() { ssh -o ConnectTimeout=10 "$host" "PATH=/usr/local/bin:\$PATH; $1"; }
+
+failed=0
+cell() { # column, expected, observed, matched
+  printf '%-10s %-5s expected %-28s observed %s\n' "$1" "$([ "$4" = 0 ] && echo ok || echo DIFF)" "$2" "$3"
+  [ "$4" = 0 ] || failed=1
+}
+
+echo "place      $place: $setup"
+echo "target     $(on 'sw_vers -productVersion; vhid --version; stat -f %Su /dev/console' | paste -sd ' ' -) (macOS, vhid, console user)"
+secure=$(on 'ioreg -l -w 0' | grep -o '"kCGSSessionSecureInputPID"=[0-9]*' | sort -u | paste -sd ' ' -)
+echo "secure     ${secure:-no process holds secure input}"
+echo "front      $(on 'lsappinfo info -only name "$(lsappinfo front)"')"
+echo "locked     $(on 'ioreg -n Root -d1 -a' | grep -A1 CGSSessionScreenIsLocked | grep -c true) session(s) at a lock screen"
+
+doctor=$(on 'vhid doctor' 2>&1)
+[ "$(echo "$doctor" | head -n 1)" = ready ]; rc=$?
+cell xpc 'doctor: ready' "$(echo "$doctor" | head -n 1)" $rc
+
+# The two ways a keystroke shows itself, the same four calls either way: type, return,
+# then read back the effect.
+nonce=vhid-reach-$$-$RANDOM
+case $evidence in
+  shell)
+    text="touch /tmp/$nonce"
+    effect="test -e /tmp/$nonce && rm /tmp/$nonce && echo 'the typed command ran'"
+    ;;
+  auth)
+    text=$nonce
+    since=$(on "date '+%Y-%m-%d %H:%M:%S'")
+    # /usr/bin/log by path: in zsh, the login shell ssh runs this in, `log` is a builtin.
+    effect="/usr/bin/log show --style compact --start '$since' --predicate 'eventMessage CONTAINS \"ODErrorCredentialsInvalid\" OR eventMessage CONTAINS \"Failed to authenticate user\"' | grep -m 1 -o -e ODErrorCredentialsInvalid -e 'Failed to authenticate user' | head -n 1"
+    ;;
+esac
+typed=$(on "vhid type '$text' && vhid press return" 2>&1)
+layout=$(echo "$typed" | grep -o 'on [^ ]*$' | head -n 1)
+cell layout 'a layout named' "${layout:-none: $typed}" "$([ -n "$layout" ]; echo $?)"
+sleep 2
+landed=$(on "$effect" 2>&1); rc=$?
+cell keystroke "$evidence evidence" "${landed:-nothing}" $rc
+
+# A point away from the corner: within one step of (0, 0) a click reports success
+# without being placed (docs/design/remote-hands.md).
+x=40 y=400
+clicked=$(on "vhid click $x $y && vhid cursor" 2>&1); clicked_rc=$?
+case $readable in
+  yes)
+    # The pointer settles within a point of its target, not on it.
+    echo "$clicked" | tail -n 1 | tr -d '(),' | awk -v x=$x -v y=$y '{ dx = $5 - x; dy = $6 - y; exit !(dx * dx < 4 && dy * dy < 4) }'; rc=$?
+    cell cursor "($x, $y) after the click" "$(echo "$clicked" | tail -n 1)" $rc
+    cell click 'placed, exit 0' "exit $clicked_rc" $clicked_rc
+    ;;
+  no)
+    read_zero=$(on 'vhid cursor' 2>&1)
+    [ "$read_zero" = 'the cursor is at (0, 0)' ]; rc=$?
+    cell cursor '(0, 0)' "$read_zero" $rc
+    echo "$clicked" | grep -q 'would not reach'; rc=$?
+    cell click 'refused: would not reach' "$(echo "$clicked" | tail -n 1)" $rc
+    ;;
+esac
+exit $failed
