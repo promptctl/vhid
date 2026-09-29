@@ -37,6 +37,10 @@ stop with `the cursor would not reach (x, y): it is at (0, 0) after 3 reports`. 
 target within one step of (0, 0): the move is read as already there, so `click` reports success and
 presses wherever the pointer really is (`Pointer.swift:196`).
 
+Since then, `Pointer.screenCursor` asks the console user first and refuses the read, naming who is in
+front, when the caller is neither that user nor root, or when nobody is logged in. Root read the same
+position as bmf while bmf was in front.
+
 What matters is the user, not the login session. Plain SSH as bmf, outside bmf's GUI session, read
 the cursor and clicked while bmf was in front. With vhidtest in front, the same SSH call read (0, 0),
 and `sudo launchctl asuser 503 sudo -u vhidtest vhid cursor` read the real position and `move` reached

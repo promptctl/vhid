@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import Pointing
+import SystemConfiguration
 
 /// How many times a click clicks. At least one, because a click that does not click is a
 /// move and there is already a move. [LAW:parse-dont-validate]
@@ -83,9 +84,21 @@ public struct Pointer: Sendable {
     }
 
     /// The cursor as the window server reports it: global coordinates, top-left origin,
-    /// points. Readable without privilege.
+    /// points. Readable without privilege, by the user in front of the screen or by root.
     public static func screenCursor() throws -> ScreenPoint {
-        guard let location = CGEvent(source: nil)?.location, let cursor = ScreenPoint(x: location.x, y: location.y) else {
+        try cursor(caller: getuid(), console: ConsoleUser.current()) { CGEvent(source: nil)?.location }
+    }
+
+    /// **The window server answers (0, 0) to anyone else, and not an error.** Measured on a
+    /// second Mac (docs/design/remote-hands.md): SSH as a user who is not the one in front,
+    /// or at the login window with nobody logged in, reads (0, 0) as though it were a
+    /// position, and a move steering by it either stalls there or, for a target beside
+    /// (0, 0), reports an arrival it never made. So who is asking is settled before the
+    /// window server is, and the answer names who is in front. [LAW:no-silent-failure]
+    static func cursor(caller: uid_t, console: ConsoleUser?, location: () -> CGPoint?) throws -> ScreenPoint {
+        guard let console else { throw NoWindowServerSession(caller: caller, console: nil) }
+        guard caller == console.uid || caller == 0 else { throw NoWindowServerSession(caller: caller, console: console) }
+        guard let location = location(), let cursor = ScreenPoint(x: location.x, y: location.y) else {
             throw CursorUnreadable()
         }
         return cursor
@@ -318,6 +331,40 @@ public struct WouldNotReach: Error, CustomStringConvertible {
     public let reports: Int
 
     public var description: String { "the cursor would not reach \(target): it is at \(cursor) after \(reports) reports" }
+}
+
+/// The user in front of the screen: whose window-server session the cursor belongs to.
+public struct ConsoleUser: Equatable, Sendable {
+    public let name: String
+    public let uid: uid_t
+
+    public init(name: String, uid: uid_t) {
+        self.name = name
+        self.uid = uid
+    }
+
+    /// Who is logged in at the console, or nil at the login window, where macOS names the
+    /// console's owner `loginwindow`.
+    public static func current() -> ConsoleUser? {
+        var uid: uid_t = 0
+        guard let name = SCDynamicStoreCopyConsoleUser(nil, &uid, nil) as String?, name != "loginwindow" else { return nil }
+        return ConsoleUser(name: name, uid: uid)
+    }
+}
+
+/// The cursor belongs to a window-server session the caller is not in: nobody is logged
+/// in, or somebody else is in front.
+public struct NoWindowServerSession: Error, CustomStringConvertible {
+    public let caller: uid_t
+    /// Who is in front, or nil at the login window.
+    public let console: ConsoleUser?
+
+    public var description: String {
+        guard let console else {
+            return "nobody is logged in at this Mac's screen, so there is no window-server session to read the cursor from, and a click cannot be placed"
+        }
+        return "the cursor belongs to \(console.name)'s window-server session, and this process runs as uid \(caller): run it as \(console.name) (sudo launchctl asuser \(console.uid) sudo -u \(console.name) ...)"
+    }
 }
 
 public struct CursorUnreadable: Error, CustomStringConvertible {

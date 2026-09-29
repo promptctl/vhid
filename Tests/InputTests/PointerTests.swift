@@ -8,6 +8,21 @@ import Testing
 @Suite @MainActor struct PointerTests {
     static let origin = ScreenPoint(x: 0, y: 0)!
 
+    /// The window server answers (0, 0) to a caller outside the session in front, so the
+    /// read is refused by name before it is made: at the login window, and for a user who
+    /// is not the one in front. The console user and root read it.
+    @Test func theCursorIsReadOnlyFromTheSessionInFront() throws {
+        let bmf = ConsoleUser(name: "bmf", uid: 501)
+        var asked = 0
+        let screen = { () -> CGPoint? in asked += 1; return CGPoint(x: 0, y: 0) }
+        #expect(throws: NoWindowServerSession.self) { try Pointer.cursor(caller: 501, console: nil, location: screen) }
+        let other = #expect(throws: NoWindowServerSession.self) { try Pointer.cursor(caller: 503, console: bmf, location: screen) }
+        #expect(other?.description.contains("bmf's window-server session") == true)
+        #expect(asked == 0)
+        #expect(try Pointer.cursor(caller: 501, console: bmf) { CGPoint(x: 10, y: 10) } == ScreenPoint(x: 10, y: 10)!)
+        #expect(try Pointer.cursor(caller: 0, console: bmf) { CGPoint(x: 10, y: 10) } == ScreenPoint(x: 10, y: 10)!)
+    }
+
     /// One step is the remaining distance over the gain, rounded toward zero and clamped to
     /// the report: the whole screen at gain one is a full report, and 160.5 at gain three
     /// asks for 53, not 54, so a known gain lands short and never past.
