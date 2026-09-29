@@ -3,6 +3,7 @@ import CoreGraphics
 import Eyes
 import Grants
 import Pixels
+import Telemetry
 import Tree
 
 /// How a caller spells an argument's name in a refusal: `--limit` on the command line,
@@ -216,12 +217,33 @@ extension Report {
         _ query: Query, source: SourceKind, wait: Wait? = nil, grantNote: String = "",
         reading read: @Sendable (SourceKind, Query) async throws -> Reading
     ) async throws -> String {
-        guard let wait else {
-            return lines(try await read(source, query), query: query, source: source, grantNote: grantNote).joined(separator: "\n")
+        // [LAW:nothing-unseen] One event per look, from the one path every verb and tool
+        // reads through: which reader, what it read, and how it ended.
+        try await Telemetry.unit("look", outcome: \.outcome) {
+            Telemetry.note("source", source.rawValue)
+            guard let wait else {
+                let reading = try await read(source, query)
+                Self.count(reading, reads: 1)
+                return (text: lines(reading, query: query, source: source, grantNote: grantNote).joined(separator: "\n"),
+                        outcome: reading.outcome.isMatched ? "matched" : "not_matched")
+            }
+            Telemetry.note("until", wait.until.rawValue)
+            let waited = try await waiting(for: wait, on: query) { try await read(source, $0) }
+            Self.count(waited.reading, reads: waited.reads)
+            let said = lines(waited.reading, query: query, source: source, grantNote: grantNote)
+            return (text: ([waitedClause(waited, wait) + said[0]] + said.dropFirst()).joined(separator: "\n"),
+                    outcome: waited.settled ? "settled" : "timed_out")
+        }.text
+    }
+
+    /// The counts a look's event carries, zeros included.
+    private static func count(_ reading: Reading, reads: Int) {
+        Telemetry.count("reads", reads)
+        Telemetry.count("examined", reading.scope.examined)
+        switch reading.outcome {
+        case .matched(let m): Telemetry.count("matched", m.count); Telemetry.count("nearest", 0)
+        case .nearest(let n): Telemetry.count("matched", 0); Telemetry.count("nearest", n.count)
         }
-        let waited = try await waiting(for: wait, on: query) { try await read(source, $0) }
-        let said = lines(waited.reading, query: query, source: source, grantNote: grantNote)
-        return ([waitedClause(waited, wait) + said[0]] + said.dropFirst()).joined(separator: "\n")
     }
 
     /// How a wait went, ahead of the scope of the reading it ended on. A timeout is said

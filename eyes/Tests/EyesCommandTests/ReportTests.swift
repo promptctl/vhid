@@ -1,4 +1,7 @@
 @testable import Eyes
+import Pixels
+import Synchronization
+import Telemetry
 import Testing
 @testable import EyesCommand
 
@@ -86,5 +89,26 @@ import Testing
         let merged = try #require(SourceKind.merged.reader as? MergedReader)
         #expect(merged.first.source == .tree)
         #expect(merged.second.source == .pixels)
+    }
+
+    /// Every look is one event: which reader, how it ended, and its counts, zeros included.
+    @Test func aLookIsOneEvent() async throws {
+        let events = Mutex<[Event]>([])
+        let near = Reading(outcome: .nearest([]), scope: Scope(region: Self.display, examined: 5, reach: .whole))
+        let hit = Reading(outcome: .matched(Matches([found("OK", x: -100)])!), scope: Scope(region: Self.display, examined: 9, reach: .whole))
+        try await Telemetry.$export.withValue({ e in events.withLock { $0.append(e) } }) {
+            _ = try await Report.text(Query(match: .contains("OK"), region: .display(12)), source: .tree) { _, _ in near }
+            _ = try await Report.text(Query(match: .contains("OK"), region: .display(12)), source: .pixels,
+                                      wait: Wait(until: .present, seconds: 1)) { _, _ in hit }
+            _ = try? await Report.text(Query(match: nil, region: .display(12)), source: .merged) { _, _ in throw PixelsError.noGrant }
+        }
+        let seen = events.withLock { $0 }
+        #expect(seen.map(\.event) == ["look", "look", "look"])
+        #expect(seen.map(\.outcome) == ["not_matched", "settled", "error"])
+        #expect(seen.map { $0.facts["source"] } == ["tree", "pixels", "merged"])
+        #expect(seen[0].counts == ["reads": 1, "examined": 5, "matched": 0, "nearest": 0])
+        #expect(seen[1].counts == ["reads": 1, "examined": 9, "matched": 1, "nearest": 0])
+        #expect(seen[1].facts["until"] == "present")
+        #expect(seen[2].error != nil)
     }
 }

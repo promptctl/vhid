@@ -1,6 +1,8 @@
 import Foundation
 import Eyes
 import Grants
+import Synchronization
+import Telemetry
 import Testing
 
 struct GrantsTests {
@@ -118,4 +120,22 @@ struct SharedReadingTests {
         #expect(try await shared.holds(.accessibility))
         #expect(await takes.count == 1)
     }
+}
+
+/// Every gate asked emits one event, saying whether its reading was taken or shared.
+@Test func eachGateAskedIsAnEvent() async throws {
+    let events = Mutex<[Event]>([])
+    let shared = SharedReading(fresh: .seconds(60)) { GrantReading { $0 == .accessibility } }
+    let failing = SharedReading { throw GrantReadingFailure("no child") }
+    try await Telemetry.$export.withValue({ e in events.withLock { $0.append(e) } }) {
+        _ = try await shared.holds(.accessibility)
+        _ = try await shared.holds(.screenRecording)
+        _ = try? await failing.holds(.accessibility)
+    }
+    let seen = events.withLock { $0 }
+    #expect(seen.map(\.event) == ["grant_reading", "grant_reading", "grant_reading"])
+    #expect(seen.map(\.outcome) == ["held", "not_held", "error"])
+    #expect(seen.map { $0.facts["reading"] } == ["taken", "shared", "taken"])
+    #expect(seen.map { $0.facts["grant"] } == ["accessibility", "screenRecording", "accessibility"])
+    #expect(seen[2].error == "no child")
 }

@@ -3,6 +3,7 @@ import CoreGraphics
 import Darwin
 import Eyes
 import Foundation
+import Telemetry
 
 /// The two privacy grants eyes' readers need.
 ///
@@ -79,10 +80,22 @@ public actor SharedReading {
         self.take = take
     }
 
+    /// One event per gate asked: which grant, whether its reading was shared or taken,
+    /// and how long the gate waited - so a slow child is told apart from a slow read.
+    /// [LAW:nothing-unseen]
     public func holds(_ grant: Grant) async throws -> Bool {
+        try await Telemetry.unit("grant_reading", outcome: { $0 ? "held" : "not_held" }) {
+            Telemetry.note("grant", grant.rawValue)
+            return try await reading(grant)
+        }
+    }
+
+    private func reading(_ grant: Grant) async throws -> Bool {
         if let latest, latest.finished.map({ ContinuousClock.now - $0 < fresh }) ?? true {
+            Telemetry.note("reading", "shared")
             return try await Self.waited(latest.reading).holds(grant)
         }
+        Telemetry.note("reading", "taken")
         taking += 1
         let reading = Task { [take, taking] in
             // Stamped when the reading ends, not when a gate stops waiting: a cancelled
