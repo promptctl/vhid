@@ -47,6 +47,10 @@ let package = Package(
         .target(name: "Tree", dependencies: ["Eyes"]),
         // The error mapping, the element rules and the walk, with trees a test wrote.
         .testTarget(name: "TreeTests", dependencies: ["Tree", "Eyes"]),
+        // Whether the readers' grants are held and which app holds them. Apart from both
+        // readers, because the answer is about the process, not about any reading.
+        .target(name: "Grants"),
+        .testTarget(name: "GrantsTests", dependencies: ["Grants"]),
         // The binary. Every line it prints describes the screen and the scope that was
         // looked at, which is what lets the reading below it be narrow and still be
         // trusted. [LAW:no-silent-failure]
@@ -56,7 +60,7 @@ let package = Package(
         .executableTarget(
             name: "EyesCommand",
             dependencies: [
-                "Eyes", "Pixels", "Tree", "Version",
+                "Eyes", "Pixels", "Tree", "Grants", "Version",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "MCP", package: "swift-sdk"),
                 .product(name: "Logging", package: "swift-log"),
@@ -67,7 +71,7 @@ let package = Package(
         // is checked here rather than read off a terminal by eye. [LAW:verifiable-goals]
         .testTarget(
             name: "EyesCommandTests",
-            dependencies: ["EyesCommand", "Eyes", "Pixels", "Tree", "Version", .product(name: "MCP", package: "swift-sdk")]
+            dependencies: ["EyesCommand", "Eyes", "Pixels", "Tree", "Grants", "Version", .product(name: "MCP", package: "swift-sdk")]
         ),
     ]
 )

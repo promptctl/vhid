@@ -2,6 +2,7 @@ import ArgumentParser
 import Darwin
 import Eyes
 import Foundation
+import Grants
 import MCP
 import Pixels
 import System
@@ -20,8 +21,8 @@ struct Mcp: AsyncParsableCommand {
         discussion: """
             Newline-delimited JSON-RPC on stdin and stdout, and nothing else on stdout: every \
             diagnostic goes to stderr. The tools are \(EyesTools.all().map(\.tool.name).joined(separator: ", ")). \
-            They take what the verbs of the same name take and answer with what those verbs \
-            print, scope line first.
+            They take what the verbs of the same name take, except that grants never asks, and \
+            answer with what those verbs print, scope line first.
             """)
 
     /// The server as a client's initialize finds it, with its tools attached.
@@ -88,16 +89,19 @@ enum EyesTools {
     typealias FrontmostApp = @Sendable () async -> Frontmost?
     /// A reader's answer to one query: the chosen reader in the process, a fake in a test.
     typealias Look = @Sendable (SourceKind, Query) async throws -> Reading
+    /// A fresh reading of the grants and the app they are charged to.
+    typealias GrantsLook = @Sendable () async throws -> (GrantReading, Holder)
 
     static func all(
         windows listing: @escaping Listing = { try await Geometry.onScreen() },
         frontmost: @escaping FrontmostApp = { await Frontmost.now() },
         displays: @escaping DisplayList = { Geometry.displays() },
-        reading look: @escaping Look = { source, query in try await source.reader.read(query) }
+        reading look: @escaping Look = { source, query in try await source.reader.read(query) },
+        grants: @escaping GrantsLook = { (try await GrantsVerb.reading(), try Holder.current()) }
     ) -> [EyesTool] {
         let serial = OneAtATime(look)
         let read: Look = { try await serial.read($0, $1) }
-        return [windows(listing, frontmost: frontmost), Self.displays(displays), find(read), Self.read(read)]
+        return [windows(listing, frontmost: frontmost), Self.displays(displays), find(read), Self.read(read), Self.grants(grants)]
     }
 
     /// Where `find` and `read` look, as `--display`, `--window` and `--rect` take it.
@@ -212,6 +216,24 @@ enum EyesTools {
     private static func served(_ error: any Error) -> String {
         "\(error)\((error as? ReaderError)?.missingGrant == true ? grantNote : "")"
     }
+
+    /// Read only: asking raises a dialog, which is a person's to raise from `eyes grants --ask`.
+    static func grants(_ look: @escaping GrantsLook) -> EyesTool { EyesTool(
+        tool: Tool(
+            name: "grants",
+            description: GrantsVerb.configuration.abstract
+                + " Read fresh on every call, so a grant switched on since the server started is seen. Never prompts.",
+            inputSchema: .object([
+                "type": "object",
+                "properties": .object([:]),
+                "additionalProperties": false,
+            ]),
+            annotations: .init(readOnlyHint: true, openWorldHint: true)),
+        call: { given in
+            try refuseStray(given, taken: [])
+            let (reading, holder) = try await look()
+            return GrantsVerb.report(reading, holder: holder, asked: [])
+        }) }
 
     static func displays(_ list: @escaping DisplayList) -> EyesTool { EyesTool(
         tool: Tool(
