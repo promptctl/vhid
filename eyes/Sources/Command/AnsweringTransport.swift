@@ -28,15 +28,17 @@ import MCP
 /// read ends. So a client that writes its calls and closes stdin, as a shell pipe does,
 /// got the process exiting under calls still running: 2 or 3 of 13 answers never came,
 /// measured, and a call cut off partway had done part of what it was asked, with nothing
-/// said. [LAW:no-ambient-temporal-coupling] What is still owed is a set this actor keeps,
-/// and the end of stdin waits on it being empty.
+/// said. [LAW:no-ambient-temporal-coupling] What is still owed is a count per id this actor
+/// keeps, and the end of stdin waits on it being empty, unless the session is stopped.
 ///
 /// [LAW:effects-at-boundaries] The deciding is `Unreadable.answer(to:)` and `Exchange`,
 /// pure functions of a line. This actor only moves bytes and keeps the count.
 actor AnsweringTransport: Transport {
     private let inner: any Transport
-    /// The ids of requests read and not yet answered.
-    private var owed: Set<ID> = []
+    /// How many requests read under each id are not yet answered. A count, not a set: a
+    /// client may reuse an id while its first request is in flight, and each is answered.
+    /// [LAW:types-are-the-program]
+    private var owed: [ID: Int] = [:]
     /// Resumed when nothing is owed, by whichever answer settles the last of it.
     private var settled: [CheckedContinuation<Void, Never>] = []
 
@@ -57,20 +59,30 @@ actor AnsweringTransport: Transport {
     }
 
     private func owe(_ line: Data) {
-        owed.formUnion(Exchange.requested(in: line))
+        for id in Exchange.requested(in: line) { owed[id, default: 0] += 1 }
         settle(Exchange.withdrawn(in: line))
     }
 
     private func settle(_ ids: [ID]) {
-        owed.subtract(ids)
-        guard owed.isEmpty else { return }
+        for id in ids { owed[id] = owed[id].flatMap { $0 > 1 ? $0 - 1 : nil } }
+        if owed.isEmpty { release() }
+    }
+
+    private func release() {
         settled.forEach { $0.resume() }
         settled = []
     }
 
+    /// Returns once nothing is owed, or once the wait is cancelled: a session stopped from
+    /// inside, as `server.stop` does, will never send the answers it would be waiting on.
     private func everythingAnswered() async {
-        if owed.isEmpty { return }
-        await withCheckedContinuation { settled.append($0) }
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { waiter in
+                if owed.isEmpty || Task.isCancelled { waiter.resume() } else { settled.append(waiter) }
+            }
+        } onCancel: {
+            Task { await self.release() }
+        }
     }
 
     func receive() -> AsyncThrowingStream<Data, any Error> {
