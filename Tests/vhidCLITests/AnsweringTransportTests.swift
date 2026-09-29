@@ -62,12 +62,15 @@ import Testing
         stdio.lines.finish()
         for await _ in read.prefix(2) {}
         // Parked: the only thing left for the relay to do is wait on id 7.
-        for _ in 0..<200 where !(await transport.isWaiting) { await Task.yield() }
+        for _ in 0..<200 where !(await transport.isWaiting) { try await Task.sleep(for: .milliseconds(10)) }
         #expect(await transport.isWaiting)
         session.cancel()
         _ = try? await session.value
-        for _ in 0..<200 where said.lines.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
-        #expect(said.lines == [#"session stopped with answers owed owed=["\"7\"": "1", "7": "1"]"#])
+        for _ in 0..<200 where said.lines.count < 2 { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(said.lines == [
+            #"stdin ended, waiting on answers owed owed="7"×1, 7×1"#,
+            #"session stopped with answers owed owed="7"×1, 7×1"#,
+        ])
     }
 }
 

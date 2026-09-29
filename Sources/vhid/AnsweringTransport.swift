@@ -87,6 +87,7 @@ actor AnsweringTransport: Transport {
     /// inside, as `server.stop` does, will never send the answers it would be waiting on.
     /// What it gives up on is said, by id. [LAW:no-silent-failure]
     private func everythingAnswered() async {
+        if !owed.isEmpty { logger.info("stdin ended, waiting on answers owed", metadata: ["owed": owedNow]) }
         let waiter = UUID()
         await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
@@ -95,12 +96,18 @@ actor AnsweringTransport: Transport {
         } onCancel: {
             Task { await self.release(waiter) }
         }
-        if !owed.isEmpty {
-            logger.warning("session stopped with answers owed", metadata: [
-                // Keyed by each id as JSON writes it, so `7` and `"7"` stay two ids.
-                "owed": .dictionary(Dictionary(uniqueKeysWithValues: owed.map { (String(decoding: (try? JSONEncoder().encode($0.key)) ?? Data(), as: UTF8.self), .stringConvertible($0.value)) })),
-            ])
-        }
+        if !owed.isEmpty { logger.warning("session stopped with answers owed", metadata: ["owed": owedNow]) }
+    }
+
+    /// What is owed, as one line a person can read: each id as JSON writes it, so `7` and
+    /// `"7"` stay two ids, with its count, in a fixed order.
+    private var owedNow: Logger.MetadataValue {
+        .string(owed.map { id, count in
+            switch id {
+            case .string(let text): "\"\(text)\"×\(count)"
+            case .number(let number): "\(number)×\(count)"
+            }
+        }.sorted().joined(separator: ", "))
     }
 
     func receive() -> AsyncThrowingStream<Data, any Error> {
