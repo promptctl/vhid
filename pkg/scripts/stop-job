@@ -8,21 +8,37 @@
 # still unwinding - the daemon releases every key and stops the pqrs daemon it started
 # before it exits. That is a stop under way, not a refusal, so the label is watched until
 # launchd lets go of it, for as long as a clean exit could take and no longer.
-# A 0 is watched the same way: a bootout that answered 0 has been seen followed by a
-# bootstrap refused with 5, launchd not yet done with the label.
+# A 0 is watched the same way. A job that takes 2 s to exit on SIGTERM was booted out and
+# bootstrapped straight after, 20 times, on macOS 15.0.1: bootout answered 0 while print
+# still found the job, and the bootstrap was refused with 5 - every time it did. Waiting
+# for print to answer 113 first let all 15 bootstraps tried that way through.
 # [LAW:no-ambient-temporal-coupling] The condition waited on is launchd's own answer.
+#
+# Only 113 is "let go"; any other failure of print is not an answer about the label, and
+# is refused rather than taken for one. [LAW:no-silent-failure]
+#
+# What bootout answered and how long launchd took go to stderr, which the callers leave
+# alone, so the next stop that goes wrong says which of these it was. [LAW:nothing-unseen]
 #
 # Held to bash 3.2, like every script here.
 stop_job() {
-  local target=$1 status=0 tries=0
+  local target=$1 status=0 printed tries=0
   launchctl bootout "$target" >/dev/null 2>&1 || status=$?
   case $status in
     0|36) ;;
     *) echo "launchd would not unload $target (bootout exited $status)"; return 1 ;;
   esac
-  while launchctl print "$target" >/dev/null 2>&1; do
+  while :; do
+    printed=0
+    launchctl print "$target" >/dev/null 2>&1 || printed=$?
+    case $printed in
+      0) ;;
+      113) break ;;
+      *) echo "launchd could not say whether it still holds $target (print exited $printed)"; return 1 ;;
+    esac
     tries=$((tries + 1))
     [ $tries -le 30 ] || { echo "$target was still loaded 30 s after launchd began unloading it"; return 1; }
     sleep 1
   done
+  echo "stop_job: $target unloaded (bootout answered $status, released after ${tries} s)" >&2
 }

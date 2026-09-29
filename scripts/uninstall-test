@@ -18,8 +18,9 @@ scripts/stage-uninstall "$SERVICE" "$(scripts/make-pkg --identifier)" >"$STUB/vh
 mkdir "$STUB/bin"
 # Loaded jobs are lines of $STUB/loaded. UNREADABLE (a target, or "all") makes print fail
 # the way a broken launchd would. BOOTOUT_STATUS makes bootout of BOOTOUT_TARGET (or of
-# every target) answer as told: 36 unloads the job only after two more prints, as a
-# daemon still unwinding does, and anything else unloads nothing.
+# every target) answer as told: 0 and 36 both unload the job only after two more prints,
+# as launchd does for a daemon still unwinding (see pkg/scripts/stop-job), and anything
+# else unloads nothing.
 cat >"$STUB/bin/launchctl" <<'S'
 #!/bin/bash
 unload() { grep -vxF "$1" "$STUB/loaded" >"$STUB/loaded.new"; mv "$STUB/loaded.new" "$STUB/loaded"; }
@@ -38,8 +39,7 @@ case $1 in
     status=0
     [ -z "${BOOTOUT_TARGET:-}" ] || [ "$BOOTOUT_TARGET" = "$2" ] && status=${BOOTOUT_STATUS:-0}
     case $status in
-      0) unload "$2" ;;
-      36) echo 2 >"$STUB/unwinding" ;;
+      0|36) echo 2 >"$STUB/unwinding" ;;
     esac
     exit "$status" ;;
 esac
