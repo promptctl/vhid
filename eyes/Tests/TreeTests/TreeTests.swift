@@ -534,6 +534,15 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
         #expect(unwalked == 0)
     }
 
+    /// A click at a window's centre landing in a small window over its middle hides only
+    /// that middle, never the whole window, even under a full-screen window in front.
+    @Test func aSmallWindowOverTheMiddleDoesNotHideTheWholeWindow() {
+        let overlay = window(1, pid: 9, region)
+        let small = window(3, pid: 5, ScreenRect(x: 350, y: 250, width: 100, height: 100))
+        let visible = seen([overlay, small, window(2, document)], in: region, hit: { _ in .answered(5) })
+        #expect(visible.map(\.window.id) == [1, 3, 2])
+    }
+
     /// A window over the whole screen that a click passes through hides nothing behind it.
     @Test func aWindowInFrontAClickPassesThroughHidesNothing() {
         let overlay = window(1, pid: 9, region)

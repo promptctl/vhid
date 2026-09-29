@@ -143,17 +143,18 @@ struct Covers {
         return hit(point).map { $0 != owner }
     }
 
-    /// Whether all of `rect` is under one window in front, and a click at its centre lands
-    /// outside this window's process. The centre stands for the rest: a window wholly
-    /// inside a front one that draws only in places is read whole or not at all by where
-    /// its middle is. Unanswered is not hidden - what is under it is read, and each
-    /// finding asks for itself.
+    /// Whether all of `rect` is under one window in front that a click at its centre lands
+    /// in. The centre stands for the rest: a window wholly inside a front one that draws
+    /// only in places is read whole or not at all by where its middle is. Only a window
+    /// holding the whole rect can stand for it - a click at the centre landing in one that
+    /// overlaps only the middle says nothing of the rest. Unanswered is not hidden - what
+    /// is under it is read, and each finding asks for itself.
     func hide(_ rect: ScreenRect) -> Bool {
         let whole = windows.filter { $0.frame.cgRect.contains(rect.cgRect) }
         guard !whole.isEmpty else { return false }
         guard !whole.contains(where: { $0.pid == owner }) else { return true }
         guard case .answered(let pid) = hit(rect.centre) else { return false }
-        return pid != owner
+        return whole.contains { $0.pid == pid }
     }
 }
 
