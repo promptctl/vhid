@@ -25,15 +25,37 @@ struct Find: AsyncParsableCommand {
     @Option(help: .init(stringLiteral: Help.source))
     var source = SourceKind.merged
 
+    @Option(help: .init(stringLiteral: Help.until))
+    var until: Until?
+
+    @Option(help: .init(stringLiteral: Help.timeout))
+    var timeout: Double?
+
     func validate() throws {
         _ = try Self.match(text, exact: exact, edits: edits, as: .flag)
         _ = try Where.limit(limit, as: .flag)
+        _ = try Self.wait(until, timeout: timeout, as: .flag)
     }
 
     @MainActor
     func run() async throws {
         try await look(Query(match: Self.match(text, exact: exact, edits: edits, as: .flag),
-                             region: place.region, limit: Where.limit(limit, as: .flag)), source: source)
+                             region: place.region, limit: Where.limit(limit, as: .flag)),
+                       source: source, wait: Self.wait(until, timeout: timeout, as: .flag))
+    }
+
+    /// The wait, none, or the refusal - one rule for the verb and the MCP tool.
+    /// [LAW:single-enforcer]
+    static func wait(_ until: Until?, timeout: Double?, as s: Spelling) throws -> Wait? {
+        guard let until else {
+            guard timeout == nil else { throw ValidationError("\(s("timeout")) needs \(s("until")): it is how long to wait") }
+            return nil
+        }
+        let seconds = timeout ?? Wait.defaultSeconds
+        guard let wait = Wait(until: until, seconds: seconds) else {
+            throw ValidationError("\(s("timeout")) is \(seconds), and it takes seconds above 0 and at most \(Int(Wait.longest))")
+        }
+        return wait
     }
 
     /// What to match, or the refusal - one rule for the verb and the MCP tool, each naming

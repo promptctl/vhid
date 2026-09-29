@@ -21,6 +21,10 @@ enum Help {
     static let display = "Read this display, by its window-server id, which `eyes displays` lists and every scope line names. Defaults to the main display."
     static let window = "Read this window's bounds, by the id `eyes windows` prints."
     static let rect = "Read this rectangle: x,y,width,height in the points vhid clicks."
+    static let until = "Read again until the text is present or absent, then answer once with the last reading."
+        + " Absent counts only a region read whole, twice running."
+    static let timeout = "With until, the most seconds to wait: at most \(Int(Wait.longest)). A wait that runs out answers"
+        + " with its last reading and says it timed out. Defaults to \(Int(Wait.defaultSeconds))."
     static let source = "Which reader looks: tree (the accessibility tree: exact text and roles, needs Accessibility),"
         + " pixels (recognised text, anything drawn, needs Screen Recording), or merged (both, each thing reported once;"
         + " answers with either grant, naming a reader that could not look). Defaults to merged."
@@ -190,16 +194,39 @@ private extension Outcome {
 
 /// Reads with the chosen reader and prints. The one place the verbs meet the screen.
 @MainActor
-func look(_ query: Query, source: SourceKind) async throws {
-    print(try await Report.text(query, source: source) { @MainActor in try await $0.reader.read($1) })
+func look(_ query: Query, source: SourceKind, wait: Wait? = nil) async throws {
+    print(try await Report.text(query, source: source, wait: wait) { @MainActor in try await $0.reader.read($1) })
 }
 
 extension Report {
-    /// A query's reading as the text the verbs print and the MCP tools answer.
+    /// A query's reading as the text the verbs print and the MCP tools answer: one read, or
+    /// with a wait, the read the wait ended on, its scope line led by how the wait went.
     /// [LAW:one-source-of-truth]
     static func text(
-        _ query: Query, source: SourceKind, grantNote: String = "", reading read: @Sendable (SourceKind, Query) async throws -> Reading
+        _ query: Query, source: SourceKind, wait: Wait? = nil, grantNote: String = "",
+        reading read: @Sendable (SourceKind, Query) async throws -> Reading
     ) async throws -> String {
-        lines(try await read(source, query), query: query, source: source, grantNote: grantNote).joined(separator: "\n")
+        guard let wait else {
+            return lines(try await read(source, query), query: query, source: source, grantNote: grantNote).joined(separator: "\n")
+        }
+        let waited = try await waiting(for: wait, on: query) { try await read(source, $0) }
+        let said = lines(waited.reading, query: query, source: source, grantNote: grantNote)
+        return ([waitedClause(waited, wait) + said[0]] + said.dropFirst()).joined(separator: "\n")
+    }
+
+    /// How a wait went, ahead of the scope of the reading it ended on. A timeout is said
+    /// as plainly as a success: it is an answer, not an error.
+    static func waitedClause(_ waited: Waited, _ wait: Wait) -> String {
+        let reads = "\(waited.reads) read\(waited.reads == 1 ? "" : "s") in \(seconds(waited.took))"
+        return waited.settled
+            ? "\(wait.until.rawValue) after \(reads): "
+            : "timed out, not \(wait.until.rawValue) after \(reads): "
+    }
+
+    private static func seconds(_ d: Duration) -> String {
+        let (s, atto) = d.components
+        return String(format: "%.1fs", Double(s) + Double(atto) / 1e18)
     }
 }
+
+extension Until: ExpressibleByArgument {}

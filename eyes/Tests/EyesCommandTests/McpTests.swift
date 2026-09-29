@@ -193,6 +193,9 @@ import Testing
             ("find", ["text": "a", "exact": true, "edits": 1], "give exact or edits, not both"),
             ("find", ["text": "a", "edits": -1], "edits cannot be negative"),
             ("find", ["text": "a", "exact": "yes"], "exact is yes, and it takes a boolean"),
+            ("find", ["text": "a", "timeout": 5], "timeout needs until: it is how long to wait"),
+            ("find", ["text": "a", "until": "gone"], "until is gone, and it takes one of present, absent"),
+            ("find", ["text": "a", "until": "absent", "timeout": 0], "timeout is 0.0, and it takes seconds above 0 and at most 600"),
             ("read", ["limit": 0], "limit must be at least 1"),
             ("read", ["display": 1, "window": 2], "give at most one of display, window, rect"),
             ("read", ["display": -1], "display is -1, which is not a window-server id (0 to 4294967295)"),
@@ -205,6 +208,18 @@ import Testing
             #expect(isError == true, "\(tool) \(arguments)")
             #expect(said == expected)
         }
+    }
+
+    /// A wait answers with the verb's report of the read it ended on, led by how the wait
+    /// went; running out of time is an answer, not a tool error.
+    @Test func findWaitsAndSaysHowTheWaitWent() async throws {
+        let (settled, settledError) = try await call(["text": "Save", "until": "present", "timeout": 1], tool: "find")
+        #expect(settledError != true)
+        #expect(settled.hasPrefix("present after 1 read in "))
+        #expect(settled.contains(": 1 matched \"Save\" in "))
+        let (timedOut, timedOutError) = try await call(["text": "Save", "until": "absent", "timeout": 0.3], tool: "find")
+        #expect(timedOutError != true)
+        #expect(timedOut.hasPrefix("timed out, not absent after "))
     }
 
     /// Reads never overlap, however many calls arrive at once: two Vision recognitions in
