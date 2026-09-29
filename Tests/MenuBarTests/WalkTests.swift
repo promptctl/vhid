@@ -49,24 +49,12 @@ import Testing
         walk.revisit(.devices)
         guard case .step(let back, _) = walk.page(readiness) else { Issue.record("expected a step"); return }
         #expect(back.row == .devices)
-        walk.reopen()
-        guard case .step(let again, 2) = walk.page(readiness) else { Issue.record("expected both steps back"); return }
-        #expect(again.row == .driverExtension)
     }
 
-    /// Only an inactive registration can be asked for from a button; once asked, the page
-    /// offers System Settings and says macOS asks only once - on the awaiting-approval page
-    /// the request leads to, too - and reopening the walk does not forget it.
-    @Test func theDriverIsAskedForOnceAndOnlyWhenInactive() {
-        let inactive = Requirement.driverExtension(.installedInactive)
-        var walk = Walk()
-        #expect(walk.ask(inactive) == .activateDriver)
-        #expect(!walk.askedAlready(inactive))
-        walk.asked(.driverExtension)
-        walk.reopen()
-        #expect(walk.ask(inactive) == nil)
-        #expect(walk.askedAlready(inactive))
-        #expect(walk.askedAlready(.driverExtension(.awaitingApproval)))
+    /// Only an inactive registration can be asked for from a button, and it can be asked
+    /// again for as long as it reads inactive: a request that never landed leaves it there.
+    @Test func onlyAnInactiveDriverIsAskedFor() {
+        #expect(Requirement.driverExtension(.installedInactive).ask == .activateDriver)
         for state: DriverState in [.absent, .awaitingApproval, .disabled, .pendingReboot, .residue, .unknown, .running] {
             #expect(Requirement.driverExtension(state).ask == nil, "\(state)")
         }

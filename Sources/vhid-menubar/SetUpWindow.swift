@@ -63,7 +63,7 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
 
     /// Opens the walk at its first step, with nothing set aside.
     func show() {
-        walk.reopen()
+        walk = Walk()
         failure = nil
         let wasKey = window.isKeyWindow
         if let shown { draw(shown) } else { drawReading() }
@@ -126,13 +126,10 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
         add(label(explanation.why, size: 13))
         add(label("If you skip it: \(explanation.ifSkipped)", size: 12, color: .secondaryLabelColor))
         add(label(requirement.stepLines.joined(separator: "\n"), size: 11, monospaced: true))
-        if walk.askedAlready(requirement) {
-            add(label("macOS asks only once. If you said no, turn it on in System Settings.", size: 12, color: .secondaryLabelColor))
-        }
         if let failure, failure.row == row {
             add(label(failure.reason, size: 12, color: .systemRed))
         }
-        let ask = walk.ask(requirement).map { request in button(request.title) { [unowned self] in self.request(request, for: row) } }
+        let ask = requirement.ask.map { request in button(request.title) { [unowned self] in self.request(request, for: row) } }
         let openSettings = row.settingsPane.map { pane in button("Open System Settings") { [unowned self] in
             self.log.info("setup open settings: \(row.rawValue, privacy: .public)")
             NSWorkspace.shared.open(pane)
@@ -149,8 +146,7 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
             self.failure = nil
             self.shown.map(self.draw)
         }
-        // Return is the person choosing to be asked; once asked, System Settings; otherwise
-        // a fresh reading.
+        // Return is the person choosing to be asked; else System Settings; else a fresh reading.
         let primary = ask ?? openSettings ?? checkAgain
         primary.keyEquivalent = "\r"
         add(buttonRow([skip] + [checkAgain, openSettings, ask].compactMap { $0 }.filter { $0 !== primary } + [primary]))
@@ -187,7 +183,6 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
     private func request(_ ask: Requirement.Ask, for row: Requirement.Row) {
         do {
             try Self.perform(ask)
-            walk.asked(row)
             log.info("setup ask: \(String(describing: ask), privacy: .public) started")
             refresh()
         } catch {

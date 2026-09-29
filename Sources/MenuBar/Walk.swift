@@ -6,8 +6,9 @@ import Foundation
 ///
 /// [LAW:one-source-of-truth] A view of `Readiness` and nothing more. Which steps there are,
 /// and whether each is done, is read off doctor's list every time; the walk remembers only
-/// what the list cannot know - which rows the person set aside, and which were already
-/// asked in this walk.
+/// what the list cannot know: which rows the person set aside. Whether a request landed is
+/// the list's to say - the driver reads installed-inactive until one does - so the button
+/// that makes it stays for as long as that reading does.
 ///
 /// Taken from low-talker's guided setup, without its microphone, input-method and hotkey
 /// rows.
@@ -16,12 +17,8 @@ public struct Walk: Sendable, Hashable {
     public static let title = "Set Up vhid…"
 
     /// Rows the person set aside in this walk. Kept only while the walk is open: a skipped
-    /// row is offered again the next time it opens, which `reopen` does.
+    /// row is offered again the next time it opens.
     public private(set) var skipped: Set<Requirement.Row> = []
-    /// Rows whose request was made. macOS shows most of these dialogs once, so a second
-    /// press of the same button would do nothing: once asked, a row still unmet offers
-    /// System Settings instead, and says why. Kept across reopening, since macOS keeps it.
-    public private(set) var asked: Set<Requirement.Row> = []
 
     public init() {}
 
@@ -45,28 +42,11 @@ public struct Walk: Sendable, Hashable {
         return .step(current, left: unmet.filter { !skipped.contains($0.row) }.count)
     }
 
-    /// The button that makes macOS ask, when this page has one: the row's request, not yet
-    /// made in this walk.
-    public func ask(_ requirement: Requirement) -> Requirement.Ask? {
-        asked.contains(requirement.row) ? nil : requirement.ask
-    }
-
-    /// Whether the page says macOS asks only once, and points at System Settings instead.
-    public func askedAlready(_ requirement: Requirement) -> Bool {
-        asked.contains(requirement.row)
-    }
-
     public mutating func skip(_ row: Requirement.Row) { skipped.insert(row) }
-
-    /// Opens the walk again: every row is offered afresh, and what was asked stays asked.
-    public mutating func reopen() { skipped = [] }
 
     /// Brings a skipped row back, which is how the summary resumes the walk at it.
     public mutating func revisit(_ row: Requirement.Row) { skipped.remove(row) }
 
-    /// A request made: the Manager started. One that could not start showed nothing, so it
-    /// is not recorded, and its button stays beside the reason.
-    public mutating func asked(_ row: Requirement.Row) { asked.insert(row) }
 }
 
 extension Walk.Page: CustomStringConvertible {
