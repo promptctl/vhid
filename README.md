@@ -40,7 +40,9 @@ eyes find Settings --exact --display 3
 eyes read --window 4127           # every run of text in one window, in reading order
 eyes find OK --source tree        # only the accessibility tree: exact text, no Screen Recording
 eyes find Saving --window 4127 --until absent --timeout 30   # returns once the text is gone
-eyes mcp                          # the verbs as MCP tools over stdio: windows, displays, find, read
+eyes grants                       # Screen Recording and Accessibility: held or not, and the app they are charged to
+eyes grants --ask                 # raise macOS's dialog for each missing grant (once per app), then read again
+eyes mcp                          # the verbs as MCP tools over stdio: windows, displays, find, read, grants
 ```
 
 `find` and `read` read with `--source`: `tree` walks the accessibility tree (exact text
@@ -110,7 +112,7 @@ nothing between calls and a `vhid click` from a shell still gets through. Stdout
 only JSON-RPC; diagnostics go to stderr. An argument a tool will not act on comes back as
 a tool error naming it, before anything is connected.
 
-`eyes mcp` serves `windows`, `displays`, `find` and `read` the same way. The two are
+`eyes mcp` serves `windows`, `displays`, `find`, `read` and `grants` the same way. The two are
 separate servers, and a client runs both.
 
 In Claude Code:
@@ -138,9 +140,12 @@ vhid's tools need what `vhid doctor` checks and no grant of the client's. eyes'
 and Screen Recording for pixels, held by
 the app macOS counts as responsible for the server: Claude Desktop, or the terminal app
 running `claude` - under tmux, SSH or an editor's terminal, whichever app started that.
-eyes never prompts for either: add the app under **System Settings > Privacy & Security >
-Accessibility** and **Screen Recording**, then quit and reopen it, since a running server
-keeps the answer it started with. A reader without its grant is named in the scope line;
+The `grants` tool says whether each is held and names that app, read fresh on every call
+and never prompting; `eyes grants --ask`, run by a person, is the only thing that raises
+macOS's dialog. Add the app under **System Settings > Privacy & Security >
+Accessibility** and **Screen Recording**. If `grants` says held and `find` or `read` still
+refuse, quit and reopen the app: a running server's readers may keep the answer they
+started with. A reader without its grant is named in the scope line;
 with neither, `find` and `read` answer with a tool error saying so.
 
 Every coordinate either server prints or takes is the same screen point, so one loop

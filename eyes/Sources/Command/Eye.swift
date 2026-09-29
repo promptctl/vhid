@@ -12,6 +12,6 @@ struct Eye: AsyncParsableCommand {
         commandName: "eyes",
         abstract: "Say what is on screen and where, in the coordinates vhid clicks.",
         version: Version.current,
-        subcommands: [Windows.self, Displays.self, Find.self, Read.self, Mcp.self]
+        subcommands: [Windows.self, Displays.self, Find.self, Read.self, GrantsVerb.self, Mcp.self]
     )
 }

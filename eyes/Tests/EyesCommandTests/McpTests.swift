@@ -1,4 +1,5 @@
 import Eyes
+import Grants
 import MCP
 import Pixels
 import Tree
@@ -17,6 +18,8 @@ import Testing
         ],
         excluded: [])
     private static let front = Frontmost(pid: 401, name: "Finder")
+    private static let grantReading = GrantReading(held: [.screenRecording: false, .accessibility: true])
+    private static let holder = Holder(executable: "/Applications/Claude.app/Contents/MacOS/Claude")
 
     /// Every query the fake reader was handed, so a test can check what reached it.
     actor Asked {
@@ -47,7 +50,7 @@ import Testing
     /// A client connected to a server over `listing`, both torn down before this returns.
     private func connected<T>(_ body: (Client) async throws -> T) async throws -> T {
         let (clientSide, serverSide) = await InMemoryTransport.createConnectedPair()
-        let server = await Mcp.server(EyesTools.all(windows: { Self.listing }, frontmost: { Self.front }, displays: { DisplaysCommandTests.desk }, reading: Self.look))
+        let server = await Mcp.server(EyesTools.all(windows: { Self.listing }, frontmost: { Self.front }, displays: { DisplaysCommandTests.desk }, reading: Self.look, grants: { (Self.grantReading, Self.holder) }))
         try await server.start(transport: serverSide)
         let client = Client(name: "test", version: "0")
         let result: Result<T, any Error>
@@ -72,7 +75,7 @@ import Testing
     @Test func theVersionIsTheStampedOne() async throws {
         #expect(Eye.configuration.version == Version.current)
         let (clientSide, serverSide) = await InMemoryTransport.createConnectedPair()
-        let server = await Mcp.server(EyesTools.all(windows: { Self.listing }, frontmost: { Self.front }, displays: { DisplaysCommandTests.desk }, reading: Self.look))
+        let server = await Mcp.server(EyesTools.all(windows: { Self.listing }, frontmost: { Self.front }, displays: { DisplaysCommandTests.desk }, reading: Self.look, grants: { (Self.grantReading, Self.holder) }))
         try await server.start(transport: serverSide)
         let result: Initialize.Result
         do {
@@ -88,7 +91,7 @@ import Testing
 
     @Test func theToolsAreListedAndReadOnly() async throws {
         let tools = try await connected { try await $0.listTools().tools }
-        #expect(tools.map(\.name) == ["windows", "displays", "find", "read"])
+        #expect(tools.map(\.name) == ["windows", "displays", "find", "read", "grants"])
         #expect(tools.allSatisfy { $0.annotations.readOnlyHint == true })
     }
 
@@ -100,6 +103,14 @@ import Testing
             #expect(said == Windows.report(Self.listing, owner: owner.stringValue, frontmost: Self.front))
         }
         #expect(try await call(["owner": .null]).0 == Windows.report(Self.listing, owner: nil, frontmost: Self.front))
+    }
+
+    /// The grants tool answers with the verb's report, never having asked.
+    @Test func grantsAnswersWithTheVerbsReport() async throws {
+        let (said, isError) = try await call([:], tool: "grants")
+        #expect(isError != true)
+        #expect(said == GrantsVerb.report(Self.grantReading, holder: Self.holder, asked: false))
+        #expect(try await call(["ask": true], tool: "grants").1 == true)
     }
 
     /// Refusals come back as tool errors in the model's words, not as ignored arguments.
