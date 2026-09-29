@@ -183,6 +183,13 @@ public final class HelperConnection: @unchecked Sendable {
         }
     }
 
+    /// Where the cursor is, read in the session in front, as the wire's two numbers.
+    ///
+    /// Not a word on the devices either, so it leaves the connection unspoken.
+    public func cursor() throws -> (x: Double, y: Double) {
+        try exchange { service, reply in service.cursor { x, y, error in reply(error.map { .failed($0) } ?? .answered((x, y))) } }
+    }
+
     /// The keyboard over this connection.
     public var keyboard: HelperKeyboard { HelperKeyboard(helper: self) }
 

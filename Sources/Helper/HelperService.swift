@@ -19,9 +19,10 @@ import Foundation
 ///
 /// **It cannot express a place on the screen either, for the same shape of reason.** The
 /// device knows deltas, and macOS accelerates them: where the pointer lands after a report
-/// is a fact of the window server in the user's session, which a root daemon cannot read.
-/// So absolute motion is the client's loop - post a delta, read the cursor back, repeat -
-/// and only deltas cross.
+/// is known only by reading it back. So absolute motion is the client's loop - post a
+/// delta, read the cursor back, repeat - and only deltas cross as acts. The read crosses
+/// too, as `HelperService.cursor`, because only the daemon can make it in the session in
+/// front when that session is not the client's.
 ///
 /// **One report per call, and the client decides when.** The daemon acknowledges reports
 /// the driver then drops: twelve 500-character runs, each report awaited, six of which
@@ -115,6 +116,16 @@ import Foundation
     /// Two values that are both there or both absent, because the wire carries no
     /// optional pair; `HelperConnection.lastFailure` is where they become one.
     func lastFailure(reply: @escaping (String?, Date?) -> Void)
+
+    /// Where the cursor is, in screen points from the top left of the main display, read
+    /// in the session in front - the login window's, or another user's, as much as the
+    /// caller's own. Claims nothing and sends no report, and is answered whether or not
+    /// the devices are up.
+    ///
+    /// A client outside the session in front reads (0, 0) for itself, as though it were a
+    /// position; a root daemon can join that session and a client cannot, which is why
+    /// this read is the daemon's.
+    func cursor(reply: @escaping (Double, Double, Error?) -> Void)
 }
 
 /// Something that went wrong in the daemon, and when: what a person debugging a headless

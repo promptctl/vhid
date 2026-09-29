@@ -6,6 +6,10 @@ import Signals
 import VirtualHID
 import os
 
+// A cursor reader is this executable run by the daemon, and is nothing else of it: it
+// takes no --service and serves nothing. See `FrontCursor`.
+if let session = cursorReaderArgument(CommandLine.arguments) { readCursor(in: session) }
+
 /// Which installation this daemon serves, from the `--service` its plist passes.
 ///
 /// Resolved before anything else, because every name below is read off it - the service
@@ -98,7 +102,7 @@ do {
     // `readiness`, rather than finding no service at all. [LAW:no-silent-failure]
     let readiness = Readiness()
     let listener = NSXPCListener(machServiceName: installation.service)
-    let delegate = Listener(readiness: readiness, callers: callers)
+    let delegate = Listener(readiness: readiness, callers: callers, cursor: FrontCursor.real)
     listener.delegate = delegate
     listener.resume()
     log("listening on \(installation.service)")

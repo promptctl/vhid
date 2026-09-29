@@ -263,7 +263,7 @@ import Testing
         let keyboard = RecordingKeyboard()
         let mouse = RecordingMouse()
         let client = NSObject()
-        let seat = Seat(ObjectIdentifier(client), pid: 41, holder: Holder(), readiness: .serving(Devices(keyboard: keyboard, mouse: mouse)))
+        let seat = Seat(ObjectIdentifier(client), pid: 41, holder: Holder(), readiness: .serving(Devices(keyboard: keyboard, mouse: mouse)), cursor: FixedCursor())
         seat.hold(usages: [0xE1, 0x04]) { #expect($0 == nil) }
         seat.holdButtons(1) { #expect($0 == nil) }
         seat.end(because: "a client went away")

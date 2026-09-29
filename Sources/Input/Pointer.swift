@@ -1,4 +1,3 @@
-import CoreGraphics
 import Foundation
 import Pointing
 
@@ -80,15 +79,6 @@ public struct Pointer: Sendable {
     public struct Click: Equatable, Sendable {
         public let at: ScreenPoint
         public let reports: Int
-    }
-
-    /// The cursor as the window server reports it: global coordinates, top-left origin,
-    /// points. Readable without privilege.
-    public static func screenCursor() throws -> ScreenPoint {
-        guard let location = CGEvent(source: nil)?.location, let cursor = ScreenPoint(x: location.x, y: location.y) else {
-            throw CursorUnreadable()
-        }
-        return cursor
     }
 
     /// How far the OS carries the cursor per count, and for how fast a report that holds.
@@ -321,6 +311,8 @@ public struct WouldNotReach: Error, CustomStringConvertible {
 }
 
 public struct CursorUnreadable: Error, CustomStringConvertible {
+    public init() {}
+
     public var description: String { "the window server would not say where the cursor is" }
 }
 

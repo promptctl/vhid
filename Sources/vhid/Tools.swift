@@ -1,5 +1,6 @@
 import Dispatch
 import Doctor
+import Helper
 import Input
 import Installations
 import KeyboardLayouts
@@ -132,9 +133,9 @@ enum Tools {
         }
     }()
 
-    /// The one tool that reaches no daemon: where the cursor is, the window server knows.
-    static let cursor: VerbTool = VerbTool(Help.cursor, readOnly: true, []) { _, _ in
-        try CursorCommand.cursor(Pointer.screenCursor)
+    /// Where the cursor is, as the daemon reads it in the session in front.
+    static let cursor: VerbTool = VerbTool(Help.cursor, readOnly: true, []) { _, installation in
+        try CursorCommand.cursor(Devices.cursor(HelperConnection(installation: installation)))
     }
 
     /// `vhid doctor` as a tool. A Mac that is not ready is an answer and not a failure of

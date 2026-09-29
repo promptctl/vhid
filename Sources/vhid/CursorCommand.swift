@@ -1,12 +1,15 @@
 import ArgumentParser
+import Helper
 import Input
 
 /// Says where the pointer is.
 struct CursorCommand: AsyncParsableCommand {
     static let configuration = Help.cursor.configuration
 
+    @OptionGroup var service: ServiceOption
+
     func run() throws {
-        print(try Self.cursor(Pointer.screenCursor))
+        print(try Self.cursor(Devices.cursor(HelperConnection(installation: try service.installation()))))
     }
 
     /// The verb itself, over a cursor from anywhere. [LAW:decomposition]

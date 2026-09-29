@@ -19,6 +19,7 @@ import Installations
 struct Devices {
     let keyboard: any Keyboard
     let mouse: any Mouse
+    let cursor: @Sendable () throws -> ScreenPoint
 
     /// Runs `body` with the devices over a connection to this installation's daemon, and
     /// hands them back when it returns.
@@ -41,7 +42,8 @@ struct Devices {
     static func using<T>(_ helper: HelperConnection, _ body: (Devices) async throws -> T) async throws -> T {
         let queue = DeviceQueue()
         let devices = Devices(keyboard: QueuedKeyboard(keyboard: helper.keyboard, queue: queue),
-                              mouse: QueuedMouse(pointing: helper.mouse, queue: queue))
+                              mouse: QueuedMouse(pointing: helper.mouse, queue: queue),
+                              cursor: cursor(helper))
         let done: T
         do {
             done = try await body(devices)
@@ -70,8 +72,19 @@ struct Devices {
     /// The typist these keys are typed by.
     var typist: Typist { Typist(keyboard: keyboard) }
 
-    /// The pointer this mouse is steered by, reading the cursor back from the window
-    /// server after every report - which is the only place the truth about where the
-    /// pointer went lives, since macOS accelerates the counts the device sends.
-    var pointer: Pointer { Pointer(mouse: mouse, cursor: Pointer.screenCursor) }
+    /// The pointer this mouse is steered by, reading the cursor back after every report -
+    /// which is the only place the truth about where the pointer went lives, since macOS
+    /// accelerates the counts the device sends.
+    var pointer: Pointer { Pointer(mouse: mouse, cursor: cursor) }
+
+    /// The cursor as the daemon reads it, in the session in front, which may not be this
+    /// process's: at the login window, or with another user in front, a read made here
+    /// answers (0, 0). [LAW:single-enforcer] Every verb that reads the cursor reads it here.
+    static func cursor(_ helper: HelperConnection) -> @Sendable () throws -> ScreenPoint {
+        {
+            let at = try helper.cursor()
+            guard let point = ScreenPoint(x: at.x, y: at.y) else { throw CursorUnreadable() }
+            return point
+        }
+    }
 }

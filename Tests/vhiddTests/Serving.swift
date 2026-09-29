@@ -28,3 +28,9 @@ final class RecordingDevices: NSObject, ServedDevices, @unchecked Sendable {
     func releaseKeysHeldPastLimit() -> KeysLetGo? { nil }
     func releaseEverything(because reason: String) { lock.lock(); acts.append(reason); lock.unlock() }
 }
+
+/// A cursor that is always at one place, for seats whose tests never read it.
+struct FixedCursor: CursorSource {
+    var at = (x: 12.5, y: 40.0)
+    func read() throws -> (x: Double, y: Double) { at }
+}

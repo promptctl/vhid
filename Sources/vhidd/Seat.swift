@@ -21,6 +21,7 @@ final class Seat: NSObject, HelperService, @unchecked Sendable {
     private let pid: pid_t
     private let holder: Holder
     private let readiness: Readiness
+    private let cursor: any CursorSource
     /// Whether this seat has ended. Under its own lock across each act's claim, so an act
     /// cannot pass the check and then claim after `end` has freed the devices. Taken
     /// before the holder's lock and never after it.
@@ -31,8 +32,9 @@ final class Seat: NSObject, HelperService, @unchecked Sendable {
     /// than carrying on as if its keys were still down. [LAW:no-silent-failure]
     private var heldOn: Int?
 
-    init(_ connection: ObjectIdentifier, pid: pid_t, holder: Holder, readiness: Readiness) {
+    init(_ connection: ObjectIdentifier, pid: pid_t, holder: Holder, readiness: Readiness, cursor: any CursorSource) {
         self.connection = connection
+        self.cursor = cursor
         self.pid = pid
         self.holder = holder
         self.readiness = readiness
@@ -98,6 +100,17 @@ final class Seat: NSObject, HelperService, @unchecked Sendable {
     func lastFailure(reply: @escaping (String?, Date?) -> Void) {
         let last = vhidd.lastFailure.current
         reply(last?.text, last?.at)
+    }
+
+    /// Where the cursor is in the session in front. Claims nothing, like `status`, and
+    /// needs no devices: a read is not an act.
+    func cursor(reply: @escaping (Double, Double, Error?) -> Void) {
+        do {
+            let at = try cursor.read()
+            reply(at.x, at.y, nil)
+        } catch {
+            reply(0, 0, refusal(error))
+        }
     }
 
     /// A call on a seat whose devices were lost under it.
