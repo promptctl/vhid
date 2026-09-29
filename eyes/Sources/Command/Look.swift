@@ -26,9 +26,12 @@ enum Help {
         + " Absent counts only a region read whole, twice running."
     static let timeout = "With until, the most seconds to wait: at most \(Int(Wait.longest)). A wait that runs out answers"
         + " with its last reading and says it timed out. Defaults to \(Int(Wait.defaultSeconds))."
-    static let source = "Which reader looks: tree (the accessibility tree: exact text and roles, needs Accessibility),"
-        + " pixels (recognised text, anything drawn, needs Screen Recording), or merged (both, each thing reported once;"
-        + " answers with either grant, naming a reader that could not look). Defaults to merged."
+    static let source = "Which reader looks: tree (the accessibility tree: exact text and roles),"
+        + " pixels (recognised text, anything drawn), or merged (both, each thing reported once;"
+        + " answers with either grant, naming a reader that could not look). Defaults to merged. " + needs
+    /// Which grant each reader needs, built from the one mapping. [LAW:one-source-of-truth]
+    static let needs = Grant.allCases.sorted { $0.reader.rawValue > $1.reader.rawValue }
+        .map { "The \($0.reader.rawValue) reader needs \($0.name)" }.joined(separator: " and ") + "."
 }
 
 /// Which reader a verb or tool reads with: every kind a reader can be. [LAW:one-source-of-truth]

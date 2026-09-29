@@ -24,8 +24,8 @@ public enum Grant: String, CaseIterable, Sendable {
     }
 
     /// The reader that cannot look without it. [LAW:one-source-of-truth] The one mapping
-    /// between readers and grants: each reader gates on it, and every sentence naming a
-    /// reader's grant is built from it.
+    /// between readers and grants that every sentence naming a reader's grant is built
+    /// from; each reader's own `grant` is held to it by its gate test.
     public var reader: SourceKind {
         switch self {
         case .screenRecording: .pixels
@@ -83,10 +83,22 @@ public actor SharedReading {
         if let latest, latest.finished.map({ ContinuousClock.now - $0 < fresh }) ?? true {
             return try await Self.waited(latest.reading).holds(grant)
         }
-        let reading = Task { [take] in try await take() }
+        taking += 1
+        let reading = Task { [take, taking] in
+            // Stamped when the reading ends, not when a gate stops waiting: a cancelled
+            // gate leaves the reading running, and it is still the one being taken.
+            defer { Task { await self.finished(taking) } }
+            return try await take()
+        }
         latest = (reading, nil)
-        defer { if latest?.reading == reading { latest?.finished = .now } }
         return try await Self.waited(reading).holds(grant)
+    }
+
+    /// Which reading is the latest, counted, so an older one ending does not stamp it.
+    private var taking = 0
+
+    private func finished(_ reading: Int) {
+        if reading == taking { latest?.finished = .now }
     }
 
     /// A shared reading's answer, given up the moment the asking task is cancelled while
