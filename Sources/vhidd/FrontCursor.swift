@@ -110,38 +110,56 @@ protocol CursorSource: Sendable {
 }
 
 /// This executable, run as `--read-cursor-in <audit session>`: a child in the session in
-/// front, answering one line with the cursor for each line it is sent.
+/// front, saying first whether it joined, then answering one line with the cursor for each
+/// line it is sent.
 final class ChildReader: FrontCursor.Reader {
-    private let process = Process()
-    private let requests = Pipe()
-    private let answers = Pipe()
+    private let pid: pid_t
+    /// The child's stdin and stdout, from this side.
+    private let requests: Int32
+    private let answers: Int32
     private let session: FrontCursor.Session
     private let patience: Duration
-    /// Bytes read past the last whole line; the protocol never leaves any, but a read may
-    /// hand back fewer bytes than a line, so a line is gathered here.
+    /// Bytes read past the last whole line; a read may hand back less than a line.
     private var pending: [UInt8] = []
 
     /// `patience` is how long one answer may take: well under the client's own wait, so a
     /// child stuck in the window server is ended and replaced while the client is still
     /// listening, and the lock `FrontCursor` holds across the read is never held forever.
-    init(in session: FrontCursor.Session, executable: URL, arguments: [String], patience: Duration = .seconds(1)) throws {
+    ///
+    /// Waits for the child's first line, which says whether it joined `session`: read
+    /// before anything is written to it, so a child that could not join and ended is heard
+    /// saying why, and not taken for a broken pipe. [LAW:no-ambient-temporal-coupling]
+    init(in session: FrontCursor.Session, executable: String, arguments: [String], patience: Duration = .seconds(1)) throws {
         self.session = session
         self.patience = patience
-        process.executableURL = executable
-        process.arguments = arguments
-        process.standardInput = requests
-        process.standardOutput = answers
+        var stdin: [Int32] = [0, 0], stdout: [Int32] = [0, 0]
+        guard pipe(&stdin) == 0 else { throw Failed(session: session, what: "could not be given a pipe: errno \(errno)") }
+        guard pipe(&stdout) == 0 else {
+            close(stdin[0]); close(stdin[1])
+            throw Failed(session: session, what: "could not be given a pipe: errno \(errno)")
+        }
+        requests = stdin[1]
+        answers = stdout[0]
         // A child that has ended must fail the write, not raise SIGPIPE in the daemon.
         // [LAW:no-silent-failure] SIGPIPE ends vhidd without a word, holding what it held.
-        guard fcntl(requests.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1) == 0 else {
-            throw Failed(session: session, what: "could not refuse SIGPIPE: errno \(errno)")
+        _ = fcntl(requests, F_SETNOSIGPIPE, 1)
+        defer { close(stdin[0]); close(stdout[1]) }
+        do {
+            pid = try spawn(executable, arguments, stdio: [0: stdin[0], 1: stdout[1]])
+        } catch {
+            close(requests); close(answers)
+            throw error
         }
-        try process.run()
+        let joined = try answerLine(by: .now + patience)
+        guard joined == joinedAnswer else {
+            stop()
+            throw Failed(session: session, what: "answered '\(joined)'")
+        }
     }
 
     /// This very executable, reading in `session`.
     convenience init(in session: FrontCursor.Session) throws {
-        try self.init(in: session, executable: Bundle.main.executableURL!, arguments: [cursorReaderFlag, String(session.audit)])
+        try self.init(in: session, executable: Bundle.main.executablePath!, arguments: [cursorReaderFlag, String(session.audit)])
     }
 
     struct Failed: Error, CustomStringConvertible {
@@ -151,7 +169,7 @@ final class ChildReader: FrontCursor.Reader {
     }
 
     func read() throws -> (x: Double, y: Double) {
-        try requests.fileHandleForWriting.write(contentsOf: Data("\n".utf8))
+        guard Darwin.write(requests, "\n", 1) == 1 else { throw Failed(session: session, what: "could not be asked: errno \(errno)") }
         let line = try answerLine(by: .now + patience)
         let fields = line.split(separator: " ").compactMap { Double($0) }
         guard fields.count == 2 else { throw Failed(session: session, what: "answered '\(line)'") }
@@ -160,7 +178,6 @@ final class ChildReader: FrontCursor.Reader {
 
     /// One line from the child, or `Failed` once `deadline` passes or the child ends.
     private func answerLine(by deadline: ContinuousClock.Instant) throws -> String {
-        let descriptor = answers.fileHandleForReading.fileDescriptor
         while true {
             if let newline = pending.firstIndex(of: UInt8(ascii: "\n")) {
                 defer { pending.removeSubrange(...newline) }
@@ -168,13 +185,13 @@ final class ChildReader: FrontCursor.Reader {
             }
             let left = ContinuousClock.now.duration(to: deadline).components
             let milliseconds = Int32(clamping: max(0, left.seconds * 1000 + left.attoseconds / 1_000_000_000_000_000))
-            var poll = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
+            var poll = pollfd(fd: answers, events: Int16(POLLIN), revents: 0)
             let ready = Darwin.poll(&poll, 1, milliseconds)
             if ready < 0, errno == EINTR { continue }
             guard ready >= 0 else { throw Failed(session: session, what: "could not be heard: errno \(errno)") }
             guard ready > 0 else { throw Failed(session: session, what: "did not answer within \(patience)") }
             var buffer = [UInt8](repeating: 0, count: 256)
-            let count = Darwin.read(descriptor, &buffer, buffer.count)
+            let count = Darwin.read(answers, &buffer, buffer.count)
             if count < 0, errno == EINTR { continue }
             guard count >= 0 else { throw Failed(session: session, what: "could not be heard: errno \(errno)") }
             guard count > 0 else { throw Failed(session: session, what: "ended without answering") }
@@ -182,14 +199,18 @@ final class ChildReader: FrontCursor.Reader {
         }
     }
 
-    /// SIGKILL, not `terminate()`: the daemon ignores SIGTERM and a child inherits that, so
-    /// a child stuck in the window server would outlive every attempt to end it. Only a
-    /// child still running: one that has ended was reaped, and its pid may be anyone's now.
+    /// Ends the child and reaps it. SIGKILL, since a child stuck in the window server may
+    /// never read the closed stdin; safe by pid, since an unreaped child's pid is its own.
     func stop() {
-        try? requests.fileHandleForWriting.close()
-        if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+        close(requests)
+        close(answers)
+        kill(pid, SIGKILL)
+        waitpid(pid, nil, 0)
     }
 }
+
+/// What a reader says first when it has joined its session.
+let joinedAnswer = "joined"
 
 /// The flag that makes this executable a cursor reader rather than the daemon.
 let cursorReaderFlag = "--read-cursor-in"

@@ -7,11 +7,11 @@ func cursorReaderArgument(_ arguments: [String]) -> au_asid_t? {
     return au_asid_t(arguments[flag + 1])
 }
 
-/// The child `FrontCursor` starts: joins `session`, then answers each line on stdin with
-/// the cursor as `x y` on stdout, until stdin closes.
+/// The child `FrontCursor` starts: joins `session` and says so, then answers each line on
+/// stdin with the cursor as `x y` on stdout, until stdin closes.
 ///
 /// The join comes before the first read, because the first read is what ties a process to
-/// a session (see `FrontCursor`). A join that fails answers with the reason, on stdout,
+/// a session (see `FrontCursor`). A join that fails says so instead, with the reason, on stdout,
 /// where the daemon reads it and logs it; the daemon's stderr goes nowhere.
 /// [LAW:no-silent-failure]
 func readCursor(in session: au_asid_t) -> Never {
@@ -21,6 +21,7 @@ func readCursor(in session: au_asid_t) -> Never {
         print("could not join audit session \(session): errno \(errno)")
         exit(1)
     }
+    print(joinedAnswer)
     while readLine() != nil {
         print(CGEvent(source: nil).map { "\($0.location.x) \($0.location.y)" } ?? "unreadable")
     }

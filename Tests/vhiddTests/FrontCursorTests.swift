@@ -72,7 +72,7 @@ import Testing
 
     /// A real child over real pipes, played by `sh`: what it says is what the read says.
     private func child(_ script: String) throws -> ChildReader {
-        try ChildReader(in: bmf, executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", script], patience: .milliseconds(300))
+        try ChildReader(in: bmf, executable: "/bin/sh", arguments: ["-c", "echo joined; " + script], patience: .milliseconds(300))
     }
 
     @Test func aChildAnswersEachLineWithTheCursor() throws {
@@ -82,10 +82,10 @@ import Testing
         #expect(try reader.read() == (12.5, 40))
     }
 
-    @Test func aChildThatCouldNotJoinSaysWhy() throws {
-        let reader = try child("echo 'could not join audit session 100003: errno 1'; exit 1")
-        defer { reader.stop() }
-        #expect { try reader.read() } throws: { "\($0)".contains("answered 'could not join audit session 100003: errno 1'") }
+    @Test func aChildThatCouldNotJoinSaysWhy() {
+        #expect {
+            try ChildReader(in: bmf, executable: "/bin/sh", arguments: ["-c", "echo 'could not join audit session 100003: errno 1'; exit 1"])
+        } throws: { "\($0)".contains("answered 'could not join audit session 100003: errno 1'") }
     }
 
     @Test func aChildThatHasEndedFailsTheReadAndNotTheDaemon() throws {
@@ -96,12 +96,13 @@ import Testing
         #expect(throws: (any Error).self) { try reader.read() }
     }
 
-    @Test func stoppingAChildEndsItAndStoppingItAgainSignalsNobody() throws {
-        let reader = try child("trap '' TERM; sleep 30")
+    /// Stopping returns only once the child is reaped, even one that ignores SIGTERM and
+    /// never reads its stdin.
+    @Test func stoppingEndsEvenAChildThatWillNotListen() throws {
+        let reader = try child("trap '' TERM; exec 0<&-; sleep 30")
+        let began = ContinuousClock.now
         reader.stop()
-        Thread.sleep(forTimeInterval: 0.2)
-        #expect(throws: (any Error).self) { try reader.read() }
-        reader.stop()
+        #expect(began.duration(to: .now) < .seconds(2))
     }
 
     @Test func aChildThatDoesNotAnswerIsGivenUpOnInTime() throws {
