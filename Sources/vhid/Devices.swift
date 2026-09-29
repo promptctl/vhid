@@ -73,6 +73,5 @@ struct Devices {
     /// The pointer this mouse is steered by, reading the cursor back from the window
     /// server after every report - which is the only place the truth about where the
     /// pointer went lives, since macOS accelerates the counts the device sends.
-    /// It throws when this process is not in the window-server session in front.
-    var pointer: Pointer { get throws { Pointer(mouse: mouse, cursor: try Pointer.windowServerCursor()) } }
+    var pointer: Pointer { Pointer(mouse: mouse, cursor: Pointer.screenCursor) }
 }

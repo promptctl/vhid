@@ -8,27 +8,6 @@ import Testing
 @Suite @MainActor struct PointerTests {
     static let origin = ScreenPoint(x: 0, y: 0)!
 
-    /// The window server answers (0, 0) to a caller outside the session in front, so the
-    /// read is refused by name before it is made: at the login window, and for a user who
-    /// is not the one in front. The console user and root read it.
-    @Test func theCursorIsReadOnlyFromTheSessionInFront() throws {
-        let bmf = ConsoleUser(name: "bmf", uid: 501)
-        let origin: @Sendable () -> CGPoint? = { CGPoint(x: 0, y: 0) }
-        let there: @Sendable () -> CGPoint? = { CGPoint(x: 10, y: 10) }
-        #expect(throws: NoWindowServerSession.self) { try Pointer.sessionCursor(caller: 501, console: { nil }, location: origin) }
-        #expect(throws: NoWindowServerSession.self) { try Pointer.sessionCursor(caller: 0, console: { nil }, location: origin) }
-        let other = #expect(throws: NoWindowServerSession.self) { try Pointer.sessionCursor(caller: 503, console: { bmf }, location: origin) }
-        #expect(other?.description.contains("bmf's window-server session") == true)
-        #expect(try Pointer.sessionCursor(caller: 501, console: { bmf }, location: there)() == ScreenPoint(x: 10, y: 10)!)
-        #expect(try Pointer.sessionCursor(caller: 0, console: { bmf }, location: there)() == ScreenPoint(x: 10, y: 10)!)
-        // Somebody else comes to the front mid-run: the next (0, 0) is refused, not steered by.
-        let front = Front(bmf)
-        let read = try Pointer.sessionCursor(caller: 501, console: { front.user }, location: origin)
-        #expect(try read() == ScreenPoint(x: 0, y: 0)!)
-        front.user = ConsoleUser(name: "vhidtest", uid: 503)
-        #expect(throws: NoWindowServerSession.self) { try read() }
-    }
-
     /// One step is the remaining distance over the gain, rounded toward zero and clamped to
     /// the report: the whole screen at gain one is a full report, and 160.5 at gain three
     /// asks for 53, not 54, so a known gain lands short and never past.
@@ -190,10 +169,4 @@ import Testing
         let fine = try JSONDecoder().decode(ScreenPoint.self, from: Data(#"{"x":800,"y":500.5}"#.utf8))
         #expect(fine == ScreenPoint(x: 800, y: 500.5)!)
     }
-}
-
-/// Who is in front, changed by the test mid-run.
-private final class Front: @unchecked Sendable {
-    var user: ConsoleUser?
-    init(_ user: ConsoleUser?) { self.user = user }
 }
