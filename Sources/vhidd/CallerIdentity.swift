@@ -40,9 +40,9 @@ struct CallerIdentity {
         var description: String {
             switch self {
             case .unsigned(let status):
-                "this helper's own code signature could not be read (OSStatus \(status))"
+                "vhidd's own code signature could not be read (OSStatus \(status))"
             case .adHoc:
-                "this helper is signed ad hoc, with no certificate to require of its callers; sign it with an identity (make sign)"
+                "vhidd is signed ad hoc, with no certificate to require of its callers; sign it with an identity (make sign)"
             case .malformedRequirement(let text, let status):
                 "the caller requirement \(text.debugDescription) is not a code signing requirement (OSStatus \(status))"
             case .noAuditToken:
@@ -50,7 +50,7 @@ struct CallerIdentity {
             case .unidentified(let status):
                 "the calling process could not be identified (OSStatus \(status))"
             case .wrongIdentity(let status):
-                "the calling process is not signed by this helper's certificate (OSStatus \(status))"
+                "the calling process is not signed by vhidd's certificate (OSStatus \(status))"
             }
         }
     }

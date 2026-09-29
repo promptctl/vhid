@@ -30,7 +30,7 @@ import os
 /// send an operator whose plist does carry it looking in the wrong place.
 let installation: Installation = {
     guard let installation = serviceArgument(CommandLine.arguments) else {
-        Logger(subsystem: Installation.unnamedSubsystem, category: "helper").fault(
+        Logger(subsystem: Installation.unnamedSubsystem, category: "vhidd").fault(
             "will not start: no usable --service <name> in \(CommandLine.arguments, privacy: .public)")
         exit(0)
     }
@@ -46,7 +46,7 @@ let installation: Installation = {
 /// three subsystems are built from the one namespace:
 ///
 ///     log show --last 10m --predicate 'subsystem BEGINSWITH "ai.promptctl.vhid"'
-private let logger = Logger(subsystem: installation.service, category: "helper")
+private let logger = Logger(subsystem: installation.service, category: "vhidd")
 func log(_ message: String) {
     logger.notice("\(message, privacy: .public)")
 }

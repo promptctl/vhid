@@ -169,10 +169,10 @@ extension DaemonProcess.Effects {
     func stop(_ origin: DaemonProcess.Origin) {
         switch origin {
         case .alreadyRunning:
-            log("leaving the daemon running: this helper did not start it")
+            log("leaving the driver's daemon running: vhidd did not start it")
         case .startedHere(let pid):
             terminate(pid)
-            log("stopped the daemon this helper started, pid \(pid)")
+            log("stopped the driver's daemon vhidd started, pid \(pid)")
         }
     }
 }
