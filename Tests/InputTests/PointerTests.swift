@@ -13,14 +13,14 @@ import Testing
     /// is not the one in front. The console user and root read it.
     @Test func theCursorIsReadOnlyFromTheSessionInFront() throws {
         let bmf = ConsoleUser(name: "bmf", uid: 501)
-        var asked = 0
-        let screen = { () -> CGPoint? in asked += 1; return CGPoint(x: 0, y: 0) }
-        #expect(throws: NoWindowServerSession.self) { try Pointer.cursor(caller: 501, console: nil, location: screen) }
-        let other = #expect(throws: NoWindowServerSession.self) { try Pointer.cursor(caller: 503, console: bmf, location: screen) }
+        let origin: @Sendable () -> CGPoint? = { CGPoint(x: 0, y: 0) }
+        let there: @Sendable () -> CGPoint? = { CGPoint(x: 10, y: 10) }
+        #expect(throws: NoWindowServerSession.self) { try Pointer.sessionCursor(caller: 501, console: nil, location: origin) }
+        #expect(throws: NoWindowServerSession.self) { try Pointer.sessionCursor(caller: 0, console: nil, location: origin) }
+        let other = #expect(throws: NoWindowServerSession.self) { try Pointer.sessionCursor(caller: 503, console: bmf, location: origin) }
         #expect(other?.description.contains("bmf's window-server session") == true)
-        #expect(asked == 0)
-        #expect(try Pointer.cursor(caller: 501, console: bmf) { CGPoint(x: 10, y: 10) } == ScreenPoint(x: 10, y: 10)!)
-        #expect(try Pointer.cursor(caller: 0, console: bmf) { CGPoint(x: 10, y: 10) } == ScreenPoint(x: 10, y: 10)!)
+        #expect(try Pointer.sessionCursor(caller: 501, console: bmf, location: there)() == ScreenPoint(x: 10, y: 10)!)
+        #expect(try Pointer.sessionCursor(caller: 0, console: bmf, location: there)() == ScreenPoint(x: 10, y: 10)!)
     }
 
     /// One step is the remaining distance over the gain, rounded toward zero and clamped to

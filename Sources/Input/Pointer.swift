@@ -86,7 +86,14 @@ public struct Pointer: Sendable {
     /// The cursor as the window server reports it: global coordinates, top-left origin,
     /// points. Readable without privilege, by the user in front of the screen or by root.
     public static func screenCursor() throws -> ScreenPoint {
-        try cursor(caller: getuid(), console: ConsoleUser.current()) { CGEvent(source: nil)?.location }
+        try windowServerCursor()()
+    }
+
+    /// The reader `screenCursor` uses, with the session settled once up front: a move reads
+    /// the cursor every millisecond while a report settles, and asking configd who is in
+    /// front each time would be thousands of round trips a move.
+    public static func windowServerCursor() throws -> @Sendable () throws -> ScreenPoint {
+        try sessionCursor(caller: geteuid(), console: ConsoleUser.current()) { CGEvent(source: nil)?.location }
     }
 
     /// **The window server answers (0, 0) to anyone else, and not an error.** Measured on a
@@ -94,14 +101,19 @@ public struct Pointer: Sendable {
     /// or at the login window with nobody logged in, reads (0, 0) as though it were a
     /// position, and a move steering by it either stalls there or, for a target beside
     /// (0, 0), reports an arrival it never made. So who is asking is settled before the
-    /// window server is, and the answer names who is in front. [LAW:no-silent-failure]
-    static func cursor(caller: uid_t, console: ConsoleUser?, location: () -> CGPoint?) throws -> ScreenPoint {
+    /// window server is, and the answer names who is in front. Root read the real position
+    /// with bmf in front, so root passes. [LAW:no-silent-failure]
+    static func sessionCursor(
+        caller: uid_t, console: ConsoleUser?, location: @escaping @Sendable () -> CGPoint?
+    ) throws -> @Sendable () throws -> ScreenPoint {
         guard let console else { throw NoWindowServerSession(caller: caller, console: nil) }
         guard caller == console.uid || caller == 0 else { throw NoWindowServerSession(caller: caller, console: console) }
-        guard let location = location(), let cursor = ScreenPoint(x: location.x, y: location.y) else {
-            throw CursorUnreadable()
+        return {
+            guard let location = location(), let cursor = ScreenPoint(x: location.x, y: location.y) else {
+                throw CursorUnreadable()
+            }
+            return cursor
         }
-        return cursor
     }
 
     /// How far the OS carries the cursor per count, and for how fast a report that holds.
@@ -344,7 +356,7 @@ public struct ConsoleUser: Equatable, Sendable {
     }
 
     /// Who is logged in at the console, or nil at the login window, where macOS names the
-    /// console's owner `loginwindow`.
+    /// console's owner `loginwindow`, and when configd will not say.
     public static func current() -> ConsoleUser? {
         var uid: uid_t = 0
         guard let name = SCDynamicStoreCopyConsoleUser(nil, &uid, nil) as String?, name != "loginwindow" else { return nil }
@@ -361,9 +373,9 @@ public struct NoWindowServerSession: Error, CustomStringConvertible {
 
     public var description: String {
         guard let console else {
-            return "nobody is logged in at this Mac's screen, so there is no window-server session to read the cursor from, and a click cannot be placed"
+            return "nobody is logged in at this Mac's screen, or who is could not be read, so there is no window-server session to read the cursor from"
         }
-        return "the cursor belongs to \(console.name)'s window-server session, and this process runs as uid \(caller): run it as \(console.name) (sudo launchctl asuser \(console.uid) sudo -u \(console.name) ...)"
+        return "the cursor belongs to \(console.name)'s window-server session, and this process runs as uid \(caller): run vhid as \(console.name), with sudo launchctl asuser \(console.uid) sudo -u \(console.name)"
     }
 }
 
