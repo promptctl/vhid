@@ -35,6 +35,10 @@ import Testing
             return Reading(outcome: .nearest([]), scope: Scope(region: ScreenRect(x: 0, y: 0, width: 10, height: 10), examined: 0,
                 reach: .stopped(.merged(.blind(.tree, "\(TreeError.noGrant)", missingGrant: true), .read(.pixels, .whole)))))
         }
+        if query.region == .display(670) {
+            return Reading(outcome: .nearest([]), scope: Scope(region: ScreenRect(x: 0, y: 0, width: 10, height: 10), examined: 0,
+                reach: .stopped(.merged(.read(.tree, .whole), .blind(.pixels, "\(PixelsError.noGrant)", missingGrant: true)))))
+        }
         if query.region == .display(668) { throw BothBlind(first: TreeError.noGrant, second: PixelsError.noGrant) }
         let save = Found(text: Text("Save")!, frame: ScreenRect(x: -300, y: 40, width: 40, height: 20), source: .pixels(confidence: Confidence(1)!))
         return Reading(outcome: .matched(Matches([save])!), scope: Scope(region: ScreenRect(x: -1512, y: 316, width: 1512, height: 982), examined: 1, reach: .whole))
@@ -220,6 +224,14 @@ import Testing
         let (timedOut, timedOutError) = try await call(["text": "Save", "until": "absent", "timeout": 0.3], tool: "find")
         #expect(timedOutError != true)
         #expect(timedOut.hasPrefix("timed out, not absent after "))
+    }
+
+    /// An absence a blind reader cannot prove is a tool error naming where its grant is held.
+    @Test func anAbsenceWaitOnABlindReaderNamesWhereItsGrantIsHeld() async throws {
+        let (said, isError) = try await call(["text": "Save", "display": 670, "until": "absent"], tool: "find")
+        #expect(isError == true)
+        #expect(said.hasPrefix("pixels could not look, so an absence cannot be proven"))
+        #expect(said.hasSuffix(EyesTools.grantNote))
     }
 
     /// Reads never overlap, however many calls arrive at once: two Vision recognitions in

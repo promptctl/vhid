@@ -60,8 +60,14 @@ public struct Waited: Sendable, Hashable {
 }
 
 /// A wait for an absence that one of a merge's readers could not look for.
-public struct WaitBlind: Error, CustomStringConvertible {
+/// A `ReaderError`, so a missing grant is told apart here as for any reader that could
+/// not look - a server names the app that must hold it. [LAW:single-enforcer]
+public struct WaitBlind: ReaderError, CustomStringConvertible {
     public let part: Part
+
+    public var missingGrant: Bool {
+        if case .blind(_, _, let grant) = part { grant } else { false }
+    }
 
     public var description: String {
         guard case .blind(let kind, let why, _) = part else { return "\(part)" }
