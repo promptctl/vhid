@@ -69,7 +69,7 @@ public struct KeyboardLayout: Sendable {
     /// US English, by its input source id: the layout typed with when none is named and
     /// none can be read. Brandon, 2026-09-28: "Don't require --layout, accept it and
     /// default to US english if not defined."
-    public static let usEnglish = "com.apple.keylayout.US"
+    public static let usEnglishID = "com.apple.keylayout.US"
 
     /// The layout a verb types with: the one `identifier` names, or with none named the
     /// user's own, or US English when the system reports no current layout at all.
@@ -85,7 +85,10 @@ public struct KeyboardLayout: Sendable {
         do {
             return try current()
         } catch NoLayout.noCurrentSource {
-            return try named(usEnglish)
+            // With US missing too, the report is that no layout could be read, not that US
+            // is uninstalled: the first is the cause. [LAW:no-silent-failure]
+            guard let us = try? named(usEnglishID) else { throw NoLayout.noCurrentSource }
+            return us
         }
     }
 

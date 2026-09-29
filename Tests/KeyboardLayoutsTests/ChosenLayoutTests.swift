@@ -21,7 +21,7 @@ import Testing
     }
 
     @Test func withNoneNamedAndNoneReadableUSEnglishIsUsed() throws {
-        #expect(try KeyboardLayout.chosen(nil, current: { throw NoLayout.noCurrentSource }).name == KeyboardLayout.usEnglish)
+        #expect(try KeyboardLayout.chosen(nil, current: { throw NoLayout.noCurrentSource }).name == KeyboardLayout.usEnglishID)
     }
 
     /// Only a missing current layout falls back. One that cannot type is the user's to hear about.

@@ -79,10 +79,12 @@ It types where the keyboard is pointed and clicks where it is told. There is no
 click-by-element and no target app, because nothing in vhid reads the screen — what is
 under a point is the caller's to know.
 
-Which keys make which characters is the console user's keyboard layout, read in the CLI
+Which keys make which characters is the calling user's keyboard layout, read in the CLI
 rather than in the daemon: macOS answers that question per process, and a root daemon
-asking it is told the US layout whatever the user is typing on. `type` refuses text the
-layout has no keys for.
+asking it is told the US layout whatever the user is typing on. `type` and `press` take
+`--layout <input source id>` (the MCP tools, `layout`) to name another, as at the login
+window over SSH, where the caller's layout need not be the one on screen. `type` refuses
+text the layout has no keys for.
 
 `--service` says which installation to talk to. It defaults to the one the binary was
 built for: the installed copy for the installed CLI, and the development copy for a
