@@ -26,23 +26,27 @@ import MCP
 /// read ends. So a client that writes its calls and closes stdin, as a shell pipe does,
 /// got the process exiting under calls still running: 2 or 3 of 13 answers never came,
 /// measured, and a call cut off partway had done part of what it was asked, with nothing
-/// said. [LAW:no-ambient-temporal-coupling] What is still owed is a set this actor keeps,
-/// and the end of stdin waits on it being empty.
+/// said. [LAW:no-ambient-temporal-coupling] What is still owed is a count per id this actor
+/// keeps, and the end of stdin waits on it being empty, unless the session is stopped.
 ///
 /// [LAW:effects-at-boundaries] The deciding is `Unreadable.answer(to:)` and `Exchange`,
 /// pure functions of a line. This actor only moves bytes and keeps the count.
 actor AnsweringTransport: Transport {
     private let inner: any Transport
-    /// The ids of requests read and not yet answered.
-    private var owed: Set<ID> = []
-    /// Resumed when nothing is owed, by whichever answer settles the last of it.
-    private var settled: [CheckedContinuation<Void, Never>] = []
+    /// How many requests read under each id are not yet answered. A count, not a set: a
+    /// client may reuse an id while its first request is in flight, and each is answered.
+    /// [LAW:types-are-the-program]
+    private var owed: [ID: Int] = [:]
+    /// Resumed when nothing is owed, by whichever answer settles the last of it. Keyed by
+    /// waiter, so a stopped relay lets go of its own wait and no other.
+    private var settled: [UUID: CheckedContinuation<Void, Never>] = [:]
 
     /// Diagnostics go to stderr, which is the only place they may: stdout is the protocol's.
-    nonisolated let logger = Logger(label: "vhid.mcp", factory: { StreamLogHandler.standardError(label: $0) })
+    nonisolated let logger: Logger
 
-    init(_ inner: any Transport) {
+    init(_ inner: any Transport, logger: Logger = Logger(label: "vhid.mcp", factory: { StreamLogHandler.standardError(label: $0) })) {
         self.inner = inner
+        self.logger = logger
     }
 
     func connect() async throws { try await inner.connect() }
@@ -55,20 +59,55 @@ actor AnsweringTransport: Transport {
     }
 
     private func owe(_ line: Data) {
-        owed.formUnion(Exchange.requested(in: line))
+        for id in Exchange.requested(in: line) { owed[id, default: 0] += 1 }
         settle(Exchange.withdrawn(in: line))
     }
 
     private func settle(_ ids: [ID]) {
-        owed.subtract(ids)
-        guard owed.isEmpty else { return }
-        settled.forEach { $0.resume() }
-        settled = []
+        for id in ids { owed[id] = owed[id].flatMap { $0 > 1 ? $0 - 1 : nil } }
+        if owed.isEmpty { release() }
     }
 
+    private func release() {
+        settled.values.forEach { $0.resume() }
+        settled = [:]
+    }
+
+    private func release(_ waiter: UUID) {
+        settled.removeValue(forKey: waiter)?.resume()
+    }
+
+    /// Whether a relay is parked, waiting on what is owed.
+    var isWaiting: Bool { !settled.isEmpty }
+
+    /// How many requests read under `id` are not yet answered.
+    func owing(_ id: ID) -> Int { owed[id] ?? 0 }
+
+    /// Returns once nothing is owed, or once the wait is cancelled: a session stopped from
+    /// inside, as `server.stop` does, will never send the answers it would be waiting on.
+    /// What it gives up on is said, by id. [LAW:no-silent-failure]
     private func everythingAnswered() async {
-        if owed.isEmpty { return }
-        await withCheckedContinuation { settled.append($0) }
+        if !owed.isEmpty { logger.info("stdin ended, waiting on answers owed", metadata: ["owed": owedNow]) }
+        let waiter = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if owed.isEmpty || Task.isCancelled { continuation.resume() } else { settled[waiter] = continuation }
+            }
+        } onCancel: {
+            Task { await self.release(waiter) }
+        }
+        if !owed.isEmpty { logger.warning("session stopped with answers owed", metadata: ["owed": owedNow]) }
+    }
+
+    /// What is owed, as one line a person can read: each id as JSON writes it, so `7` and
+    /// `"7"` stay two ids, with its count, in a fixed order.
+    private var owedNow: Logger.MetadataValue {
+        .string(owed.map { id, count in
+            switch id {
+            case .string(let text): "\"\(text)\"×\(count)"
+            case .number(let number): "\(number)×\(count)"
+            }
+        }.sorted().joined(separator: ", "))
     }
 
     func receive() -> AsyncThrowingStream<Data, any Error> {
