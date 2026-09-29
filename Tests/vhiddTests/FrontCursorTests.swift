@@ -88,6 +88,15 @@ import Testing
         } throws: { "\($0)".contains("answered 'could not join audit session 100003: errno 1'") }
     }
 
+    @Test func aChildThatNeverSaysItJoinedIsGivenUpOnAndEnded() {
+        let began = ContinuousClock.now
+        #expect {
+            try ChildReader(in: bmf, executable: "/bin/sh", arguments: ["-c", "trap '' TERM; sleep 30"], patience: .milliseconds(300))
+        } throws: { "\($0)".contains("did not answer within") }
+        // Returning at all means the child was reaped: `stop` waits for it.
+        #expect(began.duration(to: .now) < .seconds(2))
+    }
+
     @Test func aChildThatHasEndedFailsTheReadAndNotTheDaemon() throws {
         let reader = try child("exit 0")
         defer { reader.stop() }

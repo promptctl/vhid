@@ -140,20 +140,22 @@ final class ChildReader: FrontCursor.Reader {
         }
         requests = stdin[1]
         answers = stdout[0]
-        // A child that has ended must fail the write, not raise SIGPIPE in the daemon.
-        // [LAW:no-silent-failure] SIGPIPE ends vhidd without a word, holding what it held.
-        _ = fcntl(requests, F_SETNOSIGPIPE, 1)
         defer { close(stdin[0]); close(stdout[1]) }
         do {
+            // A child that has ended must fail the write, not raise SIGPIPE in the daemon.
+            // [LAW:no-silent-failure] SIGPIPE ends vhidd without a word, holding what it held.
+            guard fcntl(requests, F_SETNOSIGPIPE, 1) == 0 else { throw Failed(session: session, what: "could not refuse SIGPIPE: errno \(errno)") }
             pid = try spawn(executable, arguments, stdio: [0: stdin[0], 1: stdout[1]])
         } catch {
             close(requests); close(answers)
             throw error
         }
-        let joined = try answerLine(by: .now + patience)
-        guard joined == joinedAnswer else {
+        do {
+            let joined = try answerLine(by: .now + patience)
+            guard joined == joinedAnswer else { throw Failed(session: session, what: "answered '\(joined)'") }
+        } catch {
             stop()
-            throw Failed(session: session, what: "answered '\(joined)'")
+            throw error
         }
     }
 
