@@ -173,9 +173,10 @@ service=$("$payload/usr/local/bin/vhid" service)
 # for above: the one a bug report will quote. A binary lipo joined and codesign rewrote
 # is only known to start once it has, and eyes' slices come from two builds, each
 # stamped by a plugin of its own, so no slice's version is assumed from another's.
-# x86_64 runs under Rosetta. [LAW:single-enforcer]
+# Both slices the pkg promises, named rather than read back, so a missing one fails to
+# run. x86_64 runs under Rosetta. [LAW:single-enforcer]
 for tool in vhid eyes; do
-  for arch in $(lipo -archs "$payload/usr/local/bin/$tool"); do
+  for arch in arm64 x86_64; do
     packed=$(arch "-$arch" "$payload/usr/local/bin/$tool" --version 2>"$work/said") \
       || fail "the packed $tool ($arch) does not run: $(cat "$work/said")"
     [ "$packed" = "$version" ] \
