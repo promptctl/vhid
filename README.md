@@ -167,7 +167,7 @@ over SSH on macOS 15 with vhid 0.1.0:
 
 - **Clicks need the user in front.** vhid steers the pointer by reading the cursor back,
   and macOS answers (0, 0) to a caller who is not the user in front. `click`, `move` and
-  `drag` then stop with `the cursor would not reach`, except for a point within one step
+  `drag` then stop with `the cursor would not reach`, except for a target within half a point
   of (0, 0), which counts as reached: the click reports success and presses wherever
   the pointer really is. With another user in front, the device still moves the pointer;
   only reading it back fails.

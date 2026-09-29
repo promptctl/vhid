@@ -18,12 +18,13 @@ set -uo pipefail
 # one row per place, in its order: name | how a keystroke shows it landed | whether the cursor reads | what to arrange.
 places='console|shell|yes|Terminal frontmost, logged in as the SSH user
 secure-input|shell|yes|as console, with Terminal > Secure Keyboard Entry on
-password-prompt|auth|yes|a system password prompt focused, e.g. osascript -e '"'"'do shell script "true" with administrator privileges'"'"'
+password-prompt|auth|yes|a system password prompt focused, raised in the user'"'"'s GUI session, since one started over plain SSH has no UI: sudo launchctl asuser <uid> sudo -u <user> osascript -e '"'"'do shell script "true" with administrator privileges'"'"'
 lock-screen|auth|yes|the SSH user'"'"'s lock screen, its password field focused (Control-Command-Q)
 login-window|auth|no|the login window with nobody logged in, a user'"'"'s password field focused
 fast-user-switch|auth|no|the login window after fast user switching, the SSH user in the background, a password field focused'
 
-host=${1:?usage: scripts/reach <host> [place]}
+[ $# -ge 1 ] || { echo "usage: scripts/reach <host> [place]" >&2; exit 2; }
+host=$1
 if [ $# -lt 2 ]; then
   echo "$places" | awk -F'|' '{ printf "%-17s %s\n", $1, $4 }'
   exit 0
@@ -35,7 +36,8 @@ $row
 EOF
 
 # Every call runs on the target, where vhid is installed and not on a non-login PATH.
-on() { ssh -o ConnectTimeout=10 "$host" "PATH=/usr/local/bin:\$PATH; $1"; }
+# One connection shared by every call, closed a minute after the last.
+on() { ssh -o ConnectTimeout=10 -o ControlMaster=auto -o "ControlPath=/tmp/reach-%C" -o ControlPersist=60 "$host" "PATH=/usr/local/bin:\$PATH; $1"; }
 
 failed=0
 cell() { # column, expected, observed, matched
@@ -47,29 +49,40 @@ echo "place      $place: $setup"
 echo "target     $(on 'sw_vers -productVersion; vhid --version' | paste -sd ' ' -) (macOS, vhid)"
 front=$(on 'lsappinfo info -only name "$(lsappinfo front)"' | sed 's/.*="//; s/"$//')
 echo "front      $front"
-# The sessions macOS keeps, from IOConsoleUsers: who holds the console, whether the SSH
-# user has a session at all, which is locked, and who holds secure input.
+# The sessions macOS keeps, from IOConsoleUsers: who holds the console, how many sessions
+# the SSH user has, and whether the session in front is locked or has secure input on.
 me=$(on 'id -un')
 console=$(on 'stat -f %Su /dev/console')
-sessions=$(on 'ioreg -n Root -d1 -a')
-mine=$(echo "$sessions" | grep -A1 kCGSSessionUserNameKey | grep -c "<string>$me</string>")
-locked=$(echo "$sessions" | grep -A1 CGSSessionScreenIsLocked | grep -c true)
-secure=$(echo "$sessions" | grep -A1 kCGSSessionSecureInputPID | grep -c integer)
-echo "sessions   console $console; $me has $mine session(s); $locked locked; $secure holding secure input"
+sessions=$(on 'ioreg -n Root -d1 -a | plutil -extract IOConsoleUsers xml1 -o - -')
+field() { echo "$sessions" | plutil -extract "$1" raw -o - - 2>/dev/null; }
+mine=0 locked=false holder=none i=0
+# Walks the array until plutil finds no index i; that miss is the loop's end, not an error.
+while name=$(field $i.kCGSSessionUserNameKey); do
+  [ "$name" = "$me" ] && mine=$((mine + 1))
+  if [ "$(field $i.kCGSSessionOnConsoleKey)" = true ]; then
+    # macOS sets these keys only while true: a missing one is an unlocked session, or
+    # nobody holding secure input.
+    [ "$(field $i.CGSSessionScreenIsLocked)" = true ] && locked=true
+    pid=$(field $i.kCGSSessionSecureInputPID) && holder=$(basename "$(on "ps -p $pid -o comm=")")
+  fi
+  i=$((i + 1))
+done
+echo "sessions   console $console; $me has $mine session(s); in front: locked $locked, secure input held by $holder"
 
 # The place is arranged before anything is typed or clicked: on the wrong screen the
 # keystrokes would go to whatever is there, and no cell below could speak for the place.
+# The login window holds the console as root.
 case $place in
-  console) wanted="$me in Terminal, unlocked"; [ "$console" = "$me" ] && [ "$front" = Terminal ] && [ "$locked" = 0 ] ;;
-  secure-input) wanted="$me in Terminal, secure input"; [ "$console" = "$me" ] && [ "$front" = Terminal ] && [ "$secure" -gt 0 ] ;;
-  password-prompt) wanted="$me in front, unlocked"; [ "$console" = "$me" ] && [ "$locked" = 0 ] ;;
-  lock-screen) wanted="$me in front, locked"; [ "$console" = "$me" ] && [ "$locked" -gt 0 ] ;;
-  login-window) wanted="nobody logged in"; [ "$console" != "$me" ] && [ "$mine" = 0 ] ;;
-  fast-user-switch) wanted="$me in the background"; [ "$console" != "$me" ] && [ "$mine" -gt 0 ] ;;
+  console) wanted="$me in Terminal, unlocked"; [ "$console" = "$me" ] && [ "$front" = Terminal ] && [ $locked = false ] ;;
+  secure-input) wanted="$me in Terminal, its secure input"; [ "$console" = "$me" ] && [ "$front" = Terminal ] && [ "$holder" = Terminal ] ;;
+  password-prompt) wanted="$me, SecurityAgent in front"; [ "$console" = "$me" ] && [ "$front" = SecurityAgent ] ;;
+  lock-screen) wanted="$me in front, locked"; [ "$console" = "$me" ] && [ $locked = true ] ;;
+  login-window) wanted="root, no session of $me"; [ "$console" = root ] && [ $mine = 0 ] ;;
+  fast-user-switch) wanted="root, $me in the background"; [ "$console" = root ] && [ $mine -gt 0 ] ;;
 esac
 rc=$?
 
-cell arranged "$wanted" "$console in $front, $locked locked, $secure secure" $rc
+cell arranged "$wanted" "$console in $front, locked $locked, secure $holder, $mine of $me" $rc
 [ $rc = 0 ] || exit 1
 
 doctor=$(on 'vhid doctor' 2>&1)
@@ -100,7 +113,7 @@ landed=$(on "$effect" 2>&1); rc=$?
 landed=$(echo "$landed" | head -n 1)
 cell keystroke "$evidence evidence" "${landed:-nothing}" $rc
 
-# A point away from the corner: within one step of (0, 0) a click reports success
+# A point away from the corner: within half a point of (0, 0) a click reports success
 # without being placed (docs/design/remote-hands.md).
 x=40 y=400
 clicked=$(on "vhid click $x $y" 2>&1); clicked_rc=$?
