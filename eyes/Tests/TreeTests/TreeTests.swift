@@ -593,5 +593,6 @@ extension Covers {
             ($0 as? TreeError)?.missingGrant == true
         }
         #expect(await asked.grants == [.accessibility])
+        #expect(Grant.accessibility.reader == reader.source)
     }
 }

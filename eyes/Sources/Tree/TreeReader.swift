@@ -30,7 +30,7 @@ public struct TreeReader: Reader {
     /// not inherit its parent's.
     static let messagingTimeout: Float = 0.5
 
-    nonisolated static let grant = Grant(neededBy: .tree)!
+    nonisolated static let grant = Grant.accessibility
 
     private let granted: Gate
 

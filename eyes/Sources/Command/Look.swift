@@ -46,7 +46,8 @@ extension SourceKind: ExpressibleByArgument {
     /// Every reader's gate: a fresh reading, the one `eyes grants` prints, so a reader and
     /// the grants tool cannot disagree - and a grant switched on under a running `eyes mcp`
     /// is seen by its next read. [LAW:one-source-of-truth]
-    private static let granted: Gate = { try await GrantsVerb.reading().holds($0) }
+    private static let granted: Gate = { try await readings.holds($0) }
+    private static let readings = SharedReading(take: GrantsVerb.reading)
 
     /// The scope line's name for who looked.
     var looked: String {

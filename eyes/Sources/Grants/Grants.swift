@@ -33,12 +33,6 @@ public enum Grant: String, CaseIterable, Sendable {
         }
     }
 
-    /// The grant `reader` cannot look without; none for merged, which looks with either.
-    public init?(neededBy reader: SourceKind) {
-        guard let grant = Grant.allCases.first(where: { $0.reader == reader }) else { return nil }
-        self = grant
-    }
-
     public var pane: String { "System Settings > Privacy & Security > \(name)" }
 
     /// Whether this process holds it, read without ever putting a dialog on screen.
@@ -65,9 +59,32 @@ public enum Grant: String, CaseIterable, Sendable {
     }
 }
 
-/// Whether a grant is held, asked by a reader before it looks. In the binary it is a fresh
-/// reading, because a long-lived process's own answer goes stale; see `GrantReading.here()`.
+/// Whether a grant is held, asked by a reader before it looks. In the binary it is a
+/// `SharedReading`, because a long-lived process's own answer goes stale; see `GrantReading.here()`.
 public typealias Gate = @Sendable (Grant) async throws -> Bool
+
+/// One process's readings, shared by every gate: a reading taken less than `fresh` ago
+/// answers them all, so a merged look and a wait's polls take one reading, not one each.
+/// A reading still being taken is waited on, never taken twice. A failed reading is shared
+/// like any other, and says itself to every gate it answers. [LAW:no-silent-failure]
+public actor SharedReading {
+    private let take: @Sendable () async throws -> GrantReading
+    private let fresh: Duration
+    private var latest: (at: ContinuousClock.Instant, reading: Task<GrantReading, any Error>)?
+
+    public init(fresh: Duration = .seconds(1), take: @escaping @Sendable () async throws -> GrantReading) {
+        self.fresh = fresh
+        self.take = take
+    }
+
+    public func holds(_ grant: Grant) async throws -> Bool {
+        let now = ContinuousClock.now
+        if let latest, now - latest.at < fresh { return try await latest.reading.value.holds(grant) }
+        let reading = Task { [take] in try await take() }
+        latest = (now, reading)
+        return try await reading.value.holds(grant)
+    }
+}
 
 /// Which grants are held, at one moment.
 public struct GrantReading: Sendable, Equatable {

@@ -66,9 +66,32 @@ struct GrantsTests {
 /// Which reader needs which grant is said once, and read back the same way.
 struct GrantMappingTests {
     @Test func eachReaderNeedsTheGrantThatNamesIt() {
-        #expect(Grant(neededBy: .tree) == .accessibility)
-        #expect(Grant(neededBy: .pixels) == .screenRecording)
-        #expect(Grant(neededBy: .merged) == nil)
-        for grant in Grant.allCases { #expect(Grant(neededBy: grant.reader) == grant) }
+        #expect(Grant.accessibility.reader == .tree)
+        #expect(Grant.screenRecording.reader == .pixels)
+    }
+}
+
+/// Every gate of a process answers from one reading while it is fresh, and takes a new one after.
+struct SharedReadingTests {
+    actor Takes {
+        var count = 0
+        func take() -> GrantReading { count += 1; return GrantReading { $0 == .accessibility } }
+    }
+
+    @Test func gatesAskedTogetherShareOneReading() async throws {
+        let takes = Takes()
+        let shared = SharedReading(fresh: .seconds(60)) { await takes.take() }
+        async let pixels = shared.holds(.screenRecording)
+        async let tree = shared.holds(.accessibility)
+        #expect(try await (pixels, tree) == (false, true))
+        #expect(await takes.count == 1)
+    }
+
+    @Test func aStaleReadingIsTakenAgain() async throws {
+        let takes = Takes()
+        let shared = SharedReading(fresh: .zero) { await takes.take() }
+        _ = try await shared.holds(.accessibility)
+        _ = try await shared.holds(.accessibility)
+        #expect(await takes.count == 2)
     }
 }

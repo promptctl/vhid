@@ -14,7 +14,7 @@ import Vision
 public struct PixelReader: Reader {
     public let source = SourceKind.pixels
 
-    nonisolated static let grant = Grant(neededBy: .pixels)!
+    nonisolated static let grant = Grant.screenRecording
 
     private let granted: Gate
 

@@ -163,6 +163,7 @@ import Testing
             ($0 as? PixelsError)?.missingGrant == true
         }
         #expect(await asked.grants == [.screenRecording])
+        #expect(Grant.screenRecording.reader == reader.source)
     }
 }
 
