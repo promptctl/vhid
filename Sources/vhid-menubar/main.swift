@@ -28,7 +28,7 @@ final class Item: NSObject {
     /// One menu for the item's life, its items replaced on each reading, so a reading that
     /// lands while it is open updates it rather than swapping it out from under a click.
     private let menu = NSMenu()
-    private let setUp = SetUpWindow(installation: installation, readings: readings)
+    private let setUp = SetUpWindow(installation: installation, readNow: readNow)
 
     /// Shown from launch until the first reading lands, which a silent daemon delays by
     /// doctor's whole deadline: an item with no image has no width and is not there at all.
@@ -40,7 +40,8 @@ final class Item: NSObject {
         status.button!.image?.isTemplate = true
     }
 
-    func show(_ glance: Glance) {
+    func show(_ glance: Glance, _ readiness: Readiness) {
+        setUp.update(readiness)
         let button = status.button!
         button.image = symbol(glance.ready ? "keyboard" : "exclamationmark.triangle", described: glance.ready ? "vhid is ready" : "vhid is not ready")
         button.image?.isTemplate = true
@@ -103,10 +104,10 @@ final class Item: NSObject {
 /// failure. In that order, because doctor's status call may be what starts the daemon.
 /// The failure's deadline is short: a daemon that just answered doctor answers at once,
 /// and one that did not has already cost doctor's full deadline. [LAW:effects-at-boundaries]
-func read(_ installation: Installation) -> Glance {
+func read(_ installation: Installation) -> (Glance, Readiness) {
     let readiness = Readiness.read(for: installation)
     let lastFailure = Result { try HelperConnection(installation: installation, replyTimeout: .seconds(1)).lastFailure() }
-    return Glance(installation: installation, readiness: readiness, lastFailure: lastFailure, readAt: Date())
+    return (Glance(installation: installation, readiness: readiness, lastFailure: lastFailure, readAt: Date()), readiness)
 }
 
 // [LAW:no-ambient-temporal-coupling] One serial queue owns the readings - the menu's and
@@ -118,14 +119,22 @@ let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 let item = Item()
 
-// The handler is `@Sendable` and takes what it needs by value: written here, in top-level
-// code, it would otherwise be the main actor's, and run on this queue it traps.
+/// One reading, drawn by the menu and the set-up window when it lands. Run on the readings
+/// queue only: the timer runs it there directly, so a reading slower than the interval
+/// delays the next rather than stacking one behind another.
+/// `@Sendable`: written here, in top-level code, it would otherwise be the main actor's,
+/// and run on this queue it traps.
+let readAndShow: @Sendable () -> Void = { [installation, item] in
+    let (glance, readiness) = read(installation)
+    DispatchQueue.main.async { MainActor.assumeIsolated { item.show(glance, readiness) } }
+}
+
+/// A reading at once, for the set-up window, queued behind any the timer is taking.
+func readNow() { readings.async(execute: readAndShow) }
+
 let timer = DispatchSource.makeTimerSource(queue: readings)
 timer.schedule(deadline: .now(), repeating: interval)
-timer.setEventHandler { @Sendable [installation, item] in
-    let glance = read(installation)
-    DispatchQueue.main.async { MainActor.assumeIsolated { item.show(glance) } }
-}
+timer.setEventHandler(handler: readAndShow)
 timer.resume()
 
 withExtendedLifetime(timer) { app.run() }

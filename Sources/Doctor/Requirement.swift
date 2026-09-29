@@ -1,4 +1,5 @@
 import DriverExtension
+import Foundation
 import Installations
 
 /// One thing that must hold before a vhid verb can reach the devices, as this Mac actually
@@ -31,13 +32,36 @@ public struct Requirement: Sendable, Hashable {
     /// every step a person does in a Terminal or in System Settings by hand.
     public let ask: Ask?
 
+    /// Where System Settings holds the switch the step names, when it does: only states a
+    /// person turns on there have one, so a surface never offers a pane with nothing in it.
+    public let settingsPane: URL?
+
+    /// The earlier row whose being unmet is why this one could not be read, when that is
+    /// the whole of its step: nothing can be done here until that row is. A surface that
+    /// walks the rows one at a time passes over these, since the row they wait on is the
+    /// step. [LAW:types-are-the-program]
+    public let waitsOn: Row?
+
     public var met: Bool { step == nil }
 
-    init(row: Row, reads: String, step: String?, ask: Ask? = nil) {
+    init(row: Row, reads: String, step: String?, ask: Ask? = nil, settingsPane: URL? = nil) {
         self.row = row
         self.reads = reads
         self.step = step
         self.ask = ask
+        self.settingsPane = settingsPane
+        waitsOn = nil
+    }
+
+    /// A row that waits on another says so in the words every waiting row uses, derived
+    /// from the row it waits on, so the step and `waitsOn` cannot disagree.
+    init(row: Row, reads: String, waitsOn earlier: Row, why: String? = nil) {
+        self.row = row
+        self.reads = reads
+        ask = nil
+        settingsPane = nil
+        step = [why, "Read once the \(earlier.rawValue) row above is met."].compactMap { $0 }.joined(separator: "\n")
+        waitsOn = earlier
     }
 
     /// The requests a surface can make on a person's behalf, each one making macOS ask them.
@@ -163,15 +187,6 @@ public struct Readiness: Sendable, Hashable, CustomStringConvertible {
 
 // MARK: - shared wording
 
-/// The step of a row whose fact is not read until an earlier row is met.
-///
-/// Unmet rather than met or absent: nothing was read, so nothing may be claimed, and a
-/// row that dropped out of the list would leave a reader unsure it was ever checked. The
-/// step names the row in the way, so it sends the reader somewhere rather than nowhere.
-/// [LAW:no-silent-failure]
-private func waitsOn(_ row: Requirement.Row) -> String {
-    "Read once the \(row.rawValue) row above is met."
-}
 
 /// The daemon's log, which is where it says anything it has to say: it is a daemon, and
 /// its only voice is `os_log` under its own service name.
@@ -233,10 +248,13 @@ public extension Requirement {
     /// registration nobody approved needs a click, and a Mac mid-removal needs a restart.
     static func driverExtension(_ state: DriverState) -> Requirement {
         // Only an inactive registration is one a button can ask for: the Manager's
-        // `activate` files the request macOS then shows. Every other state is a click in
-        // System Settings, an install, or a restart.
+        // `activate` files the request macOS then shows. Only a registration awaiting
+        // approval or switched off is a switch in System Settings. Every other state is an
+        // install, a removal, or a restart.
         Requirement(row: .driverExtension, reads: state.rawValue, step: state.step,
-                    ask: state == .installedInactive ? .activateDriver : nil)
+                    ask: state == .installedInactive ? .activateDriver : nil,
+                    settingsPane: [.awaitingApproval, .disabled].contains(state)
+                        ? URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension") : nil)
     }
 }
 
@@ -397,7 +415,14 @@ public extension Requirement {
     /// reads like broken XPC and costs an afternoon before anyone suspects the signature.
     /// This row is that afternoon, spent once.
     static func signature(_ reading: DaemonReading, installation: Installation) -> Requirement {
-        Requirement(row: .signature, reads: signatureReads(reading), step: signatureStep(reading, installation: installation))
+        let reads = signatureReads(reading)
+        return switch reading {
+        case .answered, .devicesDown: Requirement(row: .signature, reads: reads, step: nil)
+        case .refusedThisVhid: Requirement(row: .signature, reads: reads, step: refusedStep(installation))
+        // [LAW:no-silent-failure] Unmet rather than met or dropped: nothing was read, so
+        // nothing may be claimed, and the step names the row in the way.
+        case .unreachable, .silent, .failed: Requirement(row: .signature, reads: reads, waitsOn: .daemon)
+        }
     }
 
     private static func signatureReads(_ reading: DaemonReading) -> String {
@@ -408,12 +433,8 @@ public extension Requirement {
         }
     }
 
-    private static func signatureStep(_ reading: DaemonReading, installation: Installation) -> String? {
-        switch reading {
-        case .answered, .devicesDown:
-            nil
-        case .refusedThisVhid:
-            """
+    private static func refusedStep(_ installation: Installation) -> String {
+        """
             The daemon on \(installation.service) admits only callers signed with
             its own certificate. A tree built with bare `swift build` is signed
             ad hoc; sign it from the root of that tree:
@@ -424,9 +445,6 @@ public extension Requirement {
             vhid is signed, restart the daemon so it runs the build beside it:
                 sudo launchctl kickstart -k system/\(installation.launchdLabel)
             """
-        case .unreachable, .silent, .failed:
-            waitsOn(.daemon)
-        }
     }
 }
 
@@ -439,7 +457,15 @@ public extension Requirement {
     /// refused as busy. Nothing here takes them back: which process that is and whether it
     /// should stop is its owner's call, and doctor says only whose they are.
     static func devices(_ reading: DaemonReading) -> Requirement {
-        Requirement(row: .devices, reads: devicesReads(reading), step: devicesStep(reading))
+        let reads = devicesReads(reading)
+        return switch reading {
+        case .answered(nil): Requirement(row: .devices, reads: reads, step: nil)
+        case .answered(let holder?): Requirement(row: .devices, reads: reads, step: heldStep(holder))
+        // The daemon refused to say, and it refused on the signature: that row is what
+        // stands in the way, not the daemon's.
+        case .refusedThisVhid: Requirement(row: .devices, reads: reads, waitsOn: .signature)
+        case .devicesDown, .unreachable, .silent, .failed: Requirement(row: .devices, reads: reads, waitsOn: .daemon)
+        }
     }
 
     private static func devicesReads(_ reading: DaemonReading) -> String {
@@ -451,23 +477,12 @@ public extension Requirement {
         }
     }
 
-    private static func devicesStep(_ reading: DaemonReading) -> String? {
-        switch reading {
-        case .answered(nil):
-            nil
-        case .answered(let holder?):
-            """
-            pid \(holder) holds the devices, and a verb from here is refused as
-            busy until it hands them back. Which process that is:
-                ps -o command= -p \(holder)
-            """
-        // The daemon refused to say, and it refused on the signature: that row is what
-        // stands in the way, not the daemon's.
-        case .refusedThisVhid:
-            waitsOn(.signature)
-        case .devicesDown, .unreachable, .silent, .failed:
-            waitsOn(.daemon)
-        }
+    private static func heldStep(_ holder: Int32) -> String {
+        """
+        pid \(holder) holds the devices, and a verb from here is refused as
+        busy until it hands them back. Which process that is:
+            ps -o command= -p \(holder)
+        """
     }
 }
 
@@ -492,9 +507,20 @@ public extension Requirement {
     ///   flag lifted off it, so this row cannot say a daemon started while that one says
     ///   none answered. [LAW:one-source-of-truth] [LAW:no-ambient-temporal-coupling]
     static func keyboardSetupAssistant(answered: Bool, daemon: DaemonReading, installation: Installation) -> Requirement {
-        Requirement(row: .keyboardSetupAssistant,
-            reads: answered ? "answered ANSI for the virtual keyboard" : "no ANSI answer on file for the virtual keyboard",
-            step: answered ? nil : keyboardSetupAssistantStep(daemonHasStarted: daemon.daemonHasStarted, installation: installation))
+        let reads = answered ? "answered ANSI for the virtual keyboard" : "no ANSI answer on file for the virtual keyboard"
+        return switch (answered, daemon.daemonHasStarted) {
+        case (true, _): Requirement(row: .keyboardSetupAssistant, reads: reads, step: nil)
+        case (false, true):
+            Requirement(row: .keyboardSetupAssistant, reads: reads, step: """
+                \(keyboardSetupAssistantOpening) and it has started - so the
+                filing is what failed. It logged why as it started, which may be
+                further back than this window; widen it if nothing comes back:
+                    \(daemonLog(installation, last: "24h"))
+                """)
+        case (false, false):
+            Requirement(row: .keyboardSetupAssistant, reads: reads, waitsOn: .daemon,
+                        why: "\(keyboardSetupAssistantOpening) so this clears once a daemon\nhas started.")
+        }
     }
 
     /// Both arms open the same way, because the reader needs the same fact either way: the
@@ -504,20 +530,9 @@ public extension Requirement {
     /// logged once, at the daemon's start, and a `KeepAlive` daemon can have started long
     /// before this ran. An empty window is what a reader takes for "no failure here", which
     /// is the silence this arm exists to break. [LAW:no-silent-failure]
-    private static func keyboardSetupAssistantStep(daemonHasStarted: Bool, installation: Installation) -> String {
-        let opening = """
-            macOS raises Keyboard Setup Assistant the first time the virtual
-            keyboard types, and it takes those keystrokes. The daemon files the
-            keyboard's answer as it starts,
-            """
-        return daemonHasStarted ? """
-            \(opening) and it has started - so the
-            filing is what failed. It logged why as it started, which may be
-            further back than this window; widen it if nothing comes back:
-                \(daemonLog(installation, last: "24h"))
-            """ : """
-            \(opening) so this clears once a daemon
-            has started: see the \(Row.daemon.rawValue) row above.
-            """
-    }
+    private static let keyboardSetupAssistantOpening = """
+        macOS raises Keyboard Setup Assistant the first time the virtual
+        keyboard types, and it takes those keystrokes. The daemon files the
+        keyboard's answer as it starts,
+        """
 }

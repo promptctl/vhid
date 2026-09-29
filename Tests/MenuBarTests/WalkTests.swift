@@ -19,7 +19,7 @@ import Testing
         }
         #expect(requirement.row == .driverExtension)
         #expect(left == 1)
-        #expect(requirement.row.settingsPane?.absoluteString == "x-apple.systempreferences:com.apple.LoginItems-Settings.extension")
+        #expect(requirement.settingsPane?.absoluteString == "x-apple.systempreferences:com.apple.LoginItems-Settings.extension")
     }
 
     /// Turning the driver on is the next reading, and the next reading is the summary with
@@ -60,11 +60,39 @@ import Testing
         }
     }
 
-    /// What the window logs for each page names the row, its reading, and the count.
-    @Test func thePageEventNamesWhatIsShown() {
-        let readiness = Self.readiness(driver: .awaitingApproval)
-        #expect(Walk().page(readiness).description == "step Driver extension (awaiting-approval), 1 left")
-        #expect(Walk().page(Self.readiness(driver: .running)).description == "summary, \(Requirement.Row.allCases.count) met, 0 set aside")
+    /// What the window logs names the row, its reading, the count, and a request's fate.
+    @Test func setUpEventsNameWhatHappened() {
+        #expect(SetUpEvent.page(Walk().page(Self.readiness(driver: .awaitingApproval))).description
+            == "setup page: step Driver extension (awaiting-approval), 1 left")
+        #expect(SetUpEvent.page(Walk().page(Self.readiness(driver: .running))).description
+            == "setup page: summary, \(Requirement.Row.allCases.count) met, 0 set aside")
+        #expect(SetUpEvent.skip(.driverExtension).description == "setup skip: Driver extension")
+        #expect(SetUpEvent.askFailed(.activateDriver, reason: "no Manager").description == "setup ask: activateDriver could not start: no Manager")
+        #expect(SetUpEvent.askEnded(.activateDriver, status: 0, said: "").description == "setup ask: activateDriver ended 0: said nothing")
+    }
+
+    /// A Mac whose driver awaits approval has its daemon's devices down, and the rows that
+    /// wait on the daemon are no steps of their own: the walk is the driver and the daemon.
+    @Test func rowsWaitingOnAnEarlierRowAreNotSteps() {
+        let readiness = Self.readiness(driver: .awaitingApproval, daemon: .devicesDown(reason: "the driver is not running"))
+        var walk = Walk()
+        guard case .step(let first, let left) = walk.page(readiness) else { Issue.record("expected a step"); return }
+        #expect(first.row == .driverExtension)
+        #expect(left == 2)
+        walk.skip(.driverExtension)
+        walk.skip(.daemon)
+        guard case .summary(_, let unmet) = walk.page(readiness) else { Issue.record("expected the summary"); return }
+        #expect(unmet.contains { $0.row == .devices && $0.waitsOn == .daemon })
+    }
+
+    /// System Settings is offered only for a driver whose switch is there.
+    @Test func onlyADriverWithASwitchOffersSystemSettings() {
+        for state: DriverState in [.awaitingApproval, .disabled] {
+            #expect(Requirement.driverExtension(state).settingsPane != nil, "\(state)")
+        }
+        for state: DriverState in [.absent, .installedInactive, .pendingReboot, .residue, .unknown] {
+            #expect(Requirement.driverExtension(state).settingsPane == nil, "\(state)")
+        }
     }
 
     /// Every row has words for why it is asked and what skipping it costs.
@@ -77,7 +105,7 @@ import Testing
     /// Every step that ends in macOS's activation dialog names the product that dialog
     /// names, which is not vhid.
     @Test func stepsThatActivateNameTheManager() {
-        for state: DriverState in [.absent, .installedInactive] {
+        for state: DriverState in [.absent, .installedInactive, .residue] {
             #expect(state.step?.contains("\"Karabiner-VirtualHIDDevice-Manager\"") == true, "\(state)")
         }
     }

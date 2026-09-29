@@ -8,28 +8,25 @@ import os
 /// The set-up window: doctor's unmet rows one at a time, each explained before the person
 /// presses the button that makes macOS ask.
 ///
-/// [LAW:one-source-of-truth] It draws a `Readiness` and keeps nothing of its own but the
-/// walk. Every page is drawn from a reading taken for it: when the window opens, when it
+/// [LAW:one-source-of-truth] It draws the menu's readings and keeps nothing of its own but
+/// the walk. It takes none itself: the menu reads the Mac every few seconds on its one
+/// serial queue, and the window asks that queue for one at once when it opens, when it
 /// comes back to the front - which is when a person returns from System Settings - and
-/// after every button. A step met anywhere clears at the next of those, with no relaunch.
+/// after every button. A step met anywhere clears at the next reading, with no relaunch.
 ///
 /// Taken from low-talker's SetUpWindow, which drew from a reading taken on the main thread.
-/// Doctor's reading can wait out a silent daemon's whole deadline, so here it is taken on
-/// the menu's serial `readings` queue and drawn when it lands.
 @MainActor
 final class SetUpWindow: NSObject, NSWindowDelegate {
-    private let installation: Installation
     private var walk = Walk()
-    private let readings: DispatchQueue
-    /// Why the last request could not be made, shown on its row's page until the next
-    /// reading, which says where that row stands now.
-    private var failure: (row: Requirement.Row, reason: String)?
-    /// The reading on screen, which skipping and revisiting redraw from: neither changes
-    /// anything on the Mac, so neither is worth a fresh reading.
+    /// Asks the menu's readings queue for a reading now, which lands in `update`.
+    private let readNow: @MainActor () -> Void
+    /// Why a request could not be made, shown while its row reads as it did when the
+    /// request was refused: a reading that says something new about that row is a page
+    /// the reason no longer describes.
+    private var failure: (requirement: Requirement, reason: String)?
+    /// The newest reading, drawn whenever the window is open, and redrawn by skipping and
+    /// revisiting, which change nothing on the Mac.
     private var shown: Readiness?
-    /// A reading is queued and not yet begun: asking again then adds nothing, since the
-    /// queued one has not looked at the Mac yet.
-    private var queued = false
 
     private let log: Logger
 
@@ -55,9 +52,8 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
 
     private static let width: CGFloat = 540
 
-    init(installation: Installation, readings: DispatchQueue) {
-        self.installation = installation
-        self.readings = readings
+    init(installation: Installation, readNow: @escaping @MainActor () -> Void) {
+        self.readNow = readNow
         log = Logger(subsystem: installation.service, category: "setup")
     }
 
@@ -65,48 +61,35 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
     func show() {
         walk = Walk()
         failure = nil
-        let wasKey = window.isKeyWindow
         if let shown { draw(shown) } else { drawReading() }
         window.center()
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
-        // A window that was key already does not become key again.
-        if wasKey || !window.isKeyWindow { refresh() }
+        readNow()
+    }
+
+    /// Every reading the menu takes; drawn while the window is open.
+    func update(_ readiness: Readiness) {
+        shown = readiness
+        if window.isVisible { draw(readiness) }
     }
 
     /// Back at the front, most often from System Settings: where a step met there is first
     /// seen.
-    func windowDidBecomeKey(_ notification: Notification) { refresh() }
+    func windowDidBecomeKey(_ notification: Notification) { readNow() }
 
-    /// Queues a reading of doctor behind the menu's and draws it when it lands. Asked for
-    /// again while one waits its turn, it adds nothing; asked while one is being taken, it
-    /// queues the next, since the Mac may have changed after that one looked.
-    private func refresh() {
-        guard !queued else { return }
-        queued = true
-        readings.async { @Sendable [installation, weak self] in
-            DispatchQueue.main.sync { MainActor.assumeIsolated { self?.queued = false } }
-            let readiness = Readiness.read(for: installation)
-            DispatchQueue.main.async { MainActor.assumeIsolated { self?.landed(readiness) } }
-        }
-    }
-
-    private func landed(_ readiness: Readiness) {
-        failure = nil
-        draw(readiness)
-    }
+    private func record(_ event: SetUpEvent) { log.info("\(event, privacy: .public)") }
 
     // MARK: - drawing
 
     private func draw(_ readiness: Readiness) {
-        shown = readiness
         clear()
         let page = walk.page(readiness)
         switch page {
         case .step(let requirement, let left): drawStep(requirement, left: left)
         case .summary(let met, let skipped): drawSummary(met: met, skipped: skipped)
         }
-        log.info("setup page: \(page, privacy: .public)")
+        record(.page(page))
         window.setContentSize(self.page.fittingSize)
     }
 
@@ -126,24 +109,23 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
         add(label(explanation.why, size: 13))
         add(label("If you skip it: \(explanation.ifSkipped)", size: 12, color: .secondaryLabelColor))
         add(label(requirement.stepLines.joined(separator: "\n"), size: 11, monospaced: true))
-        if let failure, failure.row == row {
+        if let failure, failure.requirement == requirement {
             add(label(failure.reason, size: 12, color: .systemRed))
         }
-        let ask = requirement.ask.map { request in button(request.title) { [unowned self] in self.request(request, for: row) } }
-        let openSettings = row.settingsPane.map { pane in button("Open System Settings") { [unowned self] in
-            self.log.info("setup open settings: \(row.rawValue, privacy: .public)")
+        let ask = requirement.ask.map { request in button(request.title) { [unowned self] in self.request(request, for: requirement) } }
+        let openSettings = requirement.settingsPane.map { pane in button("Open System Settings") { [unowned self] in
+            self.record(.openSettings(row))
             NSWorkspace.shared.open(pane)
         } }
-        // Every page can be read again by hand: a step met where this window cannot see it
-        // arriving - System Settings left open beside it - clears here.
+        // Every page can be read again by hand, though the menu reads on its own every few
+        // seconds: the button says the page is live, and does not make the person wait.
         let checkAgain = button("Check Again") { [unowned self] in
-            self.log.info("setup check again: \(row.rawValue, privacy: .public)")
-            self.refresh()
+            self.record(.checkAgain(row))
+            self.readNow()
         }
         let skip = button("Skip for Now") { [unowned self] in
-            self.log.info("setup skip: \(row.rawValue, privacy: .public)")
+            self.record(.skip(row))
             self.walk.skip(row)
-            self.failure = nil
             self.shown.map(self.draw)
         }
         // Return is the person choosing to be asked; else System Settings; else a fresh reading.
@@ -157,16 +139,21 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
         for requirement in met {
             add(label("✓ \(requirement.name): \(requirement.reads)", size: 13))
         }
-        // Each row set aside says what not having it costs, and offers the way back in.
+        // Each row set aside says what not having it costs, and offers the way back in. A
+        // row waiting on another has no way in of its own: it names the row that does.
         for requirement in skipped {
             let row = requirement.row
             add(label("\(requirement.name): \(requirement.reads)", size: 13, weight: .semibold))
             add(label(row.explanation.ifSkipped, size: 12, color: .secondaryLabelColor))
-            add(buttonRow([button("Set Up \(requirement.name)…") { [unowned self] in
-                self.log.info("setup revisit: \(row.rawValue, privacy: .public)")
-                self.walk.revisit(row)
-                self.shown.map(self.draw)
-            }]))
+            if let earlier = requirement.waitsOn {
+                add(label("Waits on \(earlier.rawValue).", size: 12, color: .secondaryLabelColor))
+            } else {
+                add(buttonRow([button("Set Up \(requirement.name)…") { [unowned self] in
+                    self.record(.revisit(row))
+                    self.walk.revisit(row)
+                    self.shown.map(self.draw)
+                }]))
+            }
         }
         let done = button("Done") { [unowned self] in self.window.close() }
         done.keyEquivalent = "\r"
@@ -179,34 +166,56 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
     /// person answers - on a Mac that never approved the driver, that answer is the switch
     /// in System Settings - and exits 0 whatever became of the request, so it is started
     /// and not waited on, as postinstall and scripts/virtual-hid-driver start it: whether
-    /// the request landed is the next reading's to say. [LAW:one-source-of-truth]
-    private func request(_ ask: Requirement.Ask, for row: Requirement.Row) {
-        do {
-            try Self.perform(ask)
-            log.info("setup ask: \(String(describing: ask), privacy: .public) started")
-            refresh()
-        } catch {
-            failure = (row, "The request could not be made: \(error)")
-            log.error("setup ask: \(String(describing: ask), privacy: .public) failed to start: \(error, privacy: .public)")
-            shown.map(draw)
+    /// the request landed is the readings' to say, and the menu's next one follows within
+    /// seconds of it landing. [LAW:one-source-of-truth]
+    private func request(_ ask: Requirement.Ask, for requirement: Requirement) {
+        failure = nil
+        let log = log
+        DispatchQueue.global(qos: .userInitiated).async {
+            let started = Result { try Self.perform(ask, log: log) }
+            DispatchQueue.main.async { MainActor.assumeIsolated { [weak self] in self?.requested(ask, for: requirement, started) } }
         }
+    }
+
+    private func requested(_ ask: Requirement.Ask, for requirement: Requirement, _ started: Result<Void, any Error>) {
+        switch started {
+        case .success:
+            record(.askStarted(ask))
+        case .failure(let error):
+            record(.askFailed(ask, reason: "\(error)"))
+            failure = (requirement, "The request could not be made: \(error)")
+        }
+        shown.map(draw)
+        readNow()
     }
 
     /// Runs one request as this process's user, which is the person: macOS attributes a
     /// driver activation to whoever asks, and the approval they give answers that request.
-    /// [LAW:effects-at-boundaries]
-    private static func perform(_ ask: Requirement.Ask) throws {
+    /// What the Manager prints, and its exit, are logged when it ends. [LAW:effects-at-boundaries]
+    nonisolated private static func perform(_ ask: Requirement.Ask, log: Logger) throws {
         switch ask {
         case .activateDriver:
-            // One left waiting - by postinstall, or an earlier walk - is ended first, so
-            // asking again does not pile them up. pkill exits 1 when none was waiting.
-            let ended = try Command("/usr/bin/pkill", "-u", "\(getuid())", "-f", "\(DriverProbe.managerExecutable) activate").run()
+            let manager = DriverProbe.managerExecutable
+            // One left waiting - by postinstall, or an earlier press - is ended first, so
+            // asking again does not pile them up. pkill's pattern is a regex, and the path's
+            // dots are escaped so it matches that path alone. pkill exits 1 when none was.
+            let pattern = NSRegularExpression.escapedPattern(for: "\(manager) activate")
+            let ended = try Command("/usr/bin/pkill", "-u", "\(getuid())", "-f", pattern).run()
             guard ended.status <= 1 else { throw ManagerError.pkill(ended.merged) }
-            let manager = Process()
-            manager.executableURL = URL(fileURLWithPath: DriverProbe.managerExecutable)
-            manager.arguments = ["activate"]
-            manager.standardInput = FileHandle.nullDevice
-            try manager.run()
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: manager)
+            process.arguments = ["activate"]
+            process.standardInput = FileHandle.nullDevice
+            let said = Pipe()
+            process.standardOutput = said
+            process.standardError = said
+            process.terminationHandler = { ended in
+                let output = String(decoding: said.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let event = SetUpEvent.askEnded(ask, status: ended.terminationStatus, said: output)
+                log.info("\(event, privacy: .public)")
+            }
+            try process.run()
         }
     }
 

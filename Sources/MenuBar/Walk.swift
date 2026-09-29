@@ -24,11 +24,11 @@ public struct Walk: Sendable, Hashable {
 
     /// What the window shows for a reading.
     public enum Page: Sendable, Hashable {
-        /// The first unmet row not set aside, and how many unmet rows not set aside are left,
-        /// this one included.
+        /// The first unmet row not set aside and not waiting on another, and how many such
+        /// rows are left, this one included.
         case step(Requirement, left: Int)
-        /// Nothing left that is not set aside: every row, met ones with their readings and
-        /// set-aside ones with what skipping them costs.
+        /// No step left: every row, met ones with their readings, and unmet ones - set aside,
+        /// or waiting on one that was - with what going without them costs.
         case summary(met: [Requirement], skipped: [Requirement])
     }
 
@@ -36,10 +36,12 @@ public struct Walk: Sendable, Hashable {
     /// list, never by a mode the window keeps.
     public func page(_ readiness: Readiness) -> Page {
         let unmet = readiness.requirements.filter { !$0.met }
-        guard let current = unmet.first(where: { !skipped.contains($0.row) }) else {
+        // A row waiting on an earlier one is no step of its own: the earlier row is.
+        let ahead = unmet.filter { $0.waitsOn == nil && !skipped.contains($0.row) }
+        guard let current = ahead.first else {
             return .summary(met: readiness.requirements.filter(\.met), skipped: unmet)
         }
-        return .step(current, left: unmet.filter { !skipped.contains($0.row) }.count)
+        return .step(current, left: ahead.count)
     }
 
     public mutating func skip(_ row: Requirement.Row) { skipped.insert(row) }
@@ -49,12 +51,31 @@ public struct Walk: Sendable, Hashable {
 
 }
 
-extension Walk.Page: CustomStringConvertible {
-    /// The page as the window's log records it.
+/// What the set-up window does, one event each, in the words its log records.
+/// [LAW:nothing-unseen] A value, so what the log says is tested beside the walk.
+public enum SetUpEvent: Sendable, Hashable, CustomStringConvertible {
+    case page(Walk.Page)
+    case skip(Requirement.Row)
+    case revisit(Requirement.Row)
+    case checkAgain(Requirement.Row)
+    case openSettings(Requirement.Row)
+    case askStarted(Requirement.Ask)
+    case askFailed(Requirement.Ask, reason: String)
+    /// The Manager a request started has exited, and what it said: its status proves
+    /// nothing - it exits 0 whatever became of the request - but what it printed may.
+    case askEnded(Requirement.Ask, status: Int32, said: String)
+
     public var description: String {
         switch self {
-        case .step(let requirement, let left): "step \(requirement.name) (\(requirement.reads)), \(left) left"
-        case .summary(let met, let skipped): "summary, \(met.count) met, \(skipped.count) set aside"
+        case .page(.step(let requirement, let left)): "setup page: step \(requirement.name) (\(requirement.reads)), \(left) left"
+        case .page(.summary(let met, let skipped)): "setup page: summary, \(met.count) met, \(skipped.count) set aside"
+        case .skip(let row): "setup skip: \(row.rawValue)"
+        case .revisit(let row): "setup revisit: \(row.rawValue)"
+        case .checkAgain(let row): "setup check again: \(row.rawValue)"
+        case .openSettings(let row): "setup open settings: \(row.rawValue)"
+        case .askStarted(let ask): "setup ask: \(ask) started"
+        case .askFailed(let ask, let reason): "setup ask: \(ask) could not start: \(reason)"
+        case .askEnded(let ask, let status, let said): "setup ask: \(ask) ended \(status): \(said.isEmpty ? "said nothing" : said)"
         }
     }
 }
@@ -91,14 +112,6 @@ public extension Requirement.Row {
             Explanation(
                 why: "macOS asks what kind of keyboard a new one is, in a window that takes the first keys typed. vhidd answers it for you.",
                 ifSkipped: "The first keys vhid types may go to that window instead.")
-        }
-    }
-
-    /// Where this row is switched by hand, when System Settings has a pane for it.
-    var settingsPane: URL? {
-        switch self {
-        case .driverExtension: URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension")
-        case .launchdJob, .daemon, .signature, .devices, .keyboardSetupAssistant: nil
         }
     }
 }
