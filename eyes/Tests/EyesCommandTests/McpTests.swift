@@ -50,8 +50,9 @@ import Testing
     /// A client connected to a server over `listing`, both torn down before this returns.
     private func connected<T>(_ body: (Client) async throws -> T) async throws -> T {
         let (clientSide, serverSide) = await InMemoryTransport.createConnectedPair()
-        let server = await Mcp.server(EyesTools.all(windows: { Self.listing }, frontmost: { Self.front }, displays: { DisplaysCommandTests.desk }, reading: Self.look, grants: { (Self.grantReading, Self.holder) }))
-        try await server.start(transport: serverSide)
+        let transport = AnsweringTransport(serverSide)
+        let server = await Mcp.server(EyesTools.all(windows: { Self.listing }, frontmost: { Self.front }, displays: { DisplaysCommandTests.desk }, reading: Self.look, grants: { (Self.grantReading, Self.holder) }), on: transport)
+        try await server.start(transport: transport)
         let client = Client(name: "test", version: "0")
         let result: Result<T, any Error>
         do {
@@ -75,8 +76,9 @@ import Testing
     @Test func theVersionIsTheStampedOne() async throws {
         #expect(Eye.configuration.version == Version.current)
         let (clientSide, serverSide) = await InMemoryTransport.createConnectedPair()
-        let server = await Mcp.server(EyesTools.all(windows: { Self.listing }, frontmost: { Self.front }, displays: { DisplaysCommandTests.desk }, reading: Self.look, grants: { (Self.grantReading, Self.holder) }))
-        try await server.start(transport: serverSide)
+        let transport = AnsweringTransport(serverSide)
+        let server = await Mcp.server(EyesTools.all(windows: { Self.listing }, frontmost: { Self.front }, displays: { DisplaysCommandTests.desk }, reading: Self.look, grants: { (Self.grantReading, Self.holder) }), on: transport)
+        try await server.start(transport: transport)
         let result: Initialize.Result
         do {
             result = try await Client(name: "test", version: "0").connect(transport: clientSide)

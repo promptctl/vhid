@@ -2,6 +2,7 @@ import ArgumentParser
 import Darwin
 import Foundation
 import Input
+import Installations
 import MCP
 import System
 import Version
@@ -32,9 +33,35 @@ struct McpCommand: AsyncParsableCommand {
 
     @OptionGroup var service: ServiceOption
 
-    /// The server as a client's initialize finds it, before any tool is attached.
-    static func server() -> Server {
-        Server(name: "vhid", version: Version.current, capabilities: .init(tools: .init(listChanged: false)))
+    /// The server as a client's initialize finds it, with `tools` attached to run against
+    /// `installation`, each call held `underway` on the transport it will be started on.
+    static func server(_ tools: [VerbTool] = Tools.all, on installation: Installation, over transport: AnsweringTransport) async -> Server {
+        let server = Server(name: "vhid", version: Version.current, capabilities: .init(tools: .init(listChanged: false)))
+        let turns = Turns()
+        await server.withMethodHandler(ListTools.self) { _ in .init(tools: tools.map(\.tool)) }
+        await server.withMethodHandler(CallTool.self) { request in
+            guard let verb = tools.first(where: { $0.tool.name == request.name }) else {
+                throw MCPError.invalidParams("there is no tool called \(request.name.debugDescription)")
+            }
+            // A verb that could not do what it was asked is a tool error, whose words the
+            // model reads; a protocol error is for a request that named no tool at all. A
+            // call the client withdrew is answered like any other, and the transport drops
+            // the answer, as the MCP spec says a cancelled request's is. What the verb said on
+            // the way out still goes to stderr, because it can be the one report of what the
+            // verb had already done when it was withdrawn. [LAW:no-silent-failure]
+            return try await transport.underway {
+                do {
+                    let said = try await turns.take { try await verb.call(request.arguments ?? [:], on: installation) }
+                    return .init(content: [.text(text: said, annotations: nil, _meta: nil)], isError: false)
+                } catch where Task.isCancelled {
+                    FileHandle.standardError.write(Data("vhid: \(request.name) withdrawn: \(error.reported)\n".utf8))
+                    return .init(content: [.text(text: "withdrawn: \(error.reported)", annotations: nil, _meta: nil)], isError: true)
+                } catch {
+                    return .init(content: [.text(text: error.reported, annotations: nil, _meta: nil)], isError: true)
+                }
+            }
+        }
+        return server
     }
 
     func run() async throws {
@@ -49,31 +76,9 @@ struct McpCommand: AsyncParsableCommand {
             throw Errno(rawValue: errno)
         }
 
-        let server = Self.server()
-        let turns = Turns()
-        await server.withMethodHandler(ListTools.self) { _ in .init(tools: Tools.all.map(\.tool)) }
-        await server.withMethodHandler(CallTool.self) { request in
-            guard let verb = Tools.all.first(where: { $0.tool.name == request.name }) else {
-                throw MCPError.invalidParams("there is no tool called \(request.name.debugDescription)")
-            }
-            // A verb that could not do what it was asked is a tool error, whose words the
-            // model reads; a protocol error is for a request that named no tool at all. A
-            // call the client withdrew is neither: it is thrown as a cancellation, which
-            // the SDK answers with nothing, as the MCP spec says a cancelled request is. What
-            // the verb said on the way out still goes to stderr, because it can be the one
-            // report of what the verb had already done when it was withdrawn.
-            // [LAW:no-silent-failure]
-            do {
-                let said = try await turns.take { try await verb.call(request.arguments ?? [:], on: installation) }
-                return .init(content: [.text(text: said, annotations: nil, _meta: nil)], isError: false)
-            } catch where Task.isCancelled {
-                FileHandle.standardError.write(Data("vhid: \(request.name) withdrawn: \(error.reported)\n".utf8))
-                throw CancellationError()
-            } catch {
-                return .init(content: [.text(text: error.reported, annotations: nil, _meta: nil)], isError: true)
-            }
-        }
-        try await server.start(transport: AnsweringTransport(StdioTransport(output: protocolOut)))
+        let transport = AnsweringTransport(StdioTransport(output: protocolOut))
+        let server = await Self.server(on: installation, over: transport)
+        try await server.start(transport: transport)
         await server.waitUntilCompleted()
     }
 }

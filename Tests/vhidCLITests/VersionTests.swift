@@ -1,4 +1,5 @@
 import Foundation
+import Installations
 import MCP
 import Testing
 import Version
@@ -49,8 +50,9 @@ import Version
 
     @Test func mcpInitializeReportsIt() async throws {
         let (clientSide, serverSide) = await InMemoryTransport.createConnectedPair()
-        let server = McpCommand.server()
-        try await server.start(transport: serverSide)
+        let transport = AnsweringTransport(serverSide)
+        let server = await McpCommand.server(on: Installation(service: "ai.promptctl.vhid.tests.nobody")!, over: transport)
+        try await server.start(transport: transport)
         let result: Initialize.Result
         do {
             result = try await Client(name: "test", version: "0").connect(transport: clientSide)
