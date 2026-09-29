@@ -95,9 +95,9 @@ public enum Telemetry {
     /// Sets a count on the unit underway.
     public static func count(_ key: String, _ value: Int) { current?.count(key, value) }
 
-    /// Adds one to a count on the unit underway, so a unit that ends early still says how
-    /// far it got.
-    public static func tally(_ key: String) { current?.tally(key) }
+    /// Adds to a count on the unit underway, so a unit that ends early still says how far
+    /// it got, and a unit that does a thing many times says its total.
+    public static func tally(_ key: String, by amount: Int = 1) { current?.tally(key, by: amount) }
 
     /// A W3C trace id: 16 random bytes, as hex.
     private static func newTrace() -> String {
@@ -113,7 +113,7 @@ final class Recorder: Sendable {
 
     func note(_ key: String, _ value: String) { state.withLock { $0.1[key] = value } }
     func count(_ key: String, _ value: Int) { state.withLock { $0.0[key] = value } }
-    func tally(_ key: String) { state.withLock { $0.0[key, default: 0] += 1 } }
+    func tally(_ key: String, by amount: Int) { state.withLock { $0.0[key, default: 0] += amount } }
     func taken() -> ([String: Int], [String: String]) { state.withLock { $0 } }
 }
 

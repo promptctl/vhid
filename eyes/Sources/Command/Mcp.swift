@@ -323,8 +323,9 @@ actor OneAtATime {
         let queued = ContinuousClock.now
         let mine = Task {
             _ = await before?.value
-            // [LAW:nothing-unseen] On the look's event, so a queued look is told from a slow read.
-            Telemetry.count("queued_ms", Int((ContinuousClock.now - queued) / .milliseconds(1)))
+            // [LAW:nothing-unseen] Summed on the look's event across a wait's polls, so a
+            // queued look is told from a slow read.
+            Telemetry.tally("queued_ms", by: Int((ContinuousClock.now - queued) / .milliseconds(1)))
             // A call withdrawn while it waited leaves without reading. [LAW:no-silent-failure]
             try Task.checkCancellation()
             return try await look(source, query)
