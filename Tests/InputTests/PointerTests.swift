@@ -15,12 +15,18 @@ import Testing
         let bmf = ConsoleUser(name: "bmf", uid: 501)
         let origin: @Sendable () -> CGPoint? = { CGPoint(x: 0, y: 0) }
         let there: @Sendable () -> CGPoint? = { CGPoint(x: 10, y: 10) }
-        #expect(throws: NoWindowServerSession.self) { try Pointer.sessionCursor(caller: 501, console: nil, location: origin) }
-        #expect(throws: NoWindowServerSession.self) { try Pointer.sessionCursor(caller: 0, console: nil, location: origin) }
-        let other = #expect(throws: NoWindowServerSession.self) { try Pointer.sessionCursor(caller: 503, console: bmf, location: origin) }
+        #expect(throws: NoWindowServerSession.self) { try Pointer.sessionCursor(caller: 501, console: { nil }, location: origin) }
+        #expect(throws: NoWindowServerSession.self) { try Pointer.sessionCursor(caller: 0, console: { nil }, location: origin) }
+        let other = #expect(throws: NoWindowServerSession.self) { try Pointer.sessionCursor(caller: 503, console: { bmf }, location: origin) }
         #expect(other?.description.contains("bmf's window-server session") == true)
-        #expect(try Pointer.sessionCursor(caller: 501, console: bmf, location: there)() == ScreenPoint(x: 10, y: 10)!)
-        #expect(try Pointer.sessionCursor(caller: 0, console: bmf, location: there)() == ScreenPoint(x: 10, y: 10)!)
+        #expect(try Pointer.sessionCursor(caller: 501, console: { bmf }, location: there)() == ScreenPoint(x: 10, y: 10)!)
+        #expect(try Pointer.sessionCursor(caller: 0, console: { bmf }, location: there)() == ScreenPoint(x: 10, y: 10)!)
+        // Somebody else comes to the front mid-run: the next (0, 0) is refused, not steered by.
+        let front = Front(bmf)
+        let read = try Pointer.sessionCursor(caller: 501, console: { front.user }, location: origin)
+        #expect(try read() == ScreenPoint(x: 0, y: 0)!)
+        front.user = ConsoleUser(name: "vhidtest", uid: 503)
+        #expect(throws: NoWindowServerSession.self) { try read() }
     }
 
     /// One step is the remaining distance over the gain, rounded toward zero and clamped to
@@ -184,4 +190,10 @@ import Testing
         let fine = try JSONDecoder().decode(ScreenPoint.self, from: Data(#"{"x":800,"y":500.5}"#.utf8))
         #expect(fine == ScreenPoint(x: 800, y: 500.5)!)
     }
+}
+
+/// Who is in front, changed by the test mid-run.
+private final class Front: @unchecked Sendable {
+    var user: ConsoleUser?
+    init(_ user: ConsoleUser?) { self.user = user }
 }

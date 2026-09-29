@@ -93,7 +93,7 @@ public struct Pointer: Sendable {
     /// the cursor every millisecond while a report settles, and asking configd who is in
     /// front each time would be thousands of round trips a move.
     public static func windowServerCursor() throws -> @Sendable () throws -> ScreenPoint {
-        try sessionCursor(caller: geteuid(), console: ConsoleUser.current()) { CGEvent(source: nil)?.location }
+        try sessionCursor(caller: geteuid(), console: ConsoleUser.current) { CGEvent(source: nil)?.location }
     }
 
     /// **The window server answers (0, 0) to anyone else, and not an error.** Measured on a
@@ -102,16 +102,21 @@ public struct Pointer: Sendable {
     /// position, and a move steering by it either stalls there or, for a target beside
     /// (0, 0), reports an arrival it never made. So who is asking is settled before the
     /// window server is, and the answer names who is in front. Root read the real position
-    /// with bmf in front, so root passes. [LAW:no-silent-failure]
+    /// with bmf in front, so root passes. A read of exactly (0, 0) asks again, since the
+    /// user in front can change during an hour of `play`. [LAW:no-silent-failure]
     static func sessionCursor(
-        caller: uid_t, console: ConsoleUser?, location: @escaping @Sendable () -> CGPoint?
+        caller: uid_t, console: @escaping @Sendable () -> ConsoleUser?, location: @escaping @Sendable () -> CGPoint?
     ) throws -> @Sendable () throws -> ScreenPoint {
-        guard let console else { throw NoWindowServerSession(caller: caller, console: nil) }
-        guard caller == console.uid || caller == 0 else { throw NoWindowServerSession(caller: caller, console: console) }
+        let admit: @Sendable () throws -> Void = {
+            guard let console = console() else { throw NoWindowServerSession(caller: caller, console: nil) }
+            guard caller == console.uid || caller == 0 else { throw NoWindowServerSession(caller: caller, console: console) }
+        }
+        try admit()
         return {
             guard let location = location(), let cursor = ScreenPoint(x: location.x, y: location.y) else {
                 throw CursorUnreadable()
             }
+            if location == .zero { try admit() }
             return cursor
         }
     }
