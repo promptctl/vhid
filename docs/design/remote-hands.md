@@ -1,7 +1,8 @@
 # Where vhid reaches
 
 Measured 2026-09-28 on studious (macOS 15.0.1, one display, US layout, FileVault off), vhid 0.1.0 as
-installed by the pkg, every call made over SSH as the admin user `bmf` unless the row says otherwise.
+installed by the pkg. Every call was `vhid` run over SSH as the admin user `bmf`, unless the row says
+otherwise.
 
 | Where | XPC reaches vhidd | a keystroke lands | layout resolves | cursor reads | click lands |
 |---|---|---|---|---|---|
@@ -9,40 +10,47 @@ installed by the pkg, every call made over SSH as the admin user `bmf` unless th
 | That user's lock screen | yes | yes | yes | yes | yes |
 | Terminal with Secure Keyboard Entry on | yes | yes | yes | yes | yes |
 | System password prompt (SecurityAgent) | yes | yes | yes | yes | yes |
-| Login window, nobody logged in | yes | yes | US, see below | no: reads (0, 0) | no |
-| After fast user switching, SSH as the user now in the background | yes | yes | US | no: reads (0, 0) | no |
+| Login window, nobody logged in | yes | yes | the SSH user's, see below | no: reads (0, 0) | no |
+| After fast user switching, SSH as the user now in the background | yes | yes | the SSH user's, not the one in front | no: reads (0, 0) | no |
 | FileVault pre-boot | impossible | impossible | impossible | impossible | impossible |
 
-How each yes was shown:
+How each cell was shown:
 
-- Keystrokes: at the lock screen and both login windows, `vhid type wrongpass` then `press return`
-  produced opendirectoryd's `ODErrorCredentialsInvalid` / authorizationhost's `Failed to
-  authenticate user`. At the login window with bmf in the background, typing vhidtest's real
-  password logged it in. Behind the password prompt and in Terminal, `kCGSSessionSecureInputPID` named
-  the prompt and Terminal, and Terminal ran the command vhid typed.
+- XPC: `vhid doctor` printed `ready` in every row, and each verb below got an answer from vhidd.
+- Layout: every `vhid type` and `vhid press` printed the layout it resolved, `com.apple.keylayout.US`.
+- Keystrokes: at the lock screen, the logged-out login window and the password prompt, `vhid type
+  wrongpass` then `vhid press return` produced opendirectoryd's `ODErrorCredentialsInvalid` or
+  authorizationhost's `Failed to authenticate user`. At the login window with bmf in the background,
+  typing vhidtest's real password logged it in. In Terminal, with `kCGSSessionSecureInputPID` naming
+  Terminal, the shell ran the command vhid typed.
+- Cursor: `vhid cursor` printed the real position, or (0, 0) where the table says so.
 - Clicks: Cancel on the password prompt ended `osascript` with -128; the vhidtest tile on the lock
   screen opened its password field; a click outside Terminal moved focus away from it.
 
 ## Cursor and click without a readable cursor
 
-The cursor is read with `CGEvent(source: nil).location` (`Sources/Input/Pointer.swift:88`). A caller
-outside the console user's GUI session - nobody logged in, or another user in front - gets (0, 0)
-back as though it were a real position, not an error. `click` and `move` then steer toward their
-point, see no motion, and stop with `the cursor would not reach (x, y): it is at (0, 0)`.
+The cursor is read with `CGEvent(source: nil).location`, in `Sources/Input/Pointer.swift:88` and, with
+`?? .zero`, in `Sources/vhid-record/main.swift:112`. When the caller's user is not the console user
+(nobody logged in, or another user in front), that read answers (0, 0) as though it were a real
+position, not an error. `click`, `move` and `drag` steer by reading the cursor back, see no motion, and
+stop with `the cursor would not reach (x, y): it is at (0, 0) after 3 reports`.
 
-The devices are not the limit. With vhidtest in front, `sudo launchctl asuser 503 sudo -u vhidtest
-vhid cursor` read the real position and `move` reached its point. So pointer verbs work from any
-caller that runs in the console user's session, and from nowhere else. With nobody logged in no such
-session exists, and a click cannot be placed: vhid moves by relative counts and steers by reading the
-cursor back.
+What matters is the user, not the login session. Plain SSH as bmf, outside bmf's GUI session, read
+the cursor and clicked while bmf was in front. With vhidtest in front, the same SSH call read (0, 0),
+and `sudo launchctl asuser 503 sudo -u vhidtest vhid cursor` read the real position and `move` reached
+its point. So the devices move the pointer in every row; only reading it back fails. With nobody
+logged in there is no user to run as, and a click cannot be placed: vhid moves by relative counts and
+finds its target by reading the cursor.
 
 ## Layout at the login window
 
-With nobody logged in, `TISCopyCurrentKeyboardLayoutInputSource` in the SSH-launched CLI still answered
-`com.apple.keylayout.US`, and the typed password was accepted. On this US-only Mac that doesn't show
-whether it read the login window's layout or a default for a process with no session. On a Mac whose
-login window uses another layout, the CLI could type the wrong characters and not know it, so an
-explicit layout is the safe path there.
+The layout is the calling process's own user's, never the console's
+(`Sources/KeyboardLayouts/KeyboardLayout.swift:39-47`, measured earlier with Dvorak: `sudo` is answered
+with root's US). At the login window, and after fast user switching, that is the SSH user's layout.
+It types correctly only when it matches the layout the login window or the user in front is using. On
+studious all of them are US, so every password landed. With nobody logged in, the CLI cannot see the
+login window's layout, so no reading can check it. Naming the layout is `vhid-remote-hands-7sp.aal`.
+No verb can do that today.
 
 ## FileVault pre-boot
 
