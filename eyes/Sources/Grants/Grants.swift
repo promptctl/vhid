@@ -1,6 +1,7 @@
 import ApplicationServices
 import CoreGraphics
 import Darwin
+import Eyes
 import Foundation
 
 /// The two privacy grants eyes' readers need.
@@ -22,11 +23,13 @@ public enum Grant: String, CaseIterable, Sendable {
         }
     }
 
-    /// The reader that cannot look without it.
-    public var reader: String {
+    /// The reader that cannot look without it. [LAW:one-source-of-truth] The one mapping
+    /// between readers and grants that every sentence naming a reader's grant is built
+    /// from; each reader's own `grant` is held to it by its gate test.
+    public var reader: SourceKind {
         switch self {
-        case .screenRecording: "pixels"
-        case .accessibility: "tree"
+        case .screenRecording: .pixels
+        case .accessibility: .tree
         }
     }
 
@@ -53,6 +56,61 @@ public enum Grant: String, CaseIterable, Sendable {
         // 6 will not read from a nonisolated context, and this is its documented value.
         case .accessibility: _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
         }
+    }
+}
+
+/// Whether a grant is held, asked by a reader before it looks. In the binary it is a
+/// `SharedReading`, because a long-lived process's own answer goes stale; see `GrantReading.here()`.
+public typealias Gate = @Sendable (Grant) async throws -> Bool
+
+/// One process's readings, shared by every gate: a reading that finished less than `fresh`
+/// ago answers them all, so a merged look and a wait's polls take one reading, not one each.
+/// A reading still being taken is waited on, however long it takes, never taken twice. A
+/// failed reading is shared like any other, and says itself to every gate it answers.
+/// [LAW:no-silent-failure]
+public actor SharedReading {
+    private let take: @Sendable () async throws -> GrantReading
+    private let fresh: Duration
+    /// The latest reading, and when it finished; nil while it is still being taken.
+    private var latest: (reading: Task<GrantReading, any Error>, finished: ContinuousClock.Instant?)?
+
+    public init(fresh: Duration = .seconds(1), take: @escaping @Sendable () async throws -> GrantReading) {
+        self.fresh = fresh
+        self.take = take
+    }
+
+    public func holds(_ grant: Grant) async throws -> Bool {
+        if let latest, latest.finished.map({ ContinuousClock.now - $0 < fresh }) ?? true {
+            return try await Self.waited(latest.reading).holds(grant)
+        }
+        taking += 1
+        let reading = Task { [take, taking] in
+            // Stamped when the reading ends, not when a gate stops waiting: a cancelled
+            // gate leaves the reading running, and it is still the one being taken.
+            defer { Task { await self.finished(taking) } }
+            return try await take()
+        }
+        latest = (reading, nil)
+        return try await Self.waited(reading).holds(grant)
+    }
+
+    /// Which reading is the latest, counted, so an older one ending does not stamp it.
+    private var taking = 0
+
+    private func finished(_ reading: Int) {
+        if reading == taking { latest?.finished = .now }
+    }
+
+    /// A shared reading's answer, given up the moment the asking task is cancelled while
+    /// the reading goes on for every other gate waiting on it.
+    private static func waited(_ reading: Task<GrantReading, any Error>) async throws -> GrantReading {
+        let (answer, say) = AsyncThrowingStream<GrantReading, any Error>.makeStream()
+        let relay = Task {
+            do { say.yield(try await reading.value); say.finish() } catch { say.finish(throwing: error) }
+        }
+        defer { relay.cancel() }
+        for try await taken in answer { return taken }
+        throw CancellationError()
     }
 }
 

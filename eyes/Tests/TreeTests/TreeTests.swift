@@ -1,6 +1,7 @@
 import ApplicationServices
 import Testing
 import Eyes
+import Grants
 @testable import Tree
 
 /// Every rule the tree reader keeps or drops an element by, asked with trees a test wrote.
@@ -575,5 +576,23 @@ extension Covers {
     /// Windows in front that a click anywhere in them lands on.
     static func opaque(_ frames: [ScreenRect]) -> Covers {
         Covers(windows: frames.map { Cover(frame: $0, pid: 0) }, owner: 1, hit: { _ in .answered(0) })
+    }
+}
+
+/// The reader looks only when its gate says Accessibility is held, and asks for nothing else.
+@Suite struct TreeGateTests {
+    actor Asked {
+        var grants: [Grant] = []
+        func add(_ grant: Grant) { grants.append(grant) }
+    }
+
+    @MainActor @Test func aWithheldGrantRefusesBeforeLooking() async {
+        let asked = Asked()
+        let reader = TreeReader { await asked.add($0); return false }
+        await #expect { try await reader.look(Query(match: .contains("Save"), region: .display(1))) } throws: {
+            ($0 as? TreeError)?.missingGrant == true
+        }
+        #expect(await asked.grants == [.accessibility])
+        #expect(Grant.accessibility.reader == reader.source)
     }
 }

@@ -1,4 +1,5 @@
 import Eyes
+import Grants
 import Testing
 @testable import Pixels
 
@@ -151,4 +152,22 @@ import Testing
         let cut = run("Sove", 100, 100, 40, 7), whole = run("Save", 100, 100, 40, 14)
         #expect(PixelReader.distinct([Piece(tile: 0, run: cut), Piece(tile: 1, run: whole)]).map(\.text.value) == ["Save"])
     }
+}
+
+/// The reader looks only when its gate says Screen Recording is held, and asks for nothing else.
+@Suite struct PixelGateTests {
+    @MainActor @Test func aWithheldGrantRefusesBeforeLooking() async {
+        let asked = Asked()
+        let reader = PixelReader { await asked.add($0); return false }
+        await #expect { try await reader.look(Query(match: .contains("Save"), region: .display(1))) } throws: {
+            ($0 as? PixelsError)?.missingGrant == true
+        }
+        #expect(await asked.grants == [.screenRecording])
+        #expect(Grant.screenRecording.reader == reader.source)
+    }
+}
+
+actor Asked {
+    var grants: [Grant] = []
+    func add(_ grant: Grant) { grants.append(grant) }
 }

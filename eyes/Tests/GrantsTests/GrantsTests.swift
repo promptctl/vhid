@@ -1,4 +1,5 @@
 import Foundation
+import Eyes
 import Grants
 import Testing
 
@@ -59,5 +60,62 @@ struct GrantsTests {
         }
         #expect(try await GrantReading.taken(by: sh, ["-c", "head -c 200000 /dev/zero >&2; echo screenRecording=true accessibility=true"])
             == GrantReading { _ in true })
+    }
+}
+
+/// Which reader needs which grant is said once, and read back the same way.
+struct GrantMappingTests {
+    @Test func eachReaderNeedsTheGrantThatNamesIt() {
+        #expect(Grant.accessibility.reader == .tree)
+        #expect(Grant.screenRecording.reader == .pixels)
+    }
+}
+
+/// Every gate of a process answers from one reading while it is fresh, and takes a new one after.
+struct SharedReadingTests {
+    actor Takes {
+        var count = 0
+        func take() -> GrantReading { count += 1; return GrantReading { $0 == .accessibility } }
+    }
+
+    @Test func gatesAskedTogetherShareOneReading() async throws {
+        let takes = Takes()
+        let shared = SharedReading(fresh: .seconds(60)) { await takes.take() }
+        async let pixels = shared.holds(.screenRecording)
+        async let tree = shared.holds(.accessibility)
+        #expect(try await (pixels, tree) == (false, true))
+        #expect(await takes.count == 1)
+    }
+
+    @Test func aStaleReadingIsTakenAgain() async throws {
+        let takes = Takes()
+        let shared = SharedReading(fresh: .zero) { await takes.take() }
+        _ = try await shared.holds(.accessibility)
+        _ = try await shared.holds(.accessibility)
+        #expect(await takes.count == 2)
+    }
+
+    @Test func aReadingSlowerThanFreshIsStillTakenOnce() async throws {
+        let takes = Takes()
+        let shared = SharedReading(fresh: .zero) { try await Task.sleep(for: .milliseconds(200)); return await takes.take() }
+        async let first = shared.holds(.accessibility)
+        try await Task.sleep(for: .milliseconds(50))
+        async let second = shared.holds(.accessibility)
+        _ = try await (first, second)
+        #expect(await takes.count == 1)
+    }
+
+    @Test func aCancelledGateStopsWaitingOnTheReading() async throws {
+        let takes = Takes()
+        let shared = SharedReading(fresh: .zero) { try await Task.sleep(for: .milliseconds(500)); return await takes.take() }
+        let started = ContinuousClock.now
+        let gate = Task { try await shared.holds(.accessibility) }
+        try? await Task.sleep(for: .milliseconds(50))
+        gate.cancel()
+        await #expect(throws: CancellationError.self) { try await gate.value }
+        #expect(ContinuousClock.now - started < .milliseconds(400))
+        // The reading goes on, and is still the one a later gate waits on.
+        #expect(try await shared.holds(.accessibility))
+        #expect(await takes.count == 1)
     }
 }

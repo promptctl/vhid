@@ -116,8 +116,8 @@ enum EyesTools {
     /// Reading needs a grant - Accessibility for the tree, Screen Recording for pixels -
     /// which macOS asks of the process responsible for this one: for an MCP server, the
     /// app hosting it.
-    private static let grant = " The tree needs Accessibility and pixels Screen Recording, granted to the app that runs this server;"
-        + " merged answers with either."
+    private static let grant = " " + Help.needs.dropLast()
+        + ", granted to the app that runs this server; merged answers with either."
 
     /// Where a missing grant is held, for a server: the app hosting it, not eyes.
     static let grantNote = " Under eyes mcp the grant is the app's that runs this server, not eyes'."

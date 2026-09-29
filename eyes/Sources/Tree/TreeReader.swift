@@ -1,5 +1,6 @@
 import ApplicationServices
 import Eyes
+import Grants
 
 /// Reads the screen through the accessibility tree: every on-screen window in the region,
 /// walked element by element, each element that says something reported at its own
@@ -29,12 +30,16 @@ public struct TreeReader: Reader {
     /// not inherit its parent's.
     static let messagingTimeout: Float = 0.5
 
-    public init() {}
+    nonisolated static let grant = Grant.accessibility
+
+    private let granted: Gate
+
+    public init(granted: @escaping Gate) { self.granted = granted }
 
     public func look(_ query: Query) async throws -> Candidates {
         // [LAW:no-silent-failure] Asked first: without the grant, every read fails, and a
         // walk that counted them as unanswered would report a looked-at, empty screen.
-        guard AXIsProcessTrusted() else { throw TreeError.noGrant }
+        guard try await granted(Self.grant) else { throw TreeError.noGrant }
         let region = try query.region.bounds()
         let windows = try Geometry.onScreen().windows
         // Started before the windows are matched, because matching is reads too.

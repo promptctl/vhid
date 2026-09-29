@@ -1,6 +1,7 @@
 import CoreGraphics
 import Eyes
 import Foundation
+import Grants
 import ImageIO
 import Vision
 
@@ -13,14 +14,18 @@ import Vision
 public struct PixelReader: Reader {
     public let source = SourceKind.pixels
 
-    public init() {}
+    nonisolated static let grant = Grant.screenRecording
+
+    private let granted: Gate
+
+    public init(granted: @escaping Gate) { self.granted = granted }
 
     public func look(_ query: Query) async throws -> Candidates {
+        // [LAW:no-silent-failure] The grant is asked explicitly because capturing without
+        // it does not fail - it returns the desktop wallpaper with every window blanked,
+        // and recognising that is a confident "nothing here".
+        guard try await granted(Self.grant) else { throw PixelsError.noGrant }
         let region = try Self.resolve(query.region)
-        // [LAW:no-silent-failure] Preflight is asked explicitly because capturing without
-        // the grant does not fail - it returns the desktop wallpaper with every window
-        // blanked, and recognising that is a confident "nothing here".
-        guard CGPreflightScreenCaptureAccess() else { throw PixelsError.noGrant }
         let image = try Self.capture(region)
         // A run with no words in it is nil: examined, and counted as wordless.
         // One piece after another, never at once: measured, recognising the pieces in a
@@ -240,8 +245,8 @@ public enum PixelsError: ReaderError, CustomStringConvertible {
     public var description: String {
         switch self {
         case .noGrant:
-            "Screen Recording is not granted to this process, so a capture would show only the wallpaper."
-                + " Grant it in System Settings > Privacy & Security > Screen Recording."
+            "\(PixelReader.grant.name) is not granted to the app responsible for eyes, so a capture would show only the wallpaper."
+                + " Grant it in \(PixelReader.grant.pane)."
         case .offScreen(let r):
             "\(r) is on no display, so there is nothing there to read"
         case .spansDisplays(let r):
