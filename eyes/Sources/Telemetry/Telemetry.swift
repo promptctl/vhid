@@ -49,8 +49,12 @@ public struct Exported: Sendable, Equatable, Encodable {
 public enum Telemetry {
     public typealias Export = @Sendable (Event) async -> Void
 
-    /// Where every event goes. The process's edge by default; a test binds a collector.
-    @TaskLocal public static var export: Export = { await Edge.standard.send($0) }
+    /// Where every event goes. The process's outbox by default; a test binds a collector.
+    @TaskLocal public static var export: Export = { Outbox.standard.add($0) }
+
+    /// Waits for every event still on its way out. The process calls it once, before it
+    /// exits, so an event in flight is not lost with the process. [LAW:no-silent-failure]
+    public static func drained() async { await Outbox.standard.drained() }
 
     /// The unit underway, which `note` and `count` annotate. A unit started inside another
     /// shares its trace, so a look and the grant readings it waited on read as one.
@@ -58,10 +62,10 @@ public enum Telemetry {
 
     /// Runs `work` as one unit of work and emits its event when it ends - returned, thrown
     /// or cancelled alike. `outcome` names how a returned value ended. [LAW:nothing-unseen]
-    public static func unit<T>(
+    public static func unit<T, Failure: Error>(
         _ name: String, isolation: isolated (any Actor)? = #isolation,
-        outcome: (T) -> String = { _ in "ok" }, _ work: () async throws -> T
-    ) async rethrows -> T {
+        outcome: (T) -> String = { _ in "ok" }, _ work: () async throws(Failure) -> T
+    ) async throws(Failure) -> T {
         let recorder = Recorder(trace: current?.trace ?? Self.newTrace())
         let clock = ContinuousClock(), start = clock.now, startedAt = Date()
         func emit(_ outcome: String, _ error: String?) async {
@@ -71,11 +75,14 @@ public enum Telemetry {
             await export(Event(event: name, traceID: recorder.trace, service: "eyes", startedAt: startedAt,
                                durationMs: ms, outcome: outcome, error: error, counts: counts, facts: facts))
         }
-        do {
-            let value = try await $current.withValue(recorder) { try await work() }
+        let ran: Result<T, Failure> = await $current.withValue(recorder) {
+            do throws(Failure) { return .success(try await work()) } catch { return .failure(error) }
+        }
+        switch ran {
+        case .success(let value):
             await emit(outcome(value), nil)
             return value
-        } catch {
+        case .failure(let error):
             await emit(Task.isCancelled ? "cancelled" : "error", "\(error)")
             throw error
         }
@@ -87,6 +94,10 @@ public enum Telemetry {
 
     /// Sets a count on the unit underway.
     public static func count(_ key: String, _ value: Int) { current?.count(key, value) }
+
+    /// Adds one to a count on the unit underway, so a unit that ends early still says how
+    /// far it got.
+    public static func tally(_ key: String) { current?.tally(key) }
 
     /// A W3C trace id: 16 random bytes, as hex.
     private static func newTrace() -> String {
@@ -102,7 +113,37 @@ final class Recorder: Sendable {
 
     func note(_ key: String, _ value: String) { state.withLock { $0.1[key] = value } }
     func count(_ key: String, _ value: Int) { state.withLock { $0.0[key] = value } }
+    func tally(_ key: String) { state.withLock { $0.0[key, default: 0] += 1 } }
     func taken() -> ([String: Int], [String: String]) { state.withLock { $0 } }
+}
+
+/// Events on their way out of the process, each sent in a task of its own.
+///
+/// [LAW:nothing-unseen] The hot path never waits on the pipeline: a look or a gate hands its
+/// event over and returns, and a collector slow to answer slows no reading. The send is
+/// detached, so a unit withdrawn by cancellation still delivers its event, not a refusal.
+final class Outbox: Sendable {
+    static let standard = Outbox(Edge.standard)
+
+    private let edge: Edge
+    private let sending = Mutex<[UUID: Task<Void, Never>]>([:])
+
+    init(_ edge: Edge) { self.edge = edge }
+
+    func add(_ event: Event) {
+        let id = UUID()
+        // Registered under the lock the task removes itself under, so it cannot leave first.
+        sending.withLock {
+            $0[id] = Task.detached { [self] in
+                await edge.send(event)
+                _ = sending.withLock { $0.removeValue(forKey: id) }
+            }
+        }
+    }
+
+    func drained() async {
+        while let next = sending.withLock({ $0.values.first }) { await next.value }
+    }
 }
 
 /// The one place an event leaves the process. [LAW:single-enforcer]
@@ -137,21 +178,22 @@ public struct Edge: Sendable {
         return appended(Exported(event: event, sink: .file, sinkError: nil))
     }
 
-    /// Appends the record to the file. A file that cannot be written is the last place
-    /// left to say anything, so it is said on stderr, which stdout under `eyes mcp` is not.
+    /// Appends the record to the file as one write to a descriptor opened for appending, so
+    /// lines sent at once, from this process or another, land whole and never over each
+    /// other. A file that cannot be written is the last place left to say anything, so it
+    /// is said on stderr, which stdout under `eyes mcp` is not.
     private func appended(_ exported: Exported) -> Exported {
         do {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
             encoder.outputFormatting = .sortedKeys
-            var line = try encoder.encode(exported)
-            line.append(0x0A)
+            let line = try encoder.encode(exported) + [0x0A]
             try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-            if !FileManager.default.fileExists(atPath: file.path) { FileManager.default.createFile(atPath: file.path, contents: nil) }
-            let handle = try FileHandle(forWritingTo: file)
-            defer { try? handle.close() }
-            try handle.seekToEnd()
-            try handle.write(contentsOf: line)
+            let fd = open(file.path, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0o644)
+            guard fd >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+            defer { close(fd) }
+            let wrote = line.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
+            guard wrote == line.count else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
         } catch {
             FileHandle.standardError.write(Data("eyes: event \(exported.event.event) not recorded at \(file.path): \(error)\n".utf8))
         }
@@ -160,8 +202,18 @@ public struct Edge: Sendable {
 
     private struct Refused: Error, CustomStringConvertible { let description: String }
 
-    /// The event as one OTLP/HTTP JSON log record.
     private static func post(_ event: Event, to collector: URL) async throws {
+        var request = URLRequest(url: collector.appending(path: "v1/logs"), timeoutInterval: 2)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try otlp(event)
+        let (_, response) = try await URLSession.shared.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(status) else { throw Refused(description: "\(collector) answered \(status)") }
+    }
+
+    /// The event as one OTLP/HTTP JSON log record. [LAW:effects-at-boundaries]
+    static func otlp(_ event: Event) throws -> Data {
         func attribute(_ key: String, _ value: String) -> [String: Any] { ["key": key, "value": ["stringValue": value]] }
         func attribute(_ key: String, _ value: Int) -> [String: Any] { ["key": key, "value": ["intValue": "\(value)"]] }
         let attributes: [[String: Any]] = [
@@ -178,12 +230,6 @@ public struct Edge: Sendable {
                 "body": ["stringValue": event.event], "attributes": attributes,
             ]]]],
         ]]]
-        var request = URLRequest(url: collector.appending(path: "v1/logs"), timeoutInterval: 2)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (_, response) = try await URLSession.shared.data(for: request)
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard (200..<300).contains(status) else { throw Refused(description: "\(collector) answered \(status)") }
+        return try JSONSerialization.data(withJSONObject: body, options: .sortedKeys)
     }
 }

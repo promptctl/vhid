@@ -1,11 +1,11 @@
 import Foundation
 import Eyes
 import Grants
-import Synchronization
 import Telemetry
+import TelemetryTesting
 import Testing
 
-struct GrantsTests {
+@Suite(.eventsKept) struct GrantsTests {
     /// A reading survives the line a reading process prints for it.
     @Test func aReadingRoundTripsThroughItsLine() throws {
         for held in [(true, false), (false, true), (true, true), (false, false)] {
@@ -74,7 +74,7 @@ struct GrantMappingTests {
 }
 
 /// Every gate of a process answers from one reading while it is fresh, and takes a new one after.
-struct SharedReadingTests {
+@Suite(.eventsKept) struct SharedReadingTests {
     actor Takes {
         var count = 0
         func take() -> GrantReading { count += 1; return GrantReading { $0 == .accessibility } }
@@ -124,18 +124,30 @@ struct SharedReadingTests {
 
 /// Every gate asked emits one event, saying whether its reading was taken or shared.
 @Test func eachGateAskedIsAnEvent() async throws {
-    let events = Mutex<[Event]>([])
+    let events = Collected()
     let shared = SharedReading(fresh: .seconds(60)) { GrantReading { $0 == .accessibility } }
     let failing = SharedReading { throw GrantReadingFailure("no child") }
-    try await Telemetry.$export.withValue({ e in events.withLock { $0.append(e) } }) {
+    try await Telemetry.$export.withValue(events.export) {
         _ = try await shared.holds(.accessibility)
         _ = try await shared.holds(.screenRecording)
         _ = try? await failing.holds(.accessibility)
     }
-    let seen = events.withLock { $0 }
+    let seen = events.all
     #expect(seen.map(\.event) == ["grant_reading", "grant_reading", "grant_reading"])
     #expect(seen.map(\.outcome) == ["held", "not_held", "error"])
     #expect(seen.map { $0.facts["reading"] } == ["taken", "shared", "taken"])
     #expect(seen.map { $0.facts["grant"] } == ["accessibility", "screenRecording", "accessibility"])
     #expect(seen[2].error == "no child")
+}
+
+/// Every child reading is one event of its own, however it ends.
+@Test func eachChildReadingIsAnEvent() async throws {
+    let events = Collected()
+    try await Telemetry.$export.withValue(events.export) {
+        _ = try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/echo"), ["screenRecording=true accessibility=true"])
+        _ = try? await GrantReading.taken(by: URL(fileURLWithPath: "/usr/bin/false"), [])
+    }
+    #expect(events.all.map(\.event) == ["grant_child", "grant_child"])
+    #expect(events.all.map(\.outcome) == ["ok", "error"])
+    #expect(events.all[1].error != nil)
 }

@@ -221,24 +221,26 @@ extension Report {
         // reads through: which reader, what it read, and how it ended.
         try await Telemetry.unit("look", outcome: \.outcome) {
             Telemetry.note("source", source.rawValue)
+            // Tallied as each read starts, so a look that fails says how many it spent.
+            Telemetry.count("reads", 0)
+            func counted(_ query: Query) async throws -> Reading { Telemetry.tally("reads"); return try await read(source, query) }
             guard let wait else {
-                let reading = try await read(source, query)
-                Self.count(reading, reads: 1)
+                let reading = try await counted(query)
+                Self.count(reading)
                 return (text: lines(reading, query: query, source: source, grantNote: grantNote).joined(separator: "\n"),
                         outcome: reading.outcome.isMatched ? "matched" : "not_matched")
             }
             Telemetry.note("until", wait.until.rawValue)
-            let waited = try await waiting(for: wait, on: query) { try await read(source, $0) }
-            Self.count(waited.reading, reads: waited.reads)
+            let waited = try await waiting(for: wait, on: query, read: counted)
+            Self.count(waited.reading)
             let said = lines(waited.reading, query: query, source: source, grantNote: grantNote)
             return (text: ([waitedClause(waited, wait) + said[0]] + said.dropFirst()).joined(separator: "\n"),
                     outcome: waited.settled ? "settled" : "timed_out")
         }.text
     }
 
-    /// The counts a look's event carries, zeros included.
-    private static func count(_ reading: Reading, reads: Int) {
-        Telemetry.count("reads", reads)
+    /// The counts of the reading a look ended on, zeros included.
+    private static func count(_ reading: Reading) {
         Telemetry.count("examined", reading.scope.examined)
         switch reading.outcome {
         case .matched(let m): Telemetry.count("matched", m.count); Telemetry.count("nearest", 0)

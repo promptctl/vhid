@@ -4,13 +4,14 @@ import MCP
 import Pixels
 import Tree
 import Version
+import TelemetryTesting
 import Testing
 @testable import EyesCommand
 
 /// What `eyes mcp` offers, asked through a client over an in-memory transport, with a
 /// listing written here in place of the window server.
 /// Serialized: the fake reader records into one shared `asked`.
-@Suite(.serialized) struct McpTests {
+@Suite(.serialized, .eventsKept) struct McpTests {
     private static let listing = WindowListing(
         windows: [
             Window(id: 1, owner: "Safari", pid: 400, frame: ScreenRect(x: 0, y: 33, width: 1512, height: 949), layer: 0),
