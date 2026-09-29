@@ -109,8 +109,8 @@ do {
     }
 }
 
-let startPoint = CGEvent(source: nil)?.location ?? .zero
-guard let start = ScreenPoint(x: startPoint.x, y: startPoint.y) else { refuse("the cursor's position \(startPoint) is not a point") }
+let start: ScreenPoint
+do { start = try Pointer.screenCursor() } catch { refuse("\(error)") }
 let clock = ContinuousClock()
 /// The tap's own clock at the start: nanoseconds since boot, which every event's
 /// timestamp is on. An event's time is when it happened, not when the tap handed it over.

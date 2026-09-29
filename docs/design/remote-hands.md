@@ -29,13 +29,17 @@ How each cell was shown:
 
 ## Cursor and click without a readable cursor
 
-The cursor is read with `CGEvent(source: nil).location`, in `Sources/Input/Pointer.swift:88` and, with
-`?? .zero`, in `Sources/vhid-record/main.swift:112`. When the caller's user is not the console user
+The cursor was read with `CGEvent(source: nil).location`, in `Pointer.screenCursor` and, with
+`?? .zero`, at the start of `vhid-record`. When the caller's user is not the console user
 (nobody logged in, or another user in front), that read answers (0, 0) as though it were a real
 position, not an error. `click`, `move` and `drag` steer by reading the cursor back, see no motion, and
 stop with `the cursor would not reach (x, y): it is at (0, 0) after 3 reports`. The exception is a
 target within one step of (0, 0): the move is read as already there, so `click` reports success and
-presses wherever the pointer really is (`Pointer.swift:196`).
+presses wherever the pointer really is (`guard step != .none` in `Pointer.move`).
+
+Since then, `Pointer.windowServerCursor` asks the console user first and refuses the read, naming who is in
+front, when the caller is neither that user nor root, or when nobody is logged in. Root read the same
+position as bmf while bmf was in front.
 
 What matters is the user, not the login session. Plain SSH as bmf, outside bmf's GUI session, read
 the cursor and clicked while bmf was in front. With vhidtest in front, the same SSH call read (0, 0),
