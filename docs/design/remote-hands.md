@@ -33,12 +33,15 @@ The cursor is read with `CGEvent(source: nil).location`, in `Sources/Input/Point
 `?? .zero`, in `Sources/vhid-record/main.swift:112`. When the caller's user is not the console user
 (nobody logged in, or another user in front), that read answers (0, 0) as though it were a real
 position, not an error. `click`, `move` and `drag` steer by reading the cursor back, see no motion, and
-stop with `the cursor would not reach (x, y): it is at (0, 0) after 3 reports`.
+stop with `the cursor would not reach (x, y): it is at (0, 0) after 3 reports`. The exception is a
+target within one step of (0, 0): the move is read as already there, so `click` reports success and
+presses wherever the pointer really is (`Pointer.swift:196`).
 
 What matters is the user, not the login session. Plain SSH as bmf, outside bmf's GUI session, read
 the cursor and clicked while bmf was in front. With vhidtest in front, the same SSH call read (0, 0),
 and `sudo launchctl asuser 503 sudo -u vhidtest vhid cursor` read the real position and `move` reached
-its point. So the devices move the pointer in every row; only reading it back fails. With nobody
+its point. So with another user in front the device still moves the pointer; only reading it back fails.
+Whether it moves at the empty login window was not read back. With nobody
 logged in there is no user to run as, and a click cannot be placed: vhid moves by relative counts and
 finds its target by reading the cursor.
 
