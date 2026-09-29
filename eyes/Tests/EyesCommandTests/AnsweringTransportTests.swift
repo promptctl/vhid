@@ -70,38 +70,66 @@ import Testing
         _ = try? await session.value
         for _ in 0..<200 where said.lines.count < 2 { try await Task.sleep(for: .milliseconds(10)) }
         #expect(said.lines == [
-            #"stdin ended, waiting on answers owed and calls running owed="7"×1, 7×1 running=0"#,
-            #"session stopped with answers owed or calls running owed="7"×1, 7×1 running=0"#,
+            #"stdin ended, waiting on answers owed owed="7"×1, 7×1"#,
+            #"session stopped with answers owed owed="7"×1, 7×1"#,
         ])
     }
 
-    /// A withdrawn call is owed no answer, but a handler still running it holds the end of
-    /// stdin until it is over: the SDK's cancel only asks the handler to stop.
-    @Test func aWithdrawnCallStillRunningHoldsTheSession() async throws {
-        let stdio = Stdio(), transport = AnsweringTransport(stdio)
-        let (read, next) = AsyncStream<Void>.makeStream()
-        let session = Task {
-            for try await _ in await transport.receive() { next.yield() }
-        }
-        let (started, begun) = AsyncStream<Void>.makeStream()
+    /// A withdrawn call whose handler pays the withdrawal no mind holds the end of stdin
+    /// until its handler is over, and its answer is never written.
+    @Test func aWithdrawnCallHoldsTheSessionUntilItsHandlerIsOver() async throws {
         let (finish, done) = AsyncStream<Void>.makeStream()
-        let handler = Task {
-            try await transport.underway {
-                begun.yield()
+        let (began, begin) = AsyncStream<Void>.makeStream()
+        let stubborn = EyesTool(tool: Tool(name: "click", description: "", inputSchema: .object([:]))) { _ in
+            // A task of its own, so the withdrawal cannot reach it.
+            await Task {
+                begin.yield()
                 for await _ in finish {}
-            }
+                return "clicked"
+            }.value
         }
-        for await _ in started { break }
-        stdio.lines.yield(Data(#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"click"}}"#.utf8))
-        stdio.lines.yield(Data(#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":3}}"#.utf8))
-        stdio.lines.finish()
-        for await _ in read.prefix(1) {}
+        let stdio = Stdio(), said = Said()
+        let transport = AnsweringTransport(stdio, logger: Logger(label: "test") { _ in said })
+        let session = Task {
+            let server = await Mcp.server([stubborn], on: transport)
+            try await server.start(transport: transport)
+            await server.waitUntilCompleted()
+        }
+        stdio.call(3, then: [])
+        for await _ in began { break }
+        stdio.feed([.cancel(3), .end])
         for _ in 0..<200 where !(await transport.isWaiting) { try await Task.sleep(for: .milliseconds(10)) }
-        #expect(await transport.owing(3) == 0)
         #expect(await transport.isWaiting, "the session ended under a handler still running")
+        #expect(said.lines.filter { $0.hasPrefix("stdin ended") } == ["stdin ended, waiting on answers owed owed=3×1 (1 withdrawn)"])
         done.finish()
-        try await handler.value
         try await session.value
+        #expect(stdio.sent.isEmpty, "a withdrawn call's answer was written: \(stdio.sent)")
+    }
+
+    /// A call withdrawn in the same breath as it was asked, before its handler could have
+    /// started, still ends the session once it is over, and answers nothing. The SDK, had it
+    /// read the cancel, would have answered nothing and left the session waiting for good,
+    /// or ignored it and let the call run on unawaited.
+    @Test func aCallWithdrawnAsItIsAskedEndsTheSessionWithNoAnswer() async throws {
+        let waiting = EyesTool(tool: Tool(name: "click", description: "", inputSchema: .object([:]))) { _ in
+            try await Task.sleep(for: .seconds(3600))
+            return "clicked"
+        }
+        let stdio = Stdio(), transport = AnsweringTransport(stdio)
+        let session = Task {
+            let server = await Mcp.server([waiting], on: transport)
+            try await server.start(transport: transport)
+            await server.waitUntilCompleted()
+        }
+        stdio.call(4, then: [.cancel(4), .end])
+        let ended = await withTaskGroup(of: Bool.self) { race in
+            race.addTask { _ = try? await session.value; return true }
+            race.addTask { try? await Task.sleep(for: .seconds(10)); return false }
+            defer { race.cancelAll() }
+            return await race.next() ?? false
+        }
+        #expect(ended, "the session is still waiting on a withdrawn call")
+        #expect(stdio.sent.isEmpty, "a withdrawn call's answer was written: \(stdio.sent)")
     }
 }
 
@@ -121,12 +149,38 @@ private final class Said: LogHandler, @unchecked Sendable {
     }
 }
 
-/// Stdio as a test drives it: lines are fed in by hand, and what is sent is dropped.
+/// Stdio as a test drives it: lines are fed in by hand, and what is sent is kept.
 private actor Stdio: Transport {
     nonisolated let logger = Logger(label: "test")
     nonisolated let (stream, lines) = AsyncThrowingStream<Data, any Error>.makeStream()
+    private nonisolated let kept = Kept()
+    nonisolated var sent: [String] { kept.lines }
     func connect() async throws {}
     func disconnect() async {}
-    func send(_ data: Data) async throws {}
+    func send(_ data: Data) async throws { kept.append(String(decoding: data, as: UTF8.self)) }
     func receive() -> AsyncThrowingStream<Data, any Error> { stream }
+
+    enum Line { case cancel(Int), end }
+
+    /// A tool call under `id` naming `click`, then `rest`, all in one go.
+    nonisolated func call(_ id: Int, then rest: [Line]) {
+        lines.yield(Data(#"{"jsonrpc":"2.0","id":\#(id),"method":"tools/call","params":{"name":"click"}}"#.utf8))
+        feed(rest)
+    }
+
+    nonisolated func feed(_ rest: [Line]) {
+        for line in rest {
+            switch line {
+            case .cancel(let id): lines.yield(Data(#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":\#(id)}}"#.utf8))
+            case .end: lines.finish()
+            }
+        }
+    }
+}
+
+private final class Kept: @unchecked Sendable {
+    private let lock = NSLock()
+    private var kept: [String] = []
+    var lines: [String] { lock.withLock { kept } }
+    func append(_ line: String) { lock.withLock { kept.append(line) } }
 }

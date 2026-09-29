@@ -29,26 +29,34 @@ import MCP
 /// said. [LAW:no-ambient-temporal-coupling] What is still owed is a count per id this actor
 /// keeps, and the end of stdin waits on it being empty, unless the session is stopped.
 ///
-/// **Why it also counts handlers still running: a withdrawn call is owed nothing, but may
-/// still be acting.** A cancel settles its id, since the SDK answers a cancelled request
-/// with nothing. But the SDK's cancel only asks: a handler that does not stop still runs,
-/// and a pipe that sent a call, its cancel, and then closed stdin had the process exit
-/// under it. The SDK does not tell a handler its request's id, so the handler cannot
-/// settle by id; it says instead that it is `underway`, and the end of stdin waits on that
-/// count too.
+/// **Why it withdraws calls itself: the SDK's cancel loses answers.** The SDK answers a
+/// cancelled request with nothing, and its cancel reaches a handler or not by the luck of
+/// when it is read: before the handler's task is registered it is ignored, and the call
+/// runs on and is answered; after, the call ends unanswered. Either way nothing tells this
+/// transport which, so an id settled at its cancel let a pipe that sent a call, its cancel,
+/// and the end of stdin have the process exit under a click still running. So a cancel
+/// never reaches the SDK. The transport stops the handler for that id itself, the handler
+/// answers as every handler does, and that answer settles the id and is dropped rather
+/// than written, as the MCP spec says a cancelled request's must be. Every request read is
+/// answered exactly once, and `owed` is the one ledger of what the session waits on.
+/// [LAW:one-source-of-truth] The SDK does not tell a handler its request's id, except
+/// through the per-request context it asks its transport for; that is where this one
+/// hands the id over.
 ///
 /// [LAW:effects-at-boundaries] The deciding is `Unreadable.answer(to:)` and `Exchange`,
 /// pure functions of a line. This actor only moves bytes and keeps the count.
-actor AnsweringTransport: Transport {
+actor AnsweringTransport: Transport, HTTPContextProviding {
     private let inner: any Transport
     /// How many requests read under each id are not yet answered. A count, not a set: a
     /// client may reuse an id while its first request is in flight, and each is answered.
     /// [LAW:types-are-the-program]
     private var owed: [ID: Int] = [:]
-    /// How many handlers are inside `underway`, answered or withdrawn alike.
-    private var running = 0
-    /// Resumed when nothing is owed or running, by whichever end comes last. Keyed by
-    /// waiter, so a stopped relay lets go of its own wait and no other.
+    /// How many answers under each id were withdrawn, and so are dropped when they come.
+    private var withdrawn: [ID: Int] = [:]
+    /// What stops each handler running, by the id it answers.
+    private var running: [ID: [UUID: @Sendable () -> Void]] = [:]
+    /// Resumed when nothing is owed, by whichever end comes last. Keyed by waiter, so a
+    /// stopped relay lets go of its own wait and no other.
     private var settled: [UUID: CheckedContinuation<Void, Never>] = [:]
 
     /// Diagnostics go to stderr, which is the only place they may: stdout is the protocol's.
@@ -64,42 +72,68 @@ actor AnsweringTransport: Transport {
     /// An answer is crossed off before it is written: one whose write fails is one stdout
     /// can no longer carry, and waiting on it would hold the session open for nothing.
     func send(_ data: Data) async throws {
-        settle(Exchange.answered(in: data))
-        try await inner.send(data)
+        let ids = Exchange.answered(in: data)
+        let dropped = ids.filter(takeWithdrawn)
+        settle(ids)
+        // Written unless every id it answers was withdrawn.
+        if ids.isEmpty || dropped.count < ids.count { try await inner.send(data) }
     }
+
+    /// The id a handler answers, handed to it by the SDK as its request's context.
+    func httpRequestContext(for id: ID) -> HTTPRequest? {
+        HTTPRequest(method: "", headers: [Self.idHeader: String(decoding: try! JSONEncoder().encode(id), as: UTF8.self)])
+    }
+
+    private static let idHeader = "json-rpc-id"
 
     private func owe(_ line: Data) {
         for id in Exchange.requested(in: line) { owed[id, default: 0] += 1 }
-        settle(Exchange.withdrawn(in: line))
+    }
+
+    /// A withdrawn call is stopped now if its handler is running, and when it starts if not.
+    private func withdraw(_ ids: [ID]) {
+        for id in ids where owed[id] != nil {
+            withdrawn[id, default: 0] += 1
+            running[id]?.values.forEach { $0() }
+        }
+    }
+
+    private func takeWithdrawn(_ id: ID) -> Bool {
+        guard let count = withdrawn[id] else { return false }
+        withdrawn[id] = count > 1 ? count - 1 : nil
+        return true
     }
 
     private func settle(_ ids: [ID]) {
         for id in ids { owed[id] = owed[id].flatMap { $0 > 1 ? $0 - 1 : nil } }
-        if isEnded { release() }
+        if owed.isEmpty { release() }
     }
 
-    /// Nothing owed and nothing running: all the session read has been done.
-    private var isEnded: Bool { owed.isEmpty && running == 0 }
-
-    /// Runs a handler's `work`, holding the end of the session until it is over, whether
-    /// or not its call was withdrawn meanwhile. Not isolated, so handlers run side by side.
-    nonisolated func underway<T: Sendable>(_ work: @Sendable () async throws -> T) async throws -> T {
-        await begin()
-        do {
-            let done = try await work()
-            await end()
-            return done
-        } catch {
-            await end()
-            throw error
+    /// Runs a handler's `work` where a withdrawal of its call can stop it. What `work` says
+    /// once stopped is its answer, which the transport drops, so it must not throw a
+    /// cancellation: the SDK answers that with nothing, and the session would wait for good.
+    nonisolated func underway<T: Sendable>(_ work: @escaping @Sendable () async throws -> T) async throws -> T {
+        guard let header = Server.currentHandlerContext?.httpContext?.header(Self.idHeader),
+              let id = try? JSONDecoder().decode(ID.self, from: Data(header.utf8)) else {
+            throw MCPError.internalError("a handler ran without the id of the request it answers")
         }
+        let job = Task { try await work() }
+        let key = UUID()
+        await enroll(id, key) { job.cancel() }
+        let outcome: Result<T, any Error>
+        do { outcome = .success(try await withTaskCancellationHandler { try await job.value } onCancel: { job.cancel() }) } catch { outcome = .failure(error) }
+        await leave(id, key)
+        return try outcome.get()
     }
 
-    private func begin() { running += 1 }
+    private func enroll(_ id: ID, _ key: UUID, stop: @escaping @Sendable () -> Void) {
+        if withdrawn[id] != nil { stop() }
+        running[id, default: [:]][key] = stop
+    }
 
-    private func end() {
-        running -= 1
-        if isEnded { release() }
+    private func leave(_ id: ID, _ key: UUID) {
+        running[id]?[key] = nil
+        if running[id]?.isEmpty == true { running[id] = nil }
     }
 
     private func release() {
@@ -117,30 +151,31 @@ actor AnsweringTransport: Transport {
     /// How many requests read under `id` are not yet answered.
     func owing(_ id: ID) -> Int { owed[id] ?? 0 }
 
-    /// Returns once nothing is owed or running, or once the wait is cancelled: a session stopped from
+    /// Returns once nothing is owed, or once the wait is cancelled: a session stopped from
     /// inside, as `server.stop` does, will never send the answers it would be waiting on.
     /// What it gives up on is said, by id. [LAW:no-silent-failure]
     private func everythingAnswered() async {
-        if !isEnded { logger.info("stdin ended, waiting on answers owed and calls running", metadata: ["owed": owedNow, "running": "\(running)"]) }
+        if !owed.isEmpty { logger.info("stdin ended, waiting on answers owed", metadata: ["owed": owedNow]) }
         let waiter = UUID()
         await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
-                if isEnded || Task.isCancelled { continuation.resume() } else { settled[waiter] = continuation }
+                if owed.isEmpty || Task.isCancelled { continuation.resume() } else { settled[waiter] = continuation }
             }
         } onCancel: {
             Task { await self.release(waiter) }
         }
-        if !isEnded { logger.warning("session stopped with answers owed or calls running", metadata: ["owed": owedNow, "running": "\(running)"]) }
+        if !owed.isEmpty { logger.warning("session stopped with answers owed", metadata: ["owed": owedNow]) }
     }
 
     /// What is owed, as one line a person can read: each id as JSON writes it, so `7` and
-    /// `"7"` stay two ids, with its count, in a fixed order.
+    /// `"7"` stay two ids, with its count and how many of those were withdrawn, in a fixed order.
     private var owedNow: Logger.MetadataValue {
         .string(owed.map { id, count in
-            switch id {
-            case .string(let text): "\"\(text)\"×\(count)"
-            case .number(let number): "\(number)×\(count)"
+            let name = switch id {
+            case .string(let text): "\"\(text)\""
+            case .number(let number): "\(number)"
             }
+            return "\(name)×\(count)" + (withdrawn[id].map { " (\($0) withdrawn)" } ?? "")
         }.sorted().joined(separator: ", "))
     }
 
@@ -154,8 +189,11 @@ actor AnsweringTransport: Transport {
                             try await inner.send(answer)
                         } else {
                             // Owed before the SDK sees it, so its answer cannot come first.
+                            // A withdrawal is the transport's to carry out, never the SDK's.
+                            let withdrawn = Exchange.withdrawn(in: line)
                             await self.owe(line)
-                            continuation.yield(line)
+                            await self.withdraw(withdrawn)
+                            if withdrawn.isEmpty { continuation.yield(line) }
                         }
                     }
                     await self.everythingAnswered()
@@ -272,8 +310,7 @@ enum Exchange {
         return ((try? decoder.decode([Response<Asked>].self, from: data)) ?? []).map(\.id)
     }
 
-    /// The request this line, read from the client, withdraws. The SDK answers a
-    /// cancelled request with nothing, as the MCP spec says it must.
+    /// The request this line, read from the client, withdraws.
     static func withdrawn(in line: Data) -> [ID] {
         guard let cancel = try? decoder.decode(Message<CancelledNotification>.self, from: line),
               cancel.method == CancelledNotification.name, let id = cancel.params.requestId else { return [] }

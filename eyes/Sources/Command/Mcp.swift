@@ -35,17 +35,17 @@ struct Mcp: AsyncParsableCommand {
                 throw MCPError.invalidParams("there is no tool called \(request.name.debugDescription)")
             }
             // A verb that could not do what it was asked is a tool error, whose words the
-            // model reads; a protocol error is for a request that named no tool at all.
-            // [LAW:no-silent-failure]
+            // model reads; a protocol error is for a request that named no tool at all. A
+            // call the client withdrew is answered like any other, and the transport drops
+            // the answer, as the MCP spec says a cancelled request's is. [LAW:no-silent-failure]
             return try await transport.underway {
                 do {
                     let said = try await verb.call(request.arguments ?? [:])
                     return .init(content: [.text(text: said, annotations: nil, _meta: nil)], isError: false)
                 } catch where Task.isCancelled {
-                    // A withdrawn call is answered with nothing, as the MCP spec says; what it
-                    // said on the way out still reaches stderr. [LAW:no-silent-failure]
+                    // What a withdrawn call said on the way out still reaches stderr.
                     FileHandle.standardError.write(Data("eyes: \(request.name) withdrawn: \(error)\n".utf8))
-                    throw CancellationError()
+                    return .init(content: [.text(text: "withdrawn: \(error)", annotations: nil, _meta: nil)], isError: true)
                 } catch {
                     return .init(content: [.text(text: "\(error)", annotations: nil, _meta: nil)], isError: true)
                 }
