@@ -80,7 +80,8 @@ actor AnsweringTransport: Transport, HTTPContextProviding {
         // A withdrawn call can have done all it was asked before its withdrawal was read,
         // and its answer is then the one report of it. [LAW:no-silent-failure]
         for id in dropped { logger.notice("answer to a withdrawn call not written", metadata: ["id": "\(id)", "answer": "\(String(decoding: data, as: UTF8.self))"]) }
-        // Written unless every id it answers was withdrawn.
+        // Written unless every id it answers was withdrawn: a batch answering anything else
+        // goes whole, since a response cannot be cut out of it without rewriting the line.
         if ids.isEmpty || dropped.count < ids.count { try await inner.send(data) }
     }
 
