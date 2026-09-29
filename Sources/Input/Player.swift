@@ -196,7 +196,7 @@ public struct Player<C: Clock> where C.Duration == Duration {
                 let steering = try await pointer.calibrate(calibration, from: play.start, clock: clock)
                 reports += try await pointer.move(to: play.start)
                 // Read back: the loop stops beside a point it cannot land on.
-                course = Course(steering: steering, interval: calibration.interval, at: try pointer.cursor())
+                course = Course(steering: steering, interval: calibration.interval, at: try await pointer.cursor())
             }
             let started = clock.now
             let epoch = wall()
@@ -258,7 +258,7 @@ public struct Player<C: Clock> where C.Duration == Duration {
                     let began = clock.now
                     try await pointer.move(to: point)
                     delay += began.duration(to: clock.now)
-                    course = Course(steering: current.steering, interval: current.interval, at: try pointer.cursor())
+                    course = Course(steering: current.steering, interval: current.interval, at: try await pointer.cursor())
                 case .at(let point):
                     let current = try steered(course)
                     let (moves, lands) = current.steering.reports(from: current.at, to: point)

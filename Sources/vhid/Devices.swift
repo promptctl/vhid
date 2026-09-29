@@ -19,7 +19,7 @@ import Installations
 struct Devices {
     let keyboard: any Keyboard
     let mouse: any Mouse
-    let cursor: @Sendable () throws -> ScreenPoint
+    let cursor: @Sendable () async throws -> ScreenPoint
 
     /// Runs `body` with the devices over a connection to this installation's daemon, and
     /// hands them back when it returns.
@@ -43,7 +43,7 @@ struct Devices {
         let queue = DeviceQueue()
         let devices = Devices(keyboard: QueuedKeyboard(keyboard: helper.keyboard, queue: queue),
                               mouse: QueuedMouse(pointing: helper.mouse, queue: queue),
-                              cursor: cursor(helper))
+                              cursor: cursor(helper, on: queue))
         let done: T
         do {
             done = try await body(devices)
@@ -79,10 +79,12 @@ struct Devices {
 
     /// The cursor as the daemon reads it, in the session in front, which may not be this
     /// process's: at the login window, or with another user in front, a read made here
-    /// answers (0, 0). [LAW:single-enforcer] Every verb that reads the cursor reads it here.
-    static func cursor(_ helper: HelperConnection) -> @Sendable () throws -> ScreenPoint {
+    /// answers (0, 0). [LAW:single-enforcer] Every verb that steers the pointer, and
+    /// `cursor`, reads it here. The wait for the daemon's answer is made on `queue`, for
+    /// the reason the devices' are.
+    static func cursor(_ helper: HelperConnection, on queue: DeviceQueue) -> @Sendable () async throws -> ScreenPoint {
         {
-            let at = try helper.cursor()
+            let at = try await queue.run { try helper.cursor() }
             guard let point = ScreenPoint(x: at.x, y: at.y) else { throw CursorUnreadable() }
             return point
         }

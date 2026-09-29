@@ -80,12 +80,18 @@ final class FrontCursor: CursorSource, @unchecked Sendable {
         var description: String { "no session is in front to read the cursor in" }
     }
 
+    /// A session is marked on console but does not say whose it is or which it is.
+    struct Unnamed: Error, CustomStringConvertible {
+        let entry: String
+        var description: String { "the session in front has no user name or audit id in IOConsoleUsers: \(entry)" }
+    }
+
     /// [LAW:parse-dont-validate] The session IOConsoleUsers marks on console, or why none.
     static func frontSession(_ users: [[String: Any]]) throws -> Session {
-        guard let user = users.first(where: { $0["kCGSSessionOnConsoleKey"] as? Bool == true }),
-              let audit = (user["kCGSSessionAuditIDKey"] as? NSNumber)?.int32Value,
+        guard let user = users.first(where: { $0["kCGSSessionOnConsoleKey"] as? Bool == true }) else { throw NobodyInFront() }
+        guard let audit = (user["kCGSSessionAuditIDKey"] as? NSNumber)?.int32Value,
               let name = user["kCGSSessionUserNameKey"] as? String
-        else { throw NobodyInFront() }
+        else { throw Unnamed(entry: "\(user)") }
         return Session(audit: audit, user: name)
     }
 
@@ -110,47 +116,77 @@ final class ChildReader: FrontCursor.Reader {
     private let requests = Pipe()
     private let answers = Pipe()
     private let session: FrontCursor.Session
+    private let patience: Duration
+    /// Bytes read past the last whole line; the protocol never leaves any, but a read may
+    /// hand back fewer bytes than a line, so a line is gathered here.
+    private var pending: [UInt8] = []
 
-    init(in session: FrontCursor.Session) throws {
+    /// `patience` is how long one answer may take: well under the client's own wait, so a
+    /// child stuck in the window server is ended and replaced while the client is still
+    /// listening, and the lock `FrontCursor` holds across the read is never held forever.
+    init(in session: FrontCursor.Session, executable: URL, arguments: [String], patience: Duration = .seconds(1)) throws {
         self.session = session
-        process.executableURL = Bundle.main.executableURL
-        process.arguments = [cursorReaderFlag, String(session.audit)]
+        self.patience = patience
+        process.executableURL = executable
+        process.arguments = arguments
         process.standardInput = requests
         process.standardOutput = answers
+        // A child that has ended must fail the write, not raise SIGPIPE in the daemon.
+        // [LAW:no-silent-failure] SIGPIPE ends vhidd without a word, holding what it held.
+        guard fcntl(requests.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1) == 0 else {
+            throw Failed(session: session, what: "could not refuse SIGPIPE: errno \(errno)")
+        }
         try process.run()
+    }
+
+    /// This very executable, reading in `session`.
+    convenience init(in session: FrontCursor.Session) throws {
+        try self.init(in: session, executable: Bundle.main.executableURL!, arguments: [cursorReaderFlag, String(session.audit)])
     }
 
     struct Failed: Error, CustomStringConvertible {
         let session: FrontCursor.Session
-        let answer: String?
-        var description: String {
-            answer.map { "the reader in \(session) answered '\($0)'" } ?? "the reader in \(session) ended without answering"
-        }
+        let what: String
+        var description: String { "the reader in \(session) \(what)" }
     }
 
     func read() throws -> (x: Double, y: Double) {
         try requests.fileHandleForWriting.write(contentsOf: Data("\n".utf8))
-        let line = try answerLine()
+        let line = try answerLine(by: .now + patience)
         let fields = line.split(separator: " ").compactMap { Double($0) }
-        guard fields.count == 2 else { throw Failed(session: session, answer: line) }
+        guard fields.count == 2 else { throw Failed(session: session, what: "answered '\(line)'") }
         return (fields[0], fields[1])
     }
 
-    /// One line from the child, read a byte at a time so nothing past it is taken.
-    private func answerLine() throws -> String {
-        var bytes: [UInt8] = []
+    /// One line from the child, or `Failed` once `deadline` passes or the child ends.
+    private func answerLine(by deadline: ContinuousClock.Instant) throws -> String {
+        let descriptor = answers.fileHandleForReading.fileDescriptor
         while true {
-            guard let byte = try answers.fileHandleForReading.read(upToCount: 1)?.first else {
-                throw Failed(session: session, answer: nil)
+            if let newline = pending.firstIndex(of: UInt8(ascii: "\n")) {
+                defer { pending.removeSubrange(...newline) }
+                return String(decoding: pending[..<newline], as: UTF8.self)
             }
-            if byte == UInt8(ascii: "\n") { return String(decoding: bytes, as: UTF8.self) }
-            bytes.append(byte)
+            let left = ContinuousClock.now.duration(to: deadline).components
+            let milliseconds = Int32(clamping: max(0, left.seconds * 1000 + left.attoseconds / 1_000_000_000_000_000))
+            var poll = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
+            let ready = Darwin.poll(&poll, 1, milliseconds)
+            if ready < 0, errno == EINTR { continue }
+            guard ready >= 0 else { throw Failed(session: session, what: "could not be heard: errno \(errno)") }
+            guard ready > 0 else { throw Failed(session: session, what: "did not answer within \(patience)") }
+            var buffer = [UInt8](repeating: 0, count: 256)
+            let count = Darwin.read(descriptor, &buffer, buffer.count)
+            if count < 0, errno == EINTR { continue }
+            guard count >= 0 else { throw Failed(session: session, what: "could not be heard: errno \(errno)") }
+            guard count > 0 else { throw Failed(session: session, what: "ended without answering") }
+            pending += buffer.prefix(count)
         }
     }
 
+    /// SIGKILL, not `terminate()`: the daemon ignores SIGTERM and a child inherits that, so
+    /// a child stuck in the window server would outlive every attempt to end it.
     func stop() {
         try? requests.fileHandleForWriting.close()
-        process.terminate()
+        kill(process.processIdentifier, SIGKILL)
     }
 }
 

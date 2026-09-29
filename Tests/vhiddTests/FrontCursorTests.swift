@@ -67,6 +67,41 @@ import Testing
         #expect(try FrontCursor.frontSession(users) == loginWindow)
         #expect(throws: FrontCursor.NobodyInFront.self) { try FrontCursor.frontSession(Array(users.dropFirst())) }
         #expect(throws: FrontCursor.NobodyInFront.self) { try FrontCursor.frontSession([]) }
+        #expect(throws: FrontCursor.Unnamed.self) { try FrontCursor.frontSession([["kCGSSessionOnConsoleKey": true]]) }
+    }
+
+    /// A real child over real pipes, played by `sh`: what it says is what the read says.
+    private func child(_ script: String) throws -> ChildReader {
+        try ChildReader(in: bmf, executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", script], patience: .milliseconds(300))
+    }
+
+    @Test func aChildAnswersEachLineWithTheCursor() throws {
+        let reader = try child("while read _; do echo '12.5 40'; done")
+        defer { reader.stop() }
+        #expect(try reader.read() == (12.5, 40))
+        #expect(try reader.read() == (12.5, 40))
+    }
+
+    @Test func aChildThatCouldNotJoinSaysWhy() throws {
+        let reader = try child("echo 'could not join audit session 100003: errno 1'; exit 1")
+        defer { reader.stop() }
+        #expect { try reader.read() } throws: { "\($0)".contains("answered 'could not join audit session 100003: errno 1'") }
+    }
+
+    @Test func aChildThatHasEndedFailsTheReadAndNotTheDaemon() throws {
+        let reader = try child("exit 0")
+        defer { reader.stop() }
+        Thread.sleep(forTimeInterval: 0.2)
+        // A write to its closed stdin would raise SIGPIPE and end this test process.
+        #expect(throws: (any Error).self) { try reader.read() }
+    }
+
+    @Test func aChildThatDoesNotAnswerIsGivenUpOnInTime() throws {
+        let reader = try child("sleep 30")
+        defer { reader.stop() }
+        let began = ContinuousClock.now
+        #expect { try reader.read() } throws: { "\($0)".contains("did not answer within") }
+        #expect(began.duration(to: .now) < .seconds(2))
     }
 
     @Test func theReaderFlagIsReadOnlyWithASession() {

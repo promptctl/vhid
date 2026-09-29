@@ -26,6 +26,6 @@ struct MoveCommand: AsyncParsableCommand {
         let reports = try await pointer.move(to: point)
         // Where the cursor ended up, read back, for the reason `click` reads it back.
         // [LAW:no-silent-failure]
-        return "moved to \(try pointer.cursor()) after \(counted(reports, "motion report"))"
+        return "moved to \(try await pointer.cursor()) after \(counted(reports, "motion report"))"
     }
 }

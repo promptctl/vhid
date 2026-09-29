@@ -135,7 +135,7 @@ enum Tools {
 
     /// Where the cursor is, as the daemon reads it in the session in front.
     static let cursor: VerbTool = VerbTool(Help.cursor, readOnly: true, []) { _, installation in
-        try CursorCommand.cursor(Devices.cursor(HelperConnection(installation: installation)))
+        try await CursorCommand.cursor(Devices.cursor(HelperConnection(installation: installation), on: DeviceQueue()))
     }
 
     /// `vhid doctor` as a tool. A Mac that is not ready is an answer and not a failure of
