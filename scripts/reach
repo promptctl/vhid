@@ -14,8 +14,8 @@
 # Held to bash 3.2, like every script here.
 set -uo pipefail
 
-# [LAW:one-source-of-truth] The expected cells, one row per place, in the table's order:
-# name | how a keystroke shows it landed | whether the cursor reads | what to arrange.
+# The cells docs/design/remote-hands.md measured, which stays their source; restated here
+# one row per place, in its order: name | how a keystroke shows it landed | whether the cursor reads | what to arrange.
 places='console|shell|yes|Terminal frontmost, logged in as the SSH user
 secure-input|shell|yes|as console, with Terminal > Secure Keyboard Entry on
 password-prompt|auth|yes|a system password prompt focused, e.g. osascript -e '"'"'do shell script "true" with administrator privileges'"'"'
@@ -28,7 +28,8 @@ if [ $# -lt 2 ]; then
   echo "$places" | awk -F'|' '{ printf "%-17s %s\n", $1, $4 }'
   exit 0
 fi
-row=$(echo "$places" | grep "^$2|") || { echo "reach: no place '$2'; scripts/reach $host lists them" >&2; exit 2; }
+row=$(echo "$places" | awk -F'|' -v p="$2" '$1 == p')
+[ -n "$row" ] || { echo "reach: no place '$2'; scripts/reach $host lists them" >&2; exit 2; }
 IFS='|' read -r place evidence readable setup <<EOF
 $row
 EOF
@@ -43,11 +44,31 @@ cell() { # column, expected, observed, matched
 }
 
 echo "place      $place: $setup"
-echo "target     $(on 'sw_vers -productVersion; vhid --version; stat -f %Su /dev/console' | paste -sd ' ' -) (macOS, vhid, console user)"
-secure=$(on 'ioreg -l -w 0' | grep -o '"kCGSSessionSecureInputPID"=[0-9]*' | sort -u | paste -sd ' ' -)
-echo "secure     ${secure:-no process holds secure input}"
-echo "front      $(on 'lsappinfo info -only name "$(lsappinfo front)"')"
-echo "locked     $(on 'ioreg -n Root -d1 -a' | grep -A1 CGSSessionScreenIsLocked | grep -c true) session(s) at a lock screen"
+echo "target     $(on 'sw_vers -productVersion; vhid --version' | paste -sd ' ' -) (macOS, vhid)"
+front=$(on 'lsappinfo info -only name "$(lsappinfo front)"' | sed 's/.*="//; s/"$//')
+echo "front      $front"
+# The sessions macOS keeps, from IOConsoleUsers: who holds the console, whether the SSH
+# user has a session at all, which is locked, and who holds secure input.
+me=$(on 'id -un')
+console=$(on 'stat -f %Su /dev/console')
+sessions=$(on 'ioreg -n Root -d1 -a')
+mine=$(echo "$sessions" | grep -A1 kCGSSessionUserNameKey | grep -c "<string>$me</string>")
+locked=$(echo "$sessions" | grep -A1 CGSSessionScreenIsLocked | grep -c true)
+secure=$(echo "$sessions" | grep -A1 kCGSSessionSecureInputPID | grep -c integer)
+echo "sessions   console $console; $me has $mine session(s); $locked locked; $secure holding secure input"
+
+# The place is arranged before any cell below can speak for it.
+case $place in
+  console) wanted="$me in Terminal, unlocked"; [ "$console" = "$me" ] && [ "$front" = Terminal ] && [ "$locked" = 0 ] ;;
+  secure-input) wanted="$me in Terminal, secure input"; [ "$console" = "$me" ] && [ "$front" = Terminal ] && [ "$secure" -gt 0 ] ;;
+  password-prompt) wanted="$me in front, unlocked"; [ "$console" = "$me" ] && [ "$locked" = 0 ] ;;
+  lock-screen) wanted="$me in front, locked"; [ "$console" = "$me" ] && [ "$locked" -gt 0 ] ;;
+  login-window) wanted="nobody logged in"; [ "$console" != "$me" ] && [ "$mine" = 0 ] ;;
+  fast-user-switch) wanted="$me in the background"; [ "$console" != "$me" ] && [ "$mine" -gt 0 ] ;;
+esac
+rc=$?
+
+cell arranged "$wanted" "$console in $front, $locked locked, $secure secure" $rc
 
 doctor=$(on 'vhid doctor' 2>&1)
 [ "$(echo "$doctor" | head -n 1)" = ready ]; rc=$?
@@ -65,31 +86,33 @@ case $evidence in
     text=$nonce
     since=$(on "date '+%Y-%m-%d %H:%M:%S'")
     # /usr/bin/log by path: in zsh, the login shell ssh runs this in, `log` is a builtin.
-    effect="/usr/bin/log show --style compact --start '$since' --predicate 'eventMessage CONTAINS \"ODErrorCredentialsInvalid\" OR eventMessage CONTAINS \"Failed to authenticate user\"' | grep -m 1 -o -e ODErrorCredentialsInvalid -e 'Failed to authenticate user' | head -n 1"
+    effect="/usr/bin/log show --style compact --start '$since' --predicate 'eventMessage CONTAINS \"ODErrorCredentialsInvalid\" OR eventMessage CONTAINS \"Failed to authenticate user\"' | grep -m 1 -o -e ODErrorCredentialsInvalid -e 'Failed to authenticate user'"
     ;;
 esac
 typed=$(on "vhid type '$text' && vhid press return" 2>&1)
 layout=$(echo "$typed" | grep -o 'on [^ ]*$' | head -n 1)
 cell layout 'a layout named' "${layout:-none: $typed}" "$([ -n "$layout" ]; echo $?)"
 sleep 2
+# Any credential failure logged since counts: the log never names the password typed.
 landed=$(on "$effect" 2>&1); rc=$?
+landed=$(echo "$landed" | head -n 1)
 cell keystroke "$evidence evidence" "${landed:-nothing}" $rc
 
 # A point away from the corner: within one step of (0, 0) a click reports success
 # without being placed (docs/design/remote-hands.md).
 x=40 y=400
-clicked=$(on "vhid click $x $y && vhid cursor" 2>&1); clicked_rc=$?
+clicked=$(on "vhid click $x $y" 2>&1); clicked_rc=$?
+cursor=$(on 'vhid cursor' 2>&1)
 case $readable in
   yes)
-    # The pointer settles within a point of its target, not on it.
-    echo "$clicked" | tail -n 1 | tr -d '(),' | awk -v x=$x -v y=$y '{ dx = $5 - x; dy = $6 - y; exit !(dx * dx < 4 && dy * dy < 4) }'; rc=$?
-    cell cursor "($x, $y) after the click" "$(echo "$clicked" | tail -n 1)" $rc
+    # The pointer settles within two points of its target, not on it.
+    echo "$cursor" | tr -d '(),' | awk -v x=$x -v y=$y '{ dx = $5 - x; dy = $6 - y; exit !(dx * dx < 4 && dy * dy < 4) }'; rc=$?
+    cell cursor "($x, $y) after the click" "$cursor" $rc
     cell click 'placed, exit 0' "exit $clicked_rc" $clicked_rc
     ;;
   no)
-    read_zero=$(on 'vhid cursor' 2>&1)
-    [ "$read_zero" = 'the cursor is at (0, 0)' ]; rc=$?
-    cell cursor '(0, 0)' "$read_zero" $rc
+    [ "$cursor" = 'the cursor is at (0, 0)' ]; rc=$?
+    cell cursor '(0, 0)' "$cursor" $rc
     echo "$clicked" | grep -q 'would not reach'; rc=$?
     cell click 'refused: would not reach' "$(echo "$clicked" | tail -n 1)" $rc
     ;;
