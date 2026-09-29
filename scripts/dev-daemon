@@ -69,22 +69,12 @@ if loaded; then
   [ "$origin" = "$plist" ] || fail "the $service job launchd has loaded came from ${origin:-no plist}, not $plist, so this script did not register it; see: launchctl print system/$service"
 fi
 
-# The same stop pkg/scripts/preinstall makes, for the same reason: launchd adds no second
-# job under one label, and bootout answers 36 while the daemon is still releasing what it
-# holds. The label is watched until launchd lets go of it. [LAW:no-ambient-temporal-coupling]
+# The stop pkg/scripts/preinstall and vhid-uninstall make, run as root: launchd adds no
+# second job under one label, and a bootout returns before the daemon has released what
+# it holds. [LAW:one-source-of-truth]
 stop() {
-  local status=0 tries=0
-  sudo launchctl bootout "system/$service" || status=$?
-  case $status in
-    0) return ;;
-    36) ;;
-    *) fail "launchd would not unload $service (bootout exited $status)" ;;
-  esac
-  while loaded; do
-    tries=$((tries + 1))
-    [ $tries -le 30 ] || fail "$service was still loaded 30 s after launchd began unloading it"
-    sleep 1
-  done
+  local why
+  why=$(sudo /bin/bash -c '. "$1" && stop_job "$2"' stop-job "$root/pkg/scripts/stop-job" "system/$service") || fail "${why:-sudo could not run the stop}"
 }
 
 if loaded; then
