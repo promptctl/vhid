@@ -169,18 +169,19 @@ fi
 service=$("$payload/usr/local/bin/vhid" service)
 [ -n "$service" ] || fail "the packed vhid names no service"
 
-# The version the packed CLI reports, which is the one a bug report will quote, held to
-# the one this tree was checked for above.
-packed=$("$payload/usr/local/bin/vhid" --version)
-[ "$packed" = "$version" ] \
-  || fail "the packed vhid reports version '$packed', not '$version'"
-
-# The packed eyes, run and held to the same version: a binary lipo joined and codesign
-# rewrote is only known to start once it has, and eyes is a package of its own, stamped
-# by a plugin of its own, so its version is checked here rather than assumed.
-packed=$("$payload/usr/local/bin/eyes" --version) || fail "the packed eyes does not run"
-[ "$packed" = "$version" ] \
-  || fail "the packed eyes reports version '$packed', not '$version'"
+# Every slice of every packed tool, run and held to the version this tree was checked
+# for above: the one a bug report will quote. A binary lipo joined and codesign rewrote
+# is only known to start once it has, and eyes' slices come from two builds, each
+# stamped by a plugin of its own, so no slice's version is assumed from another's.
+# x86_64 runs under Rosetta. [LAW:single-enforcer]
+for tool in vhid eyes; do
+  for arch in $(lipo -archs "$payload/usr/local/bin/$tool"); do
+    packed=$(arch "-$arch" "$payload/usr/local/bin/$tool" --version 2>"$work/said") \
+      || fail "the packed $tool ($arch) does not run: $(cat "$work/said")"
+    [ "$packed" = "$version" ] \
+      || fail "the packed $tool ($arch) reports version '$packed', not '$version'"
+  done
+done
 
 scripts/stage-uninstall "$service" "$IDENTIFIER" >"$payload/usr/local/libexec/vhid-uninstall"
 ditto scripts/virtual-hid-driver "$payload/usr/local/libexec/vhid-virtual-hid-driver"
