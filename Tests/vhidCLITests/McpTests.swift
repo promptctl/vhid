@@ -4,6 +4,7 @@ import Foundation
 import Installations
 import MCP
 import Pointing
+import KeyboardLayouts
 import Testing
 @testable import vhid
 
@@ -62,6 +63,24 @@ import Testing
         for tool in [Tools.click, Tools.scroll, Tools.drag] {
             #expect(tool.tool.inputSchema.objectValue?["properties"]?.objectValue?["modifiers"] != nil, "\(tool.tool.name)")
             #expect(tool.tool.inputSchema.objectValue?["required"]?.arrayValue?.contains("modifiers") != true, "\(tool.tool.name)")
+        }
+    }
+
+    /// `layout` is offered by the two verbs that read keys off a layout, and required by neither.
+    @Test func theKeyboardToolsTakeALayout() {
+        for tool in [Tools.type, Tools.press] {
+            #expect(tool.tool.inputSchema.objectValue?["properties"]?.objectValue?["layout"] != nil, "\(tool.tool.name)")
+            #expect(tool.tool.inputSchema.objectValue?["required"]?.arrayValue?.contains("layout") != true, "\(tool.tool.name)")
+        }
+    }
+
+    /// Refused before the daemon is reached, by the name given.
+    @Test func anUnknownLayoutIsRefusedByName() async {
+        await #expect(throws: NoLayout.noSourceNamed("com.apple.keylayout.Nope")) {
+            try await Tools.type.call(["text": "a", "layout": "com.apple.keylayout.Nope"], on: Installation.nobody)
+        }
+        await #expect(throws: NoLayout.noSourceNamed("com.apple.keylayout.Nope")) {
+            try await Tools.press.call(["chords": ["return"], "layout": "com.apple.keylayout.Nope"], on: Installation.nobody)
         }
     }
 

@@ -52,8 +52,8 @@ The layout is the calling process's own user's, never the console's
 with root's US). At the login window, and after fast user switching, that is the SSH user's layout.
 It types correctly only when it matches the layout the login window or the user in front is using. On
 studious all of them are US, so every password landed. With nobody logged in, the CLI cannot see the
-login window's layout, so no reading can check it. Naming the layout is `vhid-remote-hands-7sp.aal`.
-No verb can do that today.
+login window's layout, so no reading can check it: `type` and `press` take `--layout <input source
+id>` to name it, and fall back to US English only when the system reports no layout at all.
 
 ## FileVault pre-boot
 

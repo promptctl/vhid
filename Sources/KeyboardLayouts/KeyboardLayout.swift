@@ -56,14 +56,36 @@ public struct KeyboardLayout: Sendable {
 
     /// One input source, by the id Apple gives it - `com.apple.keylayout.Dvorak` and the
     /// like. Present so a layout other than the machine's own can be read without
-    /// selecting it, which is how the Dvorak case is tested and how a future setting would
-    /// name a layout.
+    /// selecting it, which is how the Dvorak case is tested and how `--layout` names one.
     public static func named(_ identifier: String) throws -> KeyboardLayout {
         try textInputSources.withLock {
             let query = [kTISPropertyInputSourceID as String: identifier] as CFDictionary
             let sources = TISCreateInputSourceList(query, true)?.takeRetainedValue() as? [TISInputSource]
             guard let source = sources?.first else { throw NoLayout.noSourceNamed(identifier) }
             return try KeyboardLayout(source: source)
+        }
+    }
+
+    /// US English, by its input source id: the layout typed with when none is named and
+    /// none can be read. Brandon, 2026-09-28: "Don't require --layout, accept it and
+    /// default to US english if not defined."
+    public static let usEnglish = "com.apple.keylayout.US"
+
+    /// The layout a verb types with: the one `identifier` names, or with none named the
+    /// user's own, or US English when the system reports no current layout at all.
+    ///
+    /// The fallback is taken only for `noCurrentSource`. A current source that is an input
+    /// method is a layout the user chose and this cannot type through, which is theirs to
+    /// hear about rather than to have replaced with US. [LAW:no-silent-failure]
+    /// `current` is a parameter so the fallback can be tested on a Mac that has a layout.
+    public static func chosen(
+        _ identifier: String?, current: () throws -> KeyboardLayout = KeyboardLayout.current
+    ) throws -> KeyboardLayout {
+        if let identifier { return try named(identifier) }
+        do {
+            return try current()
+        } catch NoLayout.noCurrentSource {
+            return try named(usEnglish)
         }
     }
 

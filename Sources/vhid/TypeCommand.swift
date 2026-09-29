@@ -9,10 +9,11 @@ struct TypeCommand: AsyncParsableCommand {
     @Argument(help: Help.sentence(Help.text))
     var text: String
 
+    @OptionGroup var layoutOption: LayoutOption
     @OptionGroup var service: ServiceOption
 
     func run() async throws {
-        let layout = try KeyboardLayout.current()
+        let layout = try layoutOption.layout()
         print(try await Devices.using(try service.installation()) { try await Self.type(text, on: layout, with: $0.typist) })
     }
 
