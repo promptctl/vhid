@@ -40,7 +40,8 @@ import Testing
         guard case .step(let first, 2) = walk.page(readiness) else { Issue.record("expected two steps"); return }
         #expect(first.row == .driverExtension)
         walk.skip(.driverExtension)
-        guard case .step(let second, 2) = walk.page(readiness) else { Issue.record("expected the devices step"); return }
+        // The count is of steps still ahead: the skipped driver is not one of them.
+        guard case .step(let second, 1) = walk.page(readiness) else { Issue.record("expected the devices step"); return }
         #expect(second.row == .devices)
         walk.skip(.devices)
         guard case .summary(_, let skipped) = walk.page(readiness) else { Issue.record("expected the summary"); return }
@@ -48,21 +49,34 @@ import Testing
         walk.revisit(.devices)
         guard case .step(let back, _) = walk.page(readiness) else { Issue.record("expected a step"); return }
         #expect(back.row == .devices)
+        walk.reopen()
+        guard case .step(let again, 2) = walk.page(readiness) else { Issue.record("expected both steps back"); return }
+        #expect(again.row == .driverExtension)
     }
 
     /// Only an inactive registration can be asked for from a button; once asked, the page
-    /// offers System Settings and says macOS asks only once.
+    /// offers System Settings and says macOS asks only once - on the awaiting-approval page
+    /// the request leads to, too - and reopening the walk does not forget it.
     @Test func theDriverIsAskedForOnceAndOnlyWhenInactive() {
         let inactive = Requirement.driverExtension(.installedInactive)
         var walk = Walk()
         #expect(walk.ask(inactive) == .activateDriver)
         #expect(!walk.askedAlready(inactive))
         walk.asked(.driverExtension)
+        walk.reopen()
         #expect(walk.ask(inactive) == nil)
         #expect(walk.askedAlready(inactive))
+        #expect(walk.askedAlready(.driverExtension(.awaitingApproval)))
         for state: DriverState in [.absent, .awaitingApproval, .disabled, .pendingReboot, .residue, .unknown, .running] {
             #expect(Requirement.driverExtension(state).ask == nil, "\(state)")
         }
+    }
+
+    /// What the window logs for each page names the row, its reading, and the count.
+    @Test func thePageEventNamesWhatIsShown() {
+        let readiness = Self.readiness(driver: .awaitingApproval)
+        #expect(Walk().page(readiness).description == "step Driver extension (awaiting-approval), 1 left")
+        #expect(Walk().page(Self.readiness(driver: .running)).description == "summary, \(Requirement.Row.allCases.count) met, 0 set aside")
     }
 
     /// Every row has words for why it is asked and what skipping it costs.

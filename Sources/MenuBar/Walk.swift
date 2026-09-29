@@ -16,18 +16,19 @@ public struct Walk: Sendable, Hashable {
     public static let title = "Set Up vhid…"
 
     /// Rows the person set aside in this walk. Kept only while the walk is open: a skipped
-    /// row is offered again the next time it opens.
+    /// row is offered again the next time it opens, which `reopen` does.
     public private(set) var skipped: Set<Requirement.Row> = []
-    /// Rows whose request went through in this walk. macOS shows most of these dialogs once,
-    /// so a second press of the same button would do nothing: once asked, a row still unmet
-    /// offers System Settings instead, and says why.
+    /// Rows whose request was made. macOS shows most of these dialogs once, so a second
+    /// press of the same button would do nothing: once asked, a row still unmet offers
+    /// System Settings instead, and says why. Kept across reopening, since macOS keeps it.
     public private(set) var asked: Set<Requirement.Row> = []
 
     public init() {}
 
     /// What the window shows for a reading.
     public enum Page: Sendable, Hashable {
-        /// The first unmet row not set aside, and how many unmet rows are left.
+        /// The first unmet row not set aside, and how many unmet rows not set aside are left,
+        /// this one included.
         case step(Requirement, left: Int)
         /// Nothing left that is not set aside: every row, met ones with their readings and
         /// set-aside ones with what skipping them costs.
@@ -41,7 +42,7 @@ public struct Walk: Sendable, Hashable {
         guard let current = unmet.first(where: { !skipped.contains($0.row) }) else {
             return .summary(met: readiness.requirements.filter(\.met), skipped: unmet)
         }
-        return .step(current, left: unmet.count)
+        return .step(current, left: unmet.filter { !skipped.contains($0.row) }.count)
     }
 
     /// The button that makes macOS ask, when this page has one: the row's request, not yet
@@ -52,17 +53,30 @@ public struct Walk: Sendable, Hashable {
 
     /// Whether the page says macOS asks only once, and points at System Settings instead.
     public func askedAlready(_ requirement: Requirement) -> Bool {
-        requirement.ask != nil && asked.contains(requirement.row)
+        asked.contains(requirement.row)
     }
 
     public mutating func skip(_ row: Requirement.Row) { skipped.insert(row) }
 
+    /// Opens the walk again: every row is offered afresh, and what was asked stays asked.
+    public mutating func reopen() { skipped = [] }
+
     /// Brings a skipped row back, which is how the summary resumes the walk at it.
     public mutating func revisit(_ row: Requirement.Row) { skipped.remove(row) }
 
-    /// A request that went through: macOS showed its dialog. One that failed showed none,
-    /// so it is not recorded, and its button stays beside the reason.
+    /// A request made: the Manager started. One that could not start showed nothing, so it
+    /// is not recorded, and its button stays beside the reason.
     public mutating func asked(_ row: Requirement.Row) { asked.insert(row) }
+}
+
+extension Walk.Page: CustomStringConvertible {
+    /// The page as the window's log records it.
+    public var description: String {
+        switch self {
+        case .step(let requirement, let left): "step \(requirement.name) (\(requirement.reads)), \(left) left"
+        case .summary(let met, let skipped): "summary, \(met.count) met, \(skipped.count) set aside"
+        }
+    }
 }
 
 /// Why a row is asked for, in the words a person reads before macOS asks them anything.
@@ -117,12 +131,4 @@ public extension Requirement.Ask {
         }
     }
 
-    /// What the page says while the request waits: the Manager's `activate` returns only
-    /// once the person answers macOS, so the wait is named before it starts.
-    var waiting: String {
-        switch self {
-        case .activateDriver:
-            "Waiting for you to answer macOS about \"Karabiner-VirtualHIDDevice-Manager\", then to turn the driver on in System Settings."
-        }
-    }
 }

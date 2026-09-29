@@ -28,7 +28,7 @@ final class Item: NSObject {
     /// One menu for the item's life, its items replaced on each reading, so a reading that
     /// lands while it is open updates it rather than swapping it out from under a click.
     private let menu = NSMenu()
-    private let setUp = SetUpWindow(installation: installation)
+    private let setUp = SetUpWindow(installation: installation, readings: readings)
 
     /// Shown from launch until the first reading lands, which a silent daemon delays by
     /// doctor's whole deadline: an item with no image has no width and is not there at all.
@@ -109,16 +109,17 @@ func read(_ installation: Installation) -> Glance {
     return Glance(installation: installation, readiness: readiness, lastFailure: lastFailure, readAt: Date())
 }
 
+// [LAW:no-ambient-temporal-coupling] One serial queue owns the readings - the menu's and
+// the set-up window's - so a slow one (a silent daemon takes the status call's full
+// deadline) delays the next rather than overlapping it, and each surface is only ever
+// drawn from its newest.
+let readings = DispatchQueue(label: "\(installation.service).menubar.readings")
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 let item = Item()
 
-// [LAW:no-ambient-temporal-coupling] One serial queue owns the readings, so a slow one -
-// a silent daemon takes the status call's full deadline - delays the next rather than
-// overlapping it, and the menu is only ever drawn from the newest. The handler is
-// `@Sendable` and takes what it needs by value: written here, in top-level code, it would
-// otherwise be the main actor's, and run on this queue it traps.
-let readings = DispatchQueue(label: "\(installation.service).menubar.readings")
+// The handler is `@Sendable` and takes what it needs by value: written here, in top-level
+// code, it would otherwise be the main actor's, and run on this queue it traps.
 let timer = DispatchSource.makeTimerSource(queue: readings)
 timer.schedule(deadline: .now(), repeating: interval)
 timer.setEventHandler { @Sendable [installation, item] in
