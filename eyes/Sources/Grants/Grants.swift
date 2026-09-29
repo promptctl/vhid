@@ -114,9 +114,9 @@ public struct GrantReading: Sendable, Equatable {
         let (ended, end) = AsyncStream<Void>.makeStream()
         process.terminationHandler = { _ in end.finish() }
         do { try process.run() } catch { throw GrantReadingFailure("\(command) did not start: \(error)") }
-        // Drained while the child runs, so a child that says a lot cannot fill a pipe and stall.
-        async let said = drained(output)
-        async let why = drained(complaint)
+        // Drained while the child runs, so a child that says a lot cannot fill a pipe and stall;
+        // unstructured, so a deadline returns without waiting on whatever still holds a pipe.
+        let said = Task { await drained(output) }, why = Task { await drained(complaint) }
         let finished = await withTaskGroup(of: Bool.self) { group in
             group.addTask { for await _ in ended {}; return !Task.isCancelled }
             group.addTask { try? await Task.sleep(for: deadline); return false }
@@ -130,11 +130,11 @@ public struct GrantReading: Sendable, Equatable {
                 : "\(command) did not answer within \(deadline)")
         }
         guard process.terminationReason == .exit, process.terminationStatus == 0 else {
-            let complaint = await why
+            let complaint = await why.value
             let how = process.terminationReason == .uncaughtSignal ? "crashed with signal" : "exited"
             throw GrantReadingFailure("\(command) \(how) \(process.terminationStatus)\(complaint.isEmpty ? "" : ": \(complaint)")")
         }
-        return try GrantReading(line: await said)
+        return try GrantReading(line: await said.value)
     }
 
     /// Everything a pipe carries until its writer closes it, read off the cooperative pool,
@@ -193,9 +193,11 @@ public struct Holder: Sendable, Equatable {
             throw GrantReadingFailure("the responsible process \(pid) has no path to read: \(String(cString: strerror(errno)))")
         }
         let found = Holder(executable: String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self))
-        // The pane lists an app by its display name, which its file name need not be.
+        // The pane lists an app by its Finder name, which its file name need not be; that name
+        // carries ".app" when Finder shows every extension, and the pane never does.
+        let listed = FileManager.default.displayName(atPath: found.path)
         return found.path.hasSuffix(".app")
-            ? Holder(name: FileManager.default.displayName(atPath: found.path), path: found.path)
+            ? Holder(name: listed.hasSuffix(".app") ? String(listed.dropLast(".app".count)) : listed, path: found.path)
             : found
     }
 }

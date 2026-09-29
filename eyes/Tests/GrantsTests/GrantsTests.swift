@@ -42,6 +42,12 @@ struct GrantsTests {
         await #expect(throws: GrantReadingFailure("/bin/sleep 5 did not answer within 0.2 seconds")) {
             try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/sleep"), ["5"], within: .milliseconds(200))
         }
+        // A grandchild holding the pipe does not hold the call past its deadline.
+        let start = ContinuousClock.now
+        await #expect(throws: GrantReadingFailure.self) {
+            try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/sh"), ["-c", "sleep 5"], within: .milliseconds(200))
+        }
+        #expect(ContinuousClock.now - start < .seconds(2))
     }
 
     /// The child reads nothing of this process's stdin, and a child that says more than a
