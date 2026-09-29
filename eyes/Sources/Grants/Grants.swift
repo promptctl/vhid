@@ -63,14 +63,16 @@ public enum Grant: String, CaseIterable, Sendable {
 /// `SharedReading`, because a long-lived process's own answer goes stale; see `GrantReading.here()`.
 public typealias Gate = @Sendable (Grant) async throws -> Bool
 
-/// One process's readings, shared by every gate: a reading taken less than `fresh` ago
-/// answers them all, so a merged look and a wait's polls take one reading, not one each.
-/// A reading still being taken is waited on, never taken twice. A failed reading is shared
-/// like any other, and says itself to every gate it answers. [LAW:no-silent-failure]
+/// One process's readings, shared by every gate: a reading that finished less than `fresh`
+/// ago answers them all, so a merged look and a wait's polls take one reading, not one each.
+/// A reading still being taken is waited on, however long it takes, never taken twice. A
+/// failed reading is shared like any other, and says itself to every gate it answers.
+/// [LAW:no-silent-failure]
 public actor SharedReading {
     private let take: @Sendable () async throws -> GrantReading
     private let fresh: Duration
-    private var latest: (at: ContinuousClock.Instant, reading: Task<GrantReading, any Error>)?
+    /// The latest reading, and when it finished; nil while it is still being taken.
+    private var latest: (reading: Task<GrantReading, any Error>, finished: ContinuousClock.Instant?)?
 
     public init(fresh: Duration = .seconds(1), take: @escaping @Sendable () async throws -> GrantReading) {
         self.fresh = fresh
@@ -78,11 +80,25 @@ public actor SharedReading {
     }
 
     public func holds(_ grant: Grant) async throws -> Bool {
-        let now = ContinuousClock.now
-        if let latest, now - latest.at < fresh { return try await latest.reading.value.holds(grant) }
+        if let latest, latest.finished.map({ ContinuousClock.now - $0 < fresh }) ?? true {
+            return try await Self.waited(latest.reading).holds(grant)
+        }
         let reading = Task { [take] in try await take() }
-        latest = (now, reading)
-        return try await reading.value.holds(grant)
+        latest = (reading, nil)
+        defer { if latest?.reading == reading { latest?.finished = .now } }
+        return try await Self.waited(reading).holds(grant)
+    }
+
+    /// A shared reading's answer, given up the moment the asking task is cancelled while
+    /// the reading goes on for every other gate waiting on it.
+    private static func waited(_ reading: Task<GrantReading, any Error>) async throws -> GrantReading {
+        let (answer, say) = AsyncThrowingStream<GrantReading, any Error>.makeStream()
+        let relay = Task {
+            do { say.yield(try await reading.value); say.finish() } catch { say.finish(throwing: error) }
+        }
+        defer { relay.cancel() }
+        for try await taken in answer { return taken }
+        throw CancellationError()
     }
 }
 

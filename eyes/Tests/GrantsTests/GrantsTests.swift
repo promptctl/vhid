@@ -94,4 +94,24 @@ struct SharedReadingTests {
         _ = try await shared.holds(.accessibility)
         #expect(await takes.count == 2)
     }
+
+    @Test func aReadingSlowerThanFreshIsStillTakenOnce() async throws {
+        let takes = Takes()
+        let shared = SharedReading(fresh: .zero) { try await Task.sleep(for: .milliseconds(200)); return await takes.take() }
+        async let first = shared.holds(.accessibility)
+        try await Task.sleep(for: .milliseconds(50))
+        async let second = shared.holds(.accessibility)
+        _ = try await (first, second)
+        #expect(await takes.count == 1)
+    }
+
+    @Test func aCancelledGateStopsWaitingOnTheReading() async {
+        let shared = SharedReading { try await Task.sleep(for: .seconds(60)); return GrantReading { _ in true } }
+        let started = ContinuousClock.now
+        let gate = Task { try await shared.holds(.accessibility) }
+        try? await Task.sleep(for: .milliseconds(50))
+        gate.cancel()
+        await #expect(throws: CancellationError.self) { try await gate.value }
+        #expect(ContinuousClock.now - started < .seconds(5))
+    }
 }
