@@ -39,6 +39,7 @@ eyes find Save                    # where "Save" is: the point to click, then th
 eyes find Settings --exact --display 3
 eyes read --window 4127           # every run of text in one window, in reading order
 eyes find OK --source tree        # only the accessibility tree: exact text, no Screen Recording
+eyes find Saving --window 4127 --until absent --timeout 30   # returns once the text is gone
 eyes mcp                          # the verbs as MCP tools over stdio: windows, displays, find, read
 ```
 
@@ -49,6 +50,12 @@ both saw once. A merge with one grant missing still answers from the other and s
 reader could not look. Each prints a scope line first — where it looked, which reader
 looked, how many runs it read, what it set aside, whether it read the whole region. A `find` that matches nothing prints the nearest runs
 and how many edits off each is, so a misread one edit away is not taken for an absence.
+
+`find --until present|absent` re-reads the same rectangle until the text appears or is
+gone, then answers once, its scope line led by how many reads it took and how long. A
+window that closes counts as gone. Absent needs two whole reads running without a match.
+A reader that cannot look ends the wait with its error rather than reporting "gone".
+When `--timeout` runs out, the answer is the last reading, marked as timed out.
 
 ## Scope
 

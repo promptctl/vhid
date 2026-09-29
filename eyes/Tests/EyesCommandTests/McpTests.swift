@@ -35,6 +35,10 @@ import Testing
             return Reading(outcome: .nearest([]), scope: Scope(region: ScreenRect(x: 0, y: 0, width: 10, height: 10), examined: 0,
                 reach: .stopped(.merged(.blind(.tree, "\(TreeError.noGrant)", missingGrant: true), .read(.pixels, .whole)))))
         }
+        if query.region == .display(670) {
+            return Reading(outcome: .nearest([]), scope: Scope(region: ScreenRect(x: 0, y: 0, width: 10, height: 10), examined: 0,
+                reach: .stopped(.merged(.read(.tree, .whole), .blind(.pixels, "\(PixelsError.noGrant)", missingGrant: true)))))
+        }
         if query.region == .display(668) { throw BothBlind(first: TreeError.noGrant, second: PixelsError.noGrant) }
         let save = Found(text: Text("Save")!, frame: ScreenRect(x: -300, y: 40, width: 40, height: 20), source: .pixels(confidence: Confidence(1)!))
         return Reading(outcome: .matched(Matches([save])!), scope: Scope(region: ScreenRect(x: -1512, y: 316, width: 1512, height: 982), examined: 1, reach: .whole))
@@ -193,6 +197,9 @@ import Testing
             ("find", ["text": "a", "exact": true, "edits": 1], "give exact or edits, not both"),
             ("find", ["text": "a", "edits": -1], "edits cannot be negative"),
             ("find", ["text": "a", "exact": "yes"], "exact is yes, and it takes a boolean"),
+            ("find", ["text": "a", "timeout": 5], "timeout needs until: it is how long to wait"),
+            ("find", ["text": "a", "until": "gone"], "until is gone, and it takes one of present, absent"),
+            ("find", ["text": "a", "until": "absent", "timeout": 0], "timeout is 0.0, and it takes seconds above 0 and at most 600"),
             ("read", ["limit": 0], "limit must be at least 1"),
             ("read", ["display": 1, "window": 2], "give at most one of display, window, rect"),
             ("read", ["display": -1], "display is -1, which is not a window-server id (0 to 4294967295)"),
@@ -205,6 +212,26 @@ import Testing
             #expect(isError == true, "\(tool) \(arguments)")
             #expect(said == expected)
         }
+    }
+
+    /// A wait answers with the verb's report of the read it ended on, led by how the wait
+    /// went; running out of time is an answer, not a tool error.
+    @Test func findWaitsAndSaysHowTheWaitWent() async throws {
+        let (settled, settledError) = try await call(["text": "Save", "until": "present", "timeout": 1], tool: "find")
+        #expect(settledError != true)
+        #expect(settled.hasPrefix("present after 1 read in "))
+        #expect(settled.contains(": 1 matched \"Save\" in "))
+        let (timedOut, timedOutError) = try await call(["text": "Save", "until": "absent", "timeout": 0.3], tool: "find")
+        #expect(timedOutError != true)
+        #expect(timedOut.hasPrefix("timed out, not absent after "))
+    }
+
+    /// An absence a blind reader cannot prove is a tool error naming where its grant is held.
+    @Test func anAbsenceWaitOnABlindReaderNamesWhereItsGrantIsHeld() async throws {
+        let (said, isError) = try await call(["text": "Save", "display": 670, "until": "absent"], tool: "find")
+        #expect(isError == true)
+        #expect(said.hasPrefix("pixels could not look, so an absence cannot be proven"))
+        #expect(said.hasSuffix(EyesTools.grantNote))
     }
 
     /// Reads never overlap, however many calls arrive at once: two Vision recognitions in

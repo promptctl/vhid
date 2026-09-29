@@ -128,19 +128,31 @@ enum EyesTools {
                     "text": .object(["type": "string", "description": .string(Help.text)]),
                     "exact": .object(["type": "boolean", "description": .string(Help.exact)]),
                     "edits": .object(["type": "integer", "minimum": 0, "description": .string(Help.edits)]),
+                    "until": .object(["type": "string", "enum": .array(Until.allCases.map { .string($0.rawValue) }),
+                                      "description": .string(Help.until)]),
+                    "timeout": .object(["type": "number", "exclusiveMinimum": 0, "maximum": .double(Wait.longest),
+                                        "description": .string(Help.timeout)]),
                 ]) { $1 }),
                 "required": .array(["text"]),
                 "additionalProperties": false,
             ]),
             annotations: .init(readOnlyHint: true, openWorldHint: true)),
         call: { given in
-            try refuseStray(given, taken: ["text", "exact", "edits", "display", "window", "rect", "limit", "source"])
+            try refuseStray(given, taken: ["text", "exact", "edits", "display", "window", "rect", "limit", "source", "until", "timeout"])
             guard let text = try argument("text", in: given, \.stringValue, "a string") else {
                 throw ArgumentRefused(description: "text is required: the text to look for")
             }
             let match = try Find.match(text, exact: try argument("exact", in: given, \.boolValue, "a boolean") ?? false,
                                        edits: try argument("edits", in: given, \.intValue, "an integer"), as: .argument)
-            return try await answer(try query(match, given), try source(given), look)
+            let until = try argument("until", in: given, \.stringValue, "a string").map { named in
+                guard let until = Until(rawValue: named) else {
+                    throw ArgumentRefused(description: "until is \(named), and it takes one of \(Until.allCases.map(\.rawValue).joined(separator: ", "))")
+                }
+                return until
+            }
+            let wait = try Find.wait(until, timeout: try argument("timeout", in: given, { Double($0) }, "a number"),
+                                     as: .argument)
+            return try await answer(try query(match, given), try source(given), look, wait: wait)
         }) }
 
     static func read(_ look: @escaping Look) -> EyesTool { EyesTool(
@@ -186,9 +198,9 @@ enum EyesTools {
     /// The verbs' report, with a grant refusal pointed at the process that holds the grant
     /// for a server: the app hosting it, not eyes. A merge neither of whose readers could
     /// look says so for each. [LAW:no-silent-failure]
-    private static func answer(_ query: Query, _ source: SourceKind, _ look: Look) async throws -> String {
+    private static func answer(_ query: Query, _ source: SourceKind, _ look: Look, wait: Wait? = nil) async throws -> String {
         do {
-            return try await Report.text(query, source: source, grantNote: grantNote, reading: look)
+            return try await Report.text(query, source: source, wait: wait, grantNote: grantNote, reading: look)
         } catch let both as BothBlind {
             throw ArgumentRefused(description: "Neither reader could look. \(served(both.first)) \(served(both.second))")
         } catch let error as ReaderError where error.missingGrant {
@@ -274,6 +286,11 @@ actor OneAtATime {
     init(_ look: @escaping EyesTools.Look) { self.look = look }
 
     func read(_ source: SourceKind, _ query: Query) async throws -> Reading {
+        // A call withdrawn before it got here never joins the queue. The check inside the
+        // task below cannot see it: that task is not cancelled until the handler at the
+        // bottom is installed, and with nothing ahead of it, it reads first. Measured: 1 run
+        // in 8 of aWithdrawnCallLeavesTheQueueWithoutReading read the withdrawn call.
+        try Task.checkCancellation()
         let before = tail
         let look = look
         let mine = Task {
