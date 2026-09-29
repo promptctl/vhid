@@ -64,6 +64,14 @@ extension Parameter where Taken == String {
     }
 }
 
+extension Parameter where Taken == String? {
+    /// An input source id, or nil when it is left out - which `KeyboardLayout.chosen` reads
+    /// as the user's own layout, and US English when there is none.
+    static func layout(_ name: String) -> Self {
+        Self(name: name, expected: Help.layout, schema: ["type": "string"], absent: .some(nil)) { $0.stringValue.map { .some($0) } }
+    }
+}
+
 extension Parameter where Taken == [String] {
     static func texts(_ name: String, _ expected: String) -> Self {
         Self(name: name, expected: expected, schema: ["type": "array", "items": ["type": "string"], "minItems": 1], absent: nil) {

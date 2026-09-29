@@ -33,6 +33,7 @@ enum Help {
     static let y = "the y coordinate, in " + place
     static let text = "the text to type: anything the keyboard layout has keys for, dead-key sequences and line breaks included"
     static let chords = "the chords, pressed in order"
+    static let layout = "the keyboard layout to read keys off, by input source id, e.g. com.apple.keylayout.Dvorak; left out, the calling user's own layout, or US English when the system reports none. Name it when the Mac is at the login window or another user is in front, whose layout the caller cannot see"
     static let button = "which button: left, right, middle, or a number from 1 to 32"
     static let times = "how many presses without moving between them, at least 1"
     static let vertical = "wheel ticks, positive rolling the wheel away from the hand. With macOS's Natural scrolling on, as it is by default, that moves the view toward the end of what is scrolled, so the content slides up; with it off, toward the start. Negative is the other way"
@@ -64,9 +65,10 @@ enum Help {
         The text goes wherever keys would go if they were pressed now: nothing here chooses or \
         checks what is in front.
 
-        The console user's own keyboard layout decides which keys make which characters, and it \
-        is read in this process rather than in the daemon: macOS answers that question per \
-        process, and a root daemon asking it is told the US layout whatever the user is typing on. \
+        The keyboard layout decides which keys make which characters. Unless one is named, it is \
+        the calling user's own, read in this process rather than in the daemon: macOS answers that \
+        question per process, and a root daemon asking it is told the US layout whatever the user \
+        is typing on. \
         Text it has no keys for is refused whole, before any key goes down.
         """, commandLine: ["Text starting with - follows --, as in: vhid type -- \"-5 degrees\"."])
 
@@ -77,7 +79,8 @@ enum Help {
         or a key code written key 0x24.
 
         Which key a letter is on is the layout's to say - s is key code 1 on US and 41 on Dvorak - so \
-        a chord is read against the console user's layout, in this process rather than in the daemon.
+        a chord is read against the named layout or, unless one is named, the calling user's own, \
+        read in this process rather than in the daemon.
 
         Every chord is proven pressable before the first one goes down.
         """)
