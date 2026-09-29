@@ -15,8 +15,10 @@ import Installations
 /// low-talker's two flavors, and with no menu to feed: `vhid doctor` and its MCP tool are
 /// the readers.
 public struct Requirement: Sendable, Hashable {
+    /// Which of doctor's rows this is.
+    public let row: Row
     /// What must hold, in the words every surface uses.
-    public let name: String
+    public var name: String { row.rawValue }
     /// What was read off this Mac. Shown whether or not there is a step, because a
     /// requirement that says only "not ready" is one nobody can act on or report.
     public let reads: String
@@ -25,12 +27,24 @@ public struct Requirement: Sendable, Hashable {
     /// facts, and a reader that cannot tell them apart prints the second as the first.
     public let step: String?
 
+    /// What a button can do toward the step, when macOS offers anything to press: nil for
+    /// every step a person does in a Terminal or in System Settings by hand.
+    public let ask: Ask?
+
     public var met: Bool { step == nil }
 
-    public init(name: String, reads: String, step: String?) {
-        self.name = name
+    init(row: Row, reads: String, step: String?, ask: Ask? = nil) {
+        self.row = row
         self.reads = reads
         self.step = step
+        self.ask = ask
+    }
+
+    /// The requests a surface can make on a person's behalf, each one making macOS ask them.
+    public enum Ask: Sendable, Hashable {
+        /// Run the driver package's Manager `activate` as the person, so macOS asks them to
+        /// approve the driver extension.
+        case activateDriver
     }
 }
 
@@ -68,7 +82,7 @@ public extension Requirement {
     static func unreadable(_ row: Row, _ error: any Error) -> Requirement {
         let said = "\(error)".split(whereSeparator: \.isNewline).joined(separator: "; ")
         return Requirement(
-            name: row.rawValue,
+            row: row,
             reads: said.isEmpty ? "could not be read, and the failure gave no reason" : "could not be read: \(said)",
             step: """
                 Until this is read, nothing says it holds. Run doctor again; a
@@ -218,7 +232,11 @@ public extension Requirement {
     /// of one problem: a Mac with no package needs an install, a Mac holding a
     /// registration nobody approved needs a click, and a Mac mid-removal needs a restart.
     static func driverExtension(_ state: DriverState) -> Requirement {
-        Requirement(name: Row.driverExtension.rawValue, reads: state.rawValue, step: state.step)
+        // Only an inactive registration is one a button can ask for: the Manager's
+        // `activate` files the request macOS then shows. Every other state is a click in
+        // System Settings, an install, or a restart.
+        Requirement(row: .driverExtension, reads: state.rawValue, step: state.step,
+                    ask: state == .installedInactive ? .activateDriver : nil)
     }
 }
 
@@ -240,8 +258,7 @@ public extension Requirement {
     /// load. [LAW:no-silent-failure]
     static func launchdJob(_ standing: JobStanding, daemon: DaemonReading, installation: Installation) -> Requirement {
         let strayHolder = standing == .noJob && daemon.someoneHoldsTheService
-        return Requirement(
-            name: Row.launchdJob.rawValue,
+        return Requirement(row: .launchdJob,
             reads: strayHolder ? "no job, and something else holds the service" : reads(for: standing),
             step: strayHolder ? strayHolderStep(installation) : step(for: standing, installation: installation))
     }
@@ -321,7 +338,7 @@ public extension Requirement {
     /// it, and the one thing known wrong is the signature - the next row's to say. Whether
     /// its devices are up it did not say, since it refuses a caller before it is asked.
     static func daemon(_ reading: DaemonReading, installation: Installation) -> Requirement {
-        Requirement(name: Row.daemon.rawValue, reads: daemonReads(reading), step: daemonStep(reading, installation: installation))
+        Requirement(row: .daemon, reads: daemonReads(reading), step: daemonStep(reading, installation: installation))
     }
 
     private static func daemonReads(_ reading: DaemonReading) -> String {
@@ -380,7 +397,7 @@ public extension Requirement {
     /// reads like broken XPC and costs an afternoon before anyone suspects the signature.
     /// This row is that afternoon, spent once.
     static func signature(_ reading: DaemonReading, installation: Installation) -> Requirement {
-        Requirement(name: Row.signature.rawValue, reads: signatureReads(reading), step: signatureStep(reading, installation: installation))
+        Requirement(row: .signature, reads: signatureReads(reading), step: signatureStep(reading, installation: installation))
     }
 
     private static func signatureReads(_ reading: DaemonReading) -> String {
@@ -422,7 +439,7 @@ public extension Requirement {
     /// refused as busy. Nothing here takes them back: which process that is and whether it
     /// should stop is its owner's call, and doctor says only whose they are.
     static func devices(_ reading: DaemonReading) -> Requirement {
-        Requirement(name: Row.devices.rawValue, reads: devicesReads(reading), step: devicesStep(reading))
+        Requirement(row: .devices, reads: devicesReads(reading), step: devicesStep(reading))
     }
 
     private static func devicesReads(_ reading: DaemonReading) -> String {
@@ -475,8 +492,7 @@ public extension Requirement {
     ///   flag lifted off it, so this row cannot say a daemon started while that one says
     ///   none answered. [LAW:one-source-of-truth] [LAW:no-ambient-temporal-coupling]
     static func keyboardSetupAssistant(answered: Bool, daemon: DaemonReading, installation: Installation) -> Requirement {
-        Requirement(
-            name: Row.keyboardSetupAssistant.rawValue,
+        Requirement(row: .keyboardSetupAssistant,
             reads: answered ? "answered ANSI for the virtual keyboard" : "no ANSI answer on file for the virtual keyboard",
             step: answered ? nil : keyboardSetupAssistantStep(daemonHasStarted: daemon.daemonHasStarted, installation: installation))
     }

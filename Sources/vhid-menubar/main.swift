@@ -8,8 +8,8 @@ import MenuBar
 /// vhid's menu bar item: whether this copy of vhid is ready, doctor's rows, and the
 /// daemon's last failure.
 ///
-/// A view of vhid and never a second way to drive it: the only things it does are read
-/// and copy a row's text. [LAW:decomposition] What the menu says is `Glance`, a value;
+/// A view of vhid and never a second way to drive it: it reads, copies a row's text, and
+/// opens the set-up walk, whose one request - the driver's activation - makes macOS ask. [LAW:decomposition] What the menu says is `Glance`, a value;
 /// this file is the edge that reads the Mac, draws the value and answers a click.
 ///
 /// It serves the installation it was built for, as the CLI beside it does, so the copy
@@ -28,6 +28,7 @@ final class Item: NSObject {
     /// One menu for the item's life, its items replaced on each reading, so a reading that
     /// lands while it is open updates it rather than swapping it out from under a click.
     private let menu = NSMenu()
+    private let setUp = SetUpWindow(installation: installation)
 
     /// Shown from launch until the first reading lands, which a silent daemon delays by
     /// doctor's whole deadline: an item with no image has no width and is not there at all.
@@ -57,8 +58,13 @@ final class Item: NSObject {
             menu.addItem(item)
         }
         menu.addItem(.separator())
+        let walk = NSMenuItem(title: Walk.title, action: #selector(openSetUp), keyEquivalent: "")
+        walk.target = self
+        menu.addItem(walk)
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
+
+    @objc private func openSetUp() { setUp.show() }
 
     /// The row's whole text, which the menu may have cut short. The person asked for it,
     /// so replacing what they had copied is the point.
