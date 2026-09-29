@@ -60,15 +60,16 @@ import Testing
             for try await _ in await transport.receive() { next.yield() }
         }
         stdio.lines.yield(Data(#"{"jsonrpc":"2.0","id":7,"method":"tools/list"}"#.utf8))
+        stdio.lines.yield(Data(#"{"jsonrpc":"2.0","id":"7","method":"tools/list"}"#.utf8))
         stdio.lines.finish()
-        for await _ in read { break }
+        for await _ in read.prefix(2) {}
         // Parked: the only thing left for the relay to do is wait on id 7.
         for _ in 0..<200 where !(await transport.isWaiting) { await Task.yield() }
         #expect(await transport.isWaiting)
         session.cancel()
         _ = try? await session.value
         for _ in 0..<200 where said.lines.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
-        #expect(said.lines == [#"session stopped with answers owed owed=["7": "1"]"#])
+        #expect(said.lines == [#"session stopped with answers owed owed=["\"7\"": "1", "7": "1"]"#])
     }
 }
 

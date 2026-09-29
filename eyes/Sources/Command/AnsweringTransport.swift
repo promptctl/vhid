@@ -99,7 +99,8 @@ actor AnsweringTransport: Transport {
         }
         if !owed.isEmpty {
             logger.warning("session stopped with answers owed", metadata: [
-                "owed": .dictionary(Dictionary(uniqueKeysWithValues: owed.map { ("\($0.key)", .stringConvertible($0.value)) })),
+                // Keyed by each id as JSON writes it, so `7` and `"7"` stay two ids.
+                "owed": .dictionary(Dictionary(uniqueKeysWithValues: owed.map { (String(decoding: (try? JSONEncoder().encode($0.key)) ?? Data(), as: UTF8.self), .stringConvertible($0.value)) })),
             ])
         }
     }
