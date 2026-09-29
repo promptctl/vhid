@@ -31,6 +31,14 @@ import MCP
 /// said. [LAW:no-ambient-temporal-coupling] What is still owed is a count per id this actor
 /// keeps, and the end of stdin waits on it being empty, unless the session is stopped.
 ///
+/// **Why it also counts handlers still running: a withdrawn call is owed nothing, but may
+/// still be acting.** A cancel settles its id, since the SDK answers a cancelled request
+/// with nothing. But the SDK's cancel only asks: a handler that does not stop still runs,
+/// and a pipe that sent a call, its cancel, and then closed stdin had the process exit
+/// under it. The SDK does not tell a handler its request's id, so the handler cannot
+/// settle by id; it says instead that it is `underway`, and the end of stdin waits on that
+/// count too.
+///
 /// [LAW:effects-at-boundaries] The deciding is `Unreadable.answer(to:)` and `Exchange`,
 /// pure functions of a line. This actor only moves bytes and keeps the count.
 actor AnsweringTransport: Transport {
@@ -39,7 +47,9 @@ actor AnsweringTransport: Transport {
     /// client may reuse an id while its first request is in flight, and each is answered.
     /// [LAW:types-are-the-program]
     private var owed: [ID: Int] = [:]
-    /// Resumed when nothing is owed, by whichever answer settles the last of it. Keyed by
+    /// How many handlers are inside `underway`, answered or withdrawn alike.
+    private var running = 0
+    /// Resumed when nothing is owed or running, by whichever end comes last. Keyed by
     /// waiter, so a stopped relay lets go of its own wait and no other.
     private var settled: [UUID: CheckedContinuation<Void, Never>] = [:]
 
@@ -67,7 +77,31 @@ actor AnsweringTransport: Transport {
 
     private func settle(_ ids: [ID]) {
         for id in ids { owed[id] = owed[id].flatMap { $0 > 1 ? $0 - 1 : nil } }
-        if owed.isEmpty { release() }
+        if isEnded { release() }
+    }
+
+    /// Nothing owed and nothing running: all the session read has been done.
+    private var isEnded: Bool { owed.isEmpty && running == 0 }
+
+    /// Runs a handler's `work`, holding the end of the session until it is over, whether
+    /// or not its call was withdrawn meanwhile. Not isolated, so handlers run side by side.
+    nonisolated func underway<T: Sendable>(_ work: @Sendable () async throws -> T) async throws -> T {
+        await begin()
+        do {
+            let done = try await work()
+            await end()
+            return done
+        } catch {
+            await end()
+            throw error
+        }
+    }
+
+    private func begin() { running += 1 }
+
+    private func end() {
+        running -= 1
+        if isEnded { release() }
     }
 
     private func release() {
@@ -85,20 +119,20 @@ actor AnsweringTransport: Transport {
     /// How many requests read under `id` are not yet answered.
     func owing(_ id: ID) -> Int { owed[id] ?? 0 }
 
-    /// Returns once nothing is owed, or once the wait is cancelled: a session stopped from
+    /// Returns once nothing is owed or running, or once the wait is cancelled: a session stopped from
     /// inside, as `server.stop` does, will never send the answers it would be waiting on.
     /// What it gives up on is said, by id. [LAW:no-silent-failure]
     private func everythingAnswered() async {
-        if !owed.isEmpty { logger.info("stdin ended, waiting on answers owed", metadata: ["owed": owedNow]) }
+        if !isEnded { logger.info("stdin ended, waiting on answers owed and calls running", metadata: ["owed": owedNow, "running": "\(running)"]) }
         let waiter = UUID()
         await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
-                if owed.isEmpty || Task.isCancelled { continuation.resume() } else { settled[waiter] = continuation }
+                if isEnded || Task.isCancelled { continuation.resume() } else { settled[waiter] = continuation }
             }
         } onCancel: {
             Task { await self.release(waiter) }
         }
-        if !owed.isEmpty { logger.warning("session stopped with answers owed", metadata: ["owed": owedNow]) }
+        if !isEnded { logger.warning("session stopped with answers owed or calls running", metadata: ["owed": owedNow, "running": "\(running)"]) }
     }
 
     /// What is owed, as one line a person can read: each id as JSON writes it, so `7` and

@@ -25,8 +25,9 @@ struct Mcp: AsyncParsableCommand {
             answer with what those verbs print, scope line first.
             """)
 
-    /// The server as a client's initialize finds it, with its tools attached.
-    static func server(_ tools: [EyesTool] = EyesTools.all()) async -> Server {
+    /// The server as a client's initialize finds it, with its tools attached, each call
+    /// held `underway` on the transport it will be started on.
+    static func server(_ tools: [EyesTool] = EyesTools.all(), on transport: AnsweringTransport) async -> Server {
         let server = Server(name: "eyes", version: Version.current, capabilities: .init(tools: .init(listChanged: false)))
         await server.withMethodHandler(ListTools.self) { _ in .init(tools: tools.map(\.tool)) }
         await server.withMethodHandler(CallTool.self) { request in
@@ -36,16 +37,18 @@ struct Mcp: AsyncParsableCommand {
             // A verb that could not do what it was asked is a tool error, whose words the
             // model reads; a protocol error is for a request that named no tool at all.
             // [LAW:no-silent-failure]
-            do {
-                let said = try await verb.call(request.arguments ?? [:])
-                return .init(content: [.text(text: said, annotations: nil, _meta: nil)], isError: false)
-            } catch where Task.isCancelled {
-                // A withdrawn call is answered with nothing, as the MCP spec says; what it
-                // said on the way out still reaches stderr. [LAW:no-silent-failure]
-                FileHandle.standardError.write(Data("eyes: \(request.name) withdrawn: \(error)\n".utf8))
-                throw CancellationError()
-            } catch {
-                return .init(content: [.text(text: "\(error)", annotations: nil, _meta: nil)], isError: true)
+            return try await transport.underway {
+                do {
+                    let said = try await verb.call(request.arguments ?? [:])
+                    return .init(content: [.text(text: said, annotations: nil, _meta: nil)], isError: false)
+                } catch where Task.isCancelled {
+                    // A withdrawn call is answered with nothing, as the MCP spec says; what it
+                    // said on the way out still reaches stderr. [LAW:no-silent-failure]
+                    FileHandle.standardError.write(Data("eyes: \(request.name) withdrawn: \(error)\n".utf8))
+                    throw CancellationError()
+                } catch {
+                    return .init(content: [.text(text: "\(error)", annotations: nil, _meta: nil)], isError: true)
+                }
             }
         }
         return server
@@ -59,8 +62,9 @@ struct Mcp: AsyncParsableCommand {
         guard protocolOut.rawValue >= 0, dup2(STDERR_FILENO, STDOUT_FILENO) >= 0 else {
             throw Errno(rawValue: errno)
         }
-        let server = await Self.server()
-        try await server.start(transport: AnsweringTransport(StdioTransport(output: protocolOut)))
+        let transport = AnsweringTransport(StdioTransport(output: protocolOut))
+        let server = await Self.server(on: transport)
+        try await server.start(transport: transport)
         await server.waitUntilCompleted()
     }
 }

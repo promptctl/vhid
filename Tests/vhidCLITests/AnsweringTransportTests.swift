@@ -68,9 +68,38 @@ import Testing
         _ = try? await session.value
         for _ in 0..<200 where said.lines.count < 2 { try await Task.sleep(for: .milliseconds(10)) }
         #expect(said.lines == [
-            #"stdin ended, waiting on answers owed owed="7"×1, 7×1"#,
-            #"session stopped with answers owed owed="7"×1, 7×1"#,
+            #"stdin ended, waiting on answers owed and calls running owed="7"×1, 7×1 running=0"#,
+            #"session stopped with answers owed or calls running owed="7"×1, 7×1 running=0"#,
         ])
+    }
+
+    /// A withdrawn call is owed no answer, but a handler still running it holds the end of
+    /// stdin until it is over: the SDK's cancel only asks the handler to stop.
+    @Test func aWithdrawnCallStillRunningHoldsTheSession() async throws {
+        let stdio = Stdio(), transport = AnsweringTransport(stdio)
+        let (read, next) = AsyncStream<Void>.makeStream()
+        let session = Task {
+            for try await _ in await transport.receive() { next.yield() }
+        }
+        let (started, begun) = AsyncStream<Void>.makeStream()
+        let (finish, done) = AsyncStream<Void>.makeStream()
+        let handler = Task {
+            try await transport.underway {
+                begun.yield()
+                for await _ in finish {}
+            }
+        }
+        for await _ in started { break }
+        stdio.lines.yield(Data(#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"click"}}"#.utf8))
+        stdio.lines.yield(Data(#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":3}}"#.utf8))
+        stdio.lines.finish()
+        for await _ in read.prefix(1) {}
+        for _ in 0..<200 where !(await transport.isWaiting) { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(await transport.owing(3) == 0)
+        #expect(await transport.isWaiting, "the session ended under a handler still running")
+        done.finish()
+        try await handler.value
+        try await session.value
     }
 }
 

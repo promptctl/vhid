@@ -50,6 +50,7 @@ struct McpCommand: AsyncParsableCommand {
         }
 
         let server = Self.server()
+        let transport = AnsweringTransport(StdioTransport(output: protocolOut))
         let turns = Turns()
         await server.withMethodHandler(ListTools.self) { _ in .init(tools: Tools.all.map(\.tool)) }
         await server.withMethodHandler(CallTool.self) { request in
@@ -63,17 +64,19 @@ struct McpCommand: AsyncParsableCommand {
             // the verb said on the way out still goes to stderr, because it can be the one
             // report of what the verb had already done when it was withdrawn.
             // [LAW:no-silent-failure]
-            do {
-                let said = try await turns.take { try await verb.call(request.arguments ?? [:], on: installation) }
-                return .init(content: [.text(text: said, annotations: nil, _meta: nil)], isError: false)
-            } catch where Task.isCancelled {
-                FileHandle.standardError.write(Data("vhid: \(request.name) withdrawn: \(error.reported)\n".utf8))
-                throw CancellationError()
-            } catch {
-                return .init(content: [.text(text: error.reported, annotations: nil, _meta: nil)], isError: true)
+            return try await transport.underway {
+                do {
+                    let said = try await turns.take { try await verb.call(request.arguments ?? [:], on: installation) }
+                    return .init(content: [.text(text: said, annotations: nil, _meta: nil)], isError: false)
+                } catch where Task.isCancelled {
+                    FileHandle.standardError.write(Data("vhid: \(request.name) withdrawn: \(error.reported)\n".utf8))
+                    throw CancellationError()
+                } catch {
+                    return .init(content: [.text(text: error.reported, annotations: nil, _meta: nil)], isError: true)
+                }
             }
         }
-        try await server.start(transport: AnsweringTransport(StdioTransport(output: protocolOut)))
+        try await server.start(transport: transport)
         await server.waitUntilCompleted()
     }
 }
