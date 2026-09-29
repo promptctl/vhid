@@ -14,7 +14,7 @@ struct GrantsVerb: AsyncParsableCommand {
             """
     )
 
-    @Flag(help: "Raise macOS's dialog for each missing grant, then read again. macOS shows it once per app.")
+    @Flag(help: "Raise macOS's dialog for each missing grant. macOS shows it once per app; run eyes grants again once it is answered.")
     var ask = false
 
     /// The reading half: this process's own answer, printed as one line for the process
@@ -29,11 +29,11 @@ struct GrantsVerb: AsyncParsableCommand {
             return
         }
         let holder = try Holder.current()
-        if ask {
-            let missing = try await Self.reading().held.filter { !$0.value }.keys
-            Grant.allCases.filter(missing.contains).forEach { $0.ask() }
-        }
-        print(Self.report(try await Self.reading(), holder: holder, asked: ask))
+        let reading = try await Self.reading()
+        // The dialogs return before anyone answers them, so there is nothing new to read yet.
+        let asked = ask ? Grant.allCases.filter { !reading.holds($0) } : []
+        asked.forEach { $0.ask() }
+        print(Self.report(reading, holder: holder, asked: asked))
     }
 
     /// A fresh reading, from a child of this process. [LAW:no-ambient-temporal-coupling]
@@ -49,17 +49,17 @@ struct GrantsVerb: AsyncParsableCommand {
     /// The scope line and a row per grant: what the verb prints and what the MCP tool
     /// answers. Pure, so both are tested with readings a test wrote.
     /// [LAW:one-source-of-truth] [LAW:effects-at-boundaries]
-    static func report(_ reading: GrantReading, holder: Holder, asked: Bool) -> String {
-        let missing = Grant.allCases.filter { reading.held[$0] != true }
-        let scope = "\(Grant.allCases.count) grants, read \(asked ? "after asking for each missing one" : "without asking")."
+    static func report(_ reading: GrantReading, holder: Holder, asked: [Grant]) -> String {
+        let scope = "\(Grant.allCases.count) grants, read before any dialog."
             + " macOS charges them to \(holder.name) (\(holder.path)), the app responsible for this eyes;"
             + " that is the app to switch on."
-        // Said only after asking: the dialog comes once per app, so a grant still missing
-        // after it is the pane's to change. [LAW:no-silent-failure]
-        let after = asked && !missing.isEmpty
-            ? ["Still missing after asking: if no dialog appeared, macOS already has an answer from \(holder.name), and only its switch in the pane changes it."]
-            : []
-        return ([scope] + Grant.allCases.map { row($0, held: reading.held[$0] == true, holder: holder) } + after)
+        // The dialog comes once per app, so one that never appears is the pane's to change.
+        // [LAW:no-silent-failure]
+        let after = asked.isEmpty ? [] : [
+            "Asked for \(asked.map(\.name).joined(separator: " and ")): answer macOS's dialog, then run eyes grants to read again."
+                + " If no dialog appeared, macOS already has an answer from \(holder.name), and only its switch in the pane changes it.",
+        ]
+        return ([scope] + Grant.allCases.map { row($0, held: reading.holds($0), holder: holder) } + after)
             .joined(separator: "\n")
     }
 

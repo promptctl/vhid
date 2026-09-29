@@ -6,7 +6,7 @@ struct GrantsTests {
     /// A reading survives the line a reading process prints for it.
     @Test func aReadingRoundTripsThroughItsLine() throws {
         for held in [(true, false), (false, true), (true, true), (false, false)] {
-            let reading = GrantReading(held: [.screenRecording: held.0, .accessibility: held.1])
+            let reading = GrantReading { $0 == .screenRecording ? held.0 : held.1 }
             #expect(try GrantReading(line: reading.line) == reading)
         }
     }
@@ -32,7 +32,7 @@ struct GrantsTests {
     @Test func aReadingIsTakenFromAChildProcess() async throws {
         let echo = URL(fileURLWithPath: "/bin/echo")
         #expect(try await GrantReading.taken(by: echo, ["screenRecording=false accessibility=true"])
-            == GrantReading(held: [.screenRecording: false, .accessibility: true]))
+            == GrantReading { $0 == .accessibility })
         await #expect(throws: GrantReadingFailure("unreadable grants line \"nonsense\"")) {
             try await GrantReading.taken(by: echo, ["nonsense"])
         }
@@ -42,5 +42,16 @@ struct GrantsTests {
         await #expect(throws: GrantReadingFailure("/bin/sleep 5 did not answer within 0.2 seconds")) {
             try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/sleep"), ["5"], within: .milliseconds(200))
         }
+    }
+
+    /// The child reads nothing of this process's stdin, and a child that says more than a
+    /// pipe holds still answers.
+    @Test func theChildNeitherSharesStdinNorStallsOnAFullPipe() async throws {
+        let sh = URL(fileURLWithPath: "/bin/sh")
+        await #expect(throws: GrantReadingFailure("unreadable grants line \"\"")) {
+            try await GrantReading.taken(by: sh, ["-c", "cat"])
+        }
+        #expect(try await GrantReading.taken(by: sh, ["-c", "head -c 200000 /dev/zero >&2; echo screenRecording=true accessibility=true"])
+            == GrantReading { _ in true })
     }
 }

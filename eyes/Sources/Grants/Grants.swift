@@ -58,21 +58,27 @@ public enum Grant: String, CaseIterable, Sendable {
 
 /// Which grants are held, at one moment.
 public struct GrantReading: Sendable, Equatable {
-    public let held: [Grant: Bool]
+    private let held: [Grant: Bool]
 
-    public init(held: [Grant: Bool]) { self.held = held }
+    /// [LAW:types-are-the-program] Built from an answer for every grant, so no reading can
+    /// leave one out and have it read as "not granted".
+    public init(_ holds: (Grant) -> Bool) {
+        held = Dictionary(uniqueKeysWithValues: Grant.allCases.map { ($0, holds($0)) })
+    }
+
+    public func holds(_ grant: Grant) -> Bool { held[grant]! }
 
     /// This process's own reading. A long-lived process keeps the first Screen Recording
     /// answer it got - measured on macOS 15, a process read a grant "off" for 24 s after
     /// it was allowed and asked tccd nothing meanwhile - so this is only ever the answer
     /// of a process started to give it; see `taken(by:)`.
     public static func here() -> GrantReading {
-        GrantReading(held: Dictionary(uniqueKeysWithValues: Grant.allCases.map { ($0, $0.heldHere()) }))
+        GrantReading { $0.heldHere() }
     }
 
     /// The line a reading process prints and `init(line:)` reads back.
     public var line: String {
-        Grant.allCases.map { "\($0.rawValue)=\(held[$0] == true)" }.joined(separator: " ")
+        Grant.allCases.map { "\($0.rawValue)=\(holds($0))" }.joined(separator: " ")
     }
 
     /// [LAW:parse-dont-validate] The one place a printed line becomes a reading: every
@@ -87,7 +93,7 @@ public struct GrantReading: Sendable, Equatable {
             held[grant] = value
         }
         guard held.count == Grant.allCases.count else { throw GrantReadingFailure("unreadable grants line \"\(line)\"") }
-        self.init(held: held)
+        self.init { held[$0]! }
     }
 
     /// A fresh reading: `reader` run with `arguments` as a child of this process, so macOS
@@ -101,31 +107,45 @@ public struct GrantReading: Sendable, Equatable {
         process.executableURL = reader
         process.arguments = arguments
         let output = Pipe(), complaint = Pipe()
+        // Under `eyes mcp` this process's stdin is the client's JSON-RPC stream.
+        process.standardInput = FileHandle.nullDevice
         process.standardOutput = output
         process.standardError = complaint
-        let exited = DispatchSemaphore(value: 0)
-        process.terminationHandler = { _ in exited.signal() }
+        let (ended, end) = AsyncStream<Void>.makeStream()
+        process.terminationHandler = { _ in end.finish() }
         do { try process.run() } catch { throw GrantReadingFailure("\(command) did not start: \(error)") }
-        // Waited for off the cooperative pool, which a stuck child must not hold.
-        let (seconds, attoseconds) = deadline.components
-        let finished = await withCheckedContinuation { done in
-            DispatchQueue.global().async {
-                done.resume(returning: exited.wait(timeout: .now() + Double(seconds) + Double(attoseconds) / 1e18) == .success)
-            }
+        // Drained while the child runs, so a child that says a lot cannot fill a pipe and stall.
+        async let said = drained(output)
+        async let why = drained(complaint)
+        let finished = await withTaskGroup(of: Bool.self) { group in
+            group.addTask { for await _ in ended {}; return !Task.isCancelled }
+            group.addTask { try? await Task.sleep(for: deadline); return false }
+            defer { group.cancelAll() }
+            return await group.next()!
         }
         guard finished else {
             kill(process.processIdentifier, SIGKILL)
-            throw GrantReadingFailure("\(command) did not answer within \(deadline)")
+            throw GrantReadingFailure(Task.isCancelled
+                ? "\(command) was withdrawn before it answered"
+                : "\(command) did not answer within \(deadline)")
         }
-        let said = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
         guard process.terminationReason == .exit, process.terminationStatus == 0 else {
-            let why = String(decoding: complaint.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let complaint = await why
             let how = process.terminationReason == .uncaughtSignal ? "crashed with signal" : "exited"
-            throw GrantReadingFailure("\(command) \(how) \(process.terminationStatus)\(why.isEmpty ? "" : ": \(why)")")
+            throw GrantReadingFailure("\(command) \(how) \(process.terminationStatus)\(complaint.isEmpty ? "" : ": \(complaint)")")
         }
-        return try GrantReading(line: said)
+        return try GrantReading(line: await said)
+    }
+
+    /// Everything a pipe carries until its writer closes it, read off the cooperative pool,
+    /// which a blocking read must not hold.
+    private static func drained(_ pipe: Pipe) async -> String {
+        await withCheckedContinuation { done in
+            DispatchQueue.global().async {
+                done.resume(returning: String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+                    .trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+        }
     }
 }
 
@@ -172,6 +192,10 @@ public struct Holder: Sendable, Equatable {
         guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else {
             throw GrantReadingFailure("the responsible process \(pid) has no path to read: \(String(cString: strerror(errno)))")
         }
-        return Holder(executable: String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self))
+        let found = Holder(executable: String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self))
+        // The pane lists an app by its display name, which its file name need not be.
+        return found.path.hasSuffix(".app")
+            ? Holder(name: FileManager.default.displayName(atPath: found.path), path: found.path)
+            : found
     }
 }

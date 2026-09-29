@@ -41,7 +41,7 @@ eyes read --window 4127           # every run of text in one window, in reading 
 eyes find OK --source tree        # only the accessibility tree: exact text, no Screen Recording
 eyes find Saving --window 4127 --until absent --timeout 30   # returns once the text is gone
 eyes grants                       # Screen Recording and Accessibility: held or not, and the app they are charged to
-eyes grants --ask                 # raise macOS's dialog for each missing grant (once per app), then read again
+eyes grants --ask                 # raise macOS's dialog for each missing grant (once per app); run eyes grants again once answered
 eyes mcp                          # the verbs as MCP tools over stdio: windows, displays, find, read, grants
 ```
 

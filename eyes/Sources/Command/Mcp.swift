@@ -21,8 +21,8 @@ struct Mcp: AsyncParsableCommand {
         discussion: """
             Newline-delimited JSON-RPC on stdin and stdout, and nothing else on stdout: every \
             diagnostic goes to stderr. The tools are \(EyesTools.all().map(\.tool.name).joined(separator: ", ")). \
-            They take what the verbs of the same name take and answer with what those verbs \
-            print, scope line first.
+            They take what the verbs of the same name take, except that grants never asks, and \
+            answer with what those verbs print, scope line first.
             """)
 
     /// The server as a client's initialize finds it, with its tools attached.
@@ -232,7 +232,7 @@ enum EyesTools {
         call: { given in
             try refuseStray(given, taken: [])
             let (reading, holder) = try await look()
-            return GrantsVerb.report(reading, holder: holder, asked: false)
+            return GrantsVerb.report(reading, holder: holder, asked: [])
         }) }
 
     static func displays(_ list: @escaping DisplayList) -> EyesTool { EyesTool(

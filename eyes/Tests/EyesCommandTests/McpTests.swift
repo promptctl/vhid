@@ -18,7 +18,7 @@ import Testing
         ],
         excluded: [])
     private static let front = Frontmost(pid: 401, name: "Finder")
-    private static let grantReading = GrantReading(held: [.screenRecording: false, .accessibility: true])
+    private static let grantReading = GrantReading { $0 == .accessibility }
     private static let holder = Holder(executable: "/Applications/Claude.app/Contents/MacOS/Claude")
 
     /// Every query the fake reader was handed, so a test can check what reached it.
@@ -109,7 +109,7 @@ import Testing
     @Test func grantsAnswersWithTheVerbsReport() async throws {
         let (said, isError) = try await call([:], tool: "grants")
         #expect(isError != true)
-        #expect(said == GrantsVerb.report(Self.grantReading, holder: Self.holder, asked: false))
+        #expect(said == GrantsVerb.report(Self.grantReading, holder: Self.holder, asked: []))
         #expect(try await call(["ask": true], tool: "grants").1 == true)
     }
 
