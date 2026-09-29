@@ -11,10 +11,8 @@ import Testing
     @Test func aReusedIdIsOwedOnceForEachRequest() async throws {
         let stdio = Stdio(), transport = AnsweringTransport(stdio)
         let (read, next) = AsyncStream<Void>.makeStream()
-        let (ended, end) = AsyncStream<Void>.makeStream()
         let session = Task {
             for try await _ in await transport.receive() { next.yield() }
-            end.yield()
         }
         let request = Data(#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#.utf8)
         let answer = Data(#"{"jsonrpc":"2.0","id":1,"result":{}}"#.utf8)
@@ -22,12 +20,9 @@ import Testing
         stdio.lines.yield(request)
         stdio.lines.finish()
         for await _ in read.prefix(2) {}
+        #expect(await transport.owing(1) == 2)
         try await transport.send(answer)
-        let early = await Self.within(.milliseconds(200)) { () async -> Bool? in
-            for await _ in ended { return true }
-            return nil
-        }
-        #expect(early == nil, "the session ended with a request under id 1 unanswered")
+        #expect(await transport.owing(1) == 1, "the first answer settled both requests under id 1")
         try await transport.send(answer)
         try await session.value
     }
@@ -53,15 +48,41 @@ import Testing
         #expect(held == nil, "the relay is still waiting on the owed answer")
     }
 
-    /// The result of `work`, or nil if it takes longer than `limit`.
-    private static func within<T: Sendable>(_ limit: Duration, _ work: @escaping @Sendable () async -> T?) async -> T? {
-        await withTaskGroup(of: T?.self) { group in
-            group.addTask { await work() }
-            group.addTask { try? await Task.sleep(for: limit); return nil }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
+    /// Stopped after stdin has ended, when the relay is already parked on what is owed, the
+    /// session still ends, and says which answers it gave up on.
+    @Test func aSessionStoppedWhileParkedEndsAndSaysWhatWasOwed() async throws {
+        let stdio = Stdio(), said = Said()
+        let transport = AnsweringTransport(stdio, logger: Logger(label: "test") { _ in said })
+        let (read, next) = AsyncStream<Void>.makeStream()
+        let session = Task {
+            for try await _ in await transport.receive() { next.yield() }
         }
+        stdio.lines.yield(Data(#"{"jsonrpc":"2.0","id":7,"method":"tools/list"}"#.utf8))
+        stdio.lines.finish()
+        for await _ in read { break }
+        // Parked: the only thing left for the relay to do is wait on id 7.
+        for _ in 0..<200 where !(await transport.isWaiting) { await Task.yield() }
+        #expect(await transport.isWaiting)
+        session.cancel()
+        _ = try? await session.value
+        for _ in 0..<200 where said.lines.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(said.lines == [#"session stopped with answers owed owed=["7": "1"]"#])
+    }
+}
+
+/// What a transport logged, one line per message with its metadata.
+private final class Said: LogHandler, @unchecked Sendable {
+    private let lock = NSLock()
+    private var kept: [String] = []
+    var lines: [String] { lock.withLock { kept } }
+    var metadata: Logger.Metadata = [:]
+    var logLevel: Logger.Level = .trace
+    subscript(metadataKey key: String) -> Logger.Metadata.Value? {
+        get { metadata[key] } set { metadata[key] = newValue }
+    }
+    func log(level: Logger.Level, message: Logger.Message, metadata: Logger.Metadata?, source: String, file: String, function: String, line: UInt) {
+        let fields = (metadata ?? [:]).sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }
+        lock.withLock { kept.append(([message.description] + fields).joined(separator: " ")) }
     }
 }
 

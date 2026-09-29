@@ -39,14 +39,16 @@ actor AnsweringTransport: Transport {
     /// client may reuse an id while its first request is in flight, and each is answered.
     /// [LAW:types-are-the-program]
     private var owed: [ID: Int] = [:]
-    /// Resumed when nothing is owed, by whichever answer settles the last of it.
-    private var settled: [CheckedContinuation<Void, Never>] = []
+    /// Resumed when nothing is owed, by whichever answer settles the last of it. Keyed by
+    /// waiter, so a stopped relay lets go of its own wait and no other.
+    private var settled: [UUID: CheckedContinuation<Void, Never>] = [:]
 
     /// Diagnostics go to stderr, which is the only place they may: stdout is the protocol's.
-    nonisolated let logger = Logger(label: "eyes.mcp", factory: { StreamLogHandler.standardError(label: $0) })
+    nonisolated let logger: Logger
 
-    init(_ inner: any Transport) {
+    init(_ inner: any Transport, logger: Logger = Logger(label: "eyes.mcp", factory: { StreamLogHandler.standardError(label: $0) })) {
         self.inner = inner
+        self.logger = logger
     }
 
     func connect() async throws { try await inner.connect() }
@@ -69,19 +71,36 @@ actor AnsweringTransport: Transport {
     }
 
     private func release() {
-        settled.forEach { $0.resume() }
-        settled = []
+        settled.values.forEach { $0.resume() }
+        settled = [:]
     }
+
+    private func release(_ waiter: UUID) {
+        settled.removeValue(forKey: waiter)?.resume()
+    }
+
+    /// Whether a relay is parked, waiting on what is owed.
+    var isWaiting: Bool { !settled.isEmpty }
+
+    /// How many requests read under `id` are not yet answered.
+    func owing(_ id: ID) -> Int { owed[id] ?? 0 }
 
     /// Returns once nothing is owed, or once the wait is cancelled: a session stopped from
     /// inside, as `server.stop` does, will never send the answers it would be waiting on.
+    /// What it gives up on is said, by id. [LAW:no-silent-failure]
     private func everythingAnswered() async {
+        let waiter = UUID()
         await withTaskCancellationHandler {
-            await withCheckedContinuation { waiter in
-                if owed.isEmpty || Task.isCancelled { waiter.resume() } else { settled.append(waiter) }
+            await withCheckedContinuation { continuation in
+                if owed.isEmpty || Task.isCancelled { continuation.resume() } else { settled[waiter] = continuation }
             }
         } onCancel: {
-            Task { await self.release() }
+            Task { await self.release(waiter) }
+        }
+        if !owed.isEmpty {
+            logger.warning("session stopped with answers owed", metadata: [
+                "owed": .dictionary(Dictionary(uniqueKeysWithValues: owed.map { ("\($0.key)", .stringConvertible($0.value)) })),
+            ])
         }
     }
 
