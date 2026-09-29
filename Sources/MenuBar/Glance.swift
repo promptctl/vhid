@@ -72,7 +72,7 @@ public struct Glance: Sendable, Hashable {
     private static func failure(_ lastFailure: Result<DaemonFailure?, any Error>) -> Row {
         switch lastFailure {
         case .success(let failure?): Row(mark: .error, text: "Last failure, at \(clock(failure.at)): \(failure.text)")
-        case .success(nil): Row(mark: .met, text: "No failure since the daemon started")
+        case .success(nil): Row(mark: .met, text: "No failure since vhidd started")
         case .failure(let error): Row(mark: .error, text: "The last failure could not be read: \(error)")
         }
     }

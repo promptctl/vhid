@@ -25,17 +25,17 @@ public enum DaemonError: Error, CustomStringConvertible, Equatable {
         case .noSocket(let path):
             "no socket at \(path); Karabiner-VirtualHIDDevice-Daemon is not running, and only root can see it when it is"
         case .socket(let call, let code):
-            "\(call) on the daemon's socket failed: \(String(cString: strerror(code))) (\(code))"
+            "\(call) on the driver's daemon's socket failed: \(String(cString: strerror(code))) (\(code))"
         case .silent:
-            "the daemon did not answer in time"
+            "the driver's daemon did not answer in time"
         case .closed:
-            "the daemon closed the connection"
+            "the driver's daemon closed the connection"
         case .malformed(let what):
             "the wire carried \(what)"
         case .driverVersionMismatched:
-            "the daemon reports the driver's version is not the one it was built for"
+            "the driver's daemon reports the driver's version is not the one it was built for"
         case .notReady(let awaiting, let said):
-            "the daemon never said \(awaiting.name); it last said "
+            "the driver's daemon never said \(awaiting.name); it last said "
                 + (said.isEmpty ? "nothing about the driver" : said.sorted { $0.key.rawValue < $1.key.rawValue }.map { "\($0.key.name): \($0.value ? "yes" : "no")" }.joined(separator: ", "))
         }
     }

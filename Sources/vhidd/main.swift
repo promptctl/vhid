@@ -30,7 +30,7 @@ import os
 /// send an operator whose plist does carry it looking in the wrong place.
 let installation: Installation = {
     guard let installation = serviceArgument(CommandLine.arguments) else {
-        Logger(subsystem: Installation.unnamedSubsystem, category: "helper").fault(
+        Logger(subsystem: Installation.unnamedSubsystem, category: "vhidd").fault(
             "will not start: no usable --service <name> in \(CommandLine.arguments, privacy: .public)")
         exit(0)
     }
@@ -46,7 +46,7 @@ let installation: Installation = {
 /// three subsystems are built from the one namespace:
 ///
 ///     log show --last 10m --predicate 'subsystem BEGINSWITH "ai.promptctl.vhid"'
-private let logger = Logger(subsystem: installation.service, category: "helper")
+private let logger = Logger(subsystem: installation.service, category: "vhidd")
 func log(_ message: String) {
     logger.notice("\(message, privacy: .public)")
 }
@@ -121,8 +121,8 @@ do {
             backoff: Backoff(first: .seconds(2), most: .seconds(60)),
             readiness: readiness,
             serve: { reached in
-                log("the keyboard is up: the daemon answered in \(reached.startup.keyboard.answered), ready after \(reached.startup.keyboard.ready)")
-                log("the mouse is up: the daemon answered in \(reached.startup.mouse.answered), ready after \(reached.startup.mouse.ready)")
+                log("the keyboard is up: the driver's daemon answered in \(reached.startup.keyboard.answered), ready after \(reached.startup.keyboard.ready)")
+                log("the mouse is up: the driver's daemon answered in \(reached.startup.mouse.answered), ready after \(reached.startup.mouse.ready)")
                 let devices = Devices(keyboard: reached.devices.keyboard, mouse: reached.devices.mouse)
                 // Whatever the daemon was holding for its last occupant - a vhidd that
                 // exited while the daemon lived on, or a hand-run session - is up before

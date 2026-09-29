@@ -73,9 +73,9 @@ public final class HelperConnection: @unchecked Sendable {
         public var description: String {
             switch cause {
             case .connection(NSCocoaErrorDomain, NSXPCConnectionInvalid, _):
-                "no launchd job answers \(service) (\(NSCocoaErrorDomain) \(NSXPCConnectionInvalid)): the daemon is not installed or not loaded"
+                "no launchd job answers \(service) (\(NSCocoaErrorDomain) \(NSXPCConnectionInvalid)): vhidd is not installed or not loaded"
             case .connection(NSCocoaErrorDomain, NSXPCConnectionInterrupted, _):
-                "\(service) ended the connection (\(NSCocoaErrorDomain) \(NSXPCConnectionInterrupted)): the daemon refused this binary's signature, or exited while the call was in flight"
+                "\(service) ended the connection (\(NSCocoaErrorDomain) \(NSXPCConnectionInterrupted)): vhidd refused this binary's signature, or exited while the call was in flight"
             case .connection(let domain, let code, let description): "\(service) could not be reached: \(description) (\(domain) \(code))"
             case .silence(let deadline): "\(service) did not answer in \(deadline)"
             case .notAHelper: "\(service) answered with something that is not vhidd's service"

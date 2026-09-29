@@ -175,7 +175,7 @@ import Testing
     /// signing an ad hoc tree, and restarting a daemon older than this vhid.
     @Test func aRefusalNamesBothOfItsCausesAndTheStepForEach() throws {
         let row = Requirement.signature(.refusedThisVhid, installation: Self.installation)
-        #expect(row.reads == "refused: the daemon ended this vhid's connection")
+        #expect(row.reads == "refused: vhidd ended this vhid's connection")
         let step = try #require(row.step)
         #expect(step.contains("make sign"))
         #expect(step.contains("sudo launchctl kickstart -k system/\(Self.installation.launchdLabel)"))

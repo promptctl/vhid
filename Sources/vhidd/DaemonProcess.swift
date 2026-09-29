@@ -150,10 +150,10 @@ extension DaemonProcess.Effects {
         do {
             return (try connect { whenLost($0, .alreadyRunning) }, .alreadyRunning)
         } catch let unreachable as DaemonError {
-            log("no daemon to reach (\(unreachable)); starting it")
+            log("no driver's daemon to reach (\(unreachable)); starting it")
         }
         let pid = try launch()
-        log("started the daemon as pid \(pid)")
+        log("started the driver's daemon as pid \(pid)")
         let origin = DaemonProcess.Origin.startedHere(pid)
         while true {
             do {
@@ -169,10 +169,10 @@ extension DaemonProcess.Effects {
     func stop(_ origin: DaemonProcess.Origin) {
         switch origin {
         case .alreadyRunning:
-            log("leaving the daemon running: this helper did not start it")
+            log("leaving the driver's daemon running: vhidd did not start it")
         case .startedHere(let pid):
             terminate(pid)
-            log("stopped the daemon this helper started, pid \(pid)")
+            log("stopped the driver's daemon as pid \(pid), which vhidd started")
         }
     }
 }
@@ -207,7 +207,7 @@ final class Children: @unchecked Sendable {
     private var stopping = false
 
     struct Stopping: Error, CustomStringConvertible {
-        var description: String { "vhidd is stopping, so it starts no daemon" }
+        var description: String { "vhidd is stopping, so it starts no driver's daemon" }
     }
 
     /// `effects` with every launch recorded and every termination limited to what is.

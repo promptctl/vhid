@@ -99,7 +99,7 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
         }
         let error = try #require(throws: DaemonError.self) { try keyboard(on: fake).start(within: .milliseconds(300)) }
         guard case .notReady(.keyboardReady, _) = error else { Issue.record("threw \(error)"); return }
-        #expect(error.description == "the daemon never said keyboard ready; it last said \(named)")
+        #expect(error.description == "the driver's daemon never said keyboard ready; it last said \(named)")
     }
 
     /// The daemon health-checks its clients, and a client that does not answer is one it
