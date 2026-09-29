@@ -13,7 +13,7 @@ import Testing
     /// connection nobody is left to free.
     @Test func anActArrivingAfterTheConnectionWentTakesNothing() {
         let (holder, devices) = (Holder(), RecordingDevices())
-        let seat = Seat(ObjectIdentifier(one), pid: 41, holder: holder, readiness: .serving(devices))
+        let seat = Seat(ObjectIdentifier(one), pid: 41, holder: holder, readiness: .serving(devices), cursor: FixedCursor())
         seat.down(usage: 4) { #expect($0 == nil) }
         seat.end(because: "a client went away")
         var refusal: Error?
@@ -26,7 +26,7 @@ import Testing
     /// A seat that ends without ever acting releases nothing: it never held the devices.
     @Test func aSeatThatNeverActedReleasesNothingWhenItEnds() {
         let (holder, devices) = (Holder(), RecordingDevices())
-        let seat = Seat(ObjectIdentifier(one), pid: 41, holder: holder, readiness: .serving(devices))
+        let seat = Seat(ObjectIdentifier(one), pid: 41, holder: holder, readiness: .serving(devices), cursor: FixedCursor())
         seat.end(because: "a client went away")
         #expect(devices.done.isEmpty)
         #expect(holder.pid(on: 1) == nil)
@@ -37,8 +37,8 @@ import Testing
     @Test func anActWhileTheDevicesAreDownIsRefusedWithWhyAndClaimsNothing() {
         let (holder, readiness) = (Holder(), Readiness())
         let other = NSObject()
-        let first = Seat(ObjectIdentifier(one), pid: 41, holder: holder, readiness: readiness)
-        let second = Seat(ObjectIdentifier(other), pid: 42, holder: holder, readiness: readiness)
+        let first = Seat(ObjectIdentifier(one), pid: 41, holder: holder, readiness: readiness, cursor: FixedCursor())
+        let second = Seat(ObjectIdentifier(other), pid: 42, holder: holder, readiness: readiness, cursor: FixedCursor())
         var refusals: [String?] = []
         first.down(usage: 4) { refusals.append(($0 as NSError?)?.localizedDescription) }
         second.down(usage: 4) { refusals.append(($0 as NSError?)?.localizedDescription) }
@@ -48,7 +48,7 @@ import Testing
 
     /// Status is not the proof the devices are up when they are not: it answers why.
     @Test func statusWhileTheDevicesAreDownSaysWhy() {
-        let seat = Seat(ObjectIdentifier(one), pid: 41, holder: Holder(), readiness: Readiness())
+        let seat = Seat(ObjectIdentifier(one), pid: 41, holder: Holder(), readiness: Readiness(), cursor: FixedCursor())
         var answer: (NSNumber?, String?)
         seat.status { answer = ($0, ($1 as NSError?)?.localizedDescription) }
         #expect(answer.0 == nil)
@@ -61,7 +61,7 @@ import Testing
         let (holder, readiness) = (Holder(), Readiness())
         let first = readiness.begin()
         readiness.up(RecordingDevices())
-        let seat = Seat(ObjectIdentifier(one), pid: 41, holder: holder, readiness: readiness)
+        let seat = Seat(ObjectIdentifier(one), pid: 41, holder: holder, readiness: readiness, cursor: FixedCursor())
         seat.down(usage: 225) { #expect($0 == nil) }
         _ = readiness.lost(NSError(domain: "test", code: 1), in: first)
         _ = readiness.begin()

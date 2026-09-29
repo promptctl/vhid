@@ -1,4 +1,3 @@
-import CoreGraphics
 import Foundation
 import Pointing
 
@@ -50,7 +49,7 @@ public struct Clicks: RawRepresentable, Hashable, Codable, Sendable {
 public struct Pointer: Sendable {
     public let mouse: any Mouse
     /// Where the cursor is now, in the same coordinates as the targets.
-    public let cursor: @Sendable () throws -> ScreenPoint
+    public let cursor: @Sendable () async throws -> ScreenPoint
 
     /// The most motion reports one move may take. Each halves the remaining distance or
     /// better once the gain is known, so a screen's width takes a handful; the cap is for
@@ -65,7 +64,7 @@ public struct Pointer: Sendable {
     /// it nowhere. The window server applies a report within a frame or two; this is many.
     public static let settle: Duration = .milliseconds(50)
 
-    public init(mouse: any Mouse, cursor: @escaping @Sendable () throws -> ScreenPoint) {
+    public init(mouse: any Mouse, cursor: @escaping @Sendable () async throws -> ScreenPoint) {
         self.mouse = mouse
         self.cursor = cursor
     }
@@ -80,15 +79,6 @@ public struct Pointer: Sendable {
     public struct Click: Equatable, Sendable {
         public let at: ScreenPoint
         public let reports: Int
-    }
-
-    /// The cursor as the window server reports it: global coordinates, top-left origin,
-    /// points. Readable without privilege.
-    public static func screenCursor() throws -> ScreenPoint {
-        guard let location = CGEvent(source: nil)?.location, let cursor = ScreenPoint(x: location.x, y: location.y) else {
-            throw CursorUnreadable()
-        }
-        return cursor
     }
 
     /// How far the OS carries the cursor per count, and for how fast a report that holds.
@@ -187,7 +177,7 @@ public struct Pointer: Sendable {
     /// six remainders. [LAW:verifiable-goals]
     @discardableResult
     public func move(to target: ScreenPoint) async throws -> Int {
-        var at = try cursor()
+        var at = try await cursor()
         var gain = Gain.assumed
         var stalls = 0
         for reports in 0..<Self.rounds {
@@ -216,7 +206,7 @@ public struct Pointer: Sendable {
     private func settled(from before: ScreenPoint) async throws -> ScreenPoint {
         let deadline = ContinuousClock.now + Self.settle
         while true {
-            let now = try cursor()
+            let now = try await cursor()
             if now != before || ContinuousClock.now >= deadline { return now }
             try await Task.sleep(for: .milliseconds(1))
         }
@@ -227,7 +217,7 @@ public struct Pointer: Sendable {
     public func click(at point: ScreenPoint, button: Button, times: Clicks) async throws -> Click {
         do {
             let reports = try await move(to: point)
-            let pressed = try cursor()
+            let pressed = try await cursor()
             for _ in 0..<times.rawValue {
                 try Task.checkCancellation()
                 try await mouse.down(button)
@@ -283,10 +273,10 @@ public struct Pointer: Sendable {
     public func drag(from start: ScreenPoint, to end: ScreenPoint, button: Button) async throws -> Drag {
         do {
             let approach = try await move(to: start)
-            let pressed = try cursor()
+            let pressed = try await cursor()
             try await mouse.down(button)
             let carry = try await move(to: end)
-            let released = try cursor()
+            let released = try await cursor()
             try await mouse.releaseAll()
             return Drag(from: pressed, to: released, reports: approach + carry)
         } catch {
@@ -321,6 +311,8 @@ public struct WouldNotReach: Error, CustomStringConvertible {
 }
 
 public struct CursorUnreadable: Error, CustomStringConvertible {
+    public init() {}
+
     public var description: String { "the window server would not say where the cursor is" }
 }
 

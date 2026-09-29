@@ -131,14 +131,14 @@ extension Pointer {
     /// How far `times` reports of `step`, `every` apart from `start`, carried the cursor.
     private func run<C: Clock>(_ step: Move, times: Int, from start: ScreenPoint, every interval: Duration, clock: C) async throws -> Double where C.Duration == Duration {
         try await move(to: start)
-        let before = try cursor()
+        let before = try await cursor()
         for _ in 0..<times {
             try Task.checkCancellation()
             try await mouse.move(by: step)
             try await clock.sleep(until: clock.now.advanced(by: interval), tolerance: .zero)
         }
         try await clock.sleep(until: clock.now.advanced(by: Self.settle), tolerance: .zero)
-        let after = try cursor()
+        let after = try await cursor()
         return hypot(after.x - before.x, after.y - before.y)
     }
 }

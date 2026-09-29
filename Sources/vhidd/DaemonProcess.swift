@@ -45,11 +45,6 @@ enum DaemonProcess {
         case startedHere(pid_t)
     }
 
-    struct CouldNotStart: Error, CustomStringConvertible {
-        let code: Int32
-        var description: String { "could not start \(executable): \(String(cString: strerror(code))) (\(code))" }
-    }
-
     /// What reaching the daemon does to the world, taken as values: connect to it, bring
     /// the devices up on the connection, launch the daemon, terminate it. The policy over
     /// them - reach first, launch only when nothing answers, stop only what was launched
@@ -75,29 +70,9 @@ enum DaemonProcess {
                 return HID(keyboard: VirtualKeyboard(daemon: daemon), mouse: VirtualPointing(daemon: daemon))
             },
             bringUp: { Startups(keyboard: try $0.keyboard.start(within: $1), mouse: try $0.mouse.start(within: $1)) },
-            launch: spawn,
+            launch: { try spawn(executable, [], stdio: [:]) },
             terminate: end
         )
-    }
-
-    /// Started with SIGTERM at its default: vhidd ignores SIGTERM to answer it on a queue,
-    /// and an ignored signal is inherited across exec, which would leave `end`'s SIGTERM
-    /// nothing to stop.
-    private static func spawn() throws -> pid_t {
-        var pid: pid_t = 0
-        let arguments: [UnsafeMutablePointer<CChar>?] = [strdup(executable), nil]
-        defer { arguments.forEach { free($0) } }
-        var attributes: posix_spawnattr_t?
-        posix_spawnattr_init(&attributes)
-        defer { posix_spawnattr_destroy(&attributes) }
-        var defaults = sigset_t()
-        sigemptyset(&defaults)
-        sigaddset(&defaults, SIGTERM)
-        posix_spawnattr_setsigdefault(&attributes, &defaults)
-        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSIGDEF))
-        let spawned = posix_spawn(&pid, executable, nil, &attributes, arguments, environ)
-        guard spawned == 0 else { throw CouldNotStart(code: spawned) }
-        return pid
     }
 
     /// Stops a daemon this process started and reaps it, so it is gone - not a zombie, and

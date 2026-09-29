@@ -173,16 +173,10 @@ over SSH on macOS 15 with vhid 0.1.0:
 | That user's lock screen | yes | yes |
 | Terminal with Secure Keyboard Entry on | yes | yes |
 | A system password prompt | yes | yes |
-| The login window, nobody logged in | yes | no |
-| The login window after fast user switching, SSH as a user in the background | yes | no |
+| The login window, nobody logged in | yes | yes |
+| The login window after fast user switching, SSH as a user in the background | yes | yes |
 | FileVault's unlock screen before boot | no | no |
 
-- **Clicks need the user in front.** vhid steers the pointer by reading the cursor back,
-  and macOS answers (0, 0) to a caller who is not the user in front. `click`, `move` and
-  `drag` then stop with `the cursor would not reach`, except for a target within half a point
-  of (0, 0), which counts as reached: the click reports success and presses wherever
-  the pointer really is. With another user in front, the device still moves the pointer;
-  only reading it back fails.
 - **Name the layout at the login window.** `type` and `press` use the SSH user's
   layout, not the one on screen. When they differ, pass `--layout`.
 - **FileVault cannot be reached.** Before the disk is unlocked, neither the daemon nor

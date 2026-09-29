@@ -152,9 +152,9 @@ enum Help {
         """])
 
     static let cursor = VerbHelp(name: "cursor", abstract: "Say where the pointer is, in the coordinates click takes.", discussion: """
-        Read from the window server rather than from the daemon, which cannot know: macOS \
-        accelerates what the device sends, so where the pointer went is a fact of the user's \
-        session. This verb reaches no daemon at all.
+        Read by the daemon in the session in front - the login window's, or another user's, \
+        as much as your own - since a read made outside that session answers (0, 0). Claims \
+        nothing, so it answers while another client holds the devices.
         """)
 
     static let record = VerbHelp(name: "record", abstract: "Record the physical keyboard and mouse as a script vhid play replays.", discussion: """

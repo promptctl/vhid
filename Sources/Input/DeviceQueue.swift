@@ -22,11 +22,11 @@ public final class DeviceQueue: Sendable {
 
     public init() {}
 
-    /// Runs `call` on the queue and resumes with what it threw, if anything. Handed over
+    /// Runs `call` on the queue and resumes with what it answered or threw. Handed over
     /// on the caller's executor before anything suspends - every async function here runs
     /// where its caller does (Package.swift) - so calls asked for in order are in line in
     /// that order. [LAW:no-ambient-temporal-coupling]
-    public func run(_ call: @escaping @Sendable () throws -> Void) async throws {
+    public func run<T: Sendable>(_ call: @escaping @Sendable () throws -> T) async throws -> T {
         try await withCheckedThrowingContinuation { continuation in
             queue.async { continuation.resume(with: Result(catching: call)) }
         }

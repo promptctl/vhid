@@ -193,7 +193,7 @@ import Testing
         #expect(said.contains(" to \(mouse.cursor) after "))
     }
 
-    @Test func cursorSaysWhereTheCursorIs() throws {
-        #expect(try CursorCommand.cursor { ScreenPoint(x: -12.5, y: 40)! } == "the cursor is at \(ScreenPoint(x: -12.5, y: 40)!)")
+    @Test func cursorSaysWhereTheCursorIs() async throws {
+        #expect(try await CursorCommand.cursor { ScreenPoint(x: -12.5, y: 40)! } == "the cursor is at \(ScreenPoint(x: -12.5, y: 40)!)")
     }
 }

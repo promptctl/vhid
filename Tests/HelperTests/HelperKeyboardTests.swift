@@ -83,6 +83,10 @@ import Testing
             respond { reply($0 == nil ? NSNumber(value: 41) : nil, $0) }
         }
         func lastFailure(reply: @escaping (String?, Date?) -> Void) { reply(failure.0, failure.1) }
+        func cursor(reply: @escaping (Double, Double, Error?) -> Void) {
+            lock.lock(); pointing.append("cursor"); lock.unlock()
+            respond { reply(812.5, 400, $0) }
+        }
 
         func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
             connection.exportedInterface = NSXPCInterface(with: HelperService.self)
@@ -201,6 +205,13 @@ import Testing
         #expect(try await blocking { try helper.status() } == 41)
         try await blocking { try helper.leave() }
         #expect(far.service.pointed == ["status"])
+    }
+
+    @Test func theCursorIsReadAndLeavesTheConnectionUnspoken() async throws {
+        let (helper, far) = helper(.acknowledge)
+        #expect(try await blocking { try helper.cursor() } == (812.5, 400))
+        try await blocking { try helper.leave() }
+        #expect(far.service.pointed == ["cursor"])
     }
 
     /// A service that neither answers nor hangs up is unreachable at the deadline, rather

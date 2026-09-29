@@ -11,12 +11,14 @@ import Helper
 final class Listener: NSObject, NSXPCListenerDelegate {
     private let readiness: Readiness
     private let callers: CallerIdentity
+    private let cursor: any CursorSource
     private let holder = Holder()
     /// Checks for keys held past the limit a few times a second.
     private let sweep = DispatchSource.makeTimerSource(queue: .global())
 
-    init(readiness: Readiness, callers: CallerIdentity) {
+    init(readiness: Readiness, callers: CallerIdentity, cursor: any CursorSource) {
         self.readiness = readiness
+        self.cursor = cursor
         self.callers = callers
         super.init()
         sweep.schedule(deadline: .now(), repeating: .milliseconds(250), leeway: .milliseconds(100))
@@ -34,7 +36,7 @@ final class Listener: NSObject, NSXPCListenerDelegate {
         }
         let id = ObjectIdentifier(connection)
         connection.exportedInterface = NSXPCInterface(with: HelperService.self)
-        let seat = Seat(id, pid: connection.processIdentifier, holder: holder, readiness: readiness)
+        let seat = Seat(id, pid: connection.processIdentifier, holder: holder, readiness: readiness, cursor: cursor)
         connection.exportedObject = seat
         // Both, and not one: an interrupted connection ends invalid, a closed one ends
         // interrupted, and a client killed mid-burst can take either path. The release is

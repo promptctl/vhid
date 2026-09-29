@@ -109,7 +109,9 @@ do {
     }
 }
 
-let startPoint = CGEvent(source: nil)?.location ?? .zero
+// Read here, not through vhidd: a recording taps this session's events, so it only
+// records in the session it can read the cursor in.
+guard let startPoint = CGEvent(source: nil)?.location else { refuse("the cursor could not be read") }
 guard let start = ScreenPoint(x: startPoint.x, y: startPoint.y) else { refuse("the cursor's position \(startPoint) is not a point") }
 let clock = ContinuousClock()
 /// The tap's own clock at the start: nanoseconds since boot, which every event's
