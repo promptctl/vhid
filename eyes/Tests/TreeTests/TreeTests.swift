@@ -134,14 +134,15 @@ extension Facts {
         let overlay = [Cover(frame: region, pid: 9)]
         #expect(facts().candidate(in: region, under: Covers(windows: overlay, owner: 1, hit: { _ in .answered(1) })) == .found(Found(text: Text("OK")!, frame: button, source: .tree(role: Role(rawValue: "AXButton")))))
         #expect(facts().candidate(in: region, under: Covers(windows: overlay, owner: 1, hit: { _ in .answered(9) })) == .excluded(.covered))
-        #expect(facts().candidate(in: region, under: Covers(windows: overlay, owner: 1, hit: { _ in .unanswered })) == .excluded(.unanswered))
+        #expect(facts().candidate(in: region, under: Covers(windows: overlay, owner: 1, hit: { _ in .unanswered })) == .excluded(.overlaid))
     }
 
-    /// The menu bar is the Window Server's, but a click on it lands in the front app: a
-    /// click landing in any process but the element's own covers it.
-    @Test func aClickLandingInAnotherProcessCoversWhateverOwnsTheFrameInFront() {
+    /// The menu bar is the Window Server's but a click on it lands in the front app, and a
+    /// service's panel lands in the service: a click landing in a process neither the
+    /// element's nor a window's in front settles nothing, and leaves the region unread.
+    @Test func aClickLandingInAThirdProcessLeavesTheElementOverlaid() {
         let menuBar = [Cover(frame: region, pid: 88)]
-        #expect(facts().candidate(in: region, under: Covers(windows: menuBar, owner: 1, hit: { _ in .answered(5) })) == .excluded(.covered))
+        #expect(facts().candidate(in: region, under: Covers(windows: menuBar, owner: 1, hit: { _ in .answered(5) })) == .excluded(.overlaid))
     }
 
     /// A window of the element's own app in front covers by its frame: a click landing in
@@ -262,6 +263,15 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
         var answering = dialog
         answering.nodes["busy"] = node("Cancel")
         #expect(answering.walked().reach == .whole)
+    }
+
+    /// Words under a window in front that the hit test would not settle were not read as
+    /// seen or hidden, so they keep the region from having been read whole.
+    @Test func anOverlaidElementStopsTheReachShort() {
+        let tree = FakeTree(nodes: ["window": node("Hello")])
+        let w = tree.walked(covers: Covers(windows: [Cover(frame: region, pid: 9)], owner: 1, hit: { _ in .answered(5) }))
+        #expect(w.excluded == [Exclusion(reason: .overlaid, count: 1)])
+        #expect(w.reach == .stopped(.unread))
     }
 
     @Test func aWindowWithNothingToWalkLeavesTheRegionUnread() {
@@ -541,6 +551,14 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
         let small = window(3, pid: 5, ScreenRect(x: 350, y: 250, width: 100, height: 100))
         let visible = seen([overlay, small, window(2, document)], in: region, hit: { _ in .answered(5) })
         #expect(visible.map(\.window.id) == [1, 3, 2])
+    }
+
+    /// A click at a window's centre landing in the window in front that holds all of it
+    /// hides the whole window: the centre stands for the rest.
+    @Test func aClickAtTheCentreLandingInTheWholeWindowInFrontHidesIt() {
+        let overlay = window(1, pid: 9, region)
+        let visible = seen([overlay, window(2, document)], in: region, hit: { _ in .answered(9) })
+        #expect(visible.map(\.window.id) == [1])
     }
 
     /// A window over the whole screen that a click passes through hides nothing behind it.

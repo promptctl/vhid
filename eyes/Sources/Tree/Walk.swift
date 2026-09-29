@@ -121,13 +121,13 @@ struct Cover: Equatable {
 /// A frame says only where a window could be drawn, not that it is drawn there. Measured on
 /// studious: Notification Center holds a window over the whole screen at layer 23 that
 /// draws nothing but its desktop widgets, and taken as opaque it hid every window from the
-/// tree. So a window in front covers a point unless a click there lands in the covered
-/// window's own process - the hit test the system routes clicks by, about 2 ms a point,
-/// asked only where a frame is in front. Landing in any other process covers, whether or
-/// not a front window of that process is listed there: the menu bar is owned by the
-/// Window Server but a click on it lands in the front app, and a sandboxed app's open panel
-/// lands in its service. A window in front from the covered window's own process covers by
-/// its frame, since a click landing there cannot tell the two apart. [LAW:one-source-of-truth]
+/// tree. So where a frame is in front, the hit test the system routes clicks by settles it -
+/// about 2 ms a point, asked only there. A click landing in the element's own process
+/// leaves it seen; landing in a window's in front covers it; landing anywhere else - the
+/// menu bar is the Window Server's but a click on it lands in the front app, and a panel
+/// drawn by a service lands in the service - settles nothing, and says so. A window in
+/// front from the element's own process covers by its frame, since a click landing there
+/// cannot tell the two apart. [LAW:one-source-of-truth] [LAW:no-silent-failure]
 struct Covers {
     let windows: [Cover]
     /// The process of the window these are in front of.
@@ -135,12 +135,17 @@ struct Covers {
     /// The process a click at a point lands in.
     let hit: (ScreenPoint) -> Heard<Int32>
 
-    /// Whether a click at `point` lands on something in front of this window.
+    /// Whether a click at `point` lands on a window in front of this one: unanswered when
+    /// the hit test does not settle it.
     func hide(_ point: ScreenPoint) -> Heard<Bool> {
         let over = windows.filter { $0.frame.contains(point) }
         guard !over.isEmpty else { return .answered(false) }
         guard !over.contains(where: { $0.pid == owner }) else { return .answered(true) }
-        return hit(point).map { $0 != owner }
+        switch hit(point) {
+        case .answered(owner): return .answered(false)
+        case .answered(let pid) where over.contains(where: { $0.pid == pid }): return .answered(true)
+        case .answered, .unanswered: return .unanswered
+        }
     }
 
     /// Whether all of `rect` is under one window in front that a click at its centre lands
@@ -212,7 +217,7 @@ extension Node {
             switch covers.hide(placed.centre) {
             case .answered(false): break
             case .answered(true): return .excluded(.covered)
-            case .unanswered: return .excluded(.unanswered)
+            case .unanswered: return .excluded(.overlaid)
             }
         }
         guard let text, case .answered(let placed?) = facts.frame else { return .excluded(.unanswered) }
@@ -377,7 +382,7 @@ func walk<Element>(
 
     // Ordered by the reason's spelling so one screen always reports the same way.
     let excluded = counts.map { Exclusion(reason: $0.key, count: $0.value) }.sorted { $0.reason.rawValue < $1.reason.rawValue }
-    let unread = counts[.unanswered] != nil || counts[.unwalked] != nil
+    let unread = counts[.unanswered] != nil || counts[.unwalked] != nil || counts[.overlaid] != nil
     let reach: Reach = stop.map(Reach.stopped) ?? (unread ? .stopped(.unread) : .whole)
     return Walked(found: found, examined: examined, excluded: excluded, reach: reach)
 }

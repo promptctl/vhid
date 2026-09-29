@@ -237,6 +237,12 @@ public struct Exclusion: Sendable, Hashable {
         /// The app did not answer for it - busy past the messaging timeout, or the element
         /// went away mid-walk - so neither it nor anything under it was read.
         case unanswered
+        /// Under a window in front that the system's hit test would not settle: it did not
+        /// answer, or a click there lands in a process that is neither the element's nor a
+        /// window's in front - the menu bar's front app, or a panel drawn by a service. Kept
+        /// apart from `unanswered` because the app answered; what would not say is where a
+        /// click lands.
+        case overlaid
         /// An on-screen window with no accessibility element to walk - an open menu, a
         /// system surface, or a window its app would not list - so nothing in it was read.
         case unwalked
