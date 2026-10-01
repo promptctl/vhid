@@ -1,13 +1,14 @@
 import Foundation
 import Installations
 import MCP
+import OwnThread
 import Testing
 import Version
 @testable import vhid
 
 /// One version, reported the same way by every surface that reports one, and the value
 /// scripts/version derives from VERSION and git.
-@Suite struct VersionTests {
+@Suite(.ownThread) struct VersionTests {
     static let root = URL(filePath: #filePath).deletingLastPathComponent().appending(path: "../..").standardized
 
     /// What scripts/version prints for `repo`.

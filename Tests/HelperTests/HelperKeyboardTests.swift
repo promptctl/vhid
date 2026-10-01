@@ -1,5 +1,6 @@
 import Foundation
 import Keystrokes
+import OwnThread
 import Pointing
 import Testing
 @testable import Helper
@@ -8,7 +9,7 @@ import Testing
 /// on the far end of a real XPC connection: an anonymous listener in this process, so
 /// what is exercised is the round trip and every way it ends, with nothing mocked but
 /// who answers. [LAW:behavior-not-structure]
-@Suite struct HelperKeyboardTests {
+@Suite(.ownThread) struct HelperKeyboardTests {
     /// What the service on the far end does with a call. One type, three behaviours as
     /// values. [LAW:one-type-per-behavior]
     enum Answer: Sendable {
@@ -115,64 +116,42 @@ import Testing
         return (HelperConnection(connection: connection, service: "ai.promptctl.vhid.tests.far", replyTimeout: replyTimeout), FarEnd(listener: listener, service: service))
     }
 
-    /// Runs `body` on a thread of the test's own and awaits what it returned or threw.
-    ///
-    /// `HelperConnection` blocks the thread it is called on until vhidd answers,
-    /// which is its contract. A test body runs on the cooperative pool, whose width is the
-    /// machine's core count, and a call that blocks there holds one of its threads for
-    /// the whole wait: measured on the three-core CI runner, four such calls held every
-    /// thread, no other test ran, the far end's own reply was never delivered, and the
-    /// whole run ended when the deadlines did. The wait belongs on a thread that nothing
-    /// else is scheduled on. [LAW:no-ambient-temporal-coupling]
-    private func blocking<T: Sendable>(_ body: @escaping @Sendable () throws -> T) async throws -> T {
-        try await withCheckedThrowingContinuation { continuation in
-            Thread { continuation.resume(with: Result { try body() }) }.start()
-        }
-    }
-
-    @Test func anAcknowledgedKeyGoesDownAndTheCallReturns() async throws {
+    @Test func anAcknowledgedKeyGoesDownAndTheCallReturns() throws {
         let (helper, far) = helper(.acknowledge)
         let keyboard = helper.keyboard
-        try await blocking {
-            try keyboard.down(.leftShift)
-            try keyboard.releaseAll()
-        }
+        try keyboard.down(.leftShift)
+        try keyboard.releaseAll()
         #expect(far.service.asked == [Usage.leftShift.rawValue])
     }
 
     /// The mouse's four acts cross the same connection as the keyboard's, each as the
     /// wire's own integers: a button by number, a count by its signed byte.
-    @Test func theMouseRidesTheSameConnectionAsTheKeyboard() async throws {
+    @Test func theMouseRidesTheSameConnectionAsTheKeyboard() throws {
         let (helper, far) = helper(.acknowledge)
         let mouse = helper.mouse
-        try await blocking {
-            try mouse.down(.left)
-            try mouse.move(by: Move(x: Count(clamping: -3), y: Count(clamping: 127)))
-            try mouse.scroll(by: Scroll(vertical: Count(clamping: 2), horizontal: Count(clamping: -1)))
-            try mouse.releaseAll()
-        }
+        try mouse.down(.left)
+        try mouse.move(by: Move(x: Count(clamping: -3), y: Count(clamping: 127)))
+        try mouse.scroll(by: Scroll(vertical: Count(clamping: 2), horizontal: Count(clamping: -1)))
+        try mouse.releaseAll()
         #expect(far.service.pointed == ["button 1", "move -3 127", "scroll 2 -1", "release"])
     }
 
     /// A held set crosses as its usages, and a held button set as the report's bit field.
-    @Test func heldSetsCrossAsTheWiresIntegers() async throws {
+    @Test func heldSetsCrossAsTheWiresIntegers() throws {
         let (helper, far) = helper(.acknowledge)
         let (keyboard, mouse) = (helper.keyboard, helper.mouse)
-        try await blocking {
-            try keyboard.hold(HeldKeys([.leftShift, .space]))
-            try keyboard.hold(.none)
-            try mouse.hold([.left, .middle])
-            try mouse.hold([])
-        }
+        try keyboard.hold(HeldKeys([.leftShift, .space]))
+        try keyboard.hold(.none)
+        try mouse.hold([.left, .middle])
+        try mouse.hold([])
         #expect(far.service.pointed == ["hold [44, 225]", "hold []", "hold buttons 5", "hold buttons 0"])
     }
 
     /// vhidd's refusal reaches the caller as the error vhidd sent, not as a
     /// connection failure. [LAW:no-silent-failure]
-    @Test func theHelpersRefusalIsThrown() async throws {
+    @Test func theHelpersRefusalIsThrown() throws {
         let (helper, far) = helper(.refuse(domain: "fake", code: 7))
-        let keyboard = helper.keyboard
-        let refusal = await #expect(throws: HelperConnection.Refused.self) { try await blocking { try keyboard.down(.space) } }
+        let refusal = #expect(throws: HelperConnection.Refused.self) { try helper.keyboard.down(.space) }
         // The error itself when it is not the fake's, so a connection failure in its place
         // is read by its reason and not just by its domain.
         let heard = Comment(rawValue: refusal.map { "\($0 as Error)" } ?? "nothing was thrown")
@@ -185,11 +164,10 @@ import Testing
     /// call, with the connection's own domain and code. Which code is XPC's timing to
     /// choose: invalid, or interrupted if the connection had reached the listener first.
     /// Doctor asks twice for that reason (`DaemonProbe.reading`).
-    @Test func aServiceThatWentAwayIsUnreachable() async throws {
+    @Test func aServiceThatWentAwayIsUnreachable() throws {
         let (helper, far) = helper(.acknowledge)
         far.listener.invalidate()
-        let keyboard = helper.keyboard
-        let unreachable = await #expect(throws: HelperConnection.Unreachable.self) { try await blocking { try keyboard.down(.space) } }
+        let unreachable = #expect(throws: HelperConnection.Unreachable.self) { try helper.keyboard.down(.space) }
         guard case .connection(let domain, let code, _) = unreachable?.cause else {
             Issue.record("unreachable for another cause: \(String(describing: unreachable))")
             return
@@ -200,27 +178,26 @@ import Testing
 
     /// `status` answers who holds the devices and is no act on them: the connection has
     /// still not spoken, so a `leave` after it sends nothing.
-    @Test func statusAnswersTheHolderAndLeavesTheConnectionUnspoken() async throws {
+    @Test func statusAnswersTheHolderAndLeavesTheConnectionUnspoken() throws {
         let (helper, far) = helper(.acknowledge)
-        #expect(try await blocking { try helper.status() } == 41)
-        try await blocking { try helper.leave() }
+        #expect(try helper.status() == 41)
+        try helper.leave()
         #expect(far.service.pointed == ["status"])
     }
 
-    @Test func theCursorIsReadAndLeavesTheConnectionUnspoken() async throws {
+    @Test func theCursorIsReadAndLeavesTheConnectionUnspoken() throws {
         let (helper, far) = helper(.acknowledge)
-        #expect(try await blocking { try helper.cursor() } == (812.5, 400))
-        try await blocking { try helper.leave() }
+        #expect(try helper.cursor() == (812.5, 400))
+        try helper.leave()
         #expect(far.service.pointed == ["cursor"])
     }
 
     /// A service that neither answers nor hangs up is unreachable at the deadline, rather
     /// than a caller blocked for good. [LAW:no-ambient-temporal-coupling]
-    @Test func aServiceThatNeverAnswersIsUnreachableAtTheDeadline() async throws {
+    @Test func aServiceThatNeverAnswersIsUnreachableAtTheDeadline() throws {
         let (helper, far) = helper(.never, replyTimeout: .milliseconds(200))
-        let keyboard = helper.keyboard
         let began = ContinuousClock.now
-        let unreachable = await #expect(throws: HelperConnection.Unreachable.self) { try await blocking { try keyboard.down(.space) } }
+        let unreachable = #expect(throws: HelperConnection.Unreachable.self) { try helper.keyboard.down(.space) }
         #expect(unreachable?.cause == .silence(.milliseconds(200)))
         #expect(ContinuousClock.now - began >= .milliseconds(200))
         // Held to the deadline: a far end gone early is unreachable for the wrong reason,
@@ -230,16 +207,16 @@ import Testing
 
     /// The wire's pair is one failure, or none, or a daemon this client does not
     /// understand - never half a failure shown as a whole one. [LAW:parse-dont-validate]
-    @Test func theLastFailureIsBothHalvesOrNeither() async throws {
+    @Test func theLastFailureIsBothHalvesOrNeither() throws {
         let at = Date(timeIntervalSince1970: 1_790_000_000)
         let (both, bothFar) = helper(.acknowledge, failure: ("the keyboard would not release", at))
-        #expect(try await blocking { try both.lastFailure() } == DaemonFailure(text: "the keyboard would not release", at: at))
+        #expect(try both.lastFailure() == DaemonFailure(text: "the keyboard would not release", at: at))
 
         let (neither, neitherFar) = helper(.acknowledge)
-        #expect(try await blocking { try neither.lastFailure() } == nil)
+        #expect(try neither.lastFailure() == nil)
 
         let (half, halfFar) = helper(.acknowledge, failure: ("a text with no time", nil))
-        let garbled = await #expect(throws: HelperConnection.Unreachable.self) { try await blocking { try half.lastFailure() } }
+        let garbled = #expect(throws: HelperConnection.Unreachable.self) { try half.lastFailure() }
         #expect(garbled?.cause == .notAHelper)
         withExtendedLifetime((bothFar, neitherFar, halfFar)) {}
     }

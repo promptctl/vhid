@@ -1,6 +1,7 @@
 import DriverExtension
 import Foundation
 import Installations
+import OwnThread
 import Testing
 
 @testable import Doctor
@@ -8,7 +9,7 @@ import Testing
 /// The launchd reading, against what `launchctl print` actually printed for each standing.
 /// [LAW:behavior-not-structure] What is checked is the standing each capture reads as,
 /// never how the output is searched.
-@Suite struct LaunchdProbeTests {
+@Suite(.ownThread) struct LaunchdProbeTests {
     static let development = Installation.development
     static let fixture = Installation(service: "ai.promptctl.vhid.doctor-fixture")!
 

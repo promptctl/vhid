@@ -71,12 +71,17 @@ build: signing-identity
 # whenever the tests passed, reporting success over exactly the unsigned tree this
 # target exists to prevent.
 #
+# The suite runs with Swift's cooperative pool one thread wide, which is the narrowest
+# runner there is. A test that holds its thread while it waits on the pool passes on a
+# Mac with twelve cores and stops CI's three for good, with no test named; here it stops
+# this run too. Such a test's suite takes `.ownThread` (docs/development.md).
+#
 # The driver-script checks and the NOTICE check come after the signing, because none
 # links anything and so none can undo it: the pins against the CLI just built, NOTICE
 # against what that CLI links, then the driver script's own contracts and the uninstaller against stubs.
 test: signing-identity
 	swift build
-	swift test; status=$$?; $(SIGN) || exit $$?; $(RECORD_APP) || exit $$?; exit $$status
+	LIBDISPATCH_COOPERATIVE_POOL_STRICT=1 swift test; status=$$?; $(SIGN) || exit $$?; $(RECORD_APP) || exit $$?; exit $$status
 	scripts/check-driver-pins
 	scripts/check-notice
 	scripts/virtual-hid-driver-test

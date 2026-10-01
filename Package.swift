@@ -69,7 +69,7 @@ let package = Package(
         .target(name: "DriverExtension"),
         // The verdict table is a pure function of four readings, so every combination is
         // exercised here - including the ones this Mac cannot be put into.
-        .testTarget(name: "DriverExtensionTests", dependencies: ["DriverExtension"]),
+        .testTarget(name: "DriverExtensionTests", dependencies: ["DriverExtension", "OwnThread"]),
         // Carbon lives here and not in the device layer, so the privileged side that owns
         // the device never links a window server API. [LAW:one-way-deps]
         .target(name: "KeyboardLayouts", dependencies: ["Keystrokes"]),
@@ -90,13 +90,13 @@ let package = Package(
         .target(name: "VirtualHID", dependencies: ["DriverExtension", "Keystrokes", "Pointing"]),
         // The wire protocol against a fake daemon on the other end of a socketpair, so
         // the framing is proven without root and without the driver.
-        .testTarget(name: "VirtualHIDTests", dependencies: ["VirtualHID", "DriverExtension", "Keystrokes", "Pointing"]),
+        .testTarget(name: "VirtualHIDTests", dependencies: ["VirtualHID", "DriverExtension", "Keystrokes", "Pointing", "OwnThread"]),
         // What crosses the privilege boundary, and the client's side of it. It links the
         // two vocabularies and nothing else: not the layout, because a root daemon must
         // never read one, and not the device, because a client must never open one.
         // [LAW:one-way-deps]
         .target(name: "Helper", dependencies: ["Installations", "Keystrokes", "Pointing"]),
-        .testTarget(name: "HelperTests", dependencies: ["Helper", "Installations", "Keystrokes", "Pointing"]),
+        .testTarget(name: "HelperTests", dependencies: ["Helper", "Installations", "Keystrokes", "Pointing", "OwnThread"]),
         // What a caller asks the devices for, said in a caller's terms: text lowered to
         // keystrokes, a chord, a place on the screen to click. It links the two
         // vocabularies and the layout, and deliberately not Helper or VirtualHID: which
@@ -117,7 +117,7 @@ let package = Package(
         // daemon, over the same connection every verb dials. [LAW:one-way-deps]
         // [LAW:effects-at-boundaries]
         .target(name: "Doctor", dependencies: ["DriverExtension", "Installations", "Helper"]),
-        .testTarget(name: "DoctorTests", dependencies: ["Doctor", "DriverExtension", "Installations", "Helper"]),
+        .testTarget(name: "DoctorTests", dependencies: ["Doctor", "DriverExtension", "Installations", "Helper", "OwnThread"]),
         // What vhid's menu bar item shows, as a value built from doctor's readings and the
         // daemon's last failure, so every menu is one a test constructs. It reads nothing.
         // [LAW:effects-at-boundaries]
@@ -132,7 +132,7 @@ let package = Package(
         // app's watch on the command. It links nothing, so both ends speak one vocabulary
         // without either linking the other. [LAW:one-way-deps]
         .target(name: "RecordingTie"),
-        .testTarget(name: "RecordingTieTests", dependencies: ["RecordingTie"]),
+        .testTarget(name: "RecordingTieTests", dependencies: ["RecordingTie", "OwnThread"]),
         // The tap app `vhid record` launches, shipped as a signed bundle so Input
         // Monitoring can be granted to it once. It reads the tap and the I/O Registry and
         // hands the events to Input's `Recorder`; it never reaches the devices.
@@ -168,15 +168,20 @@ let package = Package(
         .testTarget(
             name: "vhidCLITests",
             dependencies: [
-                "vhid", "Input", "Helper", "Installations", "Keystrokes", "Pointing", "Doctor", "Version",
+                "vhid", "Input", "Helper", "Installations", "Keystrokes", "Pointing", "Doctor", "Version", "OwnThread",
                 .product(name: "MCP", package: "swift-sdk"),
             ]
         ),
+        // The thread a test that waits is given, as a trait its suite names. A target of
+        // its own because the suites that wait are in seven test targets, and one test
+        // target cannot link another. No product names it, so nothing shipped carries it.
+        .target(name: "OwnThread", path: "Tests/OwnThread"),
+        .testTarget(name: "OwnThreadTests", dependencies: ["OwnThread"]),
         // The authorization boundary of a root keystroke service, checked against the
         // test process's own identity and audit token: real code signing, no root.
         .testTarget(
             name: "vhiddTests",
-            dependencies: ["vhidd", "Helper", "VirtualHID", "DriverExtension", "Keystrokes", "Pointing", "Signals", "Installations"]
+            dependencies: ["vhidd", "Helper", "VirtualHID", "DriverExtension", "Keystrokes", "Pointing", "Signals", "Installations", "OwnThread"]
         ),
     ]
 )
