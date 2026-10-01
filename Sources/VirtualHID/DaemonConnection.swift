@@ -355,11 +355,23 @@ private final class Link: @unchecked Sendable {
     /// finds the failure and not an acknowledgement. [LAW:single-enforcer] A driver built
     /// for another protocol accepts reports and then does something other than what they
     /// say, so there is no degraded mode to continue into.
+    ///
+    /// A status taken back throws from here the same way, and ends the connection with it.
+    /// The daemon goes on answering a posted report after the driver has gone, measured on
+    /// studious 2026-10-01, so its answers cannot say the devices are still there; its
+    /// status is the only word on that, and it is read on every frame, not only while a
+    /// device is being brought up. The driver coming back does not undo it: the daemon
+    /// makes the devices afresh on the same connection, and whatever was held on the old
+    /// ones is not held on the new, which is what a new connection says and an old one
+    /// cannot. [LAW:no-silent-failure]
     private func record(_ pairs: [UInt8]) throws {
+        let before = status
         for (status, value) in try DaemonConnection.statusPairs(pairs) {
             self.status[status] = value
         }
         guard status[.driverVersionMismatched] != true else { throw DaemonError.driverVersionMismatched }
+        let takenBack = before.filter { $0.value && status[$0.key] == false }.keys.min { $0.rawValue < $1.rawValue }
+        if let takenBack { throw DaemonError.withdrawn(takenBack, said: status) }
     }
 
     // MARK: Ending
