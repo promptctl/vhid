@@ -1,5 +1,6 @@
 import Foundation
 import Pointing
+import OwnThread
 import Testing
 @testable import VirtualHID
 
@@ -23,7 +24,7 @@ private func pointingReports(_ fake: FakeDaemon) -> [[UInt8]] {
     fake.requestPayloads.map(requestSent).filter { $0.request == DaemonConnection.Request.postPointingInputReport.rawValue }.map(\.bytes)
 }
 
-@Suite struct PointingStartupTests {
+@Suite(.ownThread) struct PointingStartupTests {
     /// `pointing_initialize` carries nothing after the request byte, and the wait is for
     /// the pointing device's own readiness: a daemon whose keyboard is ready has said
     /// nothing about its mouse.
@@ -47,7 +48,7 @@ private func pointingReports(_ fake: FakeDaemon) -> [[UInt8]] {
     }
 }
 
-@Suite struct ButtonsDownTests {
+@Suite(.ownThread) struct ButtonsDownTests {
     /// The 8 bytes of one report, placed by hand: the one place the layout is stated
     /// independently of the code that produces it. [LAW:one-source-of-truth]
     @Test func aReportIsEightBytesLaidOutTheWayTheDriverReadsThem() {

@@ -78,6 +78,26 @@ a release is a Developer ID certificate, which is a separate thing kept delibera
 apart — the day the dev certificate quietly signs something that ships is the day vhid
 ships something nobody can run, and the build stays green while it happens.
 
+## Tests that wait
+
+A test that blocks its thread — on a timeout, a child process, a semaphore, a reply over
+XPC — belongs to a suite marked `@Suite(.ownThread)`, from the `OwnThread` target:
+
+```swift
+import OwnThread
+
+@Suite(.ownThread) struct ConnectionTests {
+```
+
+Swift runs test bodies on a pool with one thread for each core, and a blocked test keeps
+the thread it was given. On CI's three cores, three such tests are the whole pool: the
+rest of the suite stands still until they end, and a test waiting for something the pool
+itself must run never ends. The trait gives each test of the suite a thread that is not
+one of the pool's.
+
+`make test` runs the suite with the pool one thread wide, so a test that needs the trait
+and lacks it is slow or hung on any Mac, and not only on CI.
+
 ## Checking the reach matrix
 
 The README's table of where input reaches over SSH is measured, and [design/remote-hands.md](design/remote-hands.md) has the evidence for each cell. `scripts/reach <host> <place>` checks one row again on a real Mac; with no place, it lists what to put on screen for each.

@@ -1,5 +1,6 @@
 import DriverExtension
 import Foundation
+import OwnThread
 import Testing
 import VirtualHID
 @testable import vhidd
@@ -7,7 +8,7 @@ import VirtualHID
 /// The daemon's lifecycle as a policy over what the world answers: reached when it runs,
 /// started when it does not, and stopped only when vhidd started it and could not
 /// use it. Driven with answers of the test's own and no daemon. [LAW:behavior-not-structure]
-@Suite struct DaemonProcessTests {
+@Suite(.ownThread) struct DaemonProcessTests {
     /// The devices the policy hands back as it was given. Held by the test, so identity
     /// compares the object and not whatever is allocated at its address next.
     private final class Device {}

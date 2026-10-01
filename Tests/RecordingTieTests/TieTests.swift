@@ -1,9 +1,10 @@
 import Foundation
+import OwnThread
 import Testing
 @testable import RecordingTie
 
 /// The tie between `vhid record` and its tap app, over a real socket and real processes.
-@Suite struct TieTests {
+@Suite(.ownThread) struct TieTests {
     /// Messages cross both ways whole, a script's newlines included, and a closed end
     /// reads as the end.
     @Test func messagesCrossAndACloseEndsThem() throws {

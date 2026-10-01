@@ -1,10 +1,11 @@
 import Foundation
+import OwnThread
 import Testing
 @testable import vhidd
 
 /// The cursor is read by a child in the session in front, and a session that comes to the
 /// front gets a child of its own. [LAW:behavior-not-structure]
-@Suite struct FrontCursorTests {
+@Suite(.ownThread) struct FrontCursorTests {
 
     private final class Reader: FrontCursor.Reader {
         let session: FrontCursor.Session

@@ -1,13 +1,14 @@
 import Foundation
 import Keystrokes
 import Pointing
+import OwnThread
 import Testing
 @testable import VirtualHID
 
 /// What the connection does between requests, which is where a long-lived one spends
 /// nearly all of its life. Measured on the daemon: it hangs up on a client that has sent
 /// nothing for fifteen seconds, and answering its status pushes does not count as sending.
-@Suite struct ConnectionTests {
+@Suite(.ownThread) struct ConnectionTests {
     /// A heartbeat goes out on its own, with nobody asking anything. Timed against a short
     /// interval so the test watches for the behaviour rather than sleeping the daemon's
     /// three seconds. [LAW:behavior-not-structure]

@@ -1,6 +1,7 @@
 import Foundation
 import Keystrokes
 import Synchronization
+import OwnThread
 import Testing
 @testable import VirtualHID
 
@@ -29,7 +30,7 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
     return [1, modifiers, 0] + padded.flatMap { [UInt8($0 & 0xff), UInt8($0 >> 8)] }
 }
 
-@Suite struct StartupTests {
+@Suite(.ownThread) struct StartupTests {
     /// The parameters are three uint64, little-endian, vendor then product then country.
     /// The plausible reading - two 16-bit ids and a byte - is five bytes long, well formed,
     /// and initializes a device that is not the one asked for.
@@ -116,7 +117,7 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
     }
 }
 
-@Suite struct KeysDownTests {
+@Suite(.ownThread) struct KeysDownTests {
     /// Every report is a reading of the keys that are down, and a caller never composes
     /// one. [LAW:one-source-of-truth] A report that could disagree with what is held has
     /// exactly one failure mode, and it is the one this whole epic is about.
@@ -286,7 +287,7 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
 /// A player's held sets: each `hold` is the report of exactly that set, a repeat of the set
 /// the driver acknowledged is a keep-alive that posts nothing, and none may be skipped that
 /// the driver has not acknowledged.
-@Suite struct HoldTests {
+@Suite(.ownThread) struct HoldTests {
     private let post = DaemonConnection.Request.postKeyboardInputReport.rawValue
 
     /// Whether the fake answers keyboard reports, turned by the test between calls.

@@ -1,5 +1,6 @@
 import Foundation
 import Helper
+import OwnThread
 import Security
 import Testing
 @testable import vhidd
@@ -7,7 +8,7 @@ import Testing
 /// The authorization boundary of the root keystroke service, checked against the one
 /// process whose identity and audit token this test can hold: its own.
 /// [LAW:behavior-not-structure]
-@Suite struct CallerIdentityTests {
+@Suite(.ownThread) struct CallerIdentityTests {
     @Test func aStringThatIsNotARequirementIsRefused() throws {
         let refusal = #expect(throws: CallerIdentity.Refused.self) { try CallerIdentity(requirement: "this is not a requirement") }
         guard case .malformedRequirement("this is not a requirement", _)? = refusal else {

@@ -1,10 +1,11 @@
 import ArgumentParser
 import Installations
+import OwnThread
 import Testing
 @testable import vhid
 
 /// The verb's contract with a shell: the rows on stdout, and exit 1 when any is unmet.
-@Suite struct DoctorCommandTests {
+@Suite(.ownThread) struct DoctorCommandTests {
     /// A service nothing registers is never ready, on any Mac, so this exit is fixed.
     @Test func aMacThatIsNotReadyExitsOne() throws {
         let doctor = try DoctorCommand.parse(["--service", Installation.nobody.service])

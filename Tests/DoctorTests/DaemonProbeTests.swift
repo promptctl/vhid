@@ -1,4 +1,5 @@
 import Foundation
+import OwnThread
 import Testing
 @testable import Doctor
 @testable import Helper
@@ -8,7 +9,7 @@ import Testing
 /// connection: an anonymous listener in this process, so each reading is what a real
 /// round trip ending that way comes back as, and nothing but who answers is faked.
 /// [LAW:behavior-not-structure]
-@Suite struct DaemonProbeTests {
+@Suite(.ownThread) struct DaemonProbeTests {
     /// How the far end meets the call. One type, the outcomes as values.
     /// [LAW:one-type-per-behavior]
     enum Answer: Sendable {
@@ -66,73 +67,65 @@ import Testing
 
     /// Reads a far end answering as told. The listener holds its delegate weakly, so both
     /// are held here until the reading is taken.
-    private func reading(_ answer: Answer, invalidated: Bool = false, replyTimeout: Duration = .seconds(20)) async -> DaemonReading {
+    private func reading(_ answer: Answer, invalidated: Bool = false, replyTimeout: Duration = .seconds(20)) -> DaemonReading {
         let far = FarEnd(answer)
         let listener = NSXPCListener.anonymous()
         listener.delegate = far
         listener.resume()
         if invalidated { listener.invalidate() }
         let helper = { HelperConnection(connection: NSXPCConnection(listenerEndpoint: listener.endpoint), service: "ai.promptctl.vhid.tests.far", replyTimeout: replyTimeout) }
-        // On a thread of its own: the call blocks until the far end answers, and a wait on
-        // the cooperative pool can starve the reply. [LAW:no-ambient-temporal-coupling]
-        let read = await withCheckedContinuation { continuation in
-            Thread { continuation.resume(returning: DaemonProbe.reading(helper)) }.start()
-        }
+        let read = DaemonProbe.reading(helper)
         withExtendedLifetime((far, listener)) {}
         return read
     }
 
-    @Test func aDaemonNobodyHoldsAnswersWithNoHolder() async {
-        #expect(await reading(.holder(nil)) == .answered(holder: nil))
+    @Test func aDaemonNobodyHoldsAnswersWithNoHolder() {
+        #expect(reading(.holder(nil)) == .answered(holder: nil))
     }
 
-    @Test func aDaemonAnotherClientHoldsNamesItsPid() async {
-        #expect(await reading(.holder(41)) == .answered(holder: 41))
+    @Test func aDaemonAnotherClientHoldsNamesItsPid() {
+        #expect(reading(.holder(41)) == .answered(holder: 41))
     }
 
     /// A refused connection is the signature, told apart from a service nobody holds.
-    @Test func aRefusedConnectionIsThisSignatureRefused() async {
-        #expect(await reading(.refuseTheConnection) == .refusedThisVhid)
+    @Test func aRefusedConnectionIsThisSignatureRefused() {
+        #expect(reading(.refuseTheConnection) == .refusedThisVhid)
     }
 
-    @Test func aServiceNobodyHoldsIsUnreachable() async {
-        let read = await reading(.holder(nil), invalidated: true)
+    @Test func aServiceNobodyHoldsIsUnreachable() {
+        let read = reading(.holder(nil), invalidated: true)
         guard case .unreachable = read else { Issue.record("read \(read)"); return }
     }
 
-    @Test func aDaemonThatNeverAnswersIsSilentAtTheDeadline() async {
-        let read = await reading(.never, replyTimeout: .milliseconds(200))
+    @Test func aDaemonThatNeverAnswersIsSilentAtTheDeadline() {
+        let read = reading(.never, replyTimeout: .milliseconds(200))
         guard case .silent = read else { Issue.record("read \(read)"); return }
     }
 
     /// A daemon listening without its devices is read by its code, carrying why.
-    @Test func aDaemonWhoseDevicesAreDownSaysWhy() async {
-        #expect(await reading(.devicesDown) == .devicesDown(reason: "devices not up: the driver is not activated"))
+    @Test func aDaemonWhoseDevicesAreDownSaysWhy() {
+        #expect(reading(.devicesDown) == .devicesDown(reason: "devices not up: the driver is not activated"))
     }
 
     /// An answer this build cannot classify is kept whole, in the words it came with.
-    @Test func aFailureNoneOfThoseNameIsShownAsWhatItSaid() async {
-        let read = await reading(.fail)
+    @Test func aFailureNoneOfThoseNameIsShownAsWhatItSaid() {
+        let read = reading(.fail)
         guard case .failed(let reason) = read else { Issue.record("read \(read)"); return }
         #expect(reason == "refused by the fake")
     }
 
     /// A refusal followed by an answer is a daemon that went away mid-call and came back,
     /// not a refused signature: the second connection's reading stands.
-    @Test func aRefusalThatDoesNotRepeatIsNotTheSignature() async {
+    @Test func aRefusalThatDoesNotRepeatIsNotTheSignature() {
         let refusing = NSXPCListener.anonymous(), answering = NSXPCListener.anonymous()
         let (no, yes) = (FarEnd(.refuseTheConnection), FarEnd(.holder(nil)))
         refusing.delegate = no; answering.delegate = yes
         refusing.resume(); answering.resume()
         let endpoints = [refusing.endpoint, answering.endpoint]
-        let read = await withCheckedContinuation { continuation in
-            Thread {
-                var asked = 0
-                continuation.resume(returning: DaemonProbe.reading {
-                    defer { asked += 1 }
-                    return HelperConnection(connection: NSXPCConnection(listenerEndpoint: endpoints[asked]), service: "ai.promptctl.vhid.tests.far", replyTimeout: .seconds(20))
-                })
-            }.start()
+        var asked = 0
+        let read = DaemonProbe.reading {
+            defer { asked += 1 }
+            return HelperConnection(connection: NSXPCConnection(listenerEndpoint: endpoints[asked]), service: "ai.promptctl.vhid.tests.far", replyTimeout: .seconds(20))
         }
         #expect(read == .answered(holder: nil))
         withExtendedLifetime((refusing, answering, no, yes)) {}

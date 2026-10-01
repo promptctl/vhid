@@ -1,4 +1,5 @@
 import Foundation
+import OwnThread
 import Testing
 @testable import DriverExtension
 
@@ -8,7 +9,7 @@ import Testing
 /// that is the only size at which an unread child blocks in `write(2)` and the reading
 /// order can matter at all. [LAW:behavior-not-structure] - nothing here knows how the
 /// streams are drained, only that a stream never has to wait its turn.
-@Suite struct CommandTests {
+@Suite(.ownThread) struct CommandTests {
     /// Past one pipe buffer on each stream, so a child nobody is reading blocks.
     static let size = 200_000
 
