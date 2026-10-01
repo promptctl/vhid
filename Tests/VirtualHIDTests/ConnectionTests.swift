@@ -144,6 +144,21 @@ import Testing
         #expect(lost.count == 1)
     }
 
+    /// A loss this side declares ends the stream for the daemon while the connection is
+    /// still held: the daemon keeps a client's devices, and what is down on them, until
+    /// the client goes, and the pointing device here was never taken back.
+    @Test func aLossThisSideDeclaresEndsTheStreamForTheDaemon() throws {
+        let fake = FakeDaemon()
+        let lost = Lost()
+        let daemon = try DaemonConnection(fileDescriptor: fake.clientDescriptor, whenLost: lost.record)
+        try fake.push(Self.said(connected: true, keyboard: true, pointing: true))
+        try daemon.wait(for: .pointingReady, by: .now + .seconds(2))
+        try fake.push(Self.said(connected: true, keyboard: false, pointing: true))
+        #expect(lost.await() != nil)
+        #expect(fake.awaitClientHangUp())
+        withExtendedLifetime(daemon) {}
+    }
+
     /// What the daemon says on the way up is not a loss: it answers the first request
     /// before it has connected to the driver, and says each thing as it becomes true.
     /// Nothing is taken back, so the devices come up. The frames are the ones it sent a

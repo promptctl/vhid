@@ -5,7 +5,7 @@ import Testing
 @testable import VirtualHID
 
 /// A daemon that answers every request and, once the keyboard is initialized, pushes the
-/// three statuses the real one pushes.
+/// three statuses a keyboard waits on.
 @Sendable private func daemonThatComesUp(_ frame: Frame, _ fake: FakeDaemon) throws {
     guard case .request(let id, let payload) = frame else { return }
     try fake.send(.response(id: id, payload: []))
