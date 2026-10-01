@@ -1,3 +1,4 @@
+import ChildProcess
 import Foundation
 import OwnThread
 import Testing
@@ -59,9 +60,10 @@ import Testing
     // Each watch answers on a queue of its own: .global() is capped at the core count, and
     // other tests blocking its threads on a small runner left the answer never delivered.
     @Test func theWatchFiresForACommandAlreadyEnded() throws {
-        var pid: pid_t = 0
-        let argv: [UnsafeMutablePointer<CChar>?] = [strdup("/usr/bin/true"), nil]
-        #expect(posix_spawn(&pid, "/usr/bin/true", nil, nil, argv, nil) == 0)
+        // [LAW:single-enforcer] Started as every child is: one started bare holds, for as
+        // long as it runs, every descriptor any test has open, and a test of a pipe with
+        // no reader left then finds one.
+        let pid = try spawn("/usr/bin/true", [], stdio: [:])
         defer { var status: Int32 = 0; waitpid(pid, &status, 0) }
         var info = siginfo_t()
         #expect(waitid(P_PID, id_t(pid), &info, WEXITED | WNOWAIT) == 0)

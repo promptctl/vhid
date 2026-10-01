@@ -141,7 +141,7 @@ let package = Package(
         // app's watch on the command. It links nothing, so both ends speak one vocabulary
         // without either linking the other. [LAW:one-way-deps]
         .target(name: "RecordingTie"),
-        .testTarget(name: "RecordingTieTests", dependencies: ["RecordingTie", "OwnThread"]),
+        .testTarget(name: "RecordingTieTests", dependencies: ["RecordingTie", "ChildProcess", "OwnThread"]),
         // The tap app `vhid record` launches, shipped as a signed bundle so Input
         // Monitoring can be granted to it once. It reads the tap and the I/O Registry and
         // hands the events to Input's `Recorder`; it never reaches the devices.
