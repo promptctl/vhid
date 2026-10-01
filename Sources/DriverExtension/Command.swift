@@ -1,3 +1,4 @@
+import Children
 import Foundation
 
 /// One command run against the machine, and everything it said.
@@ -49,12 +50,11 @@ public struct Command {
     /// the ones before it left, where a limit apiece would add up to several.
     public struct Deadline: Sendable {
         public let limit: Duration
-        fileprivate let at: DispatchTime
+        fileprivate let at: ContinuousClock.Instant
 
         /// Over `limit` from now.
         public static func within(_ limit: Duration) -> Deadline {
-            let nanoseconds = limit.components.seconds * 1_000_000_000 + limit.components.attoseconds / 1_000_000_000
-            return Deadline(limit: limit, at: .now() + .nanoseconds(Int(nanoseconds)))
+            Deadline(limit: limit, at: .now + limit)
         }
     }
 
@@ -72,89 +72,132 @@ public struct Command {
         public var description: String { "`\(command)` had not ended \(ran) after it was started, at the limit of \(limit), and was given up on" }
     }
 
+    /// A command this Mac would not let be heard to its end: no pipe for it, no watch on
+    /// it, or no status from it.
+    public struct Unheard: Error, CustomStringConvertible, Equatable {
+        public let command: String
+        public let what: String
+        public let code: Int32
+
+        public var description: String { "`\(command)` \(what): \(String(cString: strerror(code))) (\(code))" }
+    }
+
+    /// The command as a person would have typed it, for the errors that name it.
+    private var said: String { ([tool.lastPathComponent] + arguments).joined(separator: " ") }
+
     /// Runs the command to its end, or to `deadline`, where it is given up on and thrown as
     /// `Overran`. [LAW:types-are-the-program] The deadline is not optional, so nothing this
     /// program runs can hold its caller for good.
     ///
-    /// Nothing of it is open once this returns: the pipes' handles are autoreleased, and
-    /// close only when a pool drains, so the pool is here and not the caller's to have. A
-    /// daemon's thread that never returns drains none.
+    /// The child is this call's from `spawn` to `waitpid`: nothing of it is left once this
+    /// returns or throws, not a descriptor and not a pid to collect.
     public func run(by deadline: Deadline) throws -> Output {
-        try autoreleasepool {
-            let process = Process()
-            process.executableURL = tool
-            process.arguments = arguments
-            let out = Pipe(), err = Pipe()
-            process.standardOutput = out
-            process.standardError = err
-            let exited = DispatchSemaphore(value: 0)
-            process.terminationHandler = { _ in exited.signal() }
-            let outDrain = Drain(out.fileHandleForReading)
-            let errDrain = Drain(err.fileHandleForReading)
-            let started = ContinuousClock.now
-            try process.run()
-            // One deadline for the exit and both streams, as for every command of the
-            // reading.
-            guard exited.wait(timeout: deadline.at) == .success,
-                let stdout = outDrain.text(by: deadline.at),
-                let stderr = errDrain.text(by: deadline.at)
-            else {
-                outDrain.stop()
-                errDrain.stop()
-                // The child is stopped, and what it started is not reached: a stream held
-                // open past the child's exit is let go of here and goes on being held there.
-                // SIGKILL, because a tool that is stuck may not be answering SIGTERM. Only
-                // while it runs: a child that has exited has a pid that is no longer its.
-                if process.isRunning { kill(process.processIdentifier, SIGKILL) }
-                let ran = ContinuousClock.now - started
-                throw Overran(
-                    command: ([tool.lastPathComponent] + arguments).joined(separator: " "),
-                    ran: .milliseconds(ran.components.seconds * 1000 + ran.components.attoseconds / 1_000_000_000_000_000),
-                    limit: deadline.limit
-                )
-            }
-            return Output(status: process.terminationStatus, stdout: stdout, stderr: stderr)
+        let started = ContinuousClock.now
+        let out = try pipe()
+        let err: (read: Int32, write: Int32)
+        do { err = try pipe() } catch {
+            close(out.read); close(out.write)
+            throw error
         }
+        defer { close(out.read); close(err.read) }
+        let pid: pid_t
+        do {
+            // The writing ends are the child's once it has them: one left open here is a
+            // stream that never ends.
+            defer { close(out.write); close(err.write) }
+            pid = try spawn(tool.path, arguments, stdio: [1: out.write, 2: err.write])
+        }
+        let heard = Result { try hear(pid, [out.read, err.read], by: deadline) }
+        // [LAW:single-enforcer] The one place the child is stopped and collected, however
+        // the hearing ended. What it started is not reached: a stream held open past the
+        // child's exit is let go of here and goes on being held there. SIGKILL, because a
+        // tool that is stuck may not be answering SIGTERM, and with no look at whether the
+        // child still runs: the pid is this call's until the line below collects it, so
+        // the signal reaches the child or, where it has ended, nothing.
+        // [LAW:dataflow-not-control-flow]
+        kill(pid, SIGKILL)
+        var status: Int32 = 0, collected: pid_t
+        repeat { collected = waitpid(pid, &status, 0) } while collected == -1 && errno == EINTR
+        // [LAW:no-silent-failure] A child something else collected has no status to give,
+        // and the zero `status` began at would say it had succeeded.
+        guard collected == pid else { throw Unheard(command: said, what: "could not be collected", code: errno) }
+        guard let streams = try heard.get() else {
+            let ran = ContinuousClock.now - started
+            throw Overran(
+                command: said,
+                ran: .milliseconds(ran.components.seconds * 1000 + ran.components.attoseconds / 1_000_000_000_000_000),
+                limit: deadline.limit
+            )
+        }
+        // What it exited with, or the signal that ended it.
+        let ended = status & 0x7f
+        return Output(
+            status: ended == 0 ? (status >> 8) & 0xff : ended,
+            stdout: String(decoding: streams[out.read, default: []], as: UTF8.self),
+            stderr: String(decoding: streams[err.read, default: []], as: UTF8.self)
+        )
     }
-}
 
-/// One stream, read from before the child starts until the stream ends.
-///
-/// A command holds two of these at once, and that is the whole reason the type exists: a
-/// child whose pipe fills blocks in `write(2)` until someone reads it, so a stream that
-/// waits its turn is a stream whose turn can never come - the child cannot reach the exit
-/// that would end the read we are waiting on. [LAW:no-ambient-temporal-coupling] Both
-/// draining from the start leaves no order to get wrong, rather than an order to get right.
-private final class Drain: @unchecked Sendable {
-    // [LAW:no-shared-mutable-globals] `bytes` is written on the handler's queue and read on
-    // the caller's; the lock is the named owner of that crossing.
-    private let lock = NSLock()
-    private var bytes = Data()
-    private let ended = DispatchSemaphore(value: 0)
-    private let handle: FileHandle
+    private func pipe() throws -> (read: Int32, write: Int32) {
+        var ends: [Int32] = [0, 0]
+        guard Darwin.pipe(&ends) == 0 else { throw Unheard(command: said, what: "could not be given a pipe", code: errno) }
+        return (ends[0], ends[1])
+    }
 
-    init(_ handle: FileHandle) {
-        self.handle = handle
-        handle.readabilityHandler = { [self] handle in
-            let chunk = handle.availableData
-            lock.withLock { bytes.append(chunk) }
-            // An empty read is EOF, and it is the only thing that says the stream ended.
-            if chunk.isEmpty {
-                handle.readabilityHandler = nil
-                ended.signal()
+    /// Everything each of `streams` carried, once the child has exited and every stream
+    /// has ended, or nil where `deadline` came first.
+    ///
+    /// The exit and the streams are waited for at once, on one queue. A child whose pipe
+    /// fills blocks in `write(2)` until someone reads it, so a stream that waits its turn
+    /// is a stream whose turn can never come: the child cannot reach the exit that would
+    /// end the read being waited on. [LAW:no-ambient-temporal-coupling] Watching all of it
+    /// from the start leaves no order to get wrong.
+    private func hear(_ pid: pid_t, _ streams: [Int32], by deadline: Deadline) throws -> [Int32: [UInt8]]? {
+        let queue = kqueue()
+        guard queue >= 0 else { throw Unheard(command: said, what: "could not be watched", code: errno) }
+        defer { close(queue) }
+        func watch(_ ident: UInt, _ filter: Int32, _ flags: Int32, _ fflags: UInt32 = 0) -> Int32 {
+            var change = kevent(ident: ident, filter: Int16(filter), flags: UInt16(flags | EV_RECEIPT), fflags: fflags, data: 0, udata: nil)
+            var receipt = kevent()
+            return kevent(queue, &change, 1, &receipt, 1, nil) == 1 ? Int32(receipt.data) : errno
+        }
+        for stream in streams {
+            let refused = watch(UInt(stream), EVFILT_READ, EV_ADD)
+            guard refused == 0 else { throw Unheard(command: said, what: "could not be watched", code: refused) }
+        }
+        // A child that has ended already is not there to be watched, and that is its exit
+        // said another way: its pid is this call's until it is collected, so no such
+        // process is this child, ended.
+        let gone = watch(UInt(pid), EVFILT_PROC, EV_ADD, UInt32(NOTE_EXIT))
+        guard gone == 0 || gone == ESRCH else { throw Unheard(command: said, what: "could not be watched", code: gone) }
+        var exited = gone == ESRCH
+        var open = Set(streams)
+        var carried: [Int32: [UInt8]] = [:]
+        var events = Array(repeating: Darwin.kevent(), count: streams.count + 1)
+        var buffer = [UInt8](repeating: 0, count: 65536)
+        while !(exited && open.isEmpty) {
+            let left = ContinuousClock.now.duration(to: deadline.at)
+            guard left > .zero else { return nil }
+            var patience = timespec(tv_sec: Int(left.components.seconds), tv_nsec: Int(left.components.attoseconds / 1_000_000_000))
+            let ready = kevent(queue, nil, 0, &events, Int32(events.count), &patience)
+            if ready < 0, errno == EINTR { continue }
+            guard ready >= 0 else { throw Unheard(command: said, what: "could not be watched", code: errno) }
+            for event in events.prefix(Int(ready)) {
+                guard event.filter == Int16(EVFILT_READ) else { exited = true; continue }
+                let stream = Int32(event.ident)
+                let count = read(stream, &buffer, buffer.count)
+                if count < 0, errno == EINTR { continue }
+                guard count >= 0 else { throw Unheard(command: said, what: "could not be heard", code: errno) }
+                carried[stream, default: []] += buffer.prefix(count)
+                // An empty read is the end of the stream, and it is the only thing that
+                // says so. The watch goes with it: an ended stream is ready at every look.
+                if count == 0 {
+                    open.remove(stream)
+                    let kept = watch(UInt(stream), EVFILT_READ, EV_DELETE)
+                    guard kept == 0 else { throw Unheard(command: said, what: "could not be watched", code: kept) }
+                }
             }
         }
-    }
-
-    /// Everything the stream carried, or nil when it had not ended by `deadline`.
-    func text(by deadline: DispatchTime) -> String? {
-        guard ended.wait(timeout: deadline) == .success else { return nil }
-        return lock.withLock { String(decoding: bytes, as: UTF8.self) }
-    }
-
-    /// Gives up on a stream that has not ended: with the handler gone the handle is free
-    /// to close, where one still being read is held open with its descriptor.
-    func stop() {
-        handle.readabilityHandler = nil
+        return carried
     }
 }

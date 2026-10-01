@@ -87,9 +87,8 @@ import Testing
         // is no pid to ask after, and the test is not failed for the runner's pace.
         guard let pid = (try? String(contentsOf: pidFile, encoding: .utf8)).flatMap({ pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) }) else { return }
         // Signal 0 reaches a zombie as much as a running child, so this is the child both
-        // stopped and collected. It is collected a moment after the kill, not with it.
-        let deadline = ContinuousClock.now + .seconds(10)
-        while kill(pid, 0) == 0, ContinuousClock.now < deadline { Thread.sleep(forTimeInterval: 0.01) }
+        // stopped and collected, and by the time the command was thrown: nothing is left
+        // to collect it afterwards.
         #expect(kill(pid, 0) == -1 && errno == ESRCH)
     }
 
