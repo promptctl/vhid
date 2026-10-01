@@ -110,6 +110,6 @@ signing-identity:
 
 # The build tree only. The identity is per-Mac rather than per-checkout and survives on
 # purpose - a permission macOS granted this certificate is granted to the certificate,
-# and deleting it would throw those away. README.md says how to remove it deliberately.
+# and deleting it would throw those away. docs/development.md says how to remove it deliberately.
 clean:
 	/bin/rm -rf .build

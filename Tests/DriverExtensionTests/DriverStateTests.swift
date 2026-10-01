@@ -3,7 +3,7 @@ import Testing
 
 /// The verdict table, over every reading the machine can produce rather than over the
 /// handful this Mac happens to be in. The table is the contract `scripts/virtual-hid-driver`
-/// prints, `expect` asserts and README.md documents, so what is checked here is the word
+/// prints, `expect` asserts and docs/installing.md documents, so what is checked here is the word
 /// each combination yields - never how the switch is written. [LAW:behavior-not-structure]
 @Suite struct DriverStateTests {
     /// The seven combinations that have a name of their own. Everything else is residue,
@@ -115,7 +115,7 @@ import Testing
         }
     }
 
-    /// The words themselves. `expect <verdict>` and README.md spell them, and a rename
+    /// The words themselves. `expect <verdict>` and docs/installing.md spell them, and a rename
     /// that only touched the enum would leave those two reading a word this program no
     /// longer emits; `vhid doctor` prints the enum's own words and follows a rename. [LAW:one-source-of-truth]
     @Test func theVerdictWordsAreTheOnesEveryReaderSpells() {
