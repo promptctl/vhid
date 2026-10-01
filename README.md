@@ -72,8 +72,8 @@ The pkg is signed and notarized. It installs `vhid` and `eyes` in `/usr/local/bi
 background daemon that owns the two devices, a menu bar item that shows whether vhid is
 ready, and the driver the devices are built on,
 [Karabiner-DriverKit-VirtualHIDDevice](https://github.com/pqrs-org/Karabiner-DriverKit-VirtualHIDDevice).
-You don't need Karabiner-Elements. If you already have it, the installer warns that it
-replaces the driver files the two share.
+You don't need Karabiner-Elements. If you already have it, the pkg replaces the driver
+files the two share.
 
 One step is left to you, because macOS lets only the person at the Mac approve a driver:
 

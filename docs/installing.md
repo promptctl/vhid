@@ -20,8 +20,8 @@ It also installs the pinned
 [Karabiner-DriverKit-VirtualHIDDevice](https://github.com/pqrs-org/Karabiner-DriverKit-VirtualHIDDevice)
 package, pqrs's own component carried inside this one, and asks macOS to activate its
 driver extension for whoever is logged in. Karabiner-Elements is not needed; on a Mac
-that has it, the installer warns that the driver's Manager app and support files it
-shares are replaced.
+that has it, the driver's Manager app and support files it shares are replaced, which
+Installer warns of and `installer` on the command line only logs.
 
 One step is left to you, because macOS attributes a driver extension to the person at
 the Mac and no installer can approve it: turn on
