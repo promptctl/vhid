@@ -121,7 +121,9 @@ public struct Command {
         // child's exit is let go of here and goes on being held there. SIGKILL, because a
         // tool that is stuck may not be answering SIGTERM, and with no look at whether the
         // child still runs: the pid is this call's until the line below collects it, so
-        // the signal reaches the child or, where it has ended, nothing.
+        // the signal reaches the child or, where it has ended, nothing. The wait after it
+        // has no limit of its own: it is for the kernel to end a child that has been
+        // killed, and one given up on would be a pid nobody collects.
         // [LAW:dataflow-not-control-flow]
         kill(pid, SIGKILL)
         let ending: Ending
