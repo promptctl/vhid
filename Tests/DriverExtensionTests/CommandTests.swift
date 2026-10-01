@@ -78,8 +78,11 @@ import Testing
             try Command("/bin/sh", "-c", "echo $$ > \(pidFile.path); exec sleep 600").run(by: .within(.milliseconds(500)))
         }
         #expect(ContinuousClock.now - began < .seconds(10))
-        #expect(overran == Command.Overran(command: "sh -c echo $$ > \(pidFile.path); exec sleep 600", limit: .milliseconds(500)))
-        #expect(overran?.description == "`sh -c echo $$ > \(pidFile.path); exec sleep 600` had not ended by the limit of 0.5 seconds and was given up on")
+        let named = try #require(overran)
+        #expect(named.command == "sh -c echo $$ > \(pidFile.path); exec sleep 600")
+        #expect(named.limit == .milliseconds(500))
+        #expect(named.ran >= .milliseconds(500))
+        #expect(named.description == "`\(named.command)` had not ended \(named.ran) after it was started, at the limit of 0.5 seconds, and was given up on")
         // On a runner slow enough that the shell was stopped before it wrote its pid there
         // is no pid to ask after, and the test is not failed for the runner's pace.
         guard let pid = (try? String(contentsOf: pidFile, encoding: .utf8)).flatMap({ pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) }) else { return }
@@ -102,15 +105,15 @@ import Testing
 
     /// The limit is the reading's: a command run by a deadline that another has used most
     /// of is given what is left, where a limit of its own would let two commands take the
-    /// reading twice as long as its caller gave it. Two seconds of the 2.5 go to the first,
-    /// so the second is given up on 2.5 seconds in, and not at the 4.5 a limit apiece gives.
+    /// reading twice as long as its caller gave it. A second of the three goes to the
+    /// first, so the second has run two when it is given up on, and not the three a limit
+    /// apiece gives it. The error says both: how long this command had, and the limit.
     @Test(.timeLimit(.minutes(1))) func commandsRunByOneDeadlineShareItsLimit() throws {
-        let began = ContinuousClock.now
-        let deadline = Command.Deadline.within(.milliseconds(2500))
-        #expect(try Command("/bin/sleep", "2").run(by: deadline).status == 0)
-        let overran = #expect(throws: Command.Overran.self) { try Command("/bin/sleep", "600").run(by: deadline) }
-        #expect(ContinuousClock.now - began < .seconds(4))
-        #expect(overran?.limit == .milliseconds(2500))
+        let deadline = Command.Deadline.within(.seconds(3))
+        #expect(try Command("/bin/sleep", "1").run(by: deadline).status == 0)
+        let overran = try #require(#expect(throws: Command.Overran.self) { try Command("/bin/sleep", "600").run(by: deadline) })
+        #expect(overran.ran < .milliseconds(2500))
+        #expect(overran.limit == .seconds(3))
     }
 
     /// A command given up on holds nothing open either: vhidd reads the driver every two

@@ -60,11 +60,16 @@ public struct Command {
 
     /// A command that had not ended at its deadline: the child still running, or a stream
     /// of it still open in something the child started.
+    ///
+    /// `ran` is how long this command had, to the millisecond, beside the limit of the
+    /// reading it was run for: the command a reading's limit ends on is the one running
+    /// then, and may have had a moment of it where one before it had the rest.
     public struct Overran: Error, CustomStringConvertible, Equatable {
         public let command: String
+        public let ran: Duration
         public let limit: Duration
 
-        public var description: String { "`\(command)` had not ended by the limit of \(limit) and was given up on" }
+        public var description: String { "`\(command)` had not ended \(ran) after it was started, at the limit of \(limit), and was given up on" }
     }
 
     /// Runs the command to its end, or to `deadline`, where it is given up on and thrown as
@@ -86,6 +91,7 @@ public struct Command {
             process.terminationHandler = { _ in exited.signal() }
             let outDrain = Drain(out.fileHandleForReading)
             let errDrain = Drain(err.fileHandleForReading)
+            let started = ContinuousClock.now
             try process.run()
             // One deadline for the exit and both streams, as for every command of the
             // reading.
@@ -100,7 +106,12 @@ public struct Command {
                 // SIGKILL, because a tool that is stuck may not be answering SIGTERM. Only
                 // while it runs: a child that has exited has a pid that is no longer its.
                 if process.isRunning { kill(process.processIdentifier, SIGKILL) }
-                throw Overran(command: ([tool.lastPathComponent] + arguments).joined(separator: " "), limit: deadline.limit)
+                let ran = ContinuousClock.now - started
+                throw Overran(
+                    command: ([tool.lastPathComponent] + arguments).joined(separator: " "),
+                    ran: .milliseconds(ran.components.seconds * 1000 + ran.components.attoseconds / 1_000_000_000_000_000),
+                    limit: deadline.limit
+                )
             }
             return Output(status: process.terminationStatus, stdout: stdout, stderr: stderr)
         }

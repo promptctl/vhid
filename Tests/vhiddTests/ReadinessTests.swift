@@ -168,7 +168,7 @@ import VirtualHID
 /// the tool's limit: with why the devices are not up, and that the driver could not be
 /// read, naming the tool and the limit. A suite of its own because it waits the limit out.
 @Suite(.ownThread) struct StuckDriverReadTests {
-    @Test(.timeLimit(.minutes(1))) func aDriverReadThatNeverReturnsStillAnswersTheRefusedClient() {
+    @Test(.timeLimit(.minutes(1))) func aDriverReadThatNeverReturnsStillAnswersTheRefusedClient() throws {
         let readiness = Readiness(driver: {
             _ = try Command("/bin/sleep", "600").run(by: .within(.milliseconds(200)))
             return .running
@@ -178,7 +178,9 @@ import VirtualHID
         let began = ContinuousClock.now
         let refused = #expect(throws: Readiness.Refused.self) { try readiness.devices() }
         #expect(ContinuousClock.now - began < .seconds(5))
-        #expect(refused?.description == "devices not up: \(DaemonError.closed)\nThe driver extension could not be read: `sleep 600` had not ended by the limit of 0.2 seconds and was given up on")
+        let said = try #require(refused?.description)
+        #expect(said.hasPrefix("devices not up: \(DaemonError.closed)\nThe driver extension could not be read: `sleep 600` had not ended "))
+        #expect(said.hasSuffix(" after it was started, at the limit of 0.2 seconds, and was given up on"))
     }
 
     /// The reading is given up on before the client it is taken for stops listening, with
