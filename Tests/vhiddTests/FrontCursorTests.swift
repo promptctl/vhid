@@ -109,11 +109,21 @@ import Testing
         // The child closes its stdin before it says it joined, so the read is the write to
         // a closed pipe. Hearing the child end would not say so: a process that ends closes
         // its descriptors from the highest down, its stdout before its stdin.
-        // [LAW:no-ambient-temporal-coupling]
         let reader = try child("exec 0<&-; echo joined")
         defer { reader.stop() }
+        // The pipe is closed once nothing else holds its reading end, and a child being
+        // started holds every descriptor its parent has until it has become its program:
+        // `spawn` takes them from it then, not before. One that another test started
+        // while this reader was is such a holder, the write reaches it, and the read
+        // fails when it lets go. No holder can come after, the reading end being closed
+        // here by then, so the reads that fail that way run out.
+        // [LAW:no-ambient-temporal-coupling] Waited for by reading, not by a sleep.
+        var failure: ChildReader.Failed?
+        repeat {
+            failure = #expect(throws: ChildReader.Failed.self) { try reader.read() }
+        } while failure?.what == "ended before it could answer"
         // That write would raise SIGPIPE and end this test process.
-        #expect { try reader.read() } throws: { "\($0)".contains("could not be asked") }
+        #expect(failure?.what == "could not be asked: errno \(EPIPE)")
     }
 
     /// Stopping returns only once the child is reaped, even one that ignores SIGTERM and
