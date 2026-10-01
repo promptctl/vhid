@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import DriverExtension
 
@@ -35,5 +36,27 @@ import Testing
         #expect(output.stdout == "out\n")
         #expect(output.stderr == "err\n")
         #expect(output.merged == "out\nerr")
+    }
+
+    /// A command that has returned holds nothing open, on a thread that never drains a
+    /// pool as much as on one that does: vhidd runs the driver probe every two seconds
+    /// from a thread that never returns, and four commands a probe each leaving two
+    /// descriptors behind would be the whole table within the minute.
+    ///
+    /// The count is the process's, and other tests open descriptors of their own while
+    /// this runs, so what is checked is that it did not grow by the 80 that 40 leaking
+    /// runs leave.
+    @Test(.timeLimit(.minutes(1))) func aCommandThatHasReturnedHoldsNoDescriptorOpen() throws {
+        func open() -> Int { (0..<getdtablesize()).count { fcntl($0, F_GETFD) != -1 } }
+        let done = DispatchSemaphore(value: 0)
+        nonisolated(unsafe) var grew = 0
+        Thread.detachNewThread {
+            let before = open()
+            for _ in 0..<40 { _ = try? Command("/usr/bin/true").run() }
+            grew = open() - before
+            done.signal()
+        }
+        done.wait()
+        #expect(grew < 40)
     }
 }
