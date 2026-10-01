@@ -39,6 +39,12 @@ import Testing
         #expect(output.merged == "out\nerr")
     }
 
+    /// A command a signal ended has that signal for its status, as one that exited has what
+    /// it exited with.
+    @Test func theStatusOfACommandEndedByASignalIsTheSignal() throws {
+        #expect(try Command("/bin/sh", "-c", "kill -KILL $$").run(by: .within(.seconds(30))).status == SIGKILL)
+    }
+
     /// A command that has returned holds nothing open, on a thread that never drains a
     /// pool as much as on one that does: vhidd runs the driver probe every two seconds
     /// from a thread that never returns, and four commands a probe each leaving two
@@ -87,9 +93,8 @@ import Testing
         // is no pid to ask after, and the test is not failed for the runner's pace.
         guard let pid = (try? String(contentsOf: pidFile, encoding: .utf8)).flatMap({ pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) }) else { return }
         // Signal 0 reaches a zombie as much as a running child, so this is the child both
-        // stopped and collected. It is collected a moment after the kill, not with it.
-        let deadline = ContinuousClock.now + .seconds(10)
-        while kill(pid, 0) == 0, ContinuousClock.now < deadline { Thread.sleep(forTimeInterval: 0.01) }
+        // stopped and collected, and by the time the command was thrown: nothing is left
+        // to collect it afterwards.
         #expect(kill(pid, 0) == -1 && errno == ESRCH)
     }
 

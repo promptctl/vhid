@@ -1,3 +1,4 @@
+import ChildProcess
 import DriverExtension
 import Foundation
 import Synchronization
