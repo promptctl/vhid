@@ -118,12 +118,12 @@ import Testing
         // fails when it lets go. No holder can come after, the reading end being closed
         // here by then, so the reads that fail that way run out.
         // [LAW:no-ambient-temporal-coupling] Waited for by reading, not by a sleep.
-        var failure: String
+        var failure: ChildReader.Failed?
         repeat {
-            failure = "\(#expect(throws: ChildReader.Failed.self) { try reader.read() }?.description ?? "no failure")"
-        } while failure.contains("ended before it could answer")
+            failure = #expect(throws: ChildReader.Failed.self) { try reader.read() }
+        } while failure?.what == "ended before it could answer"
         // That write would raise SIGPIPE and end this test process.
-        #expect(failure.contains("could not be asked"))
+        #expect(failure?.what == "could not be asked: errno \(EPIPE)")
     }
 
     /// Stopping returns only once the child is reaped, even one that ignores SIGTERM and

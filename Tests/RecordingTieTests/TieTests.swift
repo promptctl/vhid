@@ -60,11 +60,11 @@ import Testing
     // Each watch answers on a queue of its own: .global() is capped at the core count, and
     // other tests blocking its threads on a small runner left the answer never delivered.
     @Test func theWatchFiresForACommandAlreadyEnded() throws {
-        // [LAW:single-enforcer] Started as every child is: one started bare holds, for as
-        // long as it runs, every descriptor any test has open, and a test of a pipe with
-        // no reader left then finds one.
+        // [LAW:single-enforcer] Started through `spawn`, which leaves a child only what it
+        // is given: one started bare holds, for as long as it runs, every descriptor any
+        // test has open, and a test of a pipe with no reader left then finds one.
         let pid = try spawn("/usr/bin/true", [], stdio: [:])
-        defer { var status: Int32 = 0; waitpid(pid, &status, 0) }
+        defer { _ = try? collect(pid) }
         var info = siginfo_t()
         #expect(waitid(P_PID, id_t(pid), &info, WEXITED | WNOWAIT) == 0)
         #expect(kill(pid, 0) == 0)
