@@ -10,7 +10,7 @@ import Installations
 /// beside it, which a test drives with every failure a connection can end in.
 public enum DaemonProbe {
     /// What this installation's daemon says, asked now.
-    public static func reading(of installation: Installation, replyTimeout: Duration = .seconds(5)) -> DaemonReading {
+    public static func reading(of installation: Installation, replyTimeout: Duration = HelperConnection.replyTimeout) -> DaemonReading {
         reading { HelperConnection(installation: installation, replyTimeout: replyTimeout) }
     }
 
