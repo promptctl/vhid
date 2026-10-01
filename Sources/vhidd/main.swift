@@ -137,7 +137,17 @@ do {
                 devices.releaseEverything(because: "starting")
                 return devices
             },
-            driver: { try? DriverState(DriverProbe.facts()) },
+            // A driver that could not be read names no step and ends no wait, so the
+            // reason it could not is said here, where it would otherwise be lost.
+            // [LAW:no-silent-failure]
+            driver: {
+                do {
+                    return try DriverState(DriverProbe.facts())
+                } catch {
+                    log("could not read the driver extension: \(error)")
+                    return nil
+                }
+            },
             now: { .now },
             pause: { Thread.sleep(forTimeInterval: Double($0.components.seconds) + Double($0.components.attoseconds) / 1e18) }
         )

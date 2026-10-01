@@ -191,8 +191,8 @@ func waitOut<Found>(
     return nil
 }
 
-/// A driver extension that read as not on before an attempt and reads as on since: the
-/// one change between attempts that a person makes and the next attempt is waiting for.
+/// A driver extension that read as not on and reads as on since: the one change between
+/// attempts that a person makes and the next attempt is waiting for.
 ///
 /// Both ends are states that were read. A state that could not be read is neither, so a
 /// probe that fails and recovers turns nothing on. [LAW:parse-dont-validate]
@@ -200,10 +200,8 @@ struct TurnedOn: Equatable, CustomStringConvertible {
     let from: DriverState
     let to: DriverState
 
-    /// `to` is read only when `from` was off: a wait whose attempt was made with the
-    /// driver on is not waiting for the driver, and reads nothing.
-    init?(from: DriverState?, to: () -> DriverState?) {
-        guard let from, !from.isOn, let to = to(), to.isOn else { return nil }
+    init?(from: DriverState, to: DriverState?) {
+        guard !from.isOn, let to, to.isOn else { return nil }
         self.from = from
         self.to = to
     }
@@ -265,7 +263,8 @@ extension DaemonProcess.Effects {
     /// both take the devices down with a reason and retry, so neither ends the process and
     /// neither is the spawn loop launchd's restarts used to make. `reach` stops any daemon
     /// it started before it throws, and a loss stops the one behind it, so every start is
-    /// separated from the one before by a whole wait. [LAW:no-ambient-temporal-coupling]
+    /// separated from the one before by a wait: the whole of it, or no less than a `look`
+    /// of one cut short. [LAW:no-ambient-temporal-coupling]
     ///
     /// Failures count until the devices stay up for `backoff.most`, so a daemon that comes
     /// up and dies at once is started ever less often, and one that served for a while is
@@ -274,8 +273,10 @@ extension DaemonProcess.Effects {
     /// A wait ends early for one thing: the driver extension turning on. A person who has
     /// just approved it is waiting on this loop, and the failures counted against a driver
     /// that was off say nothing of one that is on, so the count starts again with it. The
-    /// driver is read every `look` of such a wait, and not at all in a wait whose attempt
-    /// was made with the driver already on.
+    /// driver is read where each attempt ends, at its failure or at the loss of what it
+    /// brought up, and a reading of it not on is what the waits from then are for: the
+    /// driver is read every `look` of them until it reads on or the devices come up. Any
+    /// other wait is taken whole and reads nothing.
     ///
     /// Returns only by `pause` throwing, which the daemon's never does.
     func keepUp(
@@ -289,16 +290,21 @@ extension DaemonProcess.Effects {
         pause: (Duration) throws -> Void
     ) rethrows -> Never {
         var failures = 0
+        // The driver as it was last read not on, since the devices were last up: what a
+        // wait is for. Kept across attempts, so a driver turned on while an attempt was
+        // already failing is still one turned on since, and one reading that could not
+        // be taken leaves the wait looking. [LAW:no-ambient-temporal-coupling]
+        var off: DriverState?
         while true {
-            // Read before the attempt and not after it: a driver turned on while the
-            // attempt was already failing is then still one turned on since.
-            // [LAW:no-ambient-temporal-coupling]
-            let before = driver()
             let attempt = readiness.begin()
+            let ended: DriverState?
             do {
                 let reached = try reach(within: limit) { lost, _ in _ = readiness.lost(lost, in: attempt) }
                 readiness.up(serve(reached))
                 log("serving")
+                // Devices that came up did so on a driver that is on, whatever it read
+                // before them: a loss of these is not that driver turning on.
+                off = nil
                 let since = now()
                 let why = readiness.whileUp()
                 // Lost, so whatever the daemon held for vhidd went with the connection; a
@@ -306,15 +312,21 @@ extension DaemonProcess.Effects {
                 stop(reached.daemon)
                 failures = now() - since >= backoff.most ? 1 : failures + 1
                 logFailure("the devices went down (\(why)); bringing them up again in \(backoff.after(failures))")
+                ended = driver()
             } catch {
                 failures += 1
-                readiness.failed(BringUpFailure(error, driver: driver()))
+                ended = driver()
+                readiness.failed(BringUpFailure(error, driver: ended))
                 logFailure("could not bring the devices up (\(error)); trying again in \(backoff.after(failures))")
             }
+            if let ended, !ended.isOn { off = ended }
             let wait = backoff.after(failures)
-            if let on = try waitOut(wait, lookingEvery: look, pause: pause, for: { TurnedOn(from: before, to: driver) }) {
+            // [LAW:dataflow-not-control-flow] Every wait is waited out the same way: one
+            // with nothing to look for is a single look as long as itself, finding nothing.
+            if let on = try waitOut(wait, lookingEvery: off == nil ? wait : look, pause: pause, for: { off.flatMap { TurnedOn(from: $0, to: driver()) } }) {
                 log("\(on.found), \(on.after) into a wait of \(wait); bringing the devices up now")
                 failures = 0
+                off = nil
             }
         }
     }
