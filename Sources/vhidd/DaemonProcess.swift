@@ -278,8 +278,9 @@ extension DaemonProcess.Effects {
     /// driver is read where each attempt ends, at its failure or at the loss of what it
     /// brought up, and a reading of it not on is what the waits from then are for: the
     /// driver is read every `look` of them until it reads on or the devices come up. Any
-    /// other wait is taken whole and reads nothing. A wait is as long as the log said by
-    /// `now`, however long each reading takes.
+    /// other wait is taken whole and reads nothing. A wait ends by `now`, so the time its
+    /// readings take is part of it: the next attempt starts no later than the wait the
+    /// log gave and one reading.
     ///
     /// Returns only by `pause` throwing, which the daemon's never does.
     func keepUp(
@@ -300,7 +301,8 @@ extension DaemonProcess.Effects {
         var off: DriverState?
         while true {
             let attempt = readiness.begin()
-            let ended: DriverState?
+            // How the attempt ended, as the log says it up to the wait.
+            let ended: String
             do {
                 let reached = try reach(within: limit) { lost, _ in _ = readiness.lost(lost, in: attempt) }
                 readiness.up(serve(reached))
@@ -314,20 +316,20 @@ extension DaemonProcess.Effects {
                 // daemon started here is stopped so the next attempt starts it afresh.
                 stop(reached.daemon)
                 failures = now() - since >= backoff.most ? 1 : failures + 1
-                ended = driver()
-                logFailure("the devices went down (\(why)); bringing them up again in \(backoff.after(failures))")
+                ended = "the devices went down (\(why)); bringing them up again"
             } catch {
                 failures += 1
                 readiness.failed(error)
-                ended = driver()
-                logFailure("could not bring the devices up (\(error)); trying again in \(backoff.after(failures))")
+                ended = "could not bring the devices up (\(error)); trying again"
             }
-            if let ended, !ended.isOn { off = ended }
+            // [LAW:dataflow-not-control-flow] However the attempt ended, the driver is read
+            // and then the wait is said, so what follows the log line is the wait and
+            // nothing else.
+            if let read = driver(), !read.isOn { off = read }
             let wait = backoff.after(failures)
+            logFailure("\(ended) in \(wait)")
             // [LAW:dataflow-not-control-flow] Every wait is waited out the same way: one
             // with nothing to look for is a single look as long as itself, finding nothing.
-            // The driver was read before the wait was said, so what follows the log line
-            // is the wait and nothing else.
             if let on = try waitOut(wait, lookingEvery: off == nil ? wait : look, now: now, pause: pause, for: { off.flatMap { TurnedOn(from: $0, to: driver()) } }) {
                 log("\(on.found), \(on.after) into a wait of \(wait); bringing the devices up now")
                 failures = 0

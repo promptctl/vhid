@@ -209,8 +209,8 @@ import VirtualHID
     private func paced(_ pauses: Int, backoff: Backoff, driver: @escaping (_ launched: Int, _ waited: Duration) -> DriverState?) -> [String] {
         let world = World(connections: [.failure(.noSocket(path: "nowhere"))])
         var events: [String] = []
-        var waited = Duration.zero
         let clock = HandClock()
+        let began = clock.now
         let effects = world.effects
         let logged = DaemonProcess.Effects<Device>(
             connect: effects.connect,
@@ -219,10 +219,9 @@ import VirtualHID
             terminate: effects.terminate
         )
         #expect(throws: Stop.self) {
-            try logged.keepUp(within: .milliseconds(20), backoff: backoff, lookingEvery: .seconds(2), readiness: Readiness(driver: { .running }), serve: { _ in RecordingDevices() }, driver: { driver(world.launched, waited) }, now: { clock.now }) { wait in
+            try logged.keepUp(within: .milliseconds(20), backoff: backoff, lookingEvery: .seconds(2), readiness: Readiness(driver: { .running }), serve: { _ in RecordingDevices() }, driver: { driver(world.launched, clock.now - began) }, now: { clock.now }) { wait in
                 clock.advance(wait)
                 events.append("wait \(wait)")
-                waited += wait
                 if events.count(where: { $0.hasPrefix("wait") }) == pauses { throw Stop() }
             }
         }
@@ -354,8 +353,8 @@ import VirtualHID
     }
 
     /// A look takes time, and that time is the wait's: with a look that takes as long as
-    /// the pause before it, half the pauses fit, and the wait is over one look past its
-    /// length at the latest. What a look finds is found that far in, its own time counted.
+    /// the pause before it, three of its five pauses fit, and the wait is over one look past
+    /// its length at the latest. What a look finds is found that far in, its own time counted.
     @Test func theTimeALookTakesIsPartOfTheWait() throws {
         let clock = HandClock()
         var pauses: [Duration] = []
