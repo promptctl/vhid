@@ -46,11 +46,19 @@ enum DaemonProcess {
         case startedHere(pid_t)
     }
 
+    /// A line of the daemon's log: something that happened, or a failure of the daemon's
+    /// own, which is also kept as its last one.
+    enum Said: Equatable {
+        case happened(String)
+        case failed(String)
+    }
+
     /// What reaching the daemon does to the world, taken as values: connect to it, bring
-    /// the devices up on the connection, launch the daemon, terminate it. The policy over
-    /// them - reach first, launch only when nothing answers, stop only what was launched
-    /// here - is then a function of what they answer, and a test drives it with answers of
-    /// its own and no daemon at all. [LAW:effects-at-boundaries]
+    /// the devices up on the connection, launch the daemon, terminate it, say what was
+    /// done. The policy over them - reach first, launch only when nothing answers, stop
+    /// only what was launched here - is then a function of what they answer, and a test
+    /// drives it with answers of its own and no daemon at all, and reads what was said in
+    /// order with what was done. [LAW:effects-at-boundaries]
     struct Effects<Device> {
         /// The devices on a connection to a daemon that is running, or `DaemonError` when
         /// none answers. `whenLost` is told when that connection ends underneath them.
@@ -60,6 +68,7 @@ enum DaemonProcess {
         /// The daemon started as this process's child.
         let launch: () throws -> pid_t
         let terminate: (pid_t) -> Void
+        let say: (Said) -> Void
     }
 
     /// The effects done for real. The daemon outlives any one connection on purpose, and
@@ -72,7 +81,13 @@ enum DaemonProcess {
             },
             bringUp: { Startups(keyboard: try $0.keyboard.start(within: $1), mouse: try $0.mouse.start(within: $1)) },
             launch: { try spawn(executable, [], stdio: [:]) },
-            terminate: end
+            terminate: end,
+            say: {
+                switch $0 {
+                case .happened(let what): log(what)
+                case .failed(let what): logFailure(what)
+                }
+            }
         )
     }
 
@@ -126,10 +141,10 @@ extension DaemonProcess.Effects {
         do {
             return (try connect { whenLost($0, .alreadyRunning) }, .alreadyRunning)
         } catch let unreachable as DaemonError {
-            log("no driver's daemon to reach (\(unreachable)); starting it")
+            say(.happened("no driver's daemon to reach (\(unreachable)); starting it"))
         }
         let pid = try launch()
-        log("started the driver's daemon as pid \(pid)")
+        say(.happened("started the driver's daemon as pid \(pid)"))
         let origin = DaemonProcess.Origin.startedHere(pid)
         while true {
             do {
@@ -145,10 +160,10 @@ extension DaemonProcess.Effects {
     func stop(_ origin: DaemonProcess.Origin) {
         switch origin {
         case .alreadyRunning:
-            log("leaving the driver's daemon running: vhidd did not start it")
+            say(.happened("leaving the driver's daemon running: vhidd did not start it"))
         case .startedHere(let pid):
             terminate(pid)
-            log("stopped the driver's daemon as pid \(pid), which vhidd started")
+            say(.happened("stopped the driver's daemon as pid \(pid), which vhidd started"))
         }
     }
 }
@@ -244,7 +259,8 @@ final class Children: @unchecked Sendable {
                 self.lock.lock(); defer { self.lock.unlock() }
                 guard self.pids.remove(pid) != nil else { return }
                 effects.terminate(pid)
-            }
+            },
+            say: effects.say
         )
     }
 
@@ -305,7 +321,7 @@ extension DaemonProcess.Effects {
             do {
                 let reached = try reach(within: limit) { lost, _ in _ = readiness.lost(lost, in: attempt) }
                 readiness.up(serve(reached))
-                log("serving")
+                say(.happened("serving"))
                 // Devices that came up did so on a driver that is on, whatever it read
                 // before them: a loss of these is not that driver turning on.
                 off = nil
@@ -315,22 +331,22 @@ extension DaemonProcess.Effects {
                 // daemon started here is stopped so the next attempt starts it afresh.
                 stop(reached.daemon)
                 failures = now() - since >= backoff.most ? 1 : failures + 1
-                logFailure("the devices went down (\(why))")
+                say(.failed("the devices went down (\(why))"))
             } catch {
                 failures += 1
                 readiness.failed(error)
-                logFailure("could not bring the devices up (\(error))")
+                say(.failed("could not bring the devices up (\(error))"))
             }
             // [LAW:dataflow-not-control-flow] However the attempt ended, it is said as it
             // ends, then the driver is read, then the wait is said: a reading that takes
             // time holds back neither the failure nor the wait that follows its line.
             if let read = driver(), !read.isOn { off = read }
             let wait = backoff.after(failures)
-            log("bringing the devices up again in \(wait)")
+            say(.happened("bringing the devices up again in \(wait)"))
             // [LAW:dataflow-not-control-flow] Every wait is waited out the same way: one
             // with nothing to look for is a single look as long as itself, finding nothing.
             if let on = try waitOut(wait, lookingEvery: off == nil ? wait : look, now: now, pause: pause, for: { off.flatMap { TurnedOn(from: $0, to: driver()) } }) {
-                log("\(on.found), \(on.after) into a wait of \(wait); bringing the devices up now")
+                say(.happened("\(on.found), \(on.after) into a wait of \(wait); bringing the devices up now"))
                 failures = 0
                 off = nil
             }

@@ -21,6 +21,7 @@ import VirtualHID
         var terminated: [pid_t] = []
         var limitGiven: Duration?
         var lost: (@Sendable (DaemonError) -> Void)?
+        var say: (DaemonProcess.Said) -> Void = { _ in }
 
         init(connections: [Result<Device, DaemonError>], bringUp: Result<DaemonProcess.Startups, DaemonError> = .success(World.up)) {
             self.connections = connections
@@ -48,7 +49,8 @@ import VirtualHID
                     self.terminated.append($0)
                     // A stopped daemon closes its connection on the way down.
                     self.lost?(.closed)
-                }
+                },
+                say: { self.say($0) }
             )
         }
     }
@@ -156,7 +158,8 @@ import VirtualHID
             connect: effects.connect,
             bringUp: effects.bringUp,
             launch: { events.append("launch"); return try effects.launch() },
-            terminate: { events.append("stop"); effects.terminate($0) }
+            terminate: { events.append("stop"); effects.terminate($0) },
+            say: effects.say
         )
         let readiness = Readiness(driver: { .running })
         var downWhileWaiting: [Bool] = []
@@ -216,7 +219,8 @@ import VirtualHID
             connect: effects.connect,
             bringUp: effects.bringUp,
             launch: { events.append("launch"); return try effects.launch() },
-            terminate: effects.terminate
+            terminate: effects.terminate,
+            say: effects.say
         )
         #expect(throws: Stop.self) {
             try logged.keepUp(within: .milliseconds(20), backoff: backoff, lookingEvery: .seconds(2), readiness: Readiness(driver: { .running }), serve: { _ in RecordingDevices() }, driver: { driver(world.launched, clock.now - began) }, now: { clock.now }) { wait in
@@ -384,7 +388,8 @@ import VirtualHID
             connect: effects.connect,
             bringUp: effects.bringUp,
             launch: { launches.append(clock.now); return try effects.launch() },
-            terminate: effects.terminate
+            terminate: effects.terminate,
+            say: effects.say
         )
         #expect(throws: Stop.self) {
             try logged.keepUp(within: .milliseconds(20), backoff: Backoff(first: wait, most: wait), lookingEvery: .seconds(2), readiness: Readiness(driver: { .running }), serve: { _ in RecordingDevices() }, driver: { clock.advance(reading); return .awaitingApproval }, now: { clock.now }) { pause in
@@ -396,6 +401,61 @@ import VirtualHID
         #expect(launches.count == 2)
         #expect(launches[1] - waitBegan! <= wait + reading)
         #expect(launches[1] - waitBegan! >= wait)
+    }
+
+    /// What the loop said, and what it did between its lines.
+    private enum Step: Equatable {
+        case said(DaemonProcess.Said)
+        case readTheDriver
+        case paused(Duration)
+    }
+
+    /// One attempt in `world` and what follows it, up to the first pause: every line
+    /// said, every reading of the driver and the pause, in the order they happened.
+    private func oneAttempt(in world: World, serve: @escaping () -> Void = {}) -> [Step] {
+        var steps: [Step] = []
+        world.say = { steps.append(.said($0)) }
+        let clock = HandClock()
+        #expect(throws: Stop.self) {
+            try world.effects.keepUp(within: .milliseconds(20), backoff: Backoff(first: .seconds(2), most: .seconds(60)), lookingEvery: .seconds(2), readiness: Readiness(driver: { .running }), serve: { _ in
+                serve()
+                return RecordingDevices()
+            }, driver: { steps.append(.readTheDriver); return nil }, now: { clock.now }) { wait in
+                steps.append(.paused(wait))
+                throw Stop()
+            }
+        }
+        return steps
+    }
+
+    /// A reading of the driver can run to its limit, so a failed attempt is said before
+    /// the driver is read, and the wait is said after it: what follows the wait's line is
+    /// the wait.
+    @Test func aFailedAttemptIsSaidBeforeTheDriverIsReadAndItsWaitAfter() {
+        let nowhere = DaemonError.noSocket(path: "nowhere")
+        #expect(oneAttempt(in: World(connections: [.failure(nowhere)])) == [
+            .said(.happened("no driver's daemon to reach (\(nowhere)); starting it")),
+            .said(.happened("started the driver's daemon as pid \(World.pid)")),
+            .said(.happened("stopped the driver's daemon as pid \(World.pid), which vhidd started")),
+            .said(.failed("could not bring the devices up (\(nowhere))")),
+            .readTheDriver,
+            .said(.happened("bringing the devices up again in 2.0 seconds")),
+            .paused(.seconds(2)),
+        ])
+    }
+
+    /// Devices lost are said as a failed attempt is: before the driver is read, and the
+    /// wait after it.
+    @Test func lostDevicesAreSaidBeforeTheDriverIsReadAndTheirWaitAfter() {
+        let world = World(connections: [.success(Device())])
+        #expect(oneAttempt(in: world, serve: { world.lost!(.closed) }) == [
+            .said(.happened("serving")),
+            .said(.happened("leaving the driver's daemon running: vhidd did not start it")),
+            .said(.failed("the devices went down (\(Readiness.Down.failed(DaemonError.closed)))")),
+            .readTheDriver,
+            .said(.happened("bringing the devices up again in 2.0 seconds")),
+            .paused(.seconds(2)),
+        ])
     }
 
     /// What the log says of a wait cut short: both states, as they were read.
