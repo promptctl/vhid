@@ -276,17 +276,20 @@ import VirtualHID
         #expect(events == ["launch", "wait 2.0 seconds", "wait 2.0 seconds", "launch", "wait 60.0 seconds"])
     }
 
-    /// Served devices, each lost 20 ms after it is handed over, in a world whose daemon
-    /// is running and whose driver reads as `driver` says: the waits taken, up to the
-    /// `pauses`th. `before` is run ahead of each wait.
+    /// Devices that come up and are lost as they are handed over, in a world whose
+    /// daemon is running and whose driver reads as `driver` says: the waits taken, up to
+    /// the `pauses`th. `before` is run ahead of each wait.
+    ///
+    /// Lost from inside `serve` and not a moment later from another thread: a test that
+    /// holds its thread until a dispatch queue calls back waits on the runner having a
+    /// thread to spare, and three of them on a three-core runner wait forever.
     private func lostEachTime(_ pauses: Int, world: World, backoff: Backoff, driver: @escaping (_ served: Int, _ waited: Duration) -> DriverState?, before: @escaping (World) -> Void = { _ in }) -> [Duration] {
         var served = 0
         var waits: [Duration] = []
         #expect(throws: Stop.self) {
             try world.effects.keepUp(within: .seconds(1), backoff: backoff, lookingEvery: .seconds(2), readiness: Readiness(), serve: { _ in
                 served += 1
-                let lose = world.lost!
-                DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(20)) { lose(.closed) }
+                world.lost!(.closed)
                 return RecordingDevices()
             }, driver: { driver(served, waits.reduce(.zero, +)) }, now: { .now }) { wait in
                 before(world)
