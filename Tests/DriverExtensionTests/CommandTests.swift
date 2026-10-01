@@ -25,14 +25,14 @@ import Testing
     /// takes stdout to completion first waits for an end the child can no longer reach.
     @Test(.timeLimit(.minutes(1)), arguments: [["e", "o"], ["o", "e"]])
     func bothStreamsComeBackWholeWhicheverIsWrittenFirst(order: [String]) throws {
-        let output = try Command("/bin/sh", "-c", order.map(Self.fill).joined(separator: "; ")).run()
+        let output = try Command("/bin/sh", "-c", order.map(Self.fill).joined(separator: "; ")).run(within: .seconds(30))
         #expect(output.status == 0)
         #expect(output.stdout == String(repeating: "o", count: Self.size))
         #expect(output.stderr == String(repeating: "e", count: Self.size))
     }
 
     @Test func theStatusAndBothStreamsSurviveAFailingCommand() throws {
-        let output = try Command("/bin/sh", "-c", "echo out; echo err >&2; exit 3").run()
+        let output = try Command("/bin/sh", "-c", "echo out; echo err >&2; exit 3").run(within: .seconds(30))
         #expect(output.status == 3)
         #expect(output.stdout == "out\n")
         #expect(output.stderr == "err\n")
@@ -56,7 +56,7 @@ import Testing
         Thread.detachNewThread {
             counted = Result {
                 let before = try open()
-                let ran = (0..<100).count { _ in (try? Command("/usr/bin/true").run())?.status == 0 }
+                let ran = (0..<100).count { _ in (try? Command("/usr/bin/true").run(within: .seconds(30)))?.status == 0 }
                 return (ran, try open() - before)
             }
             done.signal()
@@ -65,5 +65,58 @@ import Testing
         let (ran, grew) = try #require(counted).get()
         #expect(ran == 100)
         #expect(grew < 100)
+    }
+
+    /// A command that never ends is given up on at its limit and said by name, with the
+    /// limit, and the child is stopped and not left running behind the reading that gave up
+    /// on it.
+    @Test(.timeLimit(.minutes(1))) func aCommandThatNeverEndsIsStoppedAtItsLimitAndNamed() throws {
+        let pidFile = FileManager.default.temporaryDirectory.appending(path: "vhid-command-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: pidFile) }
+        let began = ContinuousClock.now
+        let overran = #expect(throws: Command.Overran.self) {
+            try Command("/bin/sh", "-c", "echo $$ > \(pidFile.path); exec sleep 600").run(within: .milliseconds(500))
+        }
+        #expect(ContinuousClock.now - began < .seconds(10))
+        #expect(overran == Command.Overran(command: "sh -c echo $$ > \(pidFile.path); exec sleep 600", limit: .milliseconds(500)))
+        #expect(overran?.description == "`sh -c echo $$ > \(pidFile.path); exec sleep 600` had not ended after 0.5 seconds and was stopped")
+        let pid = try #require(pid_t(try String(contentsOf: pidFile, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)))
+        // Signal 0 reaches a zombie as much as a running child, so this is the child both
+        // stopped and collected. It is collected a moment after the kill, not with it.
+        let deadline = ContinuousClock.now + .seconds(10)
+        while kill(pid, 0) == 0, ContinuousClock.now < deadline { Thread.sleep(forTimeInterval: 0.01) }
+        #expect(kill(pid, 0) == -1 && errno == ESRCH)
+    }
+
+    /// A child that has exited can leave its streams open in something it started, and
+    /// the end of a stream is what a reading waits for: the limit covers that wait too.
+    @Test(.timeLimit(.minutes(1))) func aStreamHeldOpenPastTheChildsExitIsGivenUpOnAtTheLimit() throws {
+        let began = ContinuousClock.now
+        #expect(throws: Command.Overran.self) {
+            try Command("/bin/sh", "-c", "sleep 5 & exit 0").run(within: .milliseconds(500))
+        }
+        #expect(ContinuousClock.now - began < .seconds(4))
+    }
+
+    /// A command given up on holds nothing open either: vhidd reads the driver every two
+    /// seconds while it waits, and a stuck tool is stuck at every one of them.
+    @Test(.timeLimit(.minutes(1))) func aCommandGivenUpOnHoldsNoDescriptorOpen() throws {
+        @Sendable func open() throws -> Int { try FileManager.default.contentsOfDirectory(atPath: "/dev/fd").count }
+        let done = DispatchSemaphore(value: 0)
+        nonisolated(unsafe) var counted: Result<(overran: Int, grew: Int), any Error>?
+        Thread.detachNewThread {
+            counted = Result {
+                let before = try open()
+                let overran = (0..<50).count { _ in
+                    do { _ = try Command("/bin/sleep", "600").run(within: .milliseconds(20)); return false } catch { return error is Command.Overran }
+                }
+                return (overran, try open() - before)
+            }
+            done.signal()
+        }
+        done.wait()
+        let (overran, grew) = try #require(counted).get()
+        #expect(overran == 50)
+        #expect(grew < 50)
     }
 }

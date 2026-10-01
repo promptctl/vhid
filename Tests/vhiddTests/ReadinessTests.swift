@@ -1,5 +1,6 @@
 import DriverExtension
 import Foundation
+import OwnThread
 import Testing
 import VirtualHID
 @testable import vhidd
@@ -159,5 +160,23 @@ import VirtualHID
         readiness.failed(DaemonError.silent)
         #expect(!readiness.lost(DaemonError.closed, in: attempt))
         #expect(refusal(readiness) == "devices not up: \(DaemonError.silent)")
+    }
+}
+
+/// A client refused while a tool that reads the driver never exits is still answered, at
+/// the tool's limit: with why the devices are not up, and that the driver could not be
+/// read, naming the tool and the limit. A suite of its own because it waits the limit out.
+@Suite(.ownThread) struct StuckDriverReadTests {
+    @Test(.timeLimit(.minutes(1))) func aDriverReadThatNeverReturnsStillAnswersTheRefusedClient() {
+        let readiness = Readiness(driver: {
+            _ = try Command("/bin/sleep", "600").run(within: .milliseconds(200))
+            return .running
+        })
+        _ = readiness.begin()
+        readiness.failed(DaemonError.closed)
+        let began = ContinuousClock.now
+        let refused = #expect(throws: Readiness.Refused.self) { try readiness.devices() }
+        #expect(ContinuousClock.now - began < .seconds(5))
+        #expect(refused?.description == "devices not up: \(DaemonError.closed)\nThe driver extension could not be read: `sleep 600` had not ended after 0.2 seconds and was stopped")
     }
 }

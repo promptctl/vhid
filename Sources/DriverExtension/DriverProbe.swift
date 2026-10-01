@@ -51,7 +51,7 @@ public enum DriverProbe {
             receipt: try receiptVersion(of: bundleID),
             registration: try registration(),
             ioNode: try ioNodePresent(),
-            elementsReceipt: elementsReceipt { try Command("/usr/sbin/pkgutil", "--pkg-info", elementsReceiptID).run() }
+            elementsReceipt: elementsReceipt { try Command("/usr/sbin/pkgutil", "--pkg-info", elementsReceiptID).run(within: Command.readingLimit) }
         )
     }
 
@@ -85,7 +85,7 @@ public enum DriverProbe {
     /// The id is a parameter because two products leave receipts this program cares
     /// about and reading them differs in nothing else. [LAW:one-type-per-behavior]
     public static func receiptVersion(of id: String) throws -> String? {
-        try receiptVersion(of: id, from: Command("/usr/sbin/pkgutil", "--pkg-info", id).run())
+        try receiptVersion(of: id, from: Command("/usr/sbin/pkgutil", "--pkg-info", id).run(within: Command.readingLimit))
     }
 
     /// What pkgutil said, read. Pure, so the three answers it can give - a version, no
@@ -115,7 +115,7 @@ public enum DriverProbe {
     /// about this one fact by itself: only a live registration needs withdrawing, and
     /// only the withdrawal needs the Manager app that removal is about to delete.
     public static func registration() throws -> Registration {
-        let listed = try Command("/usr/bin/systemextensionsctl", "list").run()
+        let listed = try Command("/usr/bin/systemextensionsctl", "list").run(within: Command.readingLimit)
         guard listed.status == 0 else {
             throw DriverUnreadable.toolFailed(tool: "systemextensionsctl list", status: listed.status, complaint: listed.merged)
         }
@@ -158,7 +158,7 @@ public enum DriverProbe {
 
     /// Whether the driver has published its node in the IORegistry.
     static func ioNodePresent() throws -> Bool {
-        let read = try Command("/usr/sbin/ioreg", "-r", "-n", ioNodeName, "-d", "1").run()
+        let read = try Command("/usr/sbin/ioreg", "-r", "-n", ioNodeName, "-d", "1").run(within: Command.readingLimit)
         guard read.status == 0 else {
             throw DriverUnreadable.toolFailed(tool: "ioreg -n \(ioNodeName)", status: read.status, complaint: read.merged)
         }
