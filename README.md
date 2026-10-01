@@ -39,8 +39,8 @@ longer than shown.
 
 ## Where the input reaches
 
-Because the input comes from a device, it lands in places that synthetic events and
-remote-control tools can't reach. Measured over SSH on macOS 15:
+Because the input comes from a device, it lands in places that synthetic events
+can't reach. Measured over SSH on macOS 15:
 
 | Where | Typing | Cursor and clicks |
 |---|---|---|
@@ -53,6 +53,8 @@ remote-control tools can't reach. Measured over SSH on macOS 15:
 | FileVault's unlock screen before boot | no | no |
 
 [docs/design/remote-hands.md](docs/design/remote-hands.md) has the evidence for each cell.
+On the 0.1.0 pkg the two login window rows take typing only; placing the cursor there
+came later.
 
 ## Install
 
@@ -111,7 +113,7 @@ vhid move 800 500                            # move the pointer, pressing nothin
 vhid scroll 800 500 --vertical 3             # roll the wheel at a point
 vhid drag 100 100 400 300                    # press at one point, release at another
 vhid cursor                                  # print where the pointer is
-vhid record > script.jsonl                   # record your own keyboard and mouse; Control-C stops
+vhid record > script.jsonl                   # record your own keyboard and mouse (needs Input Monitoring); Control-C stops
 vhid play < script.jsonl                     # replay a recording with its timing
 ```
 
@@ -149,24 +151,13 @@ claude mcp add --scope user vhid -- /usr/local/bin/vhid mcp
 claude mcp add --scope user eyes -- /usr/local/bin/eyes mcp
 ```
 
-In Claude Desktop, add both to the `mcpServers` object in
-`~/Library/Application Support/Claude/claude_desktop_config.json`, then quit and reopen it:
-
-```json
-{
-  "mcpServers": {
-    "vhid": { "command": "/usr/local/bin/vhid", "args": ["mcp"] },
-    "eyes": { "command": "/usr/local/bin/eyes", "args": ["mcp"] }
-  }
-}
-```
-
-[docs/mcp.md](docs/mcp.md) lists the tools, shows the look-click-look loop step by step,
-and explains which app has to hold the screen permissions.
+[docs/mcp.md](docs/mcp.md) has the configuration for Claude Desktop, lists the tools,
+shows the look-click-look loop step by step, and explains which app has to hold the
+screen permissions.
 
 ## Limits and status
 
-vhid 0.1.0 is the first release, and it is new software.
+vhid is new software. What to know before relying on it:
 
 - **vhid does not check what it is typing into.** It types wherever the keyboard is
   focused and clicks the point it is given, whatever is there. Looking first, with `eyes`
@@ -174,14 +165,12 @@ vhid 0.1.0 is the first release, and it is new software.
 - **It cannot reach FileVault's unlock screen.** Before the disk is unlocked, neither the
   daemon nor the driver is running.
 - **Typing follows the caller's keyboard layout.** At the login window over SSH, that may
-  not be the layout on screen.
-- **`master` is ahead of the release.** Moving the cursor and clicking at the login
-  window, the `--layout` option that names another keyboard layout, `eyes find --until`,
-  and `eyes grants` are in the source and the docs but not in the 0.1.0 pkg.
+  not be the layout on screen, and `--layout` names the one to type on.
+- **This page and `docs/` describe `master`, which is ahead of the latest release.**
+  [CHANGELOG.md](CHANGELOG.md#unreleased) lists what the pkg does not have yet, above the
+  notes for each release.
 - **It installs a root daemon and a driver extension.** The daemon accepts commands only
   from a `vhid` signed with the same certificate it is.
-
-[CHANGELOG.md](CHANGELOG.md) has the notes for each release.
 
 ## Documentation
 
@@ -200,7 +189,8 @@ vhid 0.1.0 is the first release, and it is new software.
 Report bugs and ask questions in [GitHub issues](https://github.com/promptctl/vhid/issues).
 A bug report is most useful with the output of `vhid doctor` in it.
 
-To build from source you need Xcode 26 with Swift 6.2 or later:
+To build from source you need Xcode 26. CI builds with the version that
+[test.yml](.github/workflows/test.yml) names, so that one is known to work:
 
 ```sh
 git clone https://github.com/promptctl/vhid.git

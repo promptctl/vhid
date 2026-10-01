@@ -104,7 +104,7 @@ import Testing
     /// And that the two outcomes reach a reader as two different sentences, which is the
     /// entire reason there are two of them rather than a Bool nobody looks at. vhidd
     /// interpolates the case into the line it logs as it starts, so a reader running
-    /// README's `log show` can tell a start that filed the answer from one that found it
+    /// the `log show` that `vhid doctor` prints can tell a start that filed the answer from one that found it
     /// already there - and, through that, a working vhidd from one that has stopped
     /// filing anything.
     ///

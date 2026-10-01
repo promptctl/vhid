@@ -1,6 +1,6 @@
 # The vhid command line
 
-Every verb, and the rules they share: keyboard layouts, coordinates, and which daemon a `vhid` talks to. `vhid help <verb>` has each verb's full text.
+The verbs that type, click and replay, and the rules they share: keyboard layouts, coordinates, and which daemon a `vhid` talks to. `vhid help` lists every verb, and `vhid help <verb>` has each one's full text.
 
 ```sh
 vhid type "hello"
