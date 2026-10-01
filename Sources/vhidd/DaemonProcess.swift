@@ -301,8 +301,6 @@ extension DaemonProcess.Effects {
         var off: DriverState?
         while true {
             let attempt = readiness.begin()
-            // How the attempt ended, as the log says it up to the wait.
-            let ended: String
             do {
                 let reached = try reach(within: limit) { lost, _ in _ = readiness.lost(lost, in: attempt) }
                 readiness.up(serve(reached))
@@ -316,18 +314,18 @@ extension DaemonProcess.Effects {
                 // daemon started here is stopped so the next attempt starts it afresh.
                 stop(reached.daemon)
                 failures = now() - since >= backoff.most ? 1 : failures + 1
-                ended = "the devices went down (\(why)); bringing them up again"
+                logFailure("the devices went down (\(why))")
             } catch {
                 failures += 1
                 readiness.failed(error)
-                ended = "could not bring the devices up (\(error)); trying again"
+                logFailure("could not bring the devices up (\(error))")
             }
-            // [LAW:dataflow-not-control-flow] However the attempt ended, the driver is read
-            // and then the wait is said, so what follows the log line is the wait and
-            // nothing else.
+            // [LAW:dataflow-not-control-flow] However the attempt ended, it is said as it
+            // ends, then the driver is read, then the wait is said: a reading that takes
+            // time holds back neither the failure nor the wait that follows its line.
             if let read = driver(), !read.isOn { off = read }
             let wait = backoff.after(failures)
-            logFailure("\(ended) in \(wait)")
+            log("bringing the devices up again in \(wait)")
             // [LAW:dataflow-not-control-flow] Every wait is waited out the same way: one
             // with nothing to look for is a single look as long as itself, finding nothing.
             if let on = try waitOut(wait, lookingEvery: off == nil ? wait : look, now: now, pause: pause, for: { off.flatMap { TurnedOn(from: $0, to: driver()) } }) {
