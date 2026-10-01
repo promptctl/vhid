@@ -50,13 +50,15 @@ import Testing
         func open() -> Int { (0..<getdtablesize()).count { fcntl($0, F_GETFD) != -1 } }
         let done = DispatchSemaphore(value: 0)
         nonisolated(unsafe) var grew = 0
+        nonisolated(unsafe) var ran = 0
         Thread.detachNewThread {
             let before = open()
-            for _ in 0..<40 { _ = try? Command("/usr/bin/true").run() }
+            ran = (0..<40).count { _ in (try? Command("/usr/bin/true").run())?.status == 0 }
             grew = open() - before
             done.signal()
         }
         done.wait()
+        #expect(ran == 40)
         #expect(grew < 40)
     }
 }
