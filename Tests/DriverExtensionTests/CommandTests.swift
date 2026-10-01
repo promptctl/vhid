@@ -39,6 +39,12 @@ import Testing
         #expect(output.merged == "out\nerr")
     }
 
+    /// A command a signal ended has that signal for its status, as one that exited has what
+    /// it exited with.
+    @Test func theStatusOfACommandEndedByASignalIsTheSignal() throws {
+        #expect(try Command("/bin/sh", "-c", "kill -KILL $$").run(by: .within(.seconds(30))).status == SIGKILL)
+    }
+
     /// A command that has returned holds nothing open, on a thread that never drains a
     /// pool as much as on one that does: vhidd runs the driver probe every two seconds
     /// from a thread that never returns, and four commands a probe each leaving two

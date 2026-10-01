@@ -1,4 +1,4 @@
-import Children
+import ChildProcess
 import Foundation
 
 /// One command run against the machine, and everything it said.
@@ -48,9 +48,13 @@ public struct Command {
     /// [LAW:no-ambient-temporal-coupling] One is made for a reading and handed to every
     /// command the reading runs, so the limit is the reading's: each command is given what
     /// the ones before it left, where a limit apiece would add up to several.
+    ///
+    /// On the clock that stops with the Mac: a child does not run while the Mac sleeps, and
+    /// a limit that counted the sleep would be past on waking for a tool that had run a
+    /// moment of it.
     public struct Deadline: Sendable {
         public let limit: Duration
-        fileprivate let at: ContinuousClock.Instant
+        fileprivate let at: SuspendingClock.Instant
 
         /// Over `limit` from now.
         public static func within(_ limit: Duration) -> Deadline {
@@ -85,14 +89,18 @@ public struct Command {
     /// The command as a person would have typed it, for the errors that name it.
     private var said: String { ([tool.lastPathComponent] + arguments).joined(separator: " ") }
 
+    /// `code` is errno as the call is made, read before `said` runs anything that could
+    /// set it to something else.
+    private func unheard(_ what: String, _ code: Int32 = errno) -> Unheard { Unheard(command: said, what: what, code: code) }
+
     /// Runs the command to its end, or to `deadline`, where it is given up on and thrown as
     /// `Overran`. [LAW:types-are-the-program] The deadline is not optional, so nothing this
     /// program runs can hold its caller for good.
     ///
-    /// The child is this call's from `spawn` to `waitpid`: nothing of it is left once this
+    /// The child is this call's from `spawn` to `collect`: nothing of it is left once this
     /// returns or throws, not a descriptor and not a pid to collect.
     public func run(by deadline: Deadline) throws -> Output {
-        let started = ContinuousClock.now
+        let started = SuspendingClock.now
         let out = try pipe()
         let err: (read: Int32, write: Int32)
         do { err = try pipe() } catch {
@@ -116,13 +124,10 @@ public struct Command {
         // the signal reaches the child or, where it has ended, nothing.
         // [LAW:dataflow-not-control-flow]
         kill(pid, SIGKILL)
-        var status: Int32 = 0, collected: pid_t
-        repeat { collected = waitpid(pid, &status, 0) } while collected == -1 && errno == EINTR
-        // [LAW:no-silent-failure] A child something else collected has no status to give,
-        // and the zero `status` began at would say it had succeeded.
-        guard collected == pid else { throw Unheard(command: said, what: "could not be collected", code: errno) }
+        let ending: Ending
+        do throws(Uncollected) { ending = try collect(pid) } catch { throw unheard("could not be collected", error.code) }
         guard let streams = try heard.get() else {
-            let ran = ContinuousClock.now - started
+            let ran = SuspendingClock.now - started
             throw Overran(
                 command: said,
                 ran: .milliseconds(ran.components.seconds * 1000 + ran.components.attoseconds / 1_000_000_000_000_000),
@@ -130,9 +135,9 @@ public struct Command {
             )
         }
         // What it exited with, or the signal that ended it.
-        let ended = status & 0x7f
+        let status = switch ending { case .exited(let code), .signalled(let code): code }
         return Output(
-            status: ended == 0 ? (status >> 8) & 0xff : ended,
+            status: status,
             stdout: String(decoding: streams[out.read, default: []], as: UTF8.self),
             stderr: String(decoding: streams[err.read, default: []], as: UTF8.self)
         )
@@ -140,7 +145,7 @@ public struct Command {
 
     private func pipe() throws -> (read: Int32, write: Int32) {
         var ends: [Int32] = [0, 0]
-        guard Darwin.pipe(&ends) == 0 else { throw Unheard(command: said, what: "could not be given a pipe", code: errno) }
+        guard Darwin.pipe(&ends) == 0 else { throw unheard("could not be given a pipe") }
         return (ends[0], ends[1])
     }
 
@@ -154,7 +159,7 @@ public struct Command {
     /// from the start leaves no order to get wrong.
     private func hear(_ pid: pid_t, _ streams: [Int32], by deadline: Deadline) throws -> [Int32: [UInt8]]? {
         let queue = kqueue()
-        guard queue >= 0 else { throw Unheard(command: said, what: "could not be watched", code: errno) }
+        guard queue >= 0 else { throw unheard("could not be watched") }
         defer { close(queue) }
         func watch(_ ident: UInt, _ filter: Int32, _ flags: Int32, _ fflags: UInt32 = 0) -> Int32 {
             var change = kevent(ident: ident, filter: Int16(filter), flags: UInt16(flags | EV_RECEIPT), fflags: fflags, data: 0, udata: nil)
@@ -163,38 +168,38 @@ public struct Command {
         }
         for stream in streams {
             let refused = watch(UInt(stream), EVFILT_READ, EV_ADD)
-            guard refused == 0 else { throw Unheard(command: said, what: "could not be watched", code: refused) }
+            guard refused == 0 else { throw unheard("could not be watched", refused) }
         }
         // A child that has ended already is not there to be watched, and that is its exit
         // said another way: its pid is this call's until it is collected, so no such
         // process is this child, ended.
         let gone = watch(UInt(pid), EVFILT_PROC, EV_ADD, UInt32(NOTE_EXIT))
-        guard gone == 0 || gone == ESRCH else { throw Unheard(command: said, what: "could not be watched", code: gone) }
+        guard gone == 0 || gone == ESRCH else { throw unheard("could not be watched", gone) }
         var exited = gone == ESRCH
         var open = Set(streams)
         var carried: [Int32: [UInt8]] = [:]
         var events = Array(repeating: Darwin.kevent(), count: streams.count + 1)
         var buffer = [UInt8](repeating: 0, count: 65536)
         while !(exited && open.isEmpty) {
-            let left = ContinuousClock.now.duration(to: deadline.at)
+            let left = SuspendingClock.now.duration(to: deadline.at)
             guard left > .zero else { return nil }
             var patience = timespec(tv_sec: Int(left.components.seconds), tv_nsec: Int(left.components.attoseconds / 1_000_000_000))
             let ready = kevent(queue, nil, 0, &events, Int32(events.count), &patience)
             if ready < 0, errno == EINTR { continue }
-            guard ready >= 0 else { throw Unheard(command: said, what: "could not be watched", code: errno) }
+            guard ready >= 0 else { throw unheard("could not be watched") }
             for event in events.prefix(Int(ready)) {
                 guard event.filter == Int16(EVFILT_READ) else { exited = true; continue }
                 let stream = Int32(event.ident)
                 let count = read(stream, &buffer, buffer.count)
                 if count < 0, errno == EINTR { continue }
-                guard count >= 0 else { throw Unheard(command: said, what: "could not be heard", code: errno) }
+                guard count >= 0 else { throw unheard("could not be heard") }
                 carried[stream, default: []] += buffer.prefix(count)
                 // An empty read is the end of the stream, and it is the only thing that
                 // says so. The watch goes with it: an ended stream is ready at every look.
                 if count == 0 {
                     open.remove(stream)
                     let kept = watch(UInt(stream), EVFILT_READ, EV_DELETE)
-                    guard kept == 0 else { throw Unheard(command: said, what: "could not be watched", code: kept) }
+                    guard kept == 0 else { throw unheard("could not be watched", kept) }
                 }
             }
         }

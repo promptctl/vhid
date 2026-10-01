@@ -62,20 +62,20 @@ let package = Package(
         // key down on a device nothing is left to release. It links nothing.
         // [LAW:one-source-of-truth]
         .target(name: "Signals"),
-        // Starting a child of this process, with what every child of vhidd needs: SIGTERM
-        // at its default and no descriptor it was not given. It links nothing, so the
-        // daemon and the commands it runs to read the driver start their children one
-        // way. [LAW:single-enforcer]
-        .target(name: "Children"),
-        // Against /bin/sh as the child: what it was left holding, and what a SIGTERM does
-        // to it under a parent that ignores one.
-        .testTarget(name: "ChildrenTests", dependencies: ["Children", "OwnThread"]),
+        // Starting a child of this process, with what every child of vhidd needs - every
+        // signal at its default and no descriptor it was not given - and collecting one
+        // that has ended. It links nothing, so the daemon and the commands it runs to read
+        // the driver start their children one way. [LAW:single-enforcer]
+        .target(name: "ChildProcess"),
+        // Against /bin/sh as the child: what it was left holding, and what a signal does
+        // to it under a parent that ignores that signal.
+        .testTarget(name: "ChildProcessTests", dependencies: ["ChildProcess", "OwnThread"]),
         // Where the Karabiner-DriverKit-VirtualHIDDevice driver extension stands on this
-        // Mac, and the four readings that answer is derived from. It links Children for
-        // the commands those readings run and nothing else, so the CLI, the daemon and
+        // Mac, and the four readings that answer is derived from. It links ChildProcess
+        // for the commands those readings run and nothing else, so the CLI, the daemon and
         // scripts/virtual-hid-driver reach one vocabulary instead of three.
         // [LAW:one-source-of-truth]
-        .target(name: "DriverExtension", dependencies: ["Children"]),
+        .target(name: "DriverExtension", dependencies: ["ChildProcess"]),
         // The verdict table is a pure function of four readings, so every combination is
         // exercised here - including the ones this Mac cannot be put into.
         .testTarget(name: "DriverExtensionTests", dependencies: ["DriverExtension", "OwnThread"]),
@@ -152,7 +152,7 @@ let package = Package(
         // not KeyboardLayouts: text never reaches this process. [LAW:one-way-deps]
         .executableTarget(
             name: "vhidd",
-            dependencies: ["Helper", "VirtualHID", "DriverExtension", "Children", "Keystrokes", "Pointing", "Signals", "Installations"]
+            dependencies: ["Helper", "VirtualHID", "DriverExtension", "ChildProcess", "Keystrokes", "Pointing", "Signals", "Installations"]
         ),
         // The verbs, against the daemon over the helper connection - from a command line,
         // or as tools over MCP. It links Input for what the verbs mean and Helper for how
