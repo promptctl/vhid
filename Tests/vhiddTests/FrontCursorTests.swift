@@ -77,13 +77,14 @@ import Testing
     private static let unhurried: Duration = .seconds(30)
 
     /// A real child over real pipes, played by `sh`: what it says is what the read says.
-    /// It is waited for unhurried; `patience` is short only in the test of the patience.
-    private func child(_ script: String, patience: Duration = unhurried) throws -> ChildReader {
-        try ChildReader(in: bmf, executable: "/bin/sh", arguments: ["-c", "echo joined; " + script], joinWithin: Self.unhurried, patience: patience)
+    /// Each wait is unhurried but in the test of that wait. The script says `joined` itself,
+    /// after whatever the test needs to be so by the time the reader is handed back.
+    private func child(_ script: String, joinWithin: Duration = unhurried, patience: Duration = unhurried) throws -> ChildReader {
+        try ChildReader(in: bmf, executable: "/bin/sh", arguments: ["-c", script], joinWithin: joinWithin, patience: patience)
     }
 
     @Test func aChildAnswersEachLineWithTheCursor() throws {
-        let reader = try child("while read _; do echo '12.5 40'; done")
+        let reader = try child("echo joined; while read _; do echo '12.5 40'; done")
         defer { reader.stop() }
         #expect(try reader.read() == (12.5, 40))
         #expect(try reader.read() == (12.5, 40))
@@ -91,25 +92,26 @@ import Testing
 
     @Test func aChildThatCouldNotJoinSaysWhy() {
         #expect {
-            try ChildReader(in: bmf, executable: "/bin/sh", arguments: ["-c", "echo 'could not join audit session 100003: errno 1'; exit 1"])
+            try child("echo 'could not join audit session 100003: errno 1'; exit 1")
         } throws: { "\($0)".contains("answered 'could not join audit session 100003: errno 1'") }
     }
 
     @Test func aChildThatNeverSaysItJoinedIsGivenUpOnAndEnded() {
         let began = ContinuousClock.now
         #expect {
-            try ChildReader(in: bmf, executable: "/bin/sh", arguments: ["-c", "trap '' TERM; sleep 30"], joinWithin: .milliseconds(300))
-        } throws: { "\($0)".contains("did not answer within") }
+            try child("trap '' TERM; sleep 30", joinWithin: .milliseconds(300))
+        } throws: { "\($0)".contains("did not say it joined within 0.3 seconds") }
         // Returning at all means the child was reaped: `stop` waits for it.
         #expect(began.duration(to: .now) < .seconds(2))
     }
 
     @Test func aChildThatHasEndedFailsTheReadAndNotTheDaemon() throws {
-        let reader = try child("exit 0")
+        // The child closes its stdin before it says it joined, so the read is the write to
+        // a closed pipe. Hearing the child end would not say so: a process that ends closes
+        // its descriptors from the highest down, its stdout before its stdin.
+        // [LAW:no-ambient-temporal-coupling]
+        let reader = try child("exec 0<&-; echo joined")
         defer { reader.stop() }
-        // The first read fails however far the child has got in ending, and once it has
-        // failed the child's stdin is closed, so the second is the write to a closed pipe.
-        #expect(throws: (any Error).self) { try reader.read() }
         // That write would raise SIGPIPE and end this test process.
         #expect { try reader.read() } throws: { "\($0)".contains("could not be asked") }
     }
@@ -117,17 +119,17 @@ import Testing
     /// Stopping returns only once the child is reaped, even one that ignores SIGTERM and
     /// never reads its stdin.
     @Test func stoppingEndsEvenAChildThatWillNotListen() throws {
-        let reader = try child("trap '' TERM; exec 0<&-; sleep 30")
+        let reader = try child("trap '' TERM; exec 0<&-; echo joined; sleep 30")
         let began = ContinuousClock.now
         reader.stop()
         #expect(began.duration(to: .now) < .seconds(2))
     }
 
     @Test func aChildThatDoesNotAnswerIsGivenUpOnInTime() throws {
-        let reader = try child("sleep 30", patience: .milliseconds(300))
+        let reader = try child("echo joined; sleep 30", patience: .milliseconds(300))
         defer { reader.stop() }
         let began = ContinuousClock.now
-        #expect { try reader.read() } throws: { "\($0)".contains("did not answer within") }
+        #expect { try reader.read() } throws: { "\($0)".contains("did not answer within 0.3 seconds") }
         #expect(began.duration(to: .now) < .seconds(2))
     }
 
