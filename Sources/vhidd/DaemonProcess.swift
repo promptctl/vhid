@@ -169,6 +169,48 @@ struct Backoff: Equatable {
     }
 }
 
+/// Waits out `whole` a `look` at a time, and ends at the first look that finds something:
+/// what it found and how much of the wait had passed, or nil when the whole wait did.
+///
+/// [LAW:no-ambient-temporal-coupling] A wait is for something, and `find` says what: the
+/// time is the bound on it rather than the thing waited for, so what the wait was for
+/// ends it the moment it is there to find.
+func waitOut<Found>(
+    _ whole: Duration,
+    lookingEvery look: Duration,
+    pause: (Duration) throws -> Void,
+    for find: () -> Found?
+) rethrows -> (found: Found, after: Duration)? {
+    var waited = Duration.zero
+    while waited < whole {
+        let next = min(look, whole - waited)
+        try pause(next)
+        waited += next
+        if let found = find() { return (found, waited) }
+    }
+    return nil
+}
+
+/// A driver extension that read as not on before an attempt and reads as on since: the
+/// one change between attempts that a person makes and the next attempt is waiting for.
+///
+/// Both ends are states that were read. A state that could not be read is neither, so a
+/// probe that fails and recovers turns nothing on. [LAW:parse-dont-validate]
+struct TurnedOn: Equatable, CustomStringConvertible {
+    let from: DriverState
+    let to: DriverState
+
+    /// `to` is read only when `from` was off: a wait whose attempt was made with the
+    /// driver on is not waiting for the driver, and reads nothing.
+    init?(from: DriverState?, to: () -> DriverState?) {
+        guard let from, !from.isOn, let to = to(), to.isOn else { return nil }
+        self.from = from
+        self.to = to
+    }
+
+    var description: String { "the driver extension reads \(to.rawValue), from \(from.rawValue)" }
+}
+
 /// The daemons this process started and has not yet stopped.
 ///
 /// [LAW:one-source-of-truth] Recorded by the launch itself, not reported by whoever
@@ -229,10 +271,17 @@ extension DaemonProcess.Effects {
     /// up and dies at once is started ever less often, and one that served for a while is
     /// reached again after the shortest wait.
     ///
+    /// A wait ends early for one thing: the driver extension turning on. A person who has
+    /// just approved it is waiting on this loop, and the failures counted against a driver
+    /// that was off say nothing of one that is on, so the count starts again with it. The
+    /// driver is read every `look` of such a wait, and not at all in a wait whose attempt
+    /// was made with the driver already on.
+    ///
     /// Returns only by `pause` throwing, which the daemon's never does.
     func keepUp(
         within limit: Duration,
         backoff: Backoff,
+        lookingEvery look: Duration,
         readiness: Readiness,
         serve: (DaemonProcess.Reached<Device>) -> any ServedDevices,
         driver: () -> DriverState?,
@@ -241,6 +290,10 @@ extension DaemonProcess.Effects {
     ) rethrows -> Never {
         var failures = 0
         while true {
+            // Read before the attempt and not after it: a driver turned on while the
+            // attempt was already failing is then still one turned on since.
+            // [LAW:no-ambient-temporal-coupling]
+            let before = driver()
             let attempt = readiness.begin()
             do {
                 let reached = try reach(within: limit) { lost, _ in _ = readiness.lost(lost, in: attempt) }
@@ -258,7 +311,11 @@ extension DaemonProcess.Effects {
                 readiness.failed(BringUpFailure(error, driver: driver()))
                 logFailure("could not bring the devices up (\(error)); trying again in \(backoff.after(failures))")
             }
-            try pause(backoff.after(failures))
+            let wait = backoff.after(failures)
+            if let on = try waitOut(wait, lookingEvery: look, pause: pause, for: { TurnedOn(from: before, to: driver) }) {
+                log("\(on.found), \(on.after) into a wait of \(wait); bringing the devices up now")
+                failures = 0
+            }
         }
     }
 }

@@ -123,6 +123,7 @@ do {
         children.tracking(DaemonProcess.real).keepUp(
             within: .seconds(10),
             backoff: Backoff(first: .seconds(2), most: .seconds(60)),
+            lookingEvery: .seconds(2),
             readiness: readiness,
             serve: { reached in
                 log("the keyboard is up: the driver's daemon answered in \(reached.startup.keyboard.answered), ready after \(reached.startup.keyboard.ready)")

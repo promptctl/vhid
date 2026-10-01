@@ -1,3 +1,4 @@
+import DriverExtension
 import Foundation
 import Testing
 import VirtualHID
@@ -159,7 +160,7 @@ import VirtualHID
         let readiness = Readiness()
         var downWhileWaiting: [Bool] = []
         #expect(throws: Stop.self) {
-            try logged.keepUp(within: .milliseconds(20), backoff: Backoff(first: .seconds(2), most: .seconds(5)), readiness: readiness, serve: { _ in RecordingDevices() }, driver: { nil }, now: { .now }) { wait in
+            try logged.keepUp(within: .milliseconds(20), backoff: Backoff(first: .seconds(2), most: .seconds(5)), lookingEvery: .seconds(5), readiness: readiness, serve: { _ in RecordingDevices() }, driver: { nil }, now: { .now }) { wait in
                 events.append("wait \(wait)")
                 downWhileWaiting.append((try? readiness.devices()) == nil)
                 if events.filter({ $0.hasPrefix("wait") }).count == 3 { throw Stop() }
@@ -180,7 +181,7 @@ import VirtualHID
         var downWhileWaiting: [Bool] = []
         var waits: [Duration] = []
         #expect(throws: Stop.self) {
-            try world.effects.keepUp(within: .seconds(1), backoff: Backoff(first: .seconds(2), most: .seconds(60)), readiness: readiness, serve: { _ in
+            try world.effects.keepUp(within: .seconds(1), backoff: Backoff(first: .seconds(2), most: .seconds(60)), lookingEvery: .seconds(60), readiness: readiness, serve: { _ in
                 served += 1
                 let lose = world.lost!
                 DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(20)) { lose(.closed) }
@@ -195,6 +196,98 @@ import VirtualHID
         #expect(waits == [.seconds(2), .seconds(4)])
         #expect(downWhileWaiting == [true, true])
         #expect(world.terminated == [World.pid])
+    }
+
+    /// Attempts that fail in a world whose driver reads as `driver` says, with every pause
+    /// taken at once and counted: what was launched, stopped and waited, in order, up to
+    /// the `pauses`th pause.
+    private func paced(_ pauses: Int, backoff: Backoff, driver: @escaping (_ launched: Int, _ waited: Duration) -> DriverState?) -> [String] {
+        let world = World(connections: [.failure(.noSocket(path: "nowhere"))])
+        var events: [String] = []
+        var waited = Duration.zero
+        let effects = world.effects
+        let logged = DaemonProcess.Effects<Device>(
+            connect: effects.connect,
+            bringUp: effects.bringUp,
+            launch: { events.append("launch"); return try effects.launch() },
+            terminate: effects.terminate
+        )
+        #expect(throws: Stop.self) {
+            try logged.keepUp(within: .milliseconds(20), backoff: backoff, lookingEvery: .seconds(2), readiness: Readiness(), serve: { _ in RecordingDevices() }, driver: { driver(world.launched, waited) }, now: { .now }) { wait in
+                events.append("wait \(wait)")
+                waited += wait
+                if events.count(where: { $0.hasPrefix("wait") }) == pauses { throw Stop() }
+            }
+        }
+        return events
+    }
+
+    /// The person approving the driver is waiting on this loop: the wait it is in ends at
+    /// the look that reads the driver on, not at the end of the minute.
+    @Test func aDriverTurnedOnDuringAWaitEndsIt() {
+        let events = paced(5, backoff: Backoff(first: .seconds(60), most: .seconds(60))) { _, waited in
+            waited < .seconds(4) ? .awaitingApproval : .enabled
+        }
+        #expect(events == ["launch", "wait 2.0 seconds", "wait 2.0 seconds", "launch", "wait 2.0 seconds", "wait 2.0 seconds", "wait 2.0 seconds"])
+    }
+
+    /// The failures before were of a driver that was off, so the attempt made once it is
+    /// on is followed by the shortest wait again: 3 s, then 6 s ended 4 s in, then 3 s
+    /// where the next in the row would have been 12.
+    @Test func theAttemptAfterTheDriverTurnsOnIsFollowedByTheShortestWait() {
+        let events = paced(6, backoff: Backoff(first: .seconds(3), most: .seconds(60))) { _, waited in
+            waited < .seconds(7) ? .disabled : .running
+        }
+        #expect(events == ["launch", "wait 2.0 seconds", "wait 1.0 seconds", "launch", "wait 2.0 seconds", "wait 2.0 seconds", "launch", "wait 2.0 seconds", "wait 1.0 seconds"])
+    }
+
+    /// A driver turned on while an attempt was already failing was off when the attempt
+    /// began, so the first look of the wait ends it.
+    @Test func aDriverTurnedOnDuringTheFailingAttemptEndsTheWaitAtItsFirstLook() {
+        let events = paced(2, backoff: Backoff(first: .seconds(60), most: .seconds(60))) { launched, _ in
+            launched == 0 ? .awaitingApproval : .enabled
+        }
+        #expect(events == ["launch", "wait 2.0 seconds", "launch", "wait 2.0 seconds"])
+    }
+
+    /// A wait whose attempt was made with the driver on, or with a driver that could not
+    /// be read, is not waiting for the driver: it runs its whole length whatever the
+    /// driver reads during it.
+    @Test(arguments: [DriverState.enabled, .running, nil])
+    func aWaitWhoseAttemptHadTheDriverOnOrUnreadRunsWhole(before: DriverState?) {
+        let events = paced(4, backoff: Backoff(first: .seconds(6), most: .seconds(6))) { _, waited in
+            waited == .zero ? before : .running
+        }
+        #expect(events == ["launch", "wait 2.0 seconds", "wait 2.0 seconds", "wait 2.0 seconds", "launch", "wait 2.0 seconds"])
+    }
+
+    /// A driver that goes from one off state to another has not turned on.
+    @Test func aDriverThatChangesWithoutTurningOnEndsNoWait() {
+        let events = paced(4, backoff: Backoff(first: .seconds(6), most: .seconds(6))) { _, waited in
+            waited == .zero ? .installedInactive : .awaitingApproval
+        }
+        #expect(events == ["launch", "wait 2.0 seconds", "wait 2.0 seconds", "wait 2.0 seconds", "launch", "wait 2.0 seconds"])
+    }
+
+    @Test func aWaitIsTakenALookAtATimeAndEndsWithWhatALookFinds() throws {
+        var pauses: [Duration] = []
+        let whole = waitOut(.seconds(5), lookingEvery: .seconds(2), pause: { pauses.append($0) }, for: { String?.none })
+        #expect(whole == nil)
+        #expect(pauses == [.seconds(2), .seconds(2), .seconds(1)])
+
+        pauses = []
+        let ended = try #require(waitOut(.seconds(60), lookingEvery: .seconds(2), pause: { pauses.append($0) }, for: { pauses.count == 3 ? "found" : nil }))
+        #expect(ended.found == "found")
+        #expect(ended.after == .seconds(6))
+        #expect(pauses == [.seconds(2), .seconds(2), .seconds(2)])
+    }
+
+    /// What the log says of a wait cut short: both states, as they were read.
+    @Test func aDriverTurnedOnSaysWhatItReadBeforeAndSince() throws {
+        let on = try #require(TurnedOn(from: .awaitingApproval, to: { .enabled }))
+        #expect("\(on)" == "the driver extension reads enabled, from awaiting-approval")
+        #expect(TurnedOn(from: .awaitingApproval, to: { nil }) == nil)
+        #expect(TurnedOn(from: .awaitingApproval, to: { .disabled }) == nil)
     }
 
     /// Once stopping has begun, every daemon started is stopped and none is started after:

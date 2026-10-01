@@ -17,6 +17,10 @@ private let managerNotice = """
     """
 
 public extension DriverState {
+    /// Whether macOS has the extension switched on, which is every state that leaves a
+    /// person no step to take.
+    var isOn: Bool { step == nil }
+
     /// What installs the package, for both readers there are: someone with a clone of this
     /// repo, for whom the script does it, and someone who installed vhid's pkg, which
     /// carries the pinned package and asks for the activation as it finishes.
