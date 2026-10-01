@@ -44,21 +44,25 @@ import Testing
     /// descriptors behind would be the whole table within the minute.
     ///
     /// The count is the process's, and other tests open descriptors of their own while
-    /// this runs, so what is checked is that it did not grow by the 80 that 40 leaking
+    /// this runs, so what is checked is that it did not grow by the 200 that 100 leaking
     /// runs leave.
     @Test(.timeLimit(.minutes(1))) func aCommandThatHasReturnedHoldsNoDescriptorOpen() throws {
-        func open() -> Int { (0..<getdtablesize()).count { fcntl($0, F_GETFD) != -1 } }
+        // Listed, not probed slot by slot: the table's size is a limit, and where the
+        // limit is lifted there are more slots than a test has time to ask about.
+        @Sendable func open() throws -> Int { try FileManager.default.contentsOfDirectory(atPath: "/dev/fd").count }
         let done = DispatchSemaphore(value: 0)
-        nonisolated(unsafe) var grew = 0
-        nonisolated(unsafe) var ran = 0
+        nonisolated(unsafe) var counted: Result<(ran: Int, grew: Int), any Error>?
         Thread.detachNewThread {
-            let before = open()
-            ran = (0..<40).count { _ in (try? Command("/usr/bin/true").run())?.status == 0 }
-            grew = open() - before
+            counted = Result {
+                let before = try open()
+                let ran = (0..<100).count { _ in (try? Command("/usr/bin/true").run())?.status == 0 }
+                return (ran, try open() - before)
+            }
             done.signal()
         }
         done.wait()
-        #expect(ran == 40)
-        #expect(grew < 40)
+        let (ran, grew) = try #require(counted).get()
+        #expect(ran == 100)
+        #expect(grew < 100)
     }
 }
