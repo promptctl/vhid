@@ -36,22 +36,27 @@ public struct Command {
         }
     }
 
+    /// Runs the command to its end. Nothing of it is open once this returns: the pipes'
+    /// handles are autoreleased, and close only when a pool drains, so the pool is here
+    /// and not the caller's to have. A daemon's thread that never returns drains none.
     public func run() throws -> Output {
-        let process = Process()
-        process.executableURL = tool
-        process.arguments = arguments
-        let out = Pipe(), err = Pipe()
-        process.standardOutput = out
-        process.standardError = err
-        let outDrain = Drain(out.fileHandleForReading)
-        let errDrain = Drain(err.fileHandleForReading)
-        try process.run()
-        process.waitUntilExit()
-        return Output(
-            status: process.terminationStatus,
-            stdout: outDrain.text(),
-            stderr: errDrain.text()
-        )
+        try autoreleasepool {
+            let process = Process()
+            process.executableURL = tool
+            process.arguments = arguments
+            let out = Pipe(), err = Pipe()
+            process.standardOutput = out
+            process.standardError = err
+            let outDrain = Drain(out.fileHandleForReading)
+            let errDrain = Drain(err.fileHandleForReading)
+            try process.run()
+            process.waitUntilExit()
+            return Output(
+                status: process.terminationStatus,
+                stdout: outDrain.text(),
+                stderr: errDrain.text()
+            )
+        }
     }
 }
 

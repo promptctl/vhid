@@ -16,6 +16,7 @@ Each release's section is its GitHub Release notes, which keep line breaks, so e
 - Installing over a running daemon waits for launchd to let go of its job before loading the new one, which launchd had refused with error 5.
 - vhidd names itself `vhidd` in everything it prints and logs.
 - When the driver extension stops while vhidd is serving, vhidd takes the devices down, refuses every verb with the reason, and brings them up again once the driver is back, with no restart. In 0.1.0 `vhid doctor` went on printing `ready` and, while the driver stayed off, the verbs typed and moved nothing.
+- vhidd brings the devices up within seconds of the driver extension being turned on: it looks at the driver every two seconds while it waits to try again.
 
 ## [0.1.0]
 

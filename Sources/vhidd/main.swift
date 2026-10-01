@@ -123,6 +123,7 @@ do {
         children.tracking(DaemonProcess.real).keepUp(
             within: .seconds(10),
             backoff: Backoff(first: .seconds(2), most: .seconds(60)),
+            lookingEvery: .seconds(2),
             readiness: readiness,
             serve: { reached in
                 log("the keyboard is up: the driver's daemon answered in \(reached.startup.keyboard.answered), ready after \(reached.startup.keyboard.ready)")
@@ -136,7 +137,17 @@ do {
                 devices.releaseEverything(because: "starting")
                 return devices
             },
-            driver: { try? DriverState(DriverProbe.facts()) },
+            // A driver that could not be read names no step and ends no wait, so the
+            // reason it could not is said here, where it would otherwise be lost.
+            // [LAW:no-silent-failure]
+            driver: {
+                do {
+                    return try DriverState(DriverProbe.facts())
+                } catch {
+                    log("could not read the driver extension: \(error)")
+                    return nil
+                }
+            },
             now: { .now },
             pause: { Thread.sleep(forTimeInterval: Double($0.components.seconds) + Double($0.components.attoseconds) / 1e18) }
         )
