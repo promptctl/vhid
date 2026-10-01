@@ -1,6 +1,7 @@
 import DriverExtension
 import Foundation
 import Installations
+import OwnThread
 import Testing
 
 @testable import vhidd
@@ -12,7 +13,7 @@ import Testing
 /// `--service` disagree is a daemon listening under one name while clients dial another,
 /// and it surfaces only as a vhidd nobody can reach - so the writer's output is read back
 /// through the daemon's own parser rather than matched as text. [LAW:behavior-not-structure]
-struct LaunchdPlistTests {
+@Suite(.ownThread) struct LaunchdPlistTests {
     /// Carries `&` and `<`, the two characters that leave a plist unparseable when written
     /// bare, so an escape the writer dropped fails the parse.
     static let daemon = "/Library/A & B/<vhidd>"

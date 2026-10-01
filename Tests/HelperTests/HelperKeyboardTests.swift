@@ -151,8 +151,7 @@ import Testing
     /// connection failure. [LAW:no-silent-failure]
     @Test func theHelpersRefusalIsThrown() throws {
         let (helper, far) = helper(.refuse(domain: "fake", code: 7))
-        let keyboard = helper.keyboard
-        let refusal = #expect(throws: HelperConnection.Refused.self) { try keyboard.down(.space) }
+        let refusal = #expect(throws: HelperConnection.Refused.self) { try helper.keyboard.down(.space) }
         // The error itself when it is not the fake's, so a connection failure in its place
         // is read by its reason and not just by its domain.
         let heard = Comment(rawValue: refusal.map { "\($0 as Error)" } ?? "nothing was thrown")
@@ -168,8 +167,7 @@ import Testing
     @Test func aServiceThatWentAwayIsUnreachable() throws {
         let (helper, far) = helper(.acknowledge)
         far.listener.invalidate()
-        let keyboard = helper.keyboard
-        let unreachable = #expect(throws: HelperConnection.Unreachable.self) { try keyboard.down(.space) }
+        let unreachable = #expect(throws: HelperConnection.Unreachable.self) { try helper.keyboard.down(.space) }
         guard case .connection(let domain, let code, _) = unreachable?.cause else {
             Issue.record("unreachable for another cause: \(String(describing: unreachable))")
             return
@@ -198,9 +196,8 @@ import Testing
     /// than a caller blocked for good. [LAW:no-ambient-temporal-coupling]
     @Test func aServiceThatNeverAnswersIsUnreachableAtTheDeadline() throws {
         let (helper, far) = helper(.never, replyTimeout: .milliseconds(200))
-        let keyboard = helper.keyboard
         let began = ContinuousClock.now
-        let unreachable = #expect(throws: HelperConnection.Unreachable.self) { try keyboard.down(.space) }
+        let unreachable = #expect(throws: HelperConnection.Unreachable.self) { try helper.keyboard.down(.space) }
         #expect(unreachable?.cause == .silence(.milliseconds(200)))
         #expect(ContinuousClock.now - began >= .milliseconds(200))
         // Held to the deadline: a far end gone early is unreachable for the wrong reason,

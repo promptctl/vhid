@@ -96,7 +96,8 @@ itself must run never ends. The trait gives each test of the suite a thread that
 one of the pool's.
 
 `make test` runs the suite with the pool one thread wide, so a test that needs the trait
-and lacks it is slow or hung on any Mac, and not only on CI.
+and lacks it is slow or hung on any Mac, and not only on CI. `thePoolIsOneThreadWide`
+fails on a wider pool, so a run that has lost the narrow one says so.
 
 ## Checking the reach matrix
 

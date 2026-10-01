@@ -85,9 +85,8 @@ import Testing
     /// the daemon's own refusal; anything else it hears is not an answer to this, and is
     /// thrown.
     private func admitted(_ served: Served, pressing usage: Usage) throws -> Bool {
-        let keyboard = client(of: served).helper.keyboard
         do {
-            try keyboard.down(usage)
+            try client(of: served).helper.keyboard.down(usage)
             return true
         } catch let refused as HelperConnection.Refused where refused.domain == Installation.refusalDomain {
             #expect(refused.code == Installation.seatRefusedCode)
@@ -118,15 +117,14 @@ import Testing
         try keyboard.down(.leftShift)
         let left = ContinuousClock.now
         first.connection.invalidate()
-        let devices = served.devices
-        let released = devices.awaitRelease()
+        let released = served.devices.awaitRelease()
         // How long the release took and why, printed whether or not it passes: on CI this
         // test has run for six seconds, and which of that is the release is the question
         // vhid-ci-flake-80e is open on. [LAW:nothing-unseen]
-        let seen = "release after \(ContinuousClock.now - left), because \(devices.releasedBecause)"
+        let seen = "release after \(ContinuousClock.now - left), because \(served.devices.releasedBecause)"
         print("ListenerTests: \(seen)")
         #expect(released, "\(seen)")
-        #expect(devices.releasedBecause.first == "a client went away", "\(seen)")
+        #expect(served.devices.releasedBecause.first == "a client went away", "\(seen)")
 
         let deadline = ContinuousClock.now + .seconds(10)
         var next = try admitted(served, pressing: .space)

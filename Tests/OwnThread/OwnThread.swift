@@ -16,15 +16,15 @@ public struct OwnThread: SuiteTrait, TestTrait, TestScoping {
         try await withTaskExecutorPreference(Executor(), operation: function)
     }
 
-    /// A serial queue, which dispatch gives a thread whenever it has work, however many
-    /// others are blocked: it draws on neither the cooperative pool nor the bounded pool
-    /// behind `DispatchQueue.global()`.
+    /// A serial queue for each job, which dispatch gives a thread whenever it has work,
+    /// however many others are blocked: it draws on neither the cooperative pool nor the
+    /// bounded pool behind `DispatchQueue.global()`. One for each job and not one for the
+    /// test, because a test's child tasks run here too, and a test standing still for its
+    /// child would hold the one queue the child was waiting in.
     private final class Executor: TaskExecutor {
-        private let queue = DispatchQueue(label: "OwnThread")
-
         func enqueue(_ job: consuming ExecutorJob) {
             let job = UnownedJob(job)
-            queue.async { job.runSynchronously(on: self.asUnownedTaskExecutor()) }
+            DispatchQueue(label: "OwnThread").async { job.runSynchronously(on: self.asUnownedTaskExecutor()) }
         }
     }
 }
