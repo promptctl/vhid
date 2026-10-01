@@ -2,8 +2,8 @@
 # ID certificates, notarized, stapled, and attached to a GitHub Release whose notes are
 # that version's section of CHANGELOG.md. scripts/release does the building, signing and
 # notarizing, exactly as it does on a Mac that holds the certificates; this workflow only
-# gives it a keychain that holds them. The secrets it reads are listed in README
-# "Releasing".
+# gives it a keychain that holds them. The secrets it reads are listed in
+# docs/releasing.md.
 name: release
 
 on:

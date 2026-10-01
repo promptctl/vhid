@@ -1,125 +1,148 @@
 # vhid
 
-A virtual keyboard and a virtual mouse for macOS, driven from a CLI or over MCP.
+A virtual keyboard and mouse for macOS, driven from the command line or by an AI agent.
 
-It creates two HID devices through the
-[Karabiner-DriverKit-VirtualHIDDevice](https://github.com/pqrs-org/Karabiner-DriverKit-VirtualHIDDevice)
-driver extension and posts reports to them. To macOS the input is indistinguishable
-from hardware: no event taps, no Accessibility grant, no window-server synthesis.
+[![test](https://github.com/promptctl/vhid/actions/workflows/test.yml/badge.svg)](https://github.com/promptctl/vhid/actions/workflows/test.yml)
+[![release](https://img.shields.io/github/v/release/promptctl/vhid)](https://github.com/promptctl/vhid/releases/latest)
+[![license](https://img.shields.io/github/license/promptctl/vhid)](LICENSE)
 
-**It is a driver, not a nanny.** It types what it is told to type and clicks where it
-is told to click. Which app is in front, whether a dialog is covering it, and whether
-you meant to do this are not its questions to ask.
+vhid creates two virtual input devices and types and clicks through them, so macOS
+treats the input as coming from hardware. A script or an agent can then work where
+software-generated input is blocked, such as the lock screen, the login window, and
+password prompts, and it needs no Accessibility permission to do it. A companion tool,
+`eyes`, reads the screen and prints where things are, as the coordinates `vhid click` takes.
 
-Extracted from [low-talker](https://github.com/promptctl/low-talker), whose dictation
-typed through this stack first.
+```console
+$ eyes find Save
+1 matched "Save" in display 1 0,0 1600x900 by tree and pixels, merged; …
+812,604	Save
 
-## Two packages
+$ vhid click 812 604
+clicked left once at (812, 604) after 4 motion reports
 
-The repository holds two SwiftPM packages, and the root manifest deliberately does not
-mention the second one.
+$ vhid type "quarterly-report"
+typed 16 characters on com.apple.keylayout.US
+```
 
-| | what it is | build and test |
+Each line of output has the shape the command prints; the first line of `eyes find` is
+longer than shown.
+
+## Contents
+
+- [Where the input reaches](#where-the-input-reaches)
+- [Install](#install)
+- [Use](#use)
+- [Limits and status](#limits-and-status)
+- [Documentation](#documentation)
+- [Contributing](#contributing)
+- [License and credits](#license-and-credits)
+
+## Where the input reaches
+
+Because the input comes from a device, it lands in places that synthetic events
+can't reach. Measured over SSH on macOS 15:
+
+| Where | Typing | Cursor and clicks |
 |---|---|---|
-| `.` | the devices: the keyboard, the mouse, and the root daemon that owns them | `make test` |
-| `eyes/` | reading the screen: where the windows are, and where text is, as the points `vhid click` takes | `cd eyes && swift build && swift test` |
+| Logged in, SSH as the user in front | yes | yes |
+| That user's lock screen | yes | yes |
+| Terminal with Secure Keyboard Entry on | yes | yes |
+| A system password prompt | yes | yes |
+| The login window, nobody logged in | yes | yes |
+| The login window after fast user switching | yes | yes |
+| FileVault's unlock screen before boot | no | no |
 
-`eyes` finds a coordinate; `vhid click` presses it. Nothing joins them in code — only that
-workflow. A target in the root manifest would be one `dependencies:` line away from
-linking the two, and nothing in review catches that line, so the separation is a package
-boundary rather than a rule someone has to remember.
+[docs/design/remote-hands.md](docs/design/remote-hands.md) has the evidence for each cell.
+On the 0.1.0 pkg the two login window rows take typing only; placing the cursor there
+came later.
 
-The cost of that isolation is this paragraph: `make test` at the root does not run
-`eyes`' tests.
+## Install
 
-```sh
-eyes windows                      # owner, layer and bounds of each on-screen window; the frontmost app
-eyes displays                     # each display's id, bounds and scale, main first
-eyes find Save                    # where "Save" is: the point to click, then the text
-eyes find Settings --exact --display 3
-eyes read --window 4127           # every run of text in one window, in reading order
-eyes find OK --source tree        # only the accessibility tree: exact text, no Screen Recording
-eyes find Saving --window 4127 --until absent --timeout 30   # returns once the text is gone
-eyes grants                       # Screen Recording and Accessibility: held or not, and the app they are charged to
-eyes grants --ask                 # raise macOS's dialog for each missing grant (once per app); run eyes grants again once answered
-eyes mcp                          # the verbs as MCP tools over stdio: windows, displays, find, read, grants
-```
+You need macOS 15 or later, on Apple silicon or Intel, and an administrator account.
 
-`find` and `read` read with `--source`: `tree` walks the accessibility tree (exact text
-and roles; needs Accessibility), `pixels` recognises text on-device with Vision (anything
-drawn; needs Screen Recording), and `merged`, the default, asks both and reports a thing
-both saw once. A merge with one grant missing still answers from the other and says which
-reader could not look. Each prints a scope line first — where it looked, which reader
-looked, how many runs it read, what it set aside, whether it read the whole region. A `find` that matches nothing prints the nearest runs
-and how many edits off each is, so a misread one edit away is not taken for an absence.
-
-`find --until present|absent` re-reads the same rectangle until the text appears or is
-gone, then answers once, its scope line led by how many reads it took and how long. A
-window that closes counts as gone. Absent needs two whole reads running without a match.
-A reader that cannot look ends the wait with its error rather than reporting "gone".
-When `--timeout` runs out, the answer is the last reading, marked as timed out.
-
-## Scope
-
-vhid's core is input that macOS sees as hardware, from a virtual keyboard and mouse;
-its sibling package `eyes` reads the screen so that input can be aimed. A feature that
-works through the devices fits naturally. A feature that reaches around them — the
-clipboard, posting synthetic events, app-specific APIs — belongs here only when the case
-for it is overwhelmingly compelling, close to a requirement, *and* it would make no sense
-as a separate project.
-
-## The CLI
+Download the latest pkg from the [Releases page](https://github.com/promptctl/vhid/releases/latest)
+and open it, or do the same from a terminal with the [GitHub CLI](https://cli.github.com):
 
 ```sh
-vhid type "hello"
-vhid press leftCommand+s
-vhid click 800 500 --button left --times 2
-vhid click 800 500 --modifiers leftCommand+leftShift
-vhid move 800 500
-vhid scroll 800 500 --vertical 3
-vhid drag 100 100 400 300
-vhid cursor
-vhid play < script.jsonl
-vhid record > script.jsonl   # Control-C stops; needs Input Monitoring for vhid-record.app (a working tree builds ~/Applications/vhid-record-dev.app)
-vhid doctor
+gh release download --repo promptctl/vhid --pattern 'vhid-*.pkg'
+sudo installer -pkg vhid-*.pkg -target /
 ```
 
-It types where the keyboard is pointed and clicks where it is told. There is no
-click-by-element and no target app, because nothing in vhid reads the screen — what is
-under a point is the caller's to know.
+The pkg is signed and notarized. It installs `vhid` and `eyes` in `/usr/local/bin`, a
+background daemon that owns the two devices, a menu bar item that shows whether vhid is
+ready, and the driver the devices are built on,
+[Karabiner-DriverKit-VirtualHIDDevice](https://github.com/pqrs-org/Karabiner-DriverKit-VirtualHIDDevice).
+You don't need Karabiner-Elements. If you already have it, the pkg replaces the driver
+files the two share.
 
-Which keys make which characters is the calling user's keyboard layout, read in the CLI
-rather than in the daemon: macOS answers that question per process, and a root daemon
-asking it is told the US layout whatever the user is typing on. `type` and `press` take
-`--layout <input source id>` (the MCP tools, `layout`) to name another, as at the login
-window over SSH, where the caller's layout need not be the one on screen. `type` refuses
-text the layout has no keys for.
+One step is left to you, because macOS lets only the person at the Mac approve a driver:
 
-`--service` says which installation to talk to. It defaults to the one the binary was
-built for: the installed copy for the installed CLI, and the development copy for a
-build from this tree. `vhid service` prints which. Coordinates are screen points from the top left of the main display; a display
-left of or above it has negative ones, which follow `--` after every option:
-`vhid click --button left -- -100 -40`.
+1. Open **System Settings > General > Login Items & Extensions**.
+2. Click the **(i)** beside **Driver Extensions**.
+3. Turn on **org.pqrs.Karabiner-DriverKit-VirtualHIDDevice**.
 
-## Over MCP
+Then check the install:
 
-`vhid mcp` serves the same verbs as MCP tools over stdio: `type`, `press`, `click`,
-`move`, `scroll`, `drag`, `play`, `cursor` and `doctor`, run as `vhid mcp`. `play` takes
-the script as its `script` argument where the command line reads it from stdin.
+```console
+$ vhid doctor
+ready
+Driver extension: running
+launchd job: loaded, holding the service
+Daemon: listening, both devices up
+Signature: admitted
+Devices: free
+Keyboard Setup Assistant: answered ANSI for the virtual keyboard
+```
 
-Each tool call connects to the daemon and leaves when it returns, so a session holds
-nothing between calls and a `vhid click` from a shell still gets through. Stdout carries
-only JSON-RPC; diagnostics go to stderr. An argument a tool will not act on comes back as
-a tool error naming it, before anything is connected.
+If it prints `not ready`, the row that is wrong names the step to take.
 
-`eyes mcp` serves `windows`, `displays`, `find`, `read` and `grants` the same way. The two are
-separate servers, and a client runs both.
+To remove vhid, run `sudo /usr/local/libexec/vhid-uninstall`.
+[docs/installing.md](docs/installing.md) lists every file the pkg installs and covers
+removing the driver too.
 
-Every look (`find`, `read`, and each wait), every grant check a reader makes, and every
-grants reading taken from a child emits one JSON event, from the verbs and the tools alike. Events go to the OTLP collector that
-`OTEL_EXPORTER_OTLP_ENDPOINT` names. With no collector set, or one that can't take them,
-they're appended to `~/Library/Logs/eyes/events.jsonl`. An event appended because the
-collector failed carries `sink_error`.
+## Use
+
+### Type and click
+
+```sh
+vhid type "hello"                            # type text wherever the keyboard is focused
+vhid press leftCommand+s                     # press a key combination
+vhid click 800 500                           # click at a screen point
+vhid click 800 500 --button right --times 2
+vhid move 800 500                            # move the pointer, pressing nothing
+vhid scroll 800 500 --vertical 3             # roll the wheel at a point
+vhid drag 100 100 400 300                    # press at one point, release at another
+vhid cursor                                  # print where the pointer is
+vhid record > script.jsonl                   # record your own keyboard and mouse (needs Input Monitoring); Control-C stops
+vhid play < script.jsonl                     # replay a recording with its timing
+```
+
+Coordinates are screen points measured from the top left of the main display.
+`vhid help <verb>` describes each verb, and [docs/cli.md](docs/cli.md) covers keyboard
+layouts, negative coordinates on a second display, and the other rules the verbs share.
+
+### Find things on screen
+
+```sh
+eyes find Save                # where "Save" is: the point to click, then the text
+eyes read --window 4127       # every piece of text in one window, in reading order
+eyes windows                  # each on-screen window: its id, owner and bounds
+eyes displays                 # each display's id, bounds and scale
+```
+
+`find` and `read` can look in two ways. They read the accessibility tree, which is the
+exact text that apps expose to assistive tools, and they recognise text in a capture of
+the screen. The first needs the Accessibility permission and the second needs Screen
+Recording, each granted to your terminal app under **System Settings > Privacy &
+Security**. With only one granted, they answer from that one and say which was missing.
+`windows` and `displays` need neither. [docs/eyes.md](docs/eyes.md) has the detail.
+
+### From an AI agent
+
+Both tools are also [MCP](https://modelcontextprotocol.io) servers, MCP being the
+protocol that AI clients such as Claude use to call external tools. `vhid mcp` serves
+the input verbs and `eyes mcp` serves the screen-reading ones, so an agent can look,
+click, and look again.
 
 In Claude Code:
 
@@ -128,280 +151,67 @@ claude mcp add --scope user vhid -- /usr/local/bin/vhid mcp
 claude mcp add --scope user eyes -- /usr/local/bin/eyes mcp
 ```
 
-In Claude Desktop, merged into the `mcpServers` object of
-`~/Library/Application Support/Claude/claude_desktop_config.json` (keeping any servers
-already there), then quit and reopen it:
+[docs/mcp.md](docs/mcp.md) has the configuration for Claude Desktop, lists the tools,
+shows the look-click-look loop step by step, and explains which app has to hold the
+screen permissions.
 
-```json
-{
-  "mcpServers": {
-    "vhid": { "command": "/usr/local/bin/vhid", "args": ["mcp"] },
-    "eyes": { "command": "/usr/local/bin/eyes", "args": ["mcp"] }
-  }
-}
-```
+## Limits and status
 
-vhid's tools need what `vhid doctor` checks and no grant of the client's. eyes'
-`windows` and `displays` need nothing. `find` and `read` need Accessibility for the tree
-and Screen Recording for pixels, held by
-the app macOS counts as responsible for the server: Claude Desktop, or the terminal app
-running `claude` - under tmux, SSH or an editor's terminal, whichever app started that.
-The `grants` tool says whether each is held and names that app, read fresh on every call
-and never prompting; `eyes grants --ask`, run by a person, is the only thing that raises
-macOS's dialog. Add the app under **System Settings > Privacy & Security >
-Accessibility** and **Screen Recording**; `find` and `read` read the grants the same fresh
-way, so a grant switched on while the server runs counts from its next call. A reader
-without its grant is named in the scope line;
-with neither, `find` and `read` answer with a tool error saying so.
+vhid is new software. What to know before relying on it:
 
-Every coordinate either server prints or takes is the same screen point, so one loop
-closes without conversion:
+- **vhid does not check what it is typing into.** It types wherever the keyboard is
+  focused and clicks the point it is given, whatever is there. Looking first, with `eyes`
+  or otherwise, is the caller's job.
+- **It cannot reach FileVault's unlock screen.** Before the disk is unlocked, neither the
+  daemon nor the driver is running.
+- **Typing follows the caller's keyboard layout.** At the login window over SSH, that may
+  not be the layout on screen, and `--layout` names the one to type on.
+- **This page and `docs/` describe `master`, which is ahead of the latest release.**
+  [CHANGELOG.md](CHANGELOG.md#unreleased) lists what the pkg does not have yet, above the
+  notes for each release.
+- **It installs a root daemon and a driver extension.** The daemon accepts commands only
+  from a `vhid` signed with the same certificate it is.
 
-| step | tool | what it answers |
-|---|---|---|
-| where the displays are | eyes `displays` | each id and its bounds, negative left of or above the main display |
-| what is in front | eyes `windows` | each window's owner and bounds, and the frontmost application |
-| where the text is | eyes `find` `{"text": "Save", "display": 3}` | the point to click, then the run it read: `-700,604	Save` on a display left of the main one |
-| press it | vhid `click` `{"x": -700, "y": 604}` | where it clicked, or the reason it could not |
-| what changed | eyes `find` again | the run gone, or still there, with a scope line saying where it looked |
+## Documentation
 
-Neither server decides the next step. `click` presses the point it is given whatever is
-there, and `find` reports what is on screen, not whether the click did what was meant.
-
-## Over SSH, at the login window and the lock screen
-
-Because the input comes from a device, it reaches places software input cannot. Measured
-over SSH on macOS 15 with vhid 0.1.0:
-
-| Where | typing | cursor and clicks |
-|---|---|---|
-| Logged in, SSH as the user in front | yes | yes |
-| That user's lock screen | yes | yes |
-| Terminal with Secure Keyboard Entry on | yes | yes |
-| A system password prompt | yes | yes |
-| The login window, nobody logged in | yes | yes |
-| The login window after fast user switching, SSH as a user in the background | yes | yes |
-| FileVault's unlock screen before boot | no | no |
-
-- **Name the layout at the login window.** `type` and `press` use the SSH user's
-  layout, not the one on screen. When they differ, pass `--layout`.
-- **FileVault cannot be reached.** Before the disk is unlocked, neither the daemon nor
-  the driver is running.
-
-[docs/design/remote-hands.md](docs/design/remote-hands.md) has the evidence for each
-cell. `scripts/reach <host> <place>` checks one row again on a real Mac; with no place,
-it lists what to put on screen for each.
-
-## Installing
-
-vhid ships as one signed, notarized pkg. It installs:
-
-| path | what it is |
+| | |
 |---|---|
-| `/usr/local/bin/vhid` | the CLI |
-| `/usr/local/bin/eyes` | the screen reader: `windows` and `displays` need no grant; `find` and `read` need Accessibility for the tree and Screen Recording for pixels, merged either ([Over MCP](#over-mcp) says whose) |
-| `/usr/local/libexec/vhidd` | the root daemon that owns the devices |
-| `/Library/LaunchDaemons/ai.promptctl.vhid.vhidd.plist` | the daemon's launchd job, loaded as the install finishes |
-| `/usr/local/libexec/vhid-menubar` | the menu bar item |
-| `/usr/local/libexec/vhid-record.app` | the tap `vhid record` runs, granted Input Monitoring once |
-| `/Library/LaunchAgents/ai.promptctl.vhid.vhidd.menubar.plist` | its launchd job, started at every login |
-| `/usr/local/libexec/vhid-uninstall` | removes everything in this table |
-| `/usr/local/libexec/vhid-virtual-hid-driver` | the driver removal `vhid-uninstall --driver` runs |
+| [docs/cli.md](docs/cli.md) | the `vhid` verbs, keyboard layouts, coordinates |
+| [docs/eyes.md](docs/eyes.md) | reading the screen, waiting for text to appear or go, the events `eyes` logs |
+| [docs/mcp.md](docs/mcp.md) | the MCP servers, client setup, permissions |
+| [docs/installing.md](docs/installing.md) | what the pkg installs, `vhid doctor`, the menu bar item, uninstalling |
+| [docs/development.md](docs/development.md) | repository layout, scope, building and testing |
+| [docs/releasing.md](docs/releasing.md) | publishing a release |
+| [docs/design/](docs/design) | design notes and the measurements behind them |
 
-It also installs the pinned
+## Contributing
+
+Report bugs and ask questions in [GitHub issues](https://github.com/promptctl/vhid/issues).
+A bug report is most useful with the output of `vhid doctor` in it.
+
+To build from source you need Xcode 26. CI builds with the version that
+[test.yml](.github/workflows/test.yml) names, so that one is known to work:
+
+```sh
+git clone https://github.com/promptctl/vhid.git
+cd vhid
+make test                              # build, sign, and test vhid
+(cd eyes && swift build && swift test) # eyes is a separate package with its own tests
+```
+
+Use `make` rather than `swift build` at the root. The daemon accepts only a `vhid`
+signed with its own certificate, and `make` does that signing.
+[docs/development.md](docs/development.md) explains this, how to run a development
+daemon beside an installed one, and what belongs in the project. Pull requests go to
+`master` and must pass the `vhid`, `eyes` and `pkg` checks.
+
+## License and credits
+
+vhid is licensed under the Apache License 2.0; see [LICENSE](LICENSE). [NOTICE](NOTICE)
+lists the third-party software it links and carries.
+
+The virtual devices are built on
 [Karabiner-DriverKit-VirtualHIDDevice](https://github.com/pqrs-org/Karabiner-DriverKit-VirtualHIDDevice)
-package, pqrs's own component carried inside this one, and asks macOS to activate its
-driver extension for whoever is logged in. Karabiner-Elements is not needed; on a Mac
-that has it, the installer warns that the driver's Manager app and support files it
-shares are replaced.
-
-One step is left to you, because macOS attributes a driver extension to the person at
-the Mac and no installer can approve it: turn on
-`org.pqrs.Karabiner-DriverKit-VirtualHIDDevice` under **System Settings > General > Login
-Items & Extensions > Driver Extensions (i)**. An install made while you are logged in
-ends with that sheet open. `vhid driver state` prints `enabled` or `running` once it is
-on, and `vhid doctor` prints `ready` once everything vhid needs is met. Until then the
-daemon is loaded but cannot bring the devices up: it keeps trying, backing off to once a
-minute, and refuses every verb with `devices not up:` and the reason, which names the
-driver's step while the driver is off. Once the driver is on, the
-next attempt brings the devices up with no restart.
-
-The installed CLI talks to the installed daemon by default. A build from this tree talks
-to the development copy, `ai.promptctl.vhid.vhidd.dev`, so the two can run side by side.
-
-When a verb fails, run `vhid doctor`. It prints `ready` or `not ready`, then one row per
-requirement — the driver extension, the daemon's launchd job, the daemon, whether it
-admits this vhid, who holds the devices, and the Keyboard Setup Assistant answer — each
-with what it read on this Mac and the step left for you, and exits 1 while any row has a
-step. It fixes nothing and takes the devices from no client that holds them; a daemon
-launchd has a job for but has not started is started by its question, as by any verb.
-
-The menu bar item shows the same reading at a glance, every five seconds: a keyboard when
-doctor would print `ready`, a warning triangle when it would not. Its menu lists doctor's
-rows and the daemon's most recent failure, and clicking a row copies its full text.
-**Set Up vhid…** walks the unmet rows one page at a time, each with why vhid needs it and
-what skipping it costs. It reads the Mac again every time you come back to the window, so
-turning the driver on in System Settings moves the walk on by itself. Apart from the
-driver's activation, which it asks macOS for as you, it only reads. Quit stops it until
-the next login. The item from a build of this tree,
-`.build/debug/vhid-menubar`, shows the development copy and says `dev` beside its icon.
-
-## Uninstalling
-
-```sh
-sudo /usr/local/libexec/vhid-uninstall            # vhid, leaving the pqrs driver
-sudo /usr/local/libexec/vhid-uninstall --driver   # vhid and the pqrs driver package
-```
-
-Either stops the daemon and the menu bar item, removes every file listed under
-Installing (both uninstall scripts among them) and forgets the pkg's receipt; run again,
-it says there is nothing to remove. Neither touches the development job a build of this
-tree registers.
-
-The first leaves the pqrs driver installed, since Karabiner-Elements may use it. To
-remove the driver with vhid, choose `--driver` on that first run: afterwards the script
-that removes it is gone, and pqrs's own scripts in
-`/Library/Application Support/org.pqrs/Karabiner-DriverKit-VirtualHIDDevice/scripts/uninstall`
-are what is left.
-
-`--driver` withdraws the driver extension as whoever is logged in, then deletes the
-driver package's files and receipt. Before stopping anything it refuses, saying why,
-when the driver cannot safely be removed: Karabiner-Elements is installed, the
-development job is loaded, nobody is logged in to withdraw the extension, the extension
-is registered but the Manager app that withdraws it is gone (reinstalling the pkg brings
-it back), or a reading it needs cannot be taken. If the removal fails partway, vhid is left stopped with its
-files in place, and the message says so; run the same command again once the cause is
-fixed, or drop `--driver` to remove vhid alone. A withdrawn extension can stay
-registered until the next restart.
-
-## Building
-
-`make` builds and signs. `make test` runs the suite and leaves the tree signed behind
-it.
-
-Use those rather than `swift build` and `swift test` directly, because of one rule in
-the daemon: it admits a caller carrying the certificate it carries itself, and refuses
-everything else. SwiftPM ad hoc signs every product it links, and an ad hoc signature
-names a hash that changes with the binary, so it can neither be required of a caller nor
-satisfied by one. A tree built with bare `swift build` therefore gets
-`NSCocoaErrorDomain 4097` on the first call. vhid says the daemon ended the connection
-and names the signature as the likely cause, because XPC itself reports only a
-connection that failed. `make sign` repairs a tree that has been built
-that way.
-
-A build talks to the development daemon, `ai.promptctl.vhid.vhidd.dev`, and nothing
-answers it until launchd has a job for it. `make dev-daemon` builds, then registers
-`.build/debug/vhidd` under that name, replacing the job an earlier run registered; it
-asks for sudo. `make remove-dev-daemon` takes it out. Neither touches a job it did not
-register, the installed pkg's included. Launchd runs that binary as root, from a tree
-your own account can write to, until it is removed.
-
-The first `make` on a Mac makes a self-signed certificate called `vhid Dev` and signs
-with it from then on. Nothing has to be run by hand first: a certificate that has to be
-asked for is a certificate a first build does without, and a first build that does
-without it is the 4097 above.
-
-It lives in a keychain of its own, `~/Library/Keychains/vhid-dev.keychain-db`, rather
-than in the login keychain, and that is what keeps builds silent. A key imported into
-the login keychain has an empty partition list, so the first `codesign` reaching for it
-raises *codesign wants to sign using key ... in your keychain* and waits; clearing that
-permanently needs the login keychain's password, which nothing can supply from inside a
-build. vhid's own keychain has a password vhid knows. The password is in
-`scripts/signing-keychain` and is not a secret — it protects one certificate that no Mac
-trusts, whose only power is to make this machine's daemon admit this machine's CLI, both
-already running as you.
-
-To undo all of it, one command — which takes the keychain out of the search list as
-well as deleting it:
-
-```sh
-security delete-keychain vhid-dev.keychain
-```
-
-This certificate is for development and cannot ship: no other Mac trusts it. What signs
-a release is a Developer ID certificate, which is a separate thing kept deliberately
-apart — the day the dev certificate quietly signs something that ships is the day vhid
-ships something nobody can run, and the build stays green while it happens.
-
-## Releasing
-
-A release is published by pushing its tag, once `CHANGELOG.md` has its section:
-
-```sh
-git tag v$(scripts/version --base) && git push origin v$(scripts/version --base)
-```
-
-`.github/workflows/release.yml` checks that the tag is `VERSION`'s, that the tagged
-commit is on master (a `-tag` pre-release may come from any branch) with its `vhid`,
-`eyes` and `pkg` checks green, and that `CHANGELOG.md` has a `## [<version>]` section.
-It then runs `scripts/release` in a keychain `scripts/release-keychain` makes for the
-job and deletes at its end, and attaches the notarized pkg to a GitHub Release whose
-notes are that section, marked a pre-release when the version has a `-tag`. It reads
-five secrets of the `release` environment, which admits only `v*` tags and waits for a
-maintainer to approve each run in the Actions tab before handing them over:
-
-| Secret | What it holds |
-| --- | --- |
-| `DEVELOPER_ID_APPLICATION_P12` | the Developer ID Application certificate and private key, as a base64 .p12 |
-| `DEVELOPER_ID_INSTALLER_P12` | the Developer ID Installer certificate and private key, as a base64 .p12 |
-| `DEVELOPER_ID_P12_PASSWORD` | the password both .p12 files were exported with |
-| `NOTARY_APPLE_ID` | the Apple ID notarytool submits as |
-| `NOTARY_PASSWORD` | an app-specific password for that Apple ID, made at account.apple.com |
-
-Export each identity from Keychain Access (the certificate with its private key, as
-.p12, both with one password) on the Mac that holds it, then set the secrets from the
-files. The files are redirected in because Homebrew's `base64` has no `-i`:
-
-```sh
-base64 <application.p12 | gh secret set DEVELOPER_ID_APPLICATION_P12 --env release
-base64 <installer.p12 | gh secret set DEVELOPER_ID_INSTALLER_P12 --env release
-```
-
-The same release can be made on that Mac directly:
-
-```sh
-NOTARY_PROFILE=<profile> scripts/release dist    # dist/vhid-<version>.pkg
-```
-
-The version is the one in `VERSION`, and a release is built from the commit tagged
-`v<version>` with `git status` clean: any other build reports `<version>-dev+<commit>`
-from `vhid --version`, and `scripts/make-pkg` refuses to package it.
-
-That runs two scripts, and each can also be run on its own:
-
-```sh
-scripts/make-pkg dist                                   # built and signed
-NOTARY_PROFILE=<profile> scripts/notarize dist/vhid-<version>.pkg   # notarized and stapled
-```
-
-`scripts/make-pkg --unsigned dist` does all of it but the signing, from any tree, and
-names the result `vhid-<version>-unsigned.pkg`; `scripts/check-pkg` then holds what it
-installs to what make-pkg states. CI's `pkg` job runs both on every PR.
-
-`scripts/make-pkg` builds for arm64 and x86_64 in a scratch directory of its own. It signs
-both binaries with the team's **Developer ID Application** certificate, with Hardened
-Runtime and a secure timestamp, and signs the pkg with its **Developer ID Installer**
-certificate. It finds both by team ID and refuses to guess when there are none or
-several. The daemon admits a caller signed with its own certificate, so the installed
-CLI is let in and a dev-signed build is refused. The launchd job is named after the
-service the packed CLI dials (`vhid service`), so the job and the CLI cannot disagree.
-The driver package is fetched and checked against its pinned checksum and pqrs's
-signature by `scripts/virtual-hid-driver fetch`. That is the one check of pqrs's
-signature: productbuild carries the component's contents without it, so on an installing
-Mac the pkg's own Developer ID Installer signature is what covers the driver too.
-
-`scripts/notarize` submits the pkg, prints the notary log if the answer is anything
-but Accepted, staples the ticket, and requires Gatekeeper to assess the pkg as
-`source=Notarized Developer ID`. The notary profile is made once per Mac with
-`xcrun notarytool store-credentials <profile>`.
-
-## License
-
-Apache License 2.0; see [LICENSE](LICENSE). [NOTICE](NOTICE) lists the third-party software
-the `vhid` tool links and the pqrs driver package the installer carries, with their terms.
-
-## Status
-
-Releases, each with its pkg and notes, are on the
-[Releases page](https://github.com/promptctl/vhid/releases); [CHANGELOG.md](CHANGELOG.md)
-holds the same notes.
+by pqrs.org. vhid began as the typing layer of
+[low-talker](https://github.com/promptctl/low-talker), a dictation tool, and is maintained
+by [promptctl](https://github.com/promptctl).

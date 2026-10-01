@@ -110,7 +110,7 @@ trap 'rm -rf "$work"' EXIT
 build() { swift build -c release --arch arm64 --arch x86_64 --build-system swiftbuild --scratch-path "$work/build" "$@"; }
 build >&2
 bin=$(build --show-bin-path)
-# eyes is a package of its own (README "Two packages"), built once per architecture and
+# eyes is a package of its own (docs/development.md "Two packages"), built once per architecture and
 # joined: swiftbuild links its executable with no _main (the entry point of a target not
 # named for its product, measured with Swift 6.3), and it needs none of swiftbuild's
 # plugin support.

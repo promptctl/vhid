@@ -4,7 +4,7 @@
 /// [LAW:one-source-of-truth] This is the whole vocabulary for the driver's state, and
 /// it exists once. `vhid driver state` and `scripts/virtual-hid-driver` print these
 /// words, `vhid doctor` shows them in its Driver extension row, `expect` asserts them
-/// and README.md documents them; a second spelling anywhere is a way for two readers to
+/// and docs/installing.md documents them; a second spelling anywhere is a way for two readers to
 /// come to different conclusions about one machine. The probe used to live in bash,
 /// where an installed vhid - which has no clone to run a script out of - had no way to
 /// reach it.

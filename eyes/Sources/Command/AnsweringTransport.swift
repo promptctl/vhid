@@ -1,5 +1,5 @@
 // Copied from Sources/vhid/AnsweringTransport.swift, not shared: the two packages link
-// nothing of each other's (README "Two packages"). A fix to one belongs in both. [LAW:one-way-deps]
+// nothing of each other's (docs/development.md "Two packages"). A fix to one belongs in both. [LAW:one-way-deps]
 import Foundation
 import Logging
 import MCP
