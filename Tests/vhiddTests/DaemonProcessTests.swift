@@ -200,8 +200,8 @@ import VirtualHID
 
     /// Attempts that fail in a world whose driver reads as `driver` says, with every pause
     /// taken at once and counted: what was launched, stopped and waited, in order, up to
-    /// the `pauses`th pause.
-    private func paced(_ pauses: Int, backoff: Backoff, driver: @escaping (_ launched: Int, _ waited: Duration) -> DriverState?) -> [String] {
+    /// the `pauses`th pause. `atEachWait` is run as each pause begins.
+    private func paced(_ pauses: Int, backoff: Backoff, readiness: Readiness = Readiness(), atEachWait: () -> Void = {}, driver: @escaping (_ launched: Int, _ waited: Duration) -> DriverState?) -> [String] {
         let world = World(connections: [.failure(.noSocket(path: "nowhere"))])
         var events: [String] = []
         var waited = Duration.zero
@@ -213,7 +213,8 @@ import VirtualHID
             terminate: effects.terminate
         )
         #expect(throws: Stop.self) {
-            try logged.keepUp(within: .milliseconds(20), backoff: backoff, lookingEvery: .seconds(2), readiness: Readiness(), serve: { _ in RecordingDevices() }, driver: { driver(world.launched, waited) }, now: { .now }) { wait in
+            try logged.keepUp(within: .milliseconds(20), backoff: backoff, lookingEvery: .seconds(2), readiness: readiness, serve: { _ in RecordingDevices() }, driver: { driver(world.launched, waited) }, now: { .now }) { wait in
+                atEachWait()
                 events.append("wait \(wait)")
                 waited += wait
                 if events.count(where: { $0.hasPrefix("wait") }) == pauses { throw Stop() }
@@ -283,11 +284,11 @@ import VirtualHID
     /// Lost from inside `serve` and not a moment later from another thread: a test that
     /// holds its thread until a dispatch queue calls back waits on the runner having a
     /// thread to spare, and three of them on a three-core runner wait forever.
-    private func lostEachTime(_ pauses: Int, world: World, backoff: Backoff, driver: @escaping (_ served: Int, _ waited: Duration) -> DriverState?, before: @escaping (World) -> Void = { _ in }) -> [Duration] {
+    private func lostEachTime(_ pauses: Int, world: World, backoff: Backoff, readiness: Readiness = Readiness(), driver: @escaping (_ served: Int, _ waited: Duration) -> DriverState?, before: @escaping (World) -> Void = { _ in }) -> [Duration] {
         var served = 0
         var waits: [Duration] = []
         #expect(throws: Stop.self) {
-            try world.effects.keepUp(within: .seconds(1), backoff: backoff, lookingEvery: .seconds(2), readiness: Readiness(), serve: { _ in
+            try world.effects.keepUp(within: .seconds(1), backoff: backoff, lookingEvery: .seconds(2), readiness: readiness, serve: { _ in
                 served += 1
                 world.lost!(.closed)
                 return RecordingDevices()
@@ -329,6 +330,43 @@ import VirtualHID
         #expect(events == ["launch", "wait 2.0 seconds", "wait 2.0 seconds", "wait 2.0 seconds", "launch", "wait 2.0 seconds"])
     }
 
+    /// What a verb is refused with while the devices are down.
+    private func refusal(_ readiness: Readiness) -> String {
+        do { _ = try readiness.devices(); return "served" } catch { return "\(error)" }
+    }
+
+    /// The refusal for `failure` with the driver read as `state`, which is off.
+    private func naming(_ state: DriverState, after failure: DaemonError) throws -> String {
+        "devices not up: \(failure)\nThe driver extension reads \(state.rawValue):\n\(try #require(state.step))"
+    }
+
+    /// A person working through the driver's steps is told the one it is at now: asking
+    /// for the activation during a wait changes what a refused verb names at the next
+    /// look, with vhidd still waiting and nothing started again.
+    @Test func aDriverThatMovesToAnotherStepDuringAWaitIsTheStepARefusalNames() throws {
+        let readiness = Readiness()
+        var refusals: [String] = []
+        let events = paced(3, backoff: Backoff(first: .seconds(60), most: .seconds(60)), readiness: readiness, atEachWait: { refusals.append(refusal(readiness)) }) { _, waited in
+            waited == .zero ? .installedInactive : .awaitingApproval
+        }
+        #expect(events == ["launch", "wait 2.0 seconds", "wait 2.0 seconds", "wait 2.0 seconds"])
+        let failure = DaemonError.noSocket(path: "nowhere")
+        let asked = try naming(.awaitingApproval, after: failure)
+        #expect(refusals == [try naming(.installedInactive, after: failure), asked, asked])
+    }
+
+    /// Devices lost to a driver that was switched off are refused with the loss and the
+    /// driver's step, as a failed attempt is.
+    @Test func devicesLostToADriverThatIsOffAreRefusedWithItsStep() throws {
+        let world = World(connections: [.success(Device())])
+        let readiness = Readiness()
+        var refusals: [String] = []
+        _ = lostEachTime(1, world: world, backoff: Backoff(first: .seconds(6), most: .seconds(60)), readiness: readiness, driver: { _, _ in .disabled }, before: { _ in
+            refusals.append(refusal(readiness))
+        })
+        #expect(refusals == [try naming(.disabled, after: .closed)])
+    }
+
     @Test func aWaitIsTakenALookAtATimeAndEndsWithWhatALookFinds() throws {
         var pauses: [Duration] = []
         let whole = waitOut(.seconds(5), lookingEvery: .seconds(2), pause: { pauses.append($0) }, for: { String?.none })
@@ -342,13 +380,17 @@ import VirtualHID
         #expect(pauses == [.seconds(2), .seconds(2), .seconds(2)])
     }
 
-    /// What the log says of a wait cut short: both states, as they were read.
-    @Test func aDriverTurnedOnSaysWhatItReadBeforeAndSince() throws {
-        let on = try #require(TurnedOn(from: .awaitingApproval, to: .enabled))
+    /// What the log says of a driver that changed during a wait, turned on or moved to
+    /// another step: both states, as they were read. A driver that reads as it did, one
+    /// that could not be read, and one that was on already have not changed.
+    @Test func aDriverThatChangedSaysWhatItReadBeforeAndSince() throws {
+        let on = try #require(DriverChange(from: .awaitingApproval, to: .enabled))
         #expect("\(on)" == "the driver extension reads enabled, from awaiting-approval")
-        #expect(TurnedOn(from: .awaitingApproval, to: nil) == nil)
-        #expect(TurnedOn(from: .awaitingApproval, to: .disabled) == nil)
-        #expect(TurnedOn(from: .enabled, to: .running) == nil)
+        let moved = try #require(DriverChange(from: .installedInactive, to: .awaitingApproval))
+        #expect("\(moved)" == "the driver extension reads awaiting-approval, from installed-inactive")
+        #expect(DriverChange(from: .awaitingApproval, to: nil) == nil)
+        #expect(DriverChange(from: .awaitingApproval, to: .awaitingApproval) == nil)
+        #expect(DriverChange(from: .enabled, to: .running) == nil)
     }
 
     /// Once stopping has begun, every daemon started is stopped and none is started after:

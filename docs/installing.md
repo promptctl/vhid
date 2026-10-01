@@ -32,7 +32,8 @@ on, and `vhid doctor` prints `ready` once everything vhid needs is met. Until th
 daemon is loaded but cannot bring the devices up: it keeps trying, backing off to once a
 minute, and refuses every verb with `devices not up:` and the reason, which names the
 driver's step while the driver is off. It looks at the driver every two seconds while it
-waits, so turning the driver on brings the devices up within seconds, with no restart.
+waits, so the step it names is the one the driver is at now, and turning the driver on
+brings the devices up within seconds, with no restart.
 
 The installed CLI talks to the installed daemon by default. A build from this tree talks
 to the development copy, `ai.promptctl.vhid.vhidd.dev`, so the two can run side by side.
