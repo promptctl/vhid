@@ -13,12 +13,12 @@ import VirtualHID
     }
 
     @Test func beforeTheFirstAttemptEndsTheDevicesAreRefusedAsStarting() {
-        #expect(refusal(Readiness(driver: { nil })) == "devices not up: vhidd is still bringing them up")
+        #expect(refusal(Readiness(driver: { .running })) == "devices not up: vhidd is still bringing them up")
     }
 
     /// The refusal names what the pqrs daemon said. [LAW:no-silent-failure]
     @Test func aFailedAttemptIsTheRefusal() {
-        let readiness = Readiness(driver: { nil })
+        let readiness = Readiness(driver: { .running })
         let failure = DaemonError.notReady(awaiting: .keyboardReady, said: [.driverActivated: false])
         _ = readiness.begin()
         readiness.failed(failure)
@@ -41,13 +41,26 @@ import VirtualHID
         #expect(refusal(readiness) == (try naming(state, after: .failed(failure))))
     }
 
-    /// A driver that is on, or a state that could not be read, adds nothing.
-    @Test(arguments: [DriverState.enabled, .running, nil])
-    func aFailureWithTheDriverOnIsTheFailureAlone(state: DriverState?) {
+    /// A driver that is on has no step to name.
+    @Test(arguments: [DriverState.enabled, .running])
+    func aFailureWithTheDriverOnIsTheFailureAlone(state: DriverState) {
         let readiness = Readiness(driver: { state })
         _ = readiness.begin()
         readiness.failed(DaemonError.closed)
         #expect(refusal(readiness) == "devices not up: \(DaemonError.closed)")
+    }
+
+    private struct Unreadable: Error, CustomStringConvertible {
+        var description: String { "systemextensionsctl list exited 1" }
+    }
+
+    /// A driver that could not be read is said so to the client refused, with why: no
+    /// step named is not left to mean the driver is on.
+    @Test func aDriverThatCouldNotBeReadIsSaidInTheRefusal() {
+        let readiness = Readiness(driver: { throw Unreadable() })
+        _ = readiness.begin()
+        readiness.failed(DaemonError.closed)
+        #expect(refusal(readiness) == "devices not up: \(DaemonError.closed)\nThe driver extension could not be read: systemextensionsctl list exited 1")
     }
 
     /// The step named is the one for the driver as it reads when the act is refused, with
@@ -55,7 +68,7 @@ import VirtualHID
     /// switch on their next call, and one who turned it on is told of no step, with the
     /// failure standing all the while.
     @Test func eachRefusalNamesTheStepTheDriverIsAtNow() throws {
-        var driver: DriverState? = .installedInactive
+        var driver = DriverState.installedInactive
         let readiness = Readiness(driver: { driver })
         let failure = DaemonError.notReady(awaiting: .keyboardReady, said: [.driverActivated: false])
         _ = readiness.begin()
@@ -63,8 +76,6 @@ import VirtualHID
         #expect(refusal(readiness) == (try naming(.installedInactive, after: .failed(failure))))
         driver = .awaitingApproval
         #expect(refusal(readiness) == (try naming(.awaitingApproval, after: .failed(failure))))
-        driver = nil
-        #expect(refusal(readiness) == "devices not up: \(failure)")
         driver = .enabled
         #expect(refusal(readiness) == "devices not up: \(failure)")
     }
@@ -112,7 +123,7 @@ import VirtualHID
     }
 
     @Test func aLossTakesTheDevicesDownWithItsReason() {
-        let readiness = Readiness(driver: { nil })
+        let readiness = Readiness(driver: { .running })
         let attempt = readiness.begin()
         readiness.up(RecordingDevices())
         #expect(readiness.lost(DaemonError.closed, in: attempt))
@@ -122,7 +133,7 @@ import VirtualHID
     /// A loss that arrives before the devices are handed over keeps them down: they are
     /// devices on a connection that is gone.
     @Test func devicesWhoseConnectionWasLostBeforeTheyCameUpStayDown() {
-        let readiness = Readiness(driver: { nil })
+        let readiness = Readiness(driver: { .running })
         let attempt = readiness.begin()
         _ = readiness.lost(DaemonError.closed, in: attempt)
         readiness.up(RecordingDevices())
@@ -131,7 +142,7 @@ import VirtualHID
 
     /// An earlier attempt's connection going says nothing about the devices up now.
     @Test func aLossFromAnEarlierAttemptLeavesTheDevicesUp() throws {
-        let readiness = Readiness(driver: { nil })
+        let readiness = Readiness(driver: { .running })
         let earlier = readiness.begin()
         _ = readiness.begin()
         let devices = RecordingDevices()
@@ -143,7 +154,7 @@ import VirtualHID
     /// An attempt that failed keeps its reason: its connection closing afterwards is the
     /// failure's consequence, not a new cause.
     @Test func aLateLossDoesNotReplaceWhyTheAttemptFailed() {
-        let readiness = Readiness(driver: { nil })
+        let readiness = Readiness(driver: { .running })
         let attempt = readiness.begin()
         readiness.failed(DaemonError.silent)
         #expect(!readiness.lost(DaemonError.closed, in: attempt))

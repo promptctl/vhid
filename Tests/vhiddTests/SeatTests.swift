@@ -37,7 +37,7 @@ import Testing
     /// While the devices are down an act is refused with why, and claims nothing: the next
     /// client is told the same reason, not that the first is in the way.
     @Test func anActWhileTheDevicesAreDownIsRefusedWithWhyAndClaimsNothing() {
-        let (holder, readiness) = (Holder(), Readiness(driver: { nil }))
+        let (holder, readiness) = (Holder(), Readiness(driver: { .running }))
         let other = NSObject()
         let first = Seat(ObjectIdentifier(one), pid: 41, holder: holder, readiness: readiness, cursor: FixedCursor())
         let second = Seat(ObjectIdentifier(other), pid: 42, holder: holder, readiness: readiness, cursor: FixedCursor())
@@ -62,7 +62,7 @@ import Testing
 
     /// Status is not the proof the devices are up when they are not: it answers why.
     @Test func statusWhileTheDevicesAreDownSaysWhy() {
-        let seat = Seat(ObjectIdentifier(one), pid: 41, holder: Holder(), readiness: Readiness(driver: { nil }), cursor: FixedCursor())
+        let seat = Seat(ObjectIdentifier(one), pid: 41, holder: Holder(), readiness: Readiness(driver: { .running }), cursor: FixedCursor())
         var answer: (NSNumber?, String?)
         seat.status { answer = ($0, ($1 as NSError?)?.localizedDescription) }
         #expect(answer.0 == nil)
@@ -72,7 +72,7 @@ import Testing
     /// A client whose devices were lost is told so on its next act, and on every act
     /// after, rather than acting on fresh devices as if what it held were still held.
     @Test func aSeatWhoseDevicesWereLostEnds() {
-        let (holder, readiness) = (Holder(), Readiness(driver: { nil }))
+        let (holder, readiness) = (Holder(), Readiness(driver: { .running }))
         let first = readiness.begin()
         readiness.up(RecordingDevices())
         let seat = Seat(ObjectIdentifier(one), pid: 41, holder: holder, readiness: readiness, cursor: FixedCursor())

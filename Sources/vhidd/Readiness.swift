@@ -30,7 +30,7 @@ final class Readiness: @unchecked Sendable {
     }
 
     /// What a client whose act is refused is told: why the devices are not up, and the
-    /// driver extension as it read for this refusal, nil when it could not be read.
+    /// driver extension as it read for this refusal, or why it could not be read.
     ///
     /// pqrs's status says only "not activated" for an extension awaiting approval, one
     /// whose activation never landed and one half removed alike, so the state read on
@@ -40,13 +40,18 @@ final class Readiness: @unchecked Sendable {
     /// step named is never one already done. [LAW:one-source-of-truth] with `vhid doctor`.
     struct Refused: Error, CustomStringConvertible {
         let why: Down
-        let driver: DriverState?
+        let driver: Result<DriverState, any Error>
 
-        /// Names no step when the driver is on or could not be read.
+        /// A driver that is on has no step and adds nothing. One that could not be read
+        /// is said so here, to the person who would otherwise be left without a step and
+        /// without the reason. [LAW:no-silent-failure]
         var description: String {
-            "\(why)" + (driver.flatMap { state in
-                state.step.map { "\nThe driver extension reads \(state.rawValue):\n\($0)" }
-            } ?? "")
+            switch driver {
+            case .success(let state):
+                "\(why)" + (state.step.map { "\nThe driver extension reads \(state.rawValue):\n\($0)" } ?? "")
+            case .failure(let error):
+                "\(why)\nThe driver extension could not be read: \(error)"
+            }
         }
     }
 
@@ -75,10 +80,10 @@ final class Readiness: @unchecked Sendable {
     /// reported late by an attempt that already failed cannot replace why it failed, and
     /// devices whose connection went before they were handed over are not handed over.
     private var ended = false
-    /// Reads the driver extension on this Mac, or nil when it cannot be read.
-    private let driver: () -> DriverState?
+    /// Reads the driver extension on this Mac.
+    private let driver: () throws -> DriverState
 
-    init(driver: @escaping () -> DriverState?) {
+    init(driver: @escaping () throws -> DriverState) {
         self.driver = driver
     }
 
@@ -91,7 +96,7 @@ final class Readiness: @unchecked Sendable {
     /// so one client's refusal holds up nobody else's act.
     func devices() throws -> Up {
         switch current {
-        case .down(let why): throw Refused(why: why, driver: driver())
+        case .down(let why): throw Refused(why: why, driver: Result { try driver() })
         case .up(let up): return up
         }
     }

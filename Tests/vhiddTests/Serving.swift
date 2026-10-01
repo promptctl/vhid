@@ -4,7 +4,7 @@ import Foundation
 extension Readiness {
     /// Readiness whose one attempt brought `devices` up, as a seat finds it once vhidd serves.
     static func serving(_ devices: any ServedDevices) -> Readiness {
-        let readiness = Readiness(driver: { nil })
+        let readiness = Readiness(driver: { .running })
         _ = readiness.begin()
         readiness.up(devices)
         return readiness
