@@ -48,7 +48,8 @@ import VirtualHID
                     self.terminated.append($0)
                     // A stopped daemon closes its connection on the way down.
                     self.lost?(.closed)
-                }
+                },
+                say: { _ in }
             )
         }
     }
@@ -152,12 +153,9 @@ import VirtualHID
         let world = World(connections: [.failure(.noSocket(path: "nowhere"))])
         var events: [String] = []
         let effects = world.effects
-        let logged = DaemonProcess.Effects<Device>(
-            connect: effects.connect,
-            bringUp: effects.bringUp,
-            launch: { events.append("launch"); return try effects.launch() },
-            terminate: { events.append("stop"); effects.terminate($0) }
-        )
+        var logged = effects
+        logged.launch = { events.append("launch"); return try effects.launch() }
+        logged.terminate = { events.append("stop"); effects.terminate($0) }
         let readiness = Readiness(driver: { .running })
         var downWhileWaiting: [Bool] = []
         let clock = HandClock()
@@ -203,29 +201,52 @@ import VirtualHID
         #expect(world.terminated == [World.pid])
     }
 
-    /// Attempts that fail in a world whose driver reads as `driver` says, on a clock that
-    /// only the pauses move: what was launched, stopped and waited, in order, up to the
-    /// `pauses`th pause.
-    private func paced(_ pauses: Int, backoff: Backoff, driver: @escaping (_ launched: Int, _ waited: Duration) -> DriverState?) -> [String] {
-        let world = World(connections: [.failure(.noSocket(path: "nowhere"))])
-        var events: [String] = []
+    /// What the loop said, and what it did between its lines.
+    private enum Step: Equatable {
+        case said(DaemonProcess.Said)
+        case launched
+        case stopped(pid_t)
+        case readTheDriver
+        case paused(Duration)
+    }
+
+    /// The loop in `world`, whose driver reads as `driver` says, on a clock that only the
+    /// pauses move, up to the `pauses`th pause: every line said, every launch and stop,
+    /// every reading of the driver and every pause, in the order they happened.
+    private func trace(in world: World, upTo pauses: Int = 1, backoff: Backoff = Backoff(first: .seconds(2), most: .seconds(60)), serve: @escaping () -> Void = {}, driver: @escaping (_ launched: Int, _ waited: Duration) -> DriverState? = { _, _ in nil }) -> [Step] {
+        var steps: [Step] = []
+        var paused = 0
         let clock = HandClock()
         let began = clock.now
         let effects = world.effects
-        let logged = DaemonProcess.Effects<Device>(
-            connect: effects.connect,
-            bringUp: effects.bringUp,
-            launch: { events.append("launch"); return try effects.launch() },
-            terminate: effects.terminate
-        )
+        var traced = effects
+        traced.launch = { steps.append(.launched); return try effects.launch() }
+        traced.terminate = { steps.append(.stopped($0)); effects.terminate($0) }
+        traced.say = { steps.append(.said($0)) }
         #expect(throws: Stop.self) {
-            try logged.keepUp(within: .milliseconds(20), backoff: backoff, lookingEvery: .seconds(2), readiness: Readiness(driver: { .running }), serve: { _ in RecordingDevices() }, driver: { driver(world.launched, clock.now - began) }, now: { clock.now }) { wait in
+            try traced.keepUp(within: .milliseconds(20), backoff: backoff, lookingEvery: .seconds(2), readiness: Readiness(driver: { .running }), serve: { _ in
+                serve()
+                return RecordingDevices()
+            }, driver: { steps.append(.readTheDriver); return driver(world.launched, clock.now - began) }, now: { clock.now }) { wait in
                 clock.advance(wait)
-                events.append("wait \(wait)")
-                if events.count(where: { $0.hasPrefix("wait") }) == pauses { throw Stop() }
+                steps.append(.paused(wait))
+                paused += 1
+                if paused == pauses { throw Stop() }
             }
         }
-        return events
+        return steps
+    }
+
+    /// Attempts that fail: what was launched and waited, in order, up to the `pauses`th
+    /// pause.
+    private func paced(_ pauses: Int, backoff: Backoff, driver: @escaping (_ launched: Int, _ waited: Duration) -> DriverState?) -> [String] {
+        trace(in: World(connections: [.failure(.noSocket(path: "nowhere"))]), upTo: pauses, backoff: backoff, driver: driver).compactMap {
+            switch $0 {
+            case .launched: "launch"
+            case .paused(let wait): "wait \(wait)"
+            case .said, .stopped, .readTheDriver: nil
+            }
+        }
     }
 
     /// The person approving the driver is waiting on this loop: the wait it is in ends at
@@ -380,12 +401,8 @@ import VirtualHID
         var launches: [ContinuousClock.Instant] = []
         var waitBegan: ContinuousClock.Instant?
         let effects = world.effects
-        let logged = DaemonProcess.Effects<Device>(
-            connect: effects.connect,
-            bringUp: effects.bringUp,
-            launch: { launches.append(clock.now); return try effects.launch() },
-            terminate: effects.terminate
-        )
+        var logged = effects
+        logged.launch = { launches.append(clock.now); return try effects.launch() }
         #expect(throws: Stop.self) {
             try logged.keepUp(within: .milliseconds(20), backoff: Backoff(first: wait, most: wait), lookingEvery: .seconds(2), readiness: Readiness(driver: { .running }), serve: { _ in RecordingDevices() }, driver: { clock.advance(reading); return .awaitingApproval }, now: { clock.now }) { pause in
                 if launches.count == 2 { throw Stop() }
@@ -396,6 +413,57 @@ import VirtualHID
         #expect(launches.count == 2)
         #expect(launches[1] - waitBegan! <= wait + reading)
         #expect(launches[1] - waitBegan! >= wait)
+    }
+
+    /// A reading of the driver can run to its limit, so a failed attempt is said before
+    /// the driver is read, and the wait is said after it: what follows the wait's line is
+    /// the wait. A daemon is said started and stopped once it has been.
+    @Test func aFailedAttemptIsSaidBeforeTheDriverIsReadAndItsWaitAfter() {
+        let nowhere = DaemonError.noSocket(path: "nowhere")
+        #expect(trace(in: World(connections: [.failure(nowhere)])) == [
+            .said(.happened("no driver's daemon to reach (\(nowhere)); starting it")),
+            .launched,
+            .said(.happened("started the driver's daemon as pid \(World.pid)")),
+            .stopped(World.pid),
+            .said(.happened("stopped the driver's daemon as pid \(World.pid), which vhidd started")),
+            .said(.failed("could not bring the devices up (\(nowhere))")),
+            .readTheDriver,
+            .said(.happened("bringing the devices up again in 2.0 seconds")),
+            .paused(.seconds(2)),
+        ])
+    }
+
+    /// Devices lost are said before anything that takes time: before the daemon started
+    /// for them is stopped, and before the driver is read. The wait is said after both.
+    @Test func lostDevicesAreSaidBeforeTheirDaemonIsStoppedAndTheDriverReadAndTheirWaitAfter() {
+        let nowhere = DaemonError.noSocket(path: "nowhere")
+        let world = World(connections: [.failure(nowhere), .success(Device())])
+        #expect(trace(in: world, serve: { world.lost!(.closed) }) == [
+            .said(.happened("no driver's daemon to reach (\(nowhere)); starting it")),
+            .launched,
+            .said(.happened("started the driver's daemon as pid \(World.pid)")),
+            .said(.happened("serving")),
+            .said(.failed("the devices went down (\(Readiness.Down.failed(DaemonError.closed)))")),
+            .stopped(World.pid),
+            .said(.happened("stopped the driver's daemon as pid \(World.pid), which vhidd started")),
+            .readTheDriver,
+            .said(.happened("bringing the devices up again in 2.0 seconds")),
+            .paused(.seconds(2)),
+        ])
+    }
+
+    /// A wait cut short is said at the look that read the driver on, with how far into
+    /// the wait that was.
+    @Test func aWaitCutShortIsSaidAtTheLookThatReadTheDriverOn() {
+        let steps = trace(in: World(connections: [.failure(.noSocket(path: "nowhere"))]), upTo: 2, backoff: Backoff(first: .seconds(60), most: .seconds(60)), driver: { _, waited in
+            waited < .seconds(2) ? .awaitingApproval : .enabled
+        })
+        let look: [Step] = [
+            .paused(.seconds(2)),
+            .readTheDriver,
+            .said(.happened("the driver extension reads enabled, from awaiting-approval, 2.0 seconds into a wait of 60.0 seconds; bringing the devices up now")),
+        ]
+        #expect(Array(steps.drop { $0 != look[0] }.prefix(3)) == look)
     }
 
     /// What the log says of a wait cut short: both states, as they were read.
