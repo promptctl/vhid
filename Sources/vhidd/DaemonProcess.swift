@@ -46,8 +46,8 @@ enum DaemonProcess {
         case startedHere(pid_t)
     }
 
-    /// A line of the daemon's log: something that happened, or a failure of the daemon's
-    /// own, which is also kept as its last one.
+    /// A line of vhidd's log: something that happened, or a failure of vhidd's own, which
+    /// is also kept as its last one.
     enum Said: Equatable {
         case happened(String)
         case failed(String)
@@ -59,16 +59,19 @@ enum DaemonProcess {
     /// only what was launched here - is then a function of what they answer, and a test
     /// drives it with answers of its own and no daemon at all, and reads what was said in
     /// order with what was done. [LAW:effects-at-boundaries]
+    ///
+    /// [LAW:locality-or-seam] Each is replaced on a copy, so what wraps one effect names
+    /// that one and an effect added here is added nowhere else.
     struct Effects<Device> {
         /// The devices on a connection to a daemon that is running, or `DaemonError` when
         /// none answers. `whenLost` is told when that connection ends underneath them.
-        let connect: (_ whenLost: @escaping @Sendable (DaemonError) -> Void) throws -> Device
+        var connect: (_ whenLost: @escaping @Sendable (DaemonError) -> Void) throws -> Device
         /// The devices brought up on their connection, each within the limit.
-        let bringUp: (Device, Duration) throws -> Startups
+        var bringUp: (Device, Duration) throws -> Startups
         /// The daemon started as this process's child.
-        let launch: () throws -> pid_t
-        let terminate: (pid_t) -> Void
-        let say: (Said) -> Void
+        var launch: () throws -> pid_t
+        var terminate: (pid_t) -> Void
+        var say: (Said) -> Void
     }
 
     /// The effects done for real. The daemon outlives any one connection on purpose, and
@@ -245,23 +248,20 @@ final class Children: @unchecked Sendable {
 
     /// `effects` with every launch recorded and every termination limited to what is.
     func tracking<Device>(_ effects: DaemonProcess.Effects<Device>) -> DaemonProcess.Effects<Device> {
-        DaemonProcess.Effects(
-            connect: effects.connect,
-            bringUp: effects.bringUp,
-            launch: {
-                self.lock.lock(); defer { self.lock.unlock() }
-                guard !self.stopping else { throw Stopping() }
-                let pid = try effects.launch()
-                self.pids.insert(pid)
-                return pid
-            },
-            terminate: { pid in
-                self.lock.lock(); defer { self.lock.unlock() }
-                guard self.pids.remove(pid) != nil else { return }
-                effects.terminate(pid)
-            },
-            say: effects.say
-        )
+        var tracked = effects
+        tracked.launch = {
+            self.lock.lock(); defer { self.lock.unlock() }
+            guard !self.stopping else { throw Stopping() }
+            let pid = try effects.launch()
+            self.pids.insert(pid)
+            return pid
+        }
+        tracked.terminate = { pid in
+            self.lock.lock(); defer { self.lock.unlock() }
+            guard self.pids.remove(pid) != nil else { return }
+            effects.terminate(pid)
+        }
+        return tracked
     }
 
     /// Stops every daemon still recorded, and every launch after it refuses.
@@ -327,11 +327,12 @@ extension DaemonProcess.Effects {
                 off = nil
                 let since = now()
                 let why = readiness.whileUp()
+                failures = now() - since >= backoff.most ? 1 : failures + 1
+                // Said before the stop, which waits on a daemon that takes its time to end.
+                say(.failed("the devices went down (\(why))"))
                 // Lost, so whatever the daemon held for vhidd went with the connection; a
                 // daemon started here is stopped so the next attempt starts it afresh.
                 stop(reached.daemon)
-                failures = now() - since >= backoff.most ? 1 : failures + 1
-                say(.failed("the devices went down (\(why))"))
             } catch {
                 failures += 1
                 readiness.failed(error)
