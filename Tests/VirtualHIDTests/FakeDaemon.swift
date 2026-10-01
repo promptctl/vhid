@@ -19,6 +19,7 @@ final class FakeDaemon: @unchecked Sendable {
     private let lock = NSLock()
     private var log: [Frame] = []
     private var pushID: UInt64 = 10_000
+    private var clientGone = false
 
     /// `handling` runs on the daemon's own thread for every frame the client sends. The
     /// default answers each request with an empty response, which is what the daemon does
@@ -46,6 +47,7 @@ final class FakeDaemon: @unchecked Sendable {
                     lock.lock(); log.append(frame); lock.unlock()
                     try answer(frame, self)
                 } catch is Closed {
+                    lock.lock(); clientGone = true; lock.unlock()
                     break
                 } catch {
                     // The framing is what this suite exists to check, so a frame this
@@ -88,6 +90,18 @@ final class FakeDaemon: @unchecked Sendable {
             Thread.sleep(forTimeInterval: 0.002)
         }
         return received.contains(wanted)
+    }
+
+    /// Whether the client ended the stream within `limit`, which is what tells the real
+    /// daemon to take down the devices it kept for that client.
+    func awaitClientHangUp(within limit: Duration = .seconds(2)) -> Bool {
+        let deadline = ContinuousClock.now + limit
+        repeat {
+            lock.lock(); let gone = clientGone; lock.unlock()
+            if gone { return true }
+            Thread.sleep(forTimeInterval: 0.002)
+        } while ContinuousClock.now < deadline
+        return false
     }
 
     /// The payload of each request the client sent, which is where the version, the

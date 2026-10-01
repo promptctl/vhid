@@ -81,8 +81,9 @@ public final class DaemonConnection: Sendable {
     /// Connects to the daemon at the path above.
     ///
     /// `whenLost` is told, once, from the reading thread, when the connection ends for
-    /// any reason but this side hanging up: the daemon closed it, the socket failed, or
-    /// the wire carried something this side cannot read. Every later request throws the
+    /// any reason but this side hanging up: the daemon closed it, the socket failed, the
+    /// wire carried something this side cannot read, or the daemon took back a status it
+    /// had said held. Every later request throws the
     /// same failure, so a caller that only ever asks can leave it be; a process that
     /// holds the connection open across long silences is the one that needs to hear.
     public convenience init(whenLost: @escaping @Sendable (DaemonError) -> Void = { _ in }) throws {
@@ -355,11 +356,23 @@ private final class Link: @unchecked Sendable {
     /// finds the failure and not an acknowledgement. [LAW:single-enforcer] A driver built
     /// for another protocol accepts reports and then does something other than what they
     /// say, so there is no degraded mode to continue into.
+    ///
+    /// A status taken back throws from here the same way, and ends the connection with it.
+    /// The daemon goes on answering a posted report after the driver has gone, measured on
+    /// studious 2026-10-01, so its answers cannot say the devices are still there; its
+    /// status is the only word on that, and it is read on every frame, not only while a
+    /// device is being brought up. The driver coming back does not undo it: the daemon
+    /// makes the devices afresh on the same connection, and whatever was held on the old
+    /// ones is not held on the new, which is what a new connection says and an old one
+    /// cannot. [LAW:no-silent-failure]
     private func record(_ pairs: [UInt8]) throws {
+        let before = status
         for (status, value) in try DaemonConnection.statusPairs(pairs) {
             self.status[status] = value
         }
         guard status[.driverVersionMismatched] != true else { throw DaemonError.driverVersionMismatched }
+        let takenBack = before.filter { $0.value && status[$0.key] == false }.keys.min { $0.rawValue < $1.rawValue }
+        if let takenBack { throw DaemonError.withdrawn(takenBack, said: status) }
     }
 
     // MARK: Ending
@@ -386,9 +399,17 @@ private final class Link: @unchecked Sendable {
     /// waiter throws, and every waiter is woken. Answers whether the owner is owed the
     /// news, which is once, and never for an end this side asked for. Only ever called
     /// with the lock held.
+    ///
+    /// The stream ends here for the daemon too. A loss this side declares - a status taken
+    /// back, a version it was not built for, a silence - is on a socket the daemon still
+    /// counts as a client, and it keeps that client's devices, and whatever is down on
+    /// them, until the client goes: a mouse button held through a keyboard taken back
+    /// stayed held. [LAW:single-enforcer] So a connection that has ended has ended on the
+    /// wire, whoever still holds the object.
     private func record(loss error: DaemonError) -> Bool {
         let first = failure == nil
         if first { failure = error }
+        shutdown(socket, SHUT_RDWR)
         guarded.broadcast()
         return first && !hungUp
     }

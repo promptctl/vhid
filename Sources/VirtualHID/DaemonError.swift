@@ -19,6 +19,10 @@ public enum DaemonError: Error, CustomStringConvertible, Equatable {
     /// The daemon never said `awaiting` held; `said` is its latest word on every status it
     /// did send, which is the reason - an unapproved driver reads as not activated.
     case notReady(awaiting: DaemonConnection.Status, said: [DaemonConnection.Status: Bool])
+    /// The daemon said `status` held and then said it does not: the driver went away
+    /// underneath a connection that is still open, and the devices on it went with it.
+    /// `said` is its latest word on every status, as above.
+    case withdrawn(DaemonConnection.Status, said: [DaemonConnection.Status: Bool])
 
     public var description: String {
         switch self {
@@ -35,8 +39,14 @@ public enum DaemonError: Error, CustomStringConvertible, Equatable {
         case .driverVersionMismatched:
             "the driver's daemon reports the driver's version is not the one it was built for"
         case .notReady(let awaiting, let said):
-            "the driver's daemon never said \(awaiting.name); it last said "
-                + (said.isEmpty ? "nothing about the driver" : said.sorted { $0.key.rawValue < $1.key.rawValue }.map { "\($0.key.name): \($0.value ? "yes" : "no")" }.joined(separator: ", "))
+            "the driver's daemon never said \(awaiting.name); it last said \(Self.words(said))"
+        case .withdrawn(let status, let said):
+            "the driver's daemon said \(status.name) and then took it back; it last said \(Self.words(said))"
         }
+    }
+
+    /// The daemon's latest word on each status, in the order of its own table.
+    private static func words(_ said: [DaemonConnection.Status: Bool]) -> String {
+        said.isEmpty ? "nothing about the driver" : said.sorted { $0.key.rawValue < $1.key.rawValue }.map { "\($0.key.name): \($0.value ? "yes" : "no")" }.joined(separator: ", ")
     }
 }

@@ -1,5 +1,6 @@
 import Foundation
 import Keystrokes
+import Pointing
 import Testing
 @testable import VirtualHID
 
@@ -96,6 +97,98 @@ import Testing
         let connection = try DaemonConnection(fileDescriptor: fake.clientDescriptor, whenLost: lost.record)
         #expect(throws: DaemonError.driverVersionMismatched) { try connection.request(.keyboardInitialize, by: .now + .seconds(2)) }
         #expect(lost.await() == .driverVersionMismatched)
+    }
+
+    /// The driver going away under a connection that stays open is the same loss as the
+    /// connection ending: told once, with what the daemon took back and its latest word,
+    /// and every later report refused by that name with nothing sent. The fake goes on
+    /// answering reports throughout, as the daemon does. [LAW:no-silent-failure]
+    ///
+    /// The frames are the ones pqrs's daemon sent a client on studious (macOS 15.0.1,
+    /// package 8.4.0) on 2026-10-01, when the driver extension's process was killed.
+    @Test func theDriverGoingAwayUnderAnOpenConnectionIsTheLossAndNoReportIsSentAfterIt() throws {
+        let fake = FakeDaemon()
+        let lost = Lost()
+        let daemon = try DaemonConnection(fileDescriptor: fake.clientDescriptor, whenLost: lost.record)
+        let keyboard = VirtualKeyboard(daemon: daemon, reportTimeout: .seconds(2))
+        let mouse = VirtualPointing(daemon: daemon, reportTimeout: .seconds(2))
+        try fake.push(Self.said(connected: true, keyboard: true, pointing: true))
+        try keyboard.start(within: .seconds(2))
+        try mouse.start(within: .seconds(2))
+        try keyboard.down(.leftShift)
+        let sentWhileUp = fake.requestPayloads.count
+
+        try fake.push(Self.said(activated: false, connected: false, keyboard: false, pointing: false))
+        let gone = DaemonError.withdrawn(.driverActivated, said: [.driverActivated: false, .driverConnected: false, .driverVersionMismatched: false, .keyboardReady: false, .pointingReady: false])
+        #expect(lost.await() == gone)
+        #expect(throws: gone) { try keyboard.releaseAll() }
+        #expect(throws: gone) { try mouse.move(by: Move(x: Count(clamping: 1), y: .zero)) }
+        #expect(fake.requestPayloads.count == sentWhileUp)
+        #expect(lost.count == 1)
+        #expect(gone.description == "the driver's daemon said driver activated and then took it back; it last said driver activated: no, driver connected: no, driver version mismatched: no, keyboard ready: no, pointing ready: no")
+    }
+
+    /// The driver coming back on the same connection does not bring the lost devices back:
+    /// the daemon makes new ones, and the connection that held the old ones stays ended.
+    @Test func theDriverComingBackDoesNotReviveTheConnectionThatLostIt() throws {
+        let fake = FakeDaemon()
+        let lost = Lost()
+        let keyboard = VirtualKeyboard(daemon: try DaemonConnection(fileDescriptor: fake.clientDescriptor, whenLost: lost.record), reportTimeout: .seconds(2))
+        try fake.push(Self.said(connected: true, keyboard: true, pointing: true))
+        try keyboard.start(within: .seconds(2))
+        try fake.push(Self.said(connected: true, keyboard: false, pointing: true))
+        let gone = try #require(lost.await())
+        guard case .withdrawn(.keyboardReady, _) = gone else { Issue.record("lost to \(gone)"); return }
+        try fake.push(Self.said(connected: true, keyboard: true, pointing: true))
+        #expect(throws: gone) { try keyboard.down(.leftShift) }
+        #expect(lost.count == 1)
+    }
+
+    /// A loss this side declares ends the stream for the daemon while the connection is
+    /// still held: the daemon keeps a client's devices, and what is down on them, until
+    /// the client goes, and the pointing device here was never taken back.
+    @Test func aLossThisSideDeclaresEndsTheStreamForTheDaemon() throws {
+        let fake = FakeDaemon()
+        let lost = Lost()
+        let daemon = try DaemonConnection(fileDescriptor: fake.clientDescriptor, whenLost: lost.record)
+        try fake.push(Self.said(connected: true, keyboard: true, pointing: true))
+        try daemon.wait(for: .pointingReady, by: .now + .seconds(2))
+        try fake.push(Self.said(connected: true, keyboard: false, pointing: true))
+        #expect(lost.await() != nil)
+        #expect(fake.awaitClientHangUp())
+        withExtendedLifetime(daemon) {}
+    }
+
+    /// What the daemon says on the way up is not a loss: it answers the first request
+    /// before it has connected to the driver, and says each thing as it becomes true.
+    /// Nothing is taken back, so the devices come up. The frames are the ones it sent a
+    /// client that brought the keyboard up and then the mouse, on studious on 2026-10-01.
+    @Test func whatTheDaemonSaysWhileBringingTheDevicesUpIsNotALoss() throws {
+        let fake = FakeDaemon { frame, daemon in
+            guard case .request(let id, let payload) = frame else { return }
+            // The answer carries the first frame's statuses, and each is then pushed; a
+            // posted report is answered with none.
+            let frames: [[(DaemonConnection.Status, Bool)]] = switch DaemonConnection.Request(rawValue: requestSent(payload).request) {
+            case .keyboardInitialize: [Self.said(connected: false, keyboard: false, pointing: false), Self.said(connected: true, keyboard: false, pointing: false), Self.said(connected: true, keyboard: true, pointing: false)]
+            case .pointingInitialize: [Self.said(connected: true, keyboard: true, pointing: false), Self.said(connected: true, keyboard: true, pointing: true)]
+            default: []
+            }
+            try daemon.send(.response(id: id, payload: (frames.first ?? []).flatMap { [$0.0.rawValue, $0.1 ? 1 : 0] }))
+            try frames.forEach(daemon.push)
+        }
+        let lost = Lost()
+        let daemon = try DaemonConnection(fileDescriptor: fake.clientDescriptor, whenLost: lost.record)
+        let keyboard = VirtualKeyboard(daemon: daemon, reportTimeout: .seconds(2))
+        let mouse = VirtualPointing(daemon: daemon, reportTimeout: .seconds(2))
+        try keyboard.start(within: .seconds(2))
+        try mouse.start(within: .seconds(2))
+        #expect(throws: Never.self) { try keyboard.down(.leftShift) }
+        #expect(lost.count == 0)
+    }
+
+    /// The five statuses the daemon sends in every frame that carries any.
+    private static func said(activated: Bool = true, connected: Bool, keyboard: Bool, pointing: Bool) -> [(DaemonConnection.Status, Bool)] {
+        [(.driverActivated, activated), (.driverConnected, connected), (.driverVersionMismatched, false), (.keyboardReady, keyboard), (.pointingReady, pointing)]
     }
 
     /// An answer to a request nobody waits on any more - it timed out and was forgotten -
