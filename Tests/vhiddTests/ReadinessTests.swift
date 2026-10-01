@@ -13,88 +13,94 @@ import VirtualHID
     }
 
     @Test func beforeTheFirstAttemptEndsTheDevicesAreRefusedAsStarting() {
-        #expect(refusal(Readiness()) == "devices not up: vhidd is still bringing them up")
+        #expect(refusal(Readiness(driver: { nil })) == "devices not up: vhidd is still bringing them up")
     }
 
     /// The refusal names what the pqrs daemon said. [LAW:no-silent-failure]
     @Test func aFailedAttemptIsTheRefusal() {
-        let readiness = Readiness()
+        let readiness = Readiness(driver: { nil })
         let failure = DaemonError.notReady(awaiting: .keyboardReady, said: [.driverActivated: false])
         _ = readiness.begin()
-        readiness.failed(failure, driver: nil)
+        readiness.failed(failure)
         #expect(refusal(readiness) == "devices not up: \(failure)")
     }
 
-    /// The refusal for `failure` with the driver read as `state`, which is off.
-    private func naming(_ state: DriverState, after failure: any Error) throws -> String {
-        "devices not up: \(failure)\nThe driver extension reads \(state.rawValue):\n\(try #require(state.step))"
+    /// The refusal for `why` with the driver read as `state`, which is off.
+    private func naming(_ state: DriverState, after why: Readiness.Down) throws -> String {
+        "\(why)\nThe driver extension reads \(state.rawValue):\n\(try #require(state.step))"
     }
 
     /// pqrs says "not activated" for several driver states alike, so the refusal carries
     /// the step for the state read on this Mac - the switch only when the switch is it.
     @Test(arguments: [DriverState.awaitingApproval, .installedInactive, .pendingReboot])
     func aFailureWhileTheDriverIsOffNamesItsStep(state: DriverState) throws {
-        let readiness = Readiness()
+        let readiness = Readiness(driver: { state })
         let failure = DaemonError.notReady(awaiting: .keyboardReady, said: [.driverActivated: false])
         _ = readiness.begin()
-        readiness.failed(failure, driver: state)
-        #expect(refusal(readiness) == (try naming(state, after: failure)))
+        readiness.failed(failure)
+        #expect(refusal(readiness) == (try naming(state, after: .failed(failure))))
     }
 
     /// A driver that is on, or a state that could not be read, adds nothing.
     @Test(arguments: [DriverState.enabled, .running, nil])
     func aFailureWithTheDriverOnIsTheFailureAlone(state: DriverState?) {
-        let readiness = Readiness()
+        let readiness = Readiness(driver: { state })
         _ = readiness.begin()
-        readiness.failed(DaemonError.closed, driver: state)
+        readiness.failed(DaemonError.closed)
         #expect(refusal(readiness) == "devices not up: \(DaemonError.closed)")
     }
 
-    /// The step named is the one for the driver as it was last read: a person who asked
-    /// for the activation is told of the switch, and one who turned it on is told of none,
-    /// with the failure standing all the while.
-    @Test func aDriverReadSinceTheFailureIsTheOneWhoseStepIsNamed() throws {
-        let readiness = Readiness()
+    /// The step named is the one for the driver as it reads when the act is refused, with
+    /// nothing told in between: a person who asked for the activation is told of the
+    /// switch on their next call, and one who turned it on is told of no step, with the
+    /// failure standing all the while.
+    @Test func eachRefusalNamesTheStepTheDriverIsAtNow() throws {
+        var driver: DriverState? = .installedInactive
+        let readiness = Readiness(driver: { driver })
         let failure = DaemonError.notReady(awaiting: .keyboardReady, said: [.driverActivated: false])
         _ = readiness.begin()
-        readiness.failed(failure, driver: .installedInactive)
-        readiness.driver(reads: .awaitingApproval)
-        #expect(refusal(readiness) == (try naming(.awaitingApproval, after: failure)))
-        readiness.driver(reads: nil)
+        readiness.failed(failure)
+        #expect(refusal(readiness) == (try naming(.installedInactive, after: .failed(failure))))
+        driver = .awaitingApproval
+        #expect(refusal(readiness) == (try naming(.awaitingApproval, after: .failed(failure))))
+        driver = nil
         #expect(refusal(readiness) == "devices not up: \(failure)")
-        readiness.driver(reads: .enabled)
+        driver = .enabled
         #expect(refusal(readiness) == "devices not up: \(failure)")
     }
 
-    /// Devices lost to a driver that was switched off name its step once it is read.
-    @Test func aDriverReadAfterALossNamesItsStep() throws {
-        let readiness = Readiness()
+    /// A person who skipped the installer's last page is told their step by a call made
+    /// while the first attempt is still under way.
+    @Test func aRefusalBeforeTheFirstAttemptEndsNamesTheDriversStep() throws {
+        #expect(refusal(Readiness(driver: { .awaitingApproval })) == (try naming(.awaitingApproval, after: .starting)))
+    }
+
+    /// Devices lost to a driver that was switched off are refused with its step.
+    @Test func aRefusalAfterALossNamesTheDriversStep() throws {
+        let readiness = Readiness(driver: { .disabled })
         let attempt = readiness.begin()
         readiness.up(RecordingDevices())
         _ = readiness.lost(DaemonError.closed, in: attempt)
-        readiness.driver(reads: .disabled)
-        #expect(refusal(readiness) == (try naming(.disabled, after: DaemonError.closed)))
+        #expect(refusal(readiness) == (try naming(.disabled, after: .failed(DaemonError.closed))))
     }
 
-    /// A reading says nothing of devices that are up, or of an attempt still under way.
-    @Test func aDriverReadWhileNothingHasFailedChangesNothing() throws {
-        let starting = Readiness()
-        starting.driver(reads: .awaitingApproval)
-        #expect(refusal(starting) == "devices not up: vhidd is still bringing them up")
+    /// The driver is read to refuse an act and for nothing else: what is done only on
+    /// devices that are up - the sweep for keys held too long, a release - reads none,
+    /// and nor does an act that is served.
+    @Test func theDriverIsReadOnlyToRefuse() throws {
+        var read = 0
+        let readiness = Readiness(driver: { read += 1; return .awaitingApproval })
+        #expect(readiness.up == nil)
+        readiness.releaseEverything(because: "a client went away")
+        #expect(read == 0)
+        #expect(refusal(readiness) != nil)
+        #expect(read == 1)
+        _ = readiness.begin()
         let devices = RecordingDevices()
-        let serving = Readiness.serving(devices)
-        serving.driver(reads: .awaitingApproval)
-        #expect(try serving.devices().devices === devices)
-    }
-
-    /// An attempt whose connection was lost before it failed keeps the loss as its reason,
-    /// and names the step for the driver as read at the failure.
-    @Test func aFailureAfterALossKeepsTheLossAndNamesTheDriversStep() throws {
-        let readiness = Readiness()
-        let attempt = readiness.begin()
-        _ = readiness.lost(DaemonError.closed, in: attempt)
-        readiness.failed(DaemonError.silent, driver: .awaitingApproval)
-        #expect(refusal(readiness) == (try naming(.awaitingApproval, after: DaemonError.closed)))
+        readiness.up(devices)
+        #expect(try readiness.devices().devices === devices)
+        #expect(readiness.up?.devices === devices)
+        #expect(read == 1)
     }
 
     @Test func devicesThatComeUpAreHandedOut() throws {
@@ -106,7 +112,7 @@ import VirtualHID
     }
 
     @Test func aLossTakesTheDevicesDownWithItsReason() {
-        let readiness = Readiness()
+        let readiness = Readiness(driver: { nil })
         let attempt = readiness.begin()
         readiness.up(RecordingDevices())
         #expect(readiness.lost(DaemonError.closed, in: attempt))
@@ -116,7 +122,7 @@ import VirtualHID
     /// A loss that arrives before the devices are handed over keeps them down: they are
     /// devices on a connection that is gone.
     @Test func devicesWhoseConnectionWasLostBeforeTheyCameUpStayDown() {
-        let readiness = Readiness()
+        let readiness = Readiness(driver: { nil })
         let attempt = readiness.begin()
         _ = readiness.lost(DaemonError.closed, in: attempt)
         readiness.up(RecordingDevices())
@@ -125,7 +131,7 @@ import VirtualHID
 
     /// An earlier attempt's connection going says nothing about the devices up now.
     @Test func aLossFromAnEarlierAttemptLeavesTheDevicesUp() throws {
-        let readiness = Readiness()
+        let readiness = Readiness(driver: { nil })
         let earlier = readiness.begin()
         _ = readiness.begin()
         let devices = RecordingDevices()
@@ -137,9 +143,9 @@ import VirtualHID
     /// An attempt that failed keeps its reason: its connection closing afterwards is the
     /// failure's consequence, not a new cause.
     @Test func aLateLossDoesNotReplaceWhyTheAttemptFailed() {
-        let readiness = Readiness()
+        let readiness = Readiness(driver: { nil })
         let attempt = readiness.begin()
-        readiness.failed(DaemonError.silent, driver: nil)
+        readiness.failed(DaemonError.silent)
         #expect(!readiness.lost(DaemonError.closed, in: attempt))
         #expect(refusal(readiness) == "devices not up: \(DaemonError.silent)")
     }

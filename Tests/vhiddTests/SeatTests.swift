@@ -1,4 +1,6 @@
+import DriverExtension
 import Foundation
+import Installations
 import Testing
 @testable import vhidd
 
@@ -35,7 +37,7 @@ import Testing
     /// While the devices are down an act is refused with why, and claims nothing: the next
     /// client is told the same reason, not that the first is in the way.
     @Test func anActWhileTheDevicesAreDownIsRefusedWithWhyAndClaimsNothing() {
-        let (holder, readiness) = (Holder(), Readiness())
+        let (holder, readiness) = (Holder(), Readiness(driver: { nil }))
         let other = NSObject()
         let first = Seat(ObjectIdentifier(one), pid: 41, holder: holder, readiness: readiness, cursor: FixedCursor())
         let second = Seat(ObjectIdentifier(other), pid: 42, holder: holder, readiness: readiness, cursor: FixedCursor())
@@ -46,9 +48,21 @@ import Testing
         #expect(holder.pid(on: 1) == nil)
     }
 
+    /// The refusal a client receives names the driver's step, under the code that says
+    /// the devices are down.
+    @Test func anActRefusedWhileTheDriverIsOffCarriesItsStep() throws {
+        let readiness = Readiness(driver: { .awaitingApproval })
+        let seat = Seat(ObjectIdentifier(one), pid: 41, holder: Holder(), readiness: readiness, cursor: FixedCursor())
+        var refused: NSError?
+        seat.down(usage: 4) { refused = $0 as NSError? }
+        let step = try #require(DriverState.awaitingApproval.step)
+        #expect(refused?.localizedDescription == "\(Readiness.Down.starting)\nThe driver extension reads \(DriverState.awaitingApproval.rawValue):\n\(step)")
+        #expect(refused?.code == Installation.devicesDownCode)
+    }
+
     /// Status is not the proof the devices are up when they are not: it answers why.
     @Test func statusWhileTheDevicesAreDownSaysWhy() {
-        let seat = Seat(ObjectIdentifier(one), pid: 41, holder: Holder(), readiness: Readiness(), cursor: FixedCursor())
+        let seat = Seat(ObjectIdentifier(one), pid: 41, holder: Holder(), readiness: Readiness(driver: { nil }), cursor: FixedCursor())
         var answer: (NSNumber?, String?)
         seat.status { answer = ($0, ($1 as NSError?)?.localizedDescription) }
         #expect(answer.0 == nil)
@@ -58,7 +72,7 @@ import Testing
     /// A client whose devices were lost is told so on its next act, and on every act
     /// after, rather than acting on fresh devices as if what it held were still held.
     @Test func aSeatWhoseDevicesWereLostEnds() {
-        let (holder, readiness) = (Holder(), Readiness())
+        let (holder, readiness) = (Holder(), Readiness(driver: { nil }))
         let first = readiness.begin()
         readiness.up(RecordingDevices())
         let seat = Seat(ObjectIdentifier(one), pid: 41, holder: holder, readiness: readiness, cursor: FixedCursor())

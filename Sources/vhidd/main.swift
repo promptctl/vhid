@@ -100,7 +100,17 @@ do {
     // Listening comes first, and bringing the devices up after, on a thread of its own:
     // a client that calls while they are down is answered at once with the reason, from
     // `readiness`, rather than finding no service at all. [LAW:no-silent-failure]
-    let readiness = Readiness()
+    // A driver that could not be read names no step and ends no wait, so the reason it
+    // could not is said here, where it would otherwise be lost. [LAW:no-silent-failure]
+    let driver = { () -> DriverState? in
+        do {
+            return try DriverState(DriverProbe.facts())
+        } catch {
+            log("could not read the driver extension: \(error)")
+            return nil
+        }
+    }
+    let readiness = Readiness(driver: driver)
     let listener = NSXPCListener(machServiceName: installation.service)
     let delegate = Listener(readiness: readiness, callers: callers, cursor: FrontCursor.real)
     listener.delegate = delegate
@@ -137,17 +147,7 @@ do {
                 devices.releaseEverything(because: "starting")
                 return devices
             },
-            // A driver that could not be read names no step and ends no wait, so the
-            // reason it could not is said here, where it would otherwise be lost.
-            // [LAW:no-silent-failure]
-            driver: {
-                do {
-                    return try DriverState(DriverProbe.facts())
-                } catch {
-                    log("could not read the driver extension: \(error)")
-                    return nil
-                }
-            },
+            driver: driver,
             now: { .now },
             pause: { Thread.sleep(forTimeInterval: Double($0.components.seconds) + Double($0.components.attoseconds) / 1e18) }
         )

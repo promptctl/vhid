@@ -191,18 +191,17 @@ func waitOut<Found>(
     return nil
 }
 
-/// A driver extension that read as not on and reads as something else since: the change
-/// a person makes between attempts. One that now reads on is what the next attempt is
-/// waiting for; one still off has moved to another step.
+/// A driver extension that read as not on and reads as on since: the one change between
+/// attempts that a person makes and the next attempt is waiting for.
 ///
 /// Both ends are states that were read. A state that could not be read is neither, so a
-/// probe that fails and recovers changes nothing. [LAW:parse-dont-validate]
-struct DriverChange: Equatable, CustomStringConvertible {
+/// probe that fails and recovers turns nothing on. [LAW:parse-dont-validate]
+struct TurnedOn: Equatable, CustomStringConvertible {
     let from: DriverState
     let to: DriverState
 
     init?(from: DriverState, to: DriverState?) {
-        guard !from.isOn, let to, to != from else { return nil }
+        guard !from.isOn, let to, to.isOn else { return nil }
         self.from = from
         self.to = to
     }
@@ -279,11 +278,6 @@ extension DaemonProcess.Effects {
     /// driver is read every `look` of them until it reads on or the devices come up. Any
     /// other wait is taken whole and reads nothing.
     ///
-    /// Every one of those readings is told to `readiness`, so the step a refused verb
-    /// names is the one for the driver as last read, not as it stood when the attempt
-    /// ended: a person who has done one step is told the next within a `look`.
-    /// [LAW:one-source-of-truth]
-    ///
     /// Returns only by `pause` throwing, which the daemon's never does.
     func keepUp(
         within limit: Duration,
@@ -301,12 +295,6 @@ extension DaemonProcess.Effects {
         // already failing is still one turned on since, and one reading that could not
         // be taken leaves the wait looking. [LAW:no-ambient-temporal-coupling]
         var off: DriverState?
-        // The driver read once an attempt has ended, and told to `readiness` as it is read.
-        func read() -> DriverState? {
-            let reading = driver()
-            readiness.driver(reads: reading)
-            return reading
-        }
         while true {
             let attempt = readiness.begin()
             let ended: DriverState?
@@ -324,30 +312,18 @@ extension DaemonProcess.Effects {
                 stop(reached.daemon)
                 failures = now() - since >= backoff.most ? 1 : failures + 1
                 logFailure("the devices went down (\(why)); bringing them up again in \(backoff.after(failures))")
-                ended = read()
+                ended = driver()
             } catch {
                 failures += 1
-                // Read before the failure is told and told with it, so no verb is refused
-                // with the failure and not yet its step.
+                readiness.failed(error)
                 ended = driver()
-                readiness.failed(error, driver: ended)
                 logFailure("could not bring the devices up (\(error)); trying again in \(backoff.after(failures))")
             }
             if let ended, !ended.isOn { off = ended }
             let wait = backoff.after(failures)
             // [LAW:dataflow-not-control-flow] Every wait is waited out the same way: one
             // with nothing to look for is a single look as long as itself, finding nothing.
-            let on = try waitOut(wait, lookingEvery: off == nil ? wait : look, pause: pause) { () -> DriverChange? in
-                guard let change = off.flatMap({ DriverChange(from: $0, to: read()) }) else { return nil }
-                // Still off, at another step: the wait goes on, for the driver as it reads now.
-                guard change.to.isOn else {
-                    log("\(change); a refused verb names that step from now")
-                    off = change.to
-                    return nil
-                }
-                return change
-            }
-            if let on {
+            if let on = try waitOut(wait, lookingEvery: off == nil ? wait : look, pause: pause, for: { off.flatMap { TurnedOn(from: $0, to: driver()) } }) {
                 log("\(on.found), \(on.after) into a wait of \(wait); bringing the devices up now")
                 failures = 0
                 off = nil

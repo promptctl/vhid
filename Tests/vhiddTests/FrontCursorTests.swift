@@ -131,7 +131,7 @@ import Testing
     /// The seat answers the read without taking the devices, and while they are down.
     @Test func aSeatReadsTheCursorWithoutTheDevices() {
         let holder = Holder()
-        let seat = Seat(ObjectIdentifier(NSObject()), pid: 41, holder: holder, readiness: Readiness(), cursor: FixedCursor(at: (7, 9)))
+        let seat = Seat(ObjectIdentifier(NSObject()), pid: 41, holder: holder, readiness: Readiness(driver: { nil }), cursor: FixedCursor(at: (7, 9)))
         var answer: (Double, Double, Error?)?
         seat.cursor { answer = ($0, $1, $2) }
         #expect(answer?.0 == 7 && answer?.1 == 9 && answer?.2 == nil)
