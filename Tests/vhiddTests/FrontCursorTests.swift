@@ -71,9 +71,15 @@ import Testing
         #expect(throws: FrontCursor.Unnamed.self) { try FrontCursor.frontSession([["kCGSSessionOnConsoleKey": true]]) }
     }
 
+    /// Long enough that no runner is slow enough to reach it: the limit on what a test does
+    /// not test, there so a child that hangs fails the test and does not hang the run.
+    /// [LAW:no-ambient-temporal-coupling] a test's verdict does not turn on how fast `sh` is.
+    private static let unhurried: Duration = .seconds(30)
+
     /// A real child over real pipes, played by `sh`: what it says is what the read says.
-    private func child(_ script: String) throws -> ChildReader {
-        try ChildReader(in: bmf, executable: "/bin/sh", arguments: ["-c", "echo joined; " + script], patience: .milliseconds(300))
+    /// It is waited for unhurried; `patience` is short only in the test of the patience.
+    private func child(_ script: String, patience: Duration = unhurried) throws -> ChildReader {
+        try ChildReader(in: bmf, executable: "/bin/sh", arguments: ["-c", "echo joined; " + script], joinWithin: Self.unhurried, patience: patience)
     }
 
     @Test func aChildAnswersEachLineWithTheCursor() throws {
@@ -92,7 +98,7 @@ import Testing
     @Test func aChildThatNeverSaysItJoinedIsGivenUpOnAndEnded() {
         let began = ContinuousClock.now
         #expect {
-            try ChildReader(in: bmf, executable: "/bin/sh", arguments: ["-c", "trap '' TERM; sleep 30"], patience: .milliseconds(300))
+            try ChildReader(in: bmf, executable: "/bin/sh", arguments: ["-c", "trap '' TERM; sleep 30"], joinWithin: .milliseconds(300))
         } throws: { "\($0)".contains("did not answer within") }
         // Returning at all means the child was reaped: `stop` waits for it.
         #expect(began.duration(to: .now) < .seconds(2))
@@ -101,9 +107,11 @@ import Testing
     @Test func aChildThatHasEndedFailsTheReadAndNotTheDaemon() throws {
         let reader = try child("exit 0")
         defer { reader.stop() }
-        Thread.sleep(forTimeInterval: 0.2)
-        // A write to its closed stdin would raise SIGPIPE and end this test process.
+        // The first read fails however far the child has got in ending, and once it has
+        // failed the child's stdin is closed, so the second is the write to a closed pipe.
         #expect(throws: (any Error).self) { try reader.read() }
+        // That write would raise SIGPIPE and end this test process.
+        #expect { try reader.read() } throws: { "\($0)".contains("could not be asked") }
     }
 
     /// Stopping returns only once the child is reaped, even one that ignores SIGTERM and
@@ -116,7 +124,7 @@ import Testing
     }
 
     @Test func aChildThatDoesNotAnswerIsGivenUpOnInTime() throws {
-        let reader = try child("sleep 30")
+        let reader = try child("sleep 30", patience: .milliseconds(300))
         defer { reader.stop() }
         let began = ContinuousClock.now
         #expect { try reader.read() } throws: { "\($0)".contains("did not answer within") }
