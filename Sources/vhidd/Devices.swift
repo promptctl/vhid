@@ -233,7 +233,7 @@ enum NotOnTheDevice: Error, CustomStringConvertible {
 /// a client knows no key of its is held. [LAW:types-are-the-program]
 func refusal(_ error: any Error) -> NSError {
     let code = switch error {
-    case is Readiness.Down: Installation.devicesDownCode
+    case is Readiness.Refused: Installation.devicesDownCode
     case is Holder.Busy, is Seat.Ended, is Seat.Lost: Installation.seatRefusedCode
     default: 1
     }

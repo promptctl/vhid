@@ -315,8 +315,8 @@ extension DaemonProcess.Effects {
                 ended = driver()
             } catch {
                 failures += 1
+                readiness.failed(error)
                 ended = driver()
-                readiness.failed(BringUpFailure(error, driver: ended))
                 logFailure("could not bring the devices up (\(error)); trying again in \(backoff.after(failures))")
             }
             if let ended, !ended.isOn { off = ended }
@@ -329,28 +329,5 @@ extension DaemonProcess.Effects {
                 off = nil
             }
         }
-    }
-}
-
-/// A failed bring-up, and the driver extension's step when the driver is not on.
-///
-/// pqrs's status says only "not activated" for an extension awaiting approval, one whose
-/// activation never landed and one half removed alike, so the state is read from this Mac
-/// at the failure and its step is the one named: a person who skipped the installer's
-/// last page learns it from their first refused call. Read at each failure, since the
-/// state is what the person changes between attempts. Nothing is added when the state
-/// could not be read or the driver is on. [LAW:one-source-of-truth] with `vhid doctor`.
-struct BringUpFailure: Error, CustomStringConvertible {
-    let error: any Error
-    let driver: DriverState?
-
-    init(_ error: any Error, driver: DriverState?) {
-        self.error = error
-        self.driver = driver
-    }
-
-    var description: String {
-        guard let driver, let step = driver.step else { return "\(error)" }
-        return "\(error)\nThe driver extension reads \(driver.rawValue):\n\(step)"
     }
 }

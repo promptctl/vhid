@@ -67,7 +67,7 @@ final class Listener: NSObject, NSXPCListenerDelegate {
 /// The holder is read and the keys released under the holder's lock, in the order a
 /// client's act takes the two locks, so the pid named is the one whose keys these were.
 func releaseKeysHeldPastLimit(_ readiness: Readiness, _ holder: Holder) -> String? {
-    guard let up = try? readiness.devices() else { return nil }
+    guard let up = readiness.up else { return nil }
     return holder.withHolder(on: up.attempt) { pid in
         up.devices.releaseKeysHeldPastLimit().map { letGo in
             let keys = letGo.usages.map { String(format: "0x%02X", $0) }.joined(separator: ", ")

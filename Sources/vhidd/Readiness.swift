@@ -1,3 +1,4 @@
+import DriverExtension
 import Foundation
 
 /// Whether the devices are up, and the devices when they are: what every seat asks before
@@ -5,15 +6,15 @@ import Foundation
 ///
 /// A daemon that cannot bring the devices up used to exit, and launchd started it again,
 /// so the reason lived only in a log nobody reading a client's error would think to look
-/// in. Now the reason is the answer every act gets, straight away, from a listener that is
-/// already up. [LAW:no-silent-failure]
+/// in. Now the reason is the answer every act gets from a listener that is already up.
+/// [LAW:no-silent-failure]
 ///
 /// [LAW:parse-dont-validate] `devices()` is the one crossing: it hands back devices that
 /// are up or throws why not, so a seat asks before it claims the holder, and a client
 /// turned away while the devices are down holds nothing.
 final class Readiness: @unchecked Sendable {
-    /// Why the devices are not up, as a client is told it.
-    enum Down: Error, CustomStringConvertible {
+    /// Why the devices are not up, as the bring-up loop tells it.
+    enum Down: CustomStringConvertible {
         /// The first attempt has not finished.
         case starting
         /// The last attempt failed, or the devices it brought up were lost, and another is
@@ -24,6 +25,32 @@ final class Readiness: @unchecked Sendable {
             switch self {
             case .starting: "devices not up: vhidd is still bringing them up"
             case .failed(let error): "devices not up: \(error)"
+            }
+        }
+    }
+
+    /// What a client whose act is refused is told: why the devices are not up, and the
+    /// driver extension as it read for this refusal, or why it could not be read.
+    ///
+    /// pqrs's status says only "not activated" for an extension awaiting approval, one
+    /// whose activation never landed and one half removed alike, so the state read on
+    /// this Mac is what tells which step is the one: a person who skipped the installer's
+    /// last page learns it from their first refused call. The driver is what that person
+    /// changes while vhidd waits, so it is read for each refusal and kept nowhere: the
+    /// step named is never one already done. [LAW:one-source-of-truth] with `vhid doctor`.
+    struct Refused: Error, CustomStringConvertible {
+        let why: Down
+        let driver: Result<DriverState, any Error>
+
+        /// A driver that is on has no step and adds nothing. One that could not be read
+        /// is said so here, to the person who would otherwise be left without a step and
+        /// without the reason. [LAW:no-silent-failure]
+        var description: String {
+            switch driver {
+            case .success(let state):
+                "\(why)" + (state.step.map { "\nThe driver extension reads \(state.rawValue):\n\($0)" } ?? "")
+            case .failure(let error):
+                "\(why)\nThe driver extension could not be read: \(error)"
             }
         }
     }
@@ -42,9 +69,9 @@ final class Readiness: @unchecked Sendable {
         let attempt: Int
     }
 
-    /// Its own lock and never the devices', so a refusal is answered at once however long
-    /// an attempt is taking. A condition, because the bring-up loop waits on it for the
-    /// devices to be lost. [LAW:no-shared-mutable-globals]
+    /// Its own lock and never the devices', so a refusal waits on no attempt, however long
+    /// one is taking. A condition, because the bring-up loop waits on it for the devices
+    /// to be lost. [LAW:no-shared-mutable-globals]
     private let condition = NSCondition()
     private var state = State.down(.starting)
     /// Counts attempts, so a connection is known by the attempt that opened it.
@@ -53,22 +80,41 @@ final class Readiness: @unchecked Sendable {
     /// reported late by an attempt that already failed cannot replace why it failed, and
     /// devices whose connection went before they were handed over are not handed over.
     private var ended = false
+    /// Reads the driver extension on this Mac.
+    private let driver: () throws -> DriverState
 
-    /// The devices, or why they are not up.
-    func devices() throws -> Up {
+    init(driver: @escaping () throws -> DriverState) {
+        self.driver = driver
+    }
+
+    private var current: State {
         condition.lock(); defer { condition.unlock() }
-        switch state {
-        case .down(let why): throw why
+        return state
+    }
+
+    /// The devices, or the refusal a client is told. The driver is read outside the lock,
+    /// so one client's refusal holds up nobody else's act.
+    func devices() throws -> Up {
+        switch current {
+        case .down(let why): throw Refused(why: why, driver: Result { try driver() })
         case .up(let up): return up
+        }
+    }
+
+    /// The devices when they are up, for work that is only ever done on devices that are:
+    /// nobody is refused, so the driver is not read.
+    var up: Up? {
+        switch current {
+        case .down: nil
+        case .up(let up): up
         }
     }
 
     /// Devices that are not up hold nothing, so there is nothing to release.
     func releaseEverything(because reason: String) {
-        do {
-            try devices().devices.releaseEverything(because: reason)
-        } catch {
-            log("\(reason); nothing is held: \(error)")
+        switch current {
+        case .down(let why): log("\(reason); nothing is held: \(why)")
+        case .up(let up): up.devices.releaseEverything(because: reason)
         }
     }
 

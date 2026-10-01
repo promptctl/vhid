@@ -118,7 +118,7 @@ import VirtualHID
     }
 
     /// The close of a daemon stopped for failing is not a loss: told, it would replace the
-    /// failure - and the driver step it carries - as every client's refusal.
+    /// failure as every client's refusal.
     @Test func theDaemonAFailedReachStopsIsNotReportedLost() throws {
         let world = World(connections: [.failure(.noSocket(path: "nowhere")), .success(Device())], bringUp: .failure(.silent))
         let told = Told()
@@ -157,7 +157,7 @@ import VirtualHID
             launch: { events.append("launch"); return try effects.launch() },
             terminate: { events.append("stop"); effects.terminate($0) }
         )
-        let readiness = Readiness()
+        let readiness = Readiness(driver: { .running })
         var downWhileWaiting: [Bool] = []
         #expect(throws: Stop.self) {
             try logged.keepUp(within: .milliseconds(20), backoff: Backoff(first: .seconds(2), most: .seconds(5)), lookingEvery: .seconds(5), readiness: readiness, serve: { _ in RecordingDevices() }, driver: { nil }, now: { .now }) { wait in
@@ -176,7 +176,7 @@ import VirtualHID
     /// grows rather than restarting the daemon every two seconds.
     @Test func lostDevicesAreStoppedAndBroughtUpAgain() {
         let world = World(connections: [.failure(.noSocket(path: "nowhere")), .success(Device())])
-        let readiness = Readiness()
+        let readiness = Readiness(driver: { .running })
         var served = 0
         var downWhileWaiting: [Bool] = []
         var waits: [Duration] = []
@@ -213,7 +213,7 @@ import VirtualHID
             terminate: effects.terminate
         )
         #expect(throws: Stop.self) {
-            try logged.keepUp(within: .milliseconds(20), backoff: backoff, lookingEvery: .seconds(2), readiness: Readiness(), serve: { _ in RecordingDevices() }, driver: { driver(world.launched, waited) }, now: { .now }) { wait in
+            try logged.keepUp(within: .milliseconds(20), backoff: backoff, lookingEvery: .seconds(2), readiness: Readiness(driver: { .running }), serve: { _ in RecordingDevices() }, driver: { driver(world.launched, waited) }, now: { .now }) { wait in
                 events.append("wait \(wait)")
                 waited += wait
                 if events.count(where: { $0.hasPrefix("wait") }) == pauses { throw Stop() }
@@ -287,7 +287,7 @@ import VirtualHID
         var served = 0
         var waits: [Duration] = []
         #expect(throws: Stop.self) {
-            try world.effects.keepUp(within: .seconds(1), backoff: backoff, lookingEvery: .seconds(2), readiness: Readiness(), serve: { _ in
+            try world.effects.keepUp(within: .seconds(1), backoff: backoff, lookingEvery: .seconds(2), readiness: Readiness(driver: { .running }), serve: { _ in
                 served += 1
                 world.lost!(.closed)
                 return RecordingDevices()
