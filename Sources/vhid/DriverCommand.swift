@@ -45,7 +45,7 @@ extension DriverCommand {
             // output deserves a word rather than an empty string interpolated into its
             // next command, and the non-zero exit is what says not to trust it.
             do {
-                let facts = try DriverProbe.facts()
+                let facts = try DriverProbe.facts(by: .within(Command.limit))
                 let state = DriverState(facts)
                 // The verdict is shown beside the readings it came from as well as
                 // returned on stdout: a verdict nobody can check against its inputs is a
@@ -71,7 +71,7 @@ extension DriverCommand {
 
         func run() throws {
             do {
-                print(try DriverProbe.registration().rawValue)
+                print(try DriverProbe.registration(by: .within(Command.limit)).rawValue)
             } catch {
                 FileHandle.standardError.write(Data("vhid driver: \(error)\n".utf8))
                 print(DriverExtension.Registration.unknown.rawValue)
@@ -140,7 +140,7 @@ extension DriverCommand {
             do {
                 // The empty line is deliberate: a caller reading this into a variable gets
                 // an empty string for "no receipt" and never an unterminated stream.
-                print(try DriverProbe.receiptVersion(of: packageID) ?? "")
+                print(try DriverProbe.receiptVersion(of: packageID, by: .within(Command.limit)) ?? "")
             } catch {
                 FileHandle.standardError.write(Data("vhid driver: \(error)\n".utf8))
                 throw ExitCode(1)

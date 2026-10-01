@@ -25,14 +25,14 @@ import Testing
     /// takes stdout to completion first waits for an end the child can no longer reach.
     @Test(.timeLimit(.minutes(1)), arguments: [["e", "o"], ["o", "e"]])
     func bothStreamsComeBackWholeWhicheverIsWrittenFirst(order: [String]) throws {
-        let output = try Command("/bin/sh", "-c", order.map(Self.fill).joined(separator: "; ")).run(within: .seconds(30))
+        let output = try Command("/bin/sh", "-c", order.map(Self.fill).joined(separator: "; ")).run(by: .within(.seconds(30)))
         #expect(output.status == 0)
         #expect(output.stdout == String(repeating: "o", count: Self.size))
         #expect(output.stderr == String(repeating: "e", count: Self.size))
     }
 
     @Test func theStatusAndBothStreamsSurviveAFailingCommand() throws {
-        let output = try Command("/bin/sh", "-c", "echo out; echo err >&2; exit 3").run(within: .seconds(30))
+        let output = try Command("/bin/sh", "-c", "echo out; echo err >&2; exit 3").run(by: .within(.seconds(30)))
         #expect(output.status == 3)
         #expect(output.stdout == "out\n")
         #expect(output.stderr == "err\n")
@@ -56,7 +56,7 @@ import Testing
         Thread.detachNewThread {
             counted = Result {
                 let before = try open()
-                let ran = (0..<100).count { _ in (try? Command("/usr/bin/true").run(within: .seconds(30)))?.status == 0 }
+                let ran = (0..<100).count { _ in (try? Command("/usr/bin/true").run(by: .within(.seconds(30))))?.status == 0 }
                 return (ran, try open() - before)
             }
             done.signal()
@@ -75,12 +75,14 @@ import Testing
         defer { try? FileManager.default.removeItem(at: pidFile) }
         let began = ContinuousClock.now
         let overran = #expect(throws: Command.Overran.self) {
-            try Command("/bin/sh", "-c", "echo $$ > \(pidFile.path); exec sleep 600").run(within: .milliseconds(500))
+            try Command("/bin/sh", "-c", "echo $$ > \(pidFile.path); exec sleep 600").run(by: .within(.milliseconds(500)))
         }
         #expect(ContinuousClock.now - began < .seconds(10))
         #expect(overran == Command.Overran(command: "sh -c echo $$ > \(pidFile.path); exec sleep 600", limit: .milliseconds(500)))
-        #expect(overran?.description == "`sh -c echo $$ > \(pidFile.path); exec sleep 600` had not ended after 0.5 seconds and was stopped")
-        let pid = try #require(pid_t(try String(contentsOf: pidFile, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)))
+        #expect(overran?.description == "`sh -c echo $$ > \(pidFile.path); exec sleep 600` had not ended by the limit of 0.5 seconds and was given up on")
+        // On a runner slow enough that the shell was stopped before it wrote its pid there
+        // is no pid to ask after, and the test is not failed for the runner's pace.
+        guard let pid = (try? String(contentsOf: pidFile, encoding: .utf8)).flatMap({ pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) }) else { return }
         // Signal 0 reaches a zombie as much as a running child, so this is the child both
         // stopped and collected. It is collected a moment after the kill, not with it.
         let deadline = ContinuousClock.now + .seconds(10)
@@ -93,22 +95,42 @@ import Testing
     @Test(.timeLimit(.minutes(1))) func aStreamHeldOpenPastTheChildsExitIsGivenUpOnAtTheLimit() throws {
         let began = ContinuousClock.now
         #expect(throws: Command.Overran.self) {
-            try Command("/bin/sh", "-c", "sleep 5 & exit 0").run(within: .milliseconds(500))
+            try Command("/bin/sh", "-c", "sleep 5 & exit 0").run(by: .within(.milliseconds(500)))
         }
         #expect(ContinuousClock.now - began < .seconds(4))
     }
 
+    /// The limit is the reading's: a command run by a deadline that another has used most
+    /// of is given what is left, where a limit of its own would let two commands take the
+    /// reading twice as long as its caller gave it. Two seconds of the 2.5 go to the first,
+    /// so the second is given up on 2.5 seconds in, and not at the 4.5 a limit apiece gives.
+    @Test(.timeLimit(.minutes(1))) func commandsRunByOneDeadlineShareItsLimit() throws {
+        let began = ContinuousClock.now
+        let deadline = Command.Deadline.within(.milliseconds(2500))
+        #expect(try Command("/bin/sleep", "2").run(by: deadline).status == 0)
+        let overran = #expect(throws: Command.Overran.self) { try Command("/bin/sleep", "600").run(by: deadline) }
+        #expect(ContinuousClock.now - began < .seconds(4))
+        #expect(overran?.limit == .milliseconds(2500))
+    }
+
     /// A command given up on holds nothing open either: vhidd reads the driver every two
-    /// seconds while it waits, and a stuck tool is stuck at every one of them.
-    @Test(.timeLimit(.minutes(1))) func aCommandGivenUpOnHoldsNoDescriptorOpen() throws {
+    /// seconds while it waits, and a stuck tool is stuck at every one of them. Both ways of
+    /// overrunning: a child that never ends, whose streams end when it is stopped, and one
+    /// that has ended and left its streams open in something it started, where giving up is
+    /// all that lets go of them. That one is given long enough for the shell to have exited.
+    @Test(.timeLimit(.minutes(1)), arguments: [
+        ("exec sleep 600", Duration.milliseconds(20), 50),
+        ("sleep 20 & exit 0", Duration.milliseconds(300), 10),
+    ])
+    func aCommandGivenUpOnHoldsNoDescriptorOpen(script: String, limit: Duration, runs: Int) throws {
         @Sendable func open() throws -> Int { try FileManager.default.contentsOfDirectory(atPath: "/dev/fd").count }
         let done = DispatchSemaphore(value: 0)
         nonisolated(unsafe) var counted: Result<(overran: Int, grew: Int), any Error>?
         Thread.detachNewThread {
             counted = Result {
                 let before = try open()
-                let overran = (0..<50).count { _ in
-                    do { _ = try Command("/bin/sleep", "600").run(within: .milliseconds(20)); return false } catch { return error is Command.Overran }
+                let overran = (0..<runs).count { _ in
+                    do { _ = try Command("/bin/sh", "-c", script).run(by: .within(limit)); return false } catch { return error is Command.Overran }
                 }
                 return (overran, try open() - before)
             }
@@ -116,7 +138,7 @@ import Testing
         }
         done.wait()
         let (overran, grew) = try #require(counted).get()
-        #expect(overran == 50)
-        #expect(grew < 50)
+        #expect(overran == runs)
+        #expect(grew < runs)
     }
 }

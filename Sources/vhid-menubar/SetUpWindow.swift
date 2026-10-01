@@ -200,7 +200,7 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
             // asking again does not pile them up. pkill's pattern is a regex, and the path's
             // dots are escaped so it matches that path alone. pkill exits 1 when none was.
             let pattern = NSRegularExpression.escapedPattern(for: "\(manager) activate")
-            let ended = try Command("/usr/bin/pkill", "-u", "\(getuid())", "-f", pattern).run(within: Command.readingLimit)
+            let ended = try Command("/usr/bin/pkill", "-u", "\(getuid())", "-f", pattern).run(by: .within(Command.limit))
             guard ended.status <= 1 else { throw ManagerError.pkill(ended.merged) }
             let process = Process()
             process.executableURL = URL(fileURLWithPath: manager)

@@ -17,7 +17,7 @@ public extension Readiness {
     static func read(for installation: Installation) -> Readiness {
         Readiness(
             installation: installation,
-            driver: Result { DriverState(try DriverProbe.facts()) },
+            driver: Result { DriverState(try DriverProbe.facts(by: .within(Command.limit))) },
             job: Result { try LaunchdProbe.standing(of: installation) },
             daemon: DaemonProbe.reading(of: installation),
             keyboardSetupAssistantAnswered: Result { try KeyboardTypeCache.read().answersThisKeyboard })

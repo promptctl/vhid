@@ -36,29 +36,45 @@ public struct Command {
         }
     }
 
-    /// How long a command that reads this Mac is given. The tools read in hundredths of a
-    /// second, and vhidd reads the driver before it answers a client it refuses, who waits
-    /// five seconds for that answer (`HelperConnection`): a tool that never ends is given
-    /// up on while the client is still listening.
-    public static let readingLimit: Duration = .seconds(2)
+    /// How long a command is given where a person or a script is what waits for it. The
+    /// tools answer in hundredths of a second, so this is far past a tool that is going to
+    /// answer, on a Mac however busy, and it is still an end. vhidd reads for a client who
+    /// waits less, and has a limit of its own.
+    public static let limit: Duration = .seconds(30)
 
-    /// A command that had not ended at its limit: the child still running, or a stream of
-    /// it still open in something the child started.
+    /// When a reading is to be over, and the limit that put it there.
+    ///
+    /// [LAW:no-ambient-temporal-coupling] One is made for a reading and handed to every
+    /// command the reading runs, so the limit is the reading's: each command is given what
+    /// the ones before it left, where a limit apiece would add up to several.
+    public struct Deadline: Sendable {
+        public let limit: Duration
+        fileprivate let at: DispatchTime
+
+        /// Over `limit` from now.
+        public static func within(_ limit: Duration) -> Deadline {
+            let nanoseconds = limit.components.seconds * 1_000_000_000 + limit.components.attoseconds / 1_000_000_000
+            return Deadline(limit: limit, at: .now() + .nanoseconds(Int(nanoseconds)))
+        }
+    }
+
+    /// A command that had not ended at its deadline: the child still running, or a stream
+    /// of it still open in something the child started.
     public struct Overran: Error, CustomStringConvertible, Equatable {
         public let command: String
         public let limit: Duration
 
-        public var description: String { "`\(command)` had not ended after \(limit) and was stopped" }
+        public var description: String { "`\(command)` had not ended by the limit of \(limit) and was given up on" }
     }
 
-    /// Runs the command to its end, or to `limit`, where it is stopped and thrown as
-    /// `Overran`. [LAW:types-are-the-program] The limit is not optional, so nothing this
+    /// Runs the command to its end, or to `deadline`, where it is given up on and thrown as
+    /// `Overran`. [LAW:types-are-the-program] The deadline is not optional, so nothing this
     /// program runs can hold its caller for good.
     ///
     /// Nothing of it is open once this returns: the pipes' handles are autoreleased, and
     /// close only when a pool drains, so the pool is here and not the caller's to have. A
     /// daemon's thread that never returns drains none.
-    public func run(within limit: Duration) throws -> Output {
+    public func run(by deadline: Deadline) throws -> Output {
         try autoreleasepool {
             let process = Process()
             process.executableURL = tool
@@ -71,20 +87,20 @@ public struct Command {
             let outDrain = Drain(out.fileHandleForReading)
             let errDrain = Drain(err.fileHandleForReading)
             try process.run()
-            // [LAW:no-ambient-temporal-coupling] One deadline for the exit and both
-            // streams, so the limit is the command's and not each wait's.
-            let nanoseconds = limit.components.seconds * 1_000_000_000 + limit.components.attoseconds / 1_000_000_000
-            let deadline = DispatchTime.now() + .nanoseconds(Int(nanoseconds))
-            guard exited.wait(timeout: deadline) == .success,
-                let stdout = outDrain.text(by: deadline),
-                let stderr = errDrain.text(by: deadline)
+            // One deadline for the exit and both streams, as for every command of the
+            // reading.
+            guard exited.wait(timeout: deadline.at) == .success,
+                let stdout = outDrain.text(by: deadline.at),
+                let stderr = errDrain.text(by: deadline.at)
             else {
                 outDrain.stop()
                 errDrain.stop()
+                // The child is stopped, and what it started is not reached: a stream held
+                // open past the child's exit is let go of here and goes on being held there.
                 // SIGKILL, because a tool that is stuck may not be answering SIGTERM. Only
                 // while it runs: a child that has exited has a pid that is no longer its.
                 if process.isRunning { kill(process.processIdentifier, SIGKILL) }
-                throw Overran(command: ([tool.lastPathComponent] + arguments).joined(separator: " "), limit: limit)
+                throw Overran(command: ([tool.lastPathComponent] + arguments).joined(separator: " "), limit: deadline.limit)
             }
             return Output(status: process.terminationStatus, stdout: stdout, stderr: stderr)
         }

@@ -80,6 +80,11 @@ final class Readiness: @unchecked Sendable {
     /// reported late by an attempt that already failed cannot replace why it failed, and
     /// devices whose connection went before they were handed over are not handed over.
     private var ended = false
+    /// How long a reading of the driver is given. A client refused is answered after the
+    /// reading, and waits `HelperConnection.replyTimeout` for the answer: a reading that
+    /// cannot be taken is given up on while that client is still listening.
+    static let driverReadLimit: Duration = .seconds(2)
+
     /// Reads the driver extension on this Mac.
     private let driver: () throws -> DriverState
 

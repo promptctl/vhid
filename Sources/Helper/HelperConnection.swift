@@ -96,6 +96,9 @@ public final class HelperConnection: @unchecked Sendable {
         public var description: String { "\(service) refused: \(reason)" }
     }
 
+    /// How long a client waits for vhidd's reply to a call, unless it says otherwise.
+    public static let replyTimeout: Duration = .seconds(5)
+
     /// Connects to vhidd's Mach service. The connection is lazy - launchd starts the
     /// job on the first call, not here - so a vhidd that is not installed is discovered
     /// when a key is first pressed rather than at construction.
@@ -105,7 +108,7 @@ public final class HelperConnection: @unchecked Sendable {
     /// `installation` says whose daemon this reaches. It has no default: installations run
     /// side by side, and a connection that guessed would type through another copy's
     /// keyboard. [LAW:no-silent-failure]
-    public convenience init(installation: Installation, replyTimeout: Duration = .seconds(5)) {
+    public convenience init(installation: Installation, replyTimeout: Duration = HelperConnection.replyTimeout) {
         self.init(connection: NSXPCConnection(machServiceName: installation.service, options: .privileged), service: installation.service, replyTimeout: replyTimeout)
     }
 

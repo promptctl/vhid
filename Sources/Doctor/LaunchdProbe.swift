@@ -12,7 +12,7 @@ import Installations
 public enum LaunchdProbe {
     /// Where launchd stands on the job under this installation's label, asked now.
     public static func standing(of installation: Installation) throws -> JobStanding {
-        try standing(from: Command("/bin/launchctl", "print", "system/\(installation.launchdLabel)").run(within: Command.readingLimit), installation: installation)
+        try standing(from: Command("/bin/launchctl", "print", "system/\(installation.launchdLabel)").run(by: .within(Command.limit)), installation: installation)
     }
 
     /// What launchd said, read.

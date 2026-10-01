@@ -67,7 +67,7 @@ struct RecordCommand: ParsableCommand {
 
     /// The labels `launchctl print <domain>` lists under services. [LAW:effects-at-boundaries]
     static func services(in domain: String) throws -> [String] {
-        let printed = try Command("/bin/launchctl", "print", domain).run(within: Command.readingLimit)
+        let printed = try Command("/bin/launchctl", "print", domain).run(by: .within(Command.limit))
         guard printed.status == 0 else {
             throw DriverUnreadable.toolFailed(tool: "launchctl print \(domain)", status: printed.status, complaint: printed.merged)
         }
@@ -104,7 +104,7 @@ struct RecordCommand: ParsableCommand {
     /// `open -n`, so every recording is a fresh instance with its own arguments, and `-g`,
     /// so the app never comes forward over what is being recorded.
     static func launch(app: URL, socket: String) throws {
-        let opened = try Command("/usr/bin/open", "-n", "-g", app.path, "--args", socket, String(getpid())).run(within: .seconds(10))
+        let opened = try Command("/usr/bin/open", "-n", "-g", app.path, "--args", socket, String(getpid())).run(by: .within(Command.limit))
         guard opened.status == 0 else { throw TieFailure("open could not launch \(app.path): \(opened.merged)") }
     }
 }

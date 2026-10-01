@@ -1,5 +1,6 @@
 import DriverExtension
 import Foundation
+import Helper
 import OwnThread
 import Testing
 import VirtualHID
@@ -169,7 +170,7 @@ import VirtualHID
 @Suite(.ownThread) struct StuckDriverReadTests {
     @Test(.timeLimit(.minutes(1))) func aDriverReadThatNeverReturnsStillAnswersTheRefusedClient() {
         let readiness = Readiness(driver: {
-            _ = try Command("/bin/sleep", "600").run(within: .milliseconds(200))
+            _ = try Command("/bin/sleep", "600").run(by: .within(.milliseconds(200)))
             return .running
         })
         _ = readiness.begin()
@@ -177,6 +178,12 @@ import VirtualHID
         let began = ContinuousClock.now
         let refused = #expect(throws: Readiness.Refused.self) { try readiness.devices() }
         #expect(ContinuousClock.now - began < .seconds(5))
-        #expect(refused?.description == "devices not up: \(DaemonError.closed)\nThe driver extension could not be read: `sleep 600` had not ended after 0.2 seconds and was stopped")
+        #expect(refused?.description == "devices not up: \(DaemonError.closed)\nThe driver extension could not be read: `sleep 600` had not ended by the limit of 0.2 seconds and was given up on")
+    }
+
+    /// The reading is given up on before the client it is taken for stops listening, with
+    /// room for the answer to reach it.
+    @Test func theDriverIsReadWithinLessThanAClientWaits() {
+        #expect(Readiness.driverReadLimit * 2 <= HelperConnection.replyTimeout)
     }
 }
