@@ -130,7 +130,9 @@ final class ChildReader: FrontCursor.Reader {
     /// Waits for the child's first line, which says whether it joined `session`: read
     /// before anything is written to it, so a child that could not join and ended is heard
     /// saying why, and not taken for a broken pipe. [LAW:no-ambient-temporal-coupling]
-    init(in session: FrontCursor.Session, executable: String, arguments: [String], patience: Duration = .seconds(1)) throws {
+    /// `joinWithin` is how long that first line may take. It is a limit of its own because
+    /// it covers the child being started, which an answer does not.
+    init(in session: FrontCursor.Session, executable: String, arguments: [String], joinWithin: Duration = .seconds(1), patience: Duration = .seconds(1)) throws {
         self.session = session
         self.patience = patience
         var stdin: [Int32] = [0, 0], stdout: [Int32] = [0, 0]
@@ -152,7 +154,7 @@ final class ChildReader: FrontCursor.Reader {
             throw error
         }
         do {
-            let joined = try answerLine(by: .now + patience)
+            let joined = try answerLine(within: joinWithin, to: "say it joined")
             guard joined == joinedAnswer else { throw Failed(session: session, what: "answered '\(joined)'") }
         } catch {
             stop()
@@ -173,14 +175,18 @@ final class ChildReader: FrontCursor.Reader {
 
     func read() throws -> (x: Double, y: Double) {
         guard Darwin.write(requests, "\n", 1) == 1 else { throw Failed(session: session, what: "could not be asked: errno \(errno)") }
-        let line = try answerLine(by: .now + patience)
+        let line = try answerLine(within: patience, to: "answer")
         let fields = line.split(separator: " ").compactMap { Double($0) }
         guard fields.count == 2 else { throw Failed(session: session, what: "answered '\(line)'") }
         return (fields[0], fields[1])
     }
 
-    /// One line from the child, or `Failed` once `deadline` passes or the child ends.
-    private func answerLine(by deadline: ContinuousClock.Instant) throws -> String {
+    /// One line from the child, or `Failed` once `limit` has passed or the child ends.
+    /// `what` is what the child does by sending it, so a failure says which wait it was.
+    /// [LAW:nothing-unseen] A child that never started and one stuck in the window server
+    /// are told apart by what the daemon says of them.
+    private func answerLine(within limit: Duration, to what: String) throws -> String {
+        let deadline = ContinuousClock.now + limit
         while true {
             if let newline = pending.firstIndex(of: UInt8(ascii: "\n")) {
                 defer { pending.removeSubrange(...newline) }
@@ -192,12 +198,12 @@ final class ChildReader: FrontCursor.Reader {
             let ready = Darwin.poll(&poll, 1, milliseconds)
             if ready < 0, errno == EINTR { continue }
             guard ready >= 0 else { throw Failed(session: session, what: "could not be heard: errno \(errno)") }
-            guard ready > 0 else { throw Failed(session: session, what: "did not answer within \(patience)") }
+            guard ready > 0 else { throw Failed(session: session, what: "did not \(what) within \(limit)") }
             var buffer = [UInt8](repeating: 0, count: 256)
             let count = Darwin.read(answers, &buffer, buffer.count)
             if count < 0, errno == EINTR { continue }
             guard count >= 0 else { throw Failed(session: session, what: "could not be heard: errno \(errno)") }
-            guard count > 0 else { throw Failed(session: session, what: "ended without answering") }
+            guard count > 0 else { throw Failed(session: session, what: "ended before it could \(what)") }
             pending += buffer.prefix(count)
         }
     }
