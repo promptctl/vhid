@@ -170,25 +170,27 @@ struct Backoff: Equatable {
 }
 
 /// Waits out `whole` a `look` at a time, and ends at the first look that finds something:
-/// what it found and how much of the wait had passed, or nil when the whole wait did.
+/// what it found and how long into the wait, or nil when the whole wait passed.
 ///
 /// [LAW:no-ambient-temporal-coupling] A wait is for something, and `find` says what: the
 /// time is the bound on it rather than the thing waited for, so what the wait was for
-/// ends it the moment it is there to find.
+/// ends it the moment it is there to find. The bound is read from `now` and not summed
+/// from the pauses, so the time a look takes is part of the wait: it ends no later than
+/// `whole` plus the one look a last pause leads to.
 func waitOut<Found>(
     _ whole: Duration,
     lookingEvery look: Duration,
+    now: () -> ContinuousClock.Instant,
     pause: (Duration) throws -> Void,
     for find: () -> Found?
 ) rethrows -> (found: Found, after: Duration)? {
-    var waited = Duration.zero
-    while waited < whole {
-        let next = min(look, whole - waited)
-        try pause(next)
-        waited += next
-        if let found = find() { return (found, waited) }
+    let began = now()
+    while true {
+        let left = whole - (now() - began)
+        guard left > .zero else { return nil }
+        try pause(min(look, left))
+        if let found = find() { return (found, now() - began) }
     }
-    return nil
 }
 
 /// A driver extension that read as not on and reads as on since: the one change between
@@ -276,7 +278,9 @@ extension DaemonProcess.Effects {
     /// driver is read where each attempt ends, at its failure or at the loss of what it
     /// brought up, and a reading of it not on is what the waits from then are for: the
     /// driver is read every `look` of them until it reads on or the devices come up. Any
-    /// other wait is taken whole and reads nothing.
+    /// other wait is taken whole and reads nothing. A wait ends by `now`, so the time its
+    /// readings take is part of it: the next attempt starts no later than the wait the
+    /// log gave and one reading.
     ///
     /// Returns only by `pause` throwing, which the daemon's never does.
     func keepUp(
@@ -297,7 +301,6 @@ extension DaemonProcess.Effects {
         var off: DriverState?
         while true {
             let attempt = readiness.begin()
-            let ended: DriverState?
             do {
                 let reached = try reach(within: limit) { lost, _ in _ = readiness.lost(lost, in: attempt) }
                 readiness.up(serve(reached))
@@ -311,19 +314,21 @@ extension DaemonProcess.Effects {
                 // daemon started here is stopped so the next attempt starts it afresh.
                 stop(reached.daemon)
                 failures = now() - since >= backoff.most ? 1 : failures + 1
-                logFailure("the devices went down (\(why)); bringing them up again in \(backoff.after(failures))")
-                ended = driver()
+                logFailure("the devices went down (\(why))")
             } catch {
                 failures += 1
                 readiness.failed(error)
-                ended = driver()
-                logFailure("could not bring the devices up (\(error)); trying again in \(backoff.after(failures))")
+                logFailure("could not bring the devices up (\(error))")
             }
-            if let ended, !ended.isOn { off = ended }
+            // [LAW:dataflow-not-control-flow] However the attempt ended, it is said as it
+            // ends, then the driver is read, then the wait is said: a reading that takes
+            // time holds back neither the failure nor the wait that follows its line.
+            if let read = driver(), !read.isOn { off = read }
             let wait = backoff.after(failures)
+            log("bringing the devices up again in \(wait)")
             // [LAW:dataflow-not-control-flow] Every wait is waited out the same way: one
             // with nothing to look for is a single look as long as itself, finding nothing.
-            if let on = try waitOut(wait, lookingEvery: off == nil ? wait : look, pause: pause, for: { off.flatMap { TurnedOn(from: $0, to: driver()) } }) {
+            if let on = try waitOut(wait, lookingEvery: off == nil ? wait : look, now: now, pause: pause, for: { off.flatMap { TurnedOn(from: $0, to: driver()) } }) {
                 log("\(on.found), \(on.after) into a wait of \(wait); bringing the devices up now")
                 failures = 0
                 off = nil

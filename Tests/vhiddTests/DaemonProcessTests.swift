@@ -160,8 +160,10 @@ import VirtualHID
         )
         let readiness = Readiness(driver: { .running })
         var downWhileWaiting: [Bool] = []
+        let clock = HandClock()
         #expect(throws: Stop.self) {
-            try logged.keepUp(within: .milliseconds(20), backoff: Backoff(first: .seconds(2), most: .seconds(5)), lookingEvery: .seconds(5), readiness: readiness, serve: { _ in RecordingDevices() }, driver: { nil }, now: { .now }) { wait in
+            try logged.keepUp(within: .milliseconds(20), backoff: Backoff(first: .seconds(2), most: .seconds(5)), lookingEvery: .seconds(5), readiness: readiness, serve: { _ in RecordingDevices() }, driver: { nil }, now: { clock.now }) { wait in
+                clock.advance(wait)
                 events.append("wait \(wait)")
                 downWhileWaiting.append((try? readiness.devices()) == nil)
                 if events.filter({ $0.hasPrefix("wait") }).count == 3 { throw Stop() }
@@ -181,13 +183,15 @@ import VirtualHID
         var served = 0
         var downWhileWaiting: [Bool] = []
         var waits: [Duration] = []
+        let clock = HandClock()
         #expect(throws: Stop.self) {
             try world.effects.keepUp(within: .seconds(1), backoff: Backoff(first: .seconds(2), most: .seconds(60)), lookingEvery: .seconds(60), readiness: readiness, serve: { _ in
                 served += 1
                 let lose = world.lost!
                 DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(20)) { lose(.closed) }
                 return RecordingDevices()
-            }, driver: { nil }, now: { .now }) { wait in
+            }, driver: { nil }, now: { clock.now }) { wait in
+                clock.advance(wait)
                 waits.append(wait)
                 downWhileWaiting.append((try? readiness.devices()) == nil)
                 if waits.count == 2 { throw Stop() }
@@ -199,13 +203,14 @@ import VirtualHID
         #expect(world.terminated == [World.pid])
     }
 
-    /// Attempts that fail in a world whose driver reads as `driver` says, with every pause
-    /// taken at once and counted: what was launched, stopped and waited, in order, up to
-    /// the `pauses`th pause.
+    /// Attempts that fail in a world whose driver reads as `driver` says, on a clock that
+    /// only the pauses move: what was launched, stopped and waited, in order, up to the
+    /// `pauses`th pause.
     private func paced(_ pauses: Int, backoff: Backoff, driver: @escaping (_ launched: Int, _ waited: Duration) -> DriverState?) -> [String] {
         let world = World(connections: [.failure(.noSocket(path: "nowhere"))])
         var events: [String] = []
-        var waited = Duration.zero
+        let clock = HandClock()
+        let began = clock.now
         let effects = world.effects
         let logged = DaemonProcess.Effects<Device>(
             connect: effects.connect,
@@ -214,9 +219,9 @@ import VirtualHID
             terminate: effects.terminate
         )
         #expect(throws: Stop.self) {
-            try logged.keepUp(within: .milliseconds(20), backoff: backoff, lookingEvery: .seconds(2), readiness: Readiness(driver: { .running }), serve: { _ in RecordingDevices() }, driver: { driver(world.launched, waited) }, now: { .now }) { wait in
+            try logged.keepUp(within: .milliseconds(20), backoff: backoff, lookingEvery: .seconds(2), readiness: Readiness(driver: { .running }), serve: { _ in RecordingDevices() }, driver: { driver(world.launched, clock.now - began) }, now: { clock.now }) { wait in
+                clock.advance(wait)
                 events.append("wait \(wait)")
-                waited += wait
                 if events.count(where: { $0.hasPrefix("wait") }) == pauses { throw Stop() }
             }
         }
@@ -287,12 +292,14 @@ import VirtualHID
     private func lostEachTime(_ pauses: Int, world: World, backoff: Backoff, driver: @escaping (_ served: Int, _ waited: Duration) -> DriverState?, before: @escaping (World) -> Void = { _ in }) -> [Duration] {
         var served = 0
         var waits: [Duration] = []
+        let clock = HandClock()
         #expect(throws: Stop.self) {
             try world.effects.keepUp(within: .seconds(1), backoff: backoff, lookingEvery: .seconds(2), readiness: Readiness(driver: { .running }), serve: { _ in
                 served += 1
                 world.lost!(.closed)
                 return RecordingDevices()
-            }, driver: { driver(served, waits.reduce(.zero, +)) }, now: { .now }) { wait in
+            }, driver: { driver(served, waits.reduce(.zero, +)) }, now: { clock.now }) { wait in
+                clock.advance(wait)
                 before(world)
                 waits.append(wait)
                 if waits.count == pauses { throw Stop() }
@@ -331,16 +338,64 @@ import VirtualHID
     }
 
     @Test func aWaitIsTakenALookAtATimeAndEndsWithWhatALookFinds() throws {
+        let clock = HandClock()
         var pauses: [Duration] = []
-        let whole = waitOut(.seconds(5), lookingEvery: .seconds(2), pause: { pauses.append($0) }, for: { String?.none })
+        let pause: (Duration) -> Void = { clock.advance($0); pauses.append($0) }
+        let whole = waitOut(.seconds(5), lookingEvery: .seconds(2), now: { clock.now }, pause: pause, for: { String?.none })
         #expect(whole == nil)
         #expect(pauses == [.seconds(2), .seconds(2), .seconds(1)])
 
         pauses = []
-        let ended = try #require(waitOut(.seconds(60), lookingEvery: .seconds(2), pause: { pauses.append($0) }, for: { pauses.count == 3 ? "found" : nil }))
+        let ended = try #require(waitOut(.seconds(60), lookingEvery: .seconds(2), now: { clock.now }, pause: pause, for: { pauses.count == 3 ? "found" : nil }))
         #expect(ended.found == "found")
         #expect(ended.after == .seconds(6))
         #expect(pauses == [.seconds(2), .seconds(2), .seconds(2)])
+    }
+
+    /// A look takes time, and that time is the wait's: with a look that takes as long as
+    /// the pause before it, three of its five pauses fit, and the wait is over one look past
+    /// its length at the latest. What a look finds is found that far in, its own time counted.
+    @Test func theTimeALookTakesIsPartOfTheWait() throws {
+        let clock = HandClock()
+        var pauses: [Duration] = []
+        let pause: (Duration) -> Void = { clock.advance($0); pauses.append($0) }
+        let began = clock.now
+        let whole = waitOut(.seconds(10), lookingEvery: .seconds(2), now: { clock.now }, pause: pause, for: { clock.advance(.seconds(2)); return String?.none })
+        #expect(whole == nil)
+        #expect(pauses == [.seconds(2), .seconds(2), .seconds(2)])
+        #expect(clock.now - began == .seconds(12))
+
+        pauses = []
+        let ended = try #require(waitOut(.seconds(60), lookingEvery: .seconds(2), now: { clock.now }, pause: pause, for: { clock.advance(.seconds(2)); return pauses.count == 2 ? "found" : nil }))
+        #expect(ended.after == .seconds(8))
+    }
+
+    /// A driver read that runs to vhidd's two-second limit at every look - a stuck pkgutil,
+    /// systemextensionsctl or ioreg - does not stretch the wait the log gave: the next
+    /// attempt starts within that wait and one reading of it.
+    @Test func aDriverThatIsSlowToReadDoesNotStretchTheWait() {
+        let world = World(connections: [.failure(.noSocket(path: "nowhere"))])
+        let clock = HandClock()
+        let (wait, reading) = (Duration.seconds(10), Duration.seconds(2))
+        var launches: [ContinuousClock.Instant] = []
+        var waitBegan: ContinuousClock.Instant?
+        let effects = world.effects
+        let logged = DaemonProcess.Effects<Device>(
+            connect: effects.connect,
+            bringUp: effects.bringUp,
+            launch: { launches.append(clock.now); return try effects.launch() },
+            terminate: effects.terminate
+        )
+        #expect(throws: Stop.self) {
+            try logged.keepUp(within: .milliseconds(20), backoff: Backoff(first: wait, most: wait), lookingEvery: .seconds(2), readiness: Readiness(driver: { .running }), serve: { _ in RecordingDevices() }, driver: { clock.advance(reading); return .awaitingApproval }, now: { clock.now }) { pause in
+                if launches.count == 2 { throw Stop() }
+                waitBegan = waitBegan ?? clock.now
+                clock.advance(pause)
+            }
+        }
+        #expect(launches.count == 2)
+        #expect(launches[1] - waitBegan! <= wait + reading)
+        #expect(launches[1] - waitBegan! >= wait)
     }
 
     /// What the log says of a wait cut short: both states, as they were read.

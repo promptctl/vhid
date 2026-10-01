@@ -111,15 +111,8 @@ import Testing
         #expect(mouse.log == ["up"])
     }
 
-    /// A clock the test moves by hand.
-    final class Clock: Sendable {
-        private let instant = Mutex(ContinuousClock.now)
-        var now: ContinuousClock.Instant { instant.withLock { $0 } }
-        func advance(_ by: Duration) { instant.withLock { $0 += by } }
-    }
-
-    private func timed(_ keyboard: RecordingKeyboard = RecordingKeyboard(), _ mouse: RecordingMouse = RecordingMouse()) -> (Devices, Clock) {
-        let clock = Clock()
+    private func timed(_ keyboard: RecordingKeyboard = RecordingKeyboard(), _ mouse: RecordingMouse = RecordingMouse()) -> (Devices, HandClock) {
+        let clock = HandClock()
         return (Devices(keyboard: keyboard, mouse: mouse, limit: .seconds(2), now: { clock.now }), clock)
     }
 
@@ -209,7 +202,7 @@ import Testing
         let readiness = Readiness.serving(devices)
         let holder = Holder()
         // Kept alive, so the two identifiers cannot share a freed address.
-        let (first, second) = (Clock(), Clock())
+        let (first, second) = (HandClock(), HandClock())
         let client = ObjectIdentifier(first)
         let attempt = try readiness.devices().attempt
         try holder.serve(client, by: 4242, on: attempt) { devices.down(usage: 0x04) { _ in } }
