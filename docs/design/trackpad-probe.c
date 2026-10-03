@@ -4,7 +4,7 @@
 // can match it. Creating it needs com.apple.developer.hid.virtual.device in a
 // provisioning profile; without one the kernel refuses (docs/design/trackpad.md).
 //   trackpad-probe hold [seconds]         create the device and keep it
-//   trackpad-probe swipe up|down|left|right [fingers 1-5]
+//   trackpad-probe swipe up|down|left|right [fingers 1-5]   swipes on Return
 // Build: clang -framework IOKit -framework CoreFoundation -o trackpad-probe trackpad-probe.c
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/hid/IOHIDKeys.h>
@@ -107,6 +107,9 @@ int main(int argc, char **argv) {
     if (hold) {
         sleep(hold);
     } else {
+        printf("press Return to swipe\n");
+        fflush(stdout);
+        getchar();
         double x = 80, y = 57.5; // start at the centre; 5 fingers span 60 mm
         for (int i = 0; i <= 40; i++) { // 40 steps of 1.2 mm at 8 ms: 48 mm
             send(n, x + dx * 1.2 * i, y + dy * 1.2 * i, 1);

@@ -1,11 +1,12 @@
-// trackpad-mtwatch: lists the devices MultitouchSupport (Apple's private
-// framework) knows, then prints every contact frame they deliver for 12 seconds.
-// It lists devices once, at launch: start it after AppleMultitouchDevice shows
-// in ioreg and before the swipe begins (docs/design/trackpad.md).
+// trackpad-mtwatch: waits up to 30 seconds for MultitouchSupport (Apple's
+// private framework) to list a device, then prints every contact frame its
+// devices deliver for 20 seconds. Start it before trackpad-probe; the probe's
+// swipe waits for Return (docs/design/trackpad.md).
 // Build: clang -w -F/System/Library/PrivateFrameworks -framework MultitouchSupport \
 //          -framework CoreFoundation -o trackpad-mtwatch trackpad-mtwatch.c
 #include <CoreFoundation/CoreFoundation.h>
 #include <stdio.h>
+#include <unistd.h>
 
 // MultitouchSupport's contact record, as reverse-engineered by many projects.
 typedef void *MTDeviceRef;
@@ -32,9 +33,14 @@ static int frame(MTDeviceRef d, Finger *f, int n, double t, int fr) {
 
 int main(void) {
     CFArrayRef l = MTDeviceCreateList();
+    for (int waited = 0; CFArrayGetCount(l) == 0; waited++) {
+        if (waited == 300) { fprintf(stderr, "no multitouch device appeared in 30 s\n"); return 1; }
+        CFRelease(l);
+        usleep(100000);
+        l = MTDeviceCreateList();
+    }
     long c = CFArrayGetCount(l);
     printf("devices %ld\n", c);
-    if (c == 0) { fprintf(stderr, "no multitouch devices: start this after the probe's device is up\n"); return 1; }
     for (long i = 0; i < c; i++) {
         MTDeviceRef d = (MTDeviceRef)CFArrayGetValueAtIndex(l, i);
         int family = 0;
@@ -44,6 +50,6 @@ int main(void) {
         MTDeviceStart(d, 0);
     }
     fflush(stdout);
-    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 12, false);
+    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 20, false);
     return 0;
 }

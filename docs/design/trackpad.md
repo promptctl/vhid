@@ -51,16 +51,15 @@ Gestures such as switching Spaces, Mission Control, pinch and rotate come from A
 
 The entitlement is worth requesting only once a device is shown to make a gesture, and that can be tested on studious without it. The next device to try is the Magic Trackpad clone, built from VoodooInput's protocol into the probe.
 
-To run a probe with AMFI relaxed, set the boot-arg and reboot, sign the probe ad hoc with [trackpad-probe.entitlements](trackpad-probe.entitlements), and run it as bmf. Start trackpad-mtwatch only once `AppleMultitouchDevice` shows in ioreg, since it lists devices once, at launch. Root changes nothing. Remove the boot-arg and reboot when done, so studious stays a stock Mac.
+To run a probe with AMFI relaxed, set the boot-arg and reboot, sign the probe ad hoc with [trackpad-probe.entitlements](trackpad-probe.entitlements), and run it as bmf. Start trackpad-mtwatch first: it waits for the probe's device to reach MultitouchSupport and lists it. Press Return to swipe only after that. Root changes nothing. Remove the boot-arg and reboot when done, so studious stays a stock Mac.
 
     sudo nvram boot-args="amfi_get_out_of_my_way=1" && sudo reboot
     clang -framework IOKit -framework CoreFoundation -o trackpad-probe trackpad-probe.c
     clang -w -F/System/Library/PrivateFrameworks -framework MultitouchSupport \
           -framework CoreFoundation -o trackpad-mtwatch trackpad-mtwatch.c
     codesign -f -s - --entitlements trackpad-probe.entitlements trackpad-probe
-    ./trackpad-probe swipe up 3 &
-    until ioreg -r -n IOHIDUserDevice | grep -q AppleMultitouchDevice; do sleep 0.1; done
-    ./trackpad-mtwatch
+    ./trackpad-mtwatch &
+    ./trackpad-probe swipe up 3
     sudo nvram -d boot-args && sudo reboot
 
 A device works when trackpad-mtwatch prints frames and the swipe opens Mission Control. Only then does the request to Apple follow. A granted entitlement cannot ride on a bare binary: it needs a bundle with the provisioning profile at `Contents/embedded.provisionprofile`, signed with the team's certificate and the same entitlements plist.
