@@ -60,32 +60,39 @@ the next login. The item from a build of this tree,
 
 ```sh
 brew uninstall --cask vhid                        # vhid, if Homebrew installed it
+brew uninstall --zap --cask vhid                  # vhid and the pqrs driver package, under Homebrew
 sudo /usr/local/libexec/vhid-uninstall            # vhid, leaving the pqrs driver
 sudo /usr/local/libexec/vhid-uninstall --driver   # vhid and the pqrs driver package
 ```
 
-`brew uninstall --cask vhid` runs `vhid-uninstall` without `--driver`, then stops listing
-vhid. Each of these stops the daemon and the menu bar item, removes every file in the
-table above (both uninstall scripts among them) and forgets the pkg's receipt. None
-touches the development job a build of this tree registers.
+Each of these stops the daemon and the menu bar item, removes every file in the table
+above (both uninstall scripts among them) and forgets the pkg's receipt. None touches
+the development job a build of this tree registers.
 
-Since the script deletes itself, running it on a Homebrew install leaves Homebrew listing
-vhid, and a plain `brew uninstall --cask vhid` then fails, saying the script does not
-exist. `brew uninstall --cask --force vhid` skips the script and forgets vhid.
+`brew uninstall --cask vhid` runs `vhid-uninstall` without `--driver`, then stops listing
+vhid; `--zap` runs `vhid-uninstall --driver` after it. Both run a copy of the script, the
+driver removal and `vhid` that the cask keeps beside the pkg in Homebrew's Caskroom, so
+they still run once the installed files are gone, and Homebrew deletes that copy as it
+stops listing vhid. Running the installed script by hand first therefore leaves nothing
+for brew to trip on: `brew uninstall --cask vhid` finds nothing to remove and forgets vhid.
+An install made with a cask from before it kept that copy runs the installed script
+instead, and once that script is gone only `brew uninstall --cask --force vhid` forgets vhid.
 
 Without `--driver` the script leaves the pqrs driver installed, since Karabiner-Elements
-may use it. To remove the driver with vhid, choose `--driver` on that first run (under
-Homebrew, follow it with `brew uninstall --cask --force vhid`): afterwards the script
-that removes it is gone, and pqrs's own scripts in
+may use it, and the script that removes it goes with vhid's files; pqrs's own scripts in
 `/Library/Application Support/org.pqrs/Karabiner-DriverKit-VirtualHIDDevice/scripts/uninstall`
-are what is left.
+are what is left. To remove the driver with vhid, choose `--driver` on that first run,
+or `--zap` under Homebrew.
 
 `--driver` withdraws the driver extension as whoever is logged in, then deletes the
 driver package's files and receipt. Before stopping anything it refuses, saying why,
 when the driver cannot safely be removed: Karabiner-Elements is installed, the
 development job is loaded, nobody is logged in to withdraw the extension, the extension
 is registered but the Manager app that withdraws it is gone (reinstalling the pkg brings
-it back), or a reading it needs cannot be taken. If the removal fails partway, vhid is left stopped with its
-files in place, and the message says so; run the same command again once the cause is
-fixed, or drop `--driver` to remove vhid alone. A withdrawn extension can stay
+it back), or a reading it needs cannot be taken. Under `--zap`, Homebrew has already removed vhid by
+then, so a refusal leaves the driver in place and Homebrew still listing vhid: run
+`brew uninstall --zap --cask vhid` again once the cause is fixed, or
+`brew uninstall --cask vhid` to keep the driver. If the removal fails partway, vhid's jobs
+are left stopped and that run removes none of vhid's files, and the message says so; run
+the same command again once the cause is fixed, or drop `--driver` to remove vhid alone. A withdrawn extension can stay
 registered until the next restart.
