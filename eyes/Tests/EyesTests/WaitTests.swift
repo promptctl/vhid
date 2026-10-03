@@ -66,11 +66,12 @@ import Testing
         #expect(waited.settled)
     }
 
-    /// A read that stopped short matched nothing but did not see the whole region.
+    /// A read that stopped short matched nothing but did not see the whole region, so it
+    /// breaks a run of absences: counted as one, the wait would settle on the second read.
     @Test func aPartialReadIsNeverAnAbsence() async throws {
-        let waited = try await wait(.absent, 0.2, Script([Self.present, Self.present, Self.partial]))
-        #expect(!waited.settled)
-        #expect(waited.reading == Self.partial)
+        let waited = try await wait(.absent, 5, Script([Self.absent, Self.partial, Self.absent]))
+        #expect(waited.settled)
+        #expect(waited.reads == 4)
     }
 
     /// The first read finds the window; every read after it looks at the rectangle that
