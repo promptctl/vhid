@@ -679,6 +679,13 @@ extension Covers {
         var tree = Self.browser
         tree["scroll"] = Node(facts: facts([], frame: .answered(Self.viewport), role: "AXScrollArea"), children: .unanswered)
         #expect(search(tree).stop == .unread)
+        // A page, or the scroll area clipping it, that will not say where it is.
+        for unplaced in ["page", "scroll"] {
+            var tree = Self.browser
+            tree[unplaced] = Node(facts: facts([], frame: .unanswered, role: Self.browser[unplaced]!.facts.role.rawValue),
+                                  children: Self.browser[unplaced]!.children)
+            #expect(search(tree).stop == .unread)
+        }
         for cut in [search(tree), search(Self.browser, within: Bounds(elements: Limit(2)!, time: .seconds(60)))] {
             #expect { try cut.page(in: 219) } throws: { "\($0)".contains("not read whole") }
         }

@@ -289,6 +289,10 @@ func pages<Element>(
         guard elapsed() < bounds.time else { return Paged(pages: pages, examined: examined, stop: .timeBudget(bounds.time)) }
         let node = try read(element)
         examined += 1
+        // A page or a clipping area that will not say where it is leaves unknown which page
+        // is shown and how much of it: dropping it could leave a DevTools pane the one page,
+        // and passing the window down could hand back the toolbar. [LAW:no-silent-failure]
+        if node.facts.role == webArea || clips.contains(node.facts.role), case .unanswered = node.facts.frame { unread = true; continue }
         let placed = node.facts.frame.answer.flatMap { $0 }
         let inner = placed.map { clips.contains(node.facts.role) && !$0.isEmpty ? ScreenRect(bound.cgRect.intersection($0.cgRect)) : bound } ?? bound
         if node.facts.role == webArea {
