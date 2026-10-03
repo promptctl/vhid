@@ -72,6 +72,25 @@ jobs:
           git merge-base --is-ancestor "$GITHUB_SHA" origin/master \
             || { echo "::error::$TAG is not on master"; exit 1; }
 
+      # The tap's cask names one version and its sha256, so each release moves it, or `brew
+      # upgrade` never sees the release. A pre-release is left out: the cask is what
+      # `brew install` gives everyone. The tap's token is minted before anything is built,
+      # so a missing or wrong App fails the release while nothing is published yet. It can
+      # start the tap's workflows and nothing else: it is the promptctl tap App's,
+      # installed on the tap alone with Actions: write (docs/releasing.md).
+      # [LAW:no-ambient-temporal-coupling] It lasts an hour, past this job's 60-minute
+      # timeout, so it outlives every step that reads it.
+      - name: The tap's token
+        id: tap
+        if: env.PRERELEASE == 'false'
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.TAP_APP_CLIENT_ID }}
+          private-key: ${{ secrets.TAP_APP_PRIVATE_KEY }}
+          owner: promptctl
+          repositories: homebrew-tap
+          permission-actions: write
+
       # The notes, read before minutes of building, so a version with no changelog
       # section fails here. A section is everything from its "## [<version>]" heading
       # to the next "## " heading or the link definitions that close the file.
@@ -135,33 +154,31 @@ jobs:
         if: always()
         run: scripts/release-keychain delete "$NOTARY_KEYCHAIN"
 
-      # The tap's cask names one version and its sha256, so each release moves it, or `brew
-      # upgrade` never sees the release. A pre-release is left out: the cask is what
-      # `brew install` gives everyone. The tap's vhid workflow (cask.yml here) is the one
-      # writer of the cask, with the tap's own token; this starts it now and waits for it,
-      # so the release fails when the move does not land. The token can start the tap's
-      # workflows and nothing else: it is the promptctl tap App's, installed on the tap
-      # alone with Actions: write (docs/releasing.md).
-      - name: The tap's token
-        id: tap
-        if: env.PRERELEASE == 'false'
-        uses: actions/create-github-app-token@v3
-        with:
-          client-id: ${{ vars.TAP_APP_CLIENT_ID }}
-          private-key: ${{ secrets.TAP_APP_PRIVATE_KEY }}
-          owner: promptctl
-          repositories: homebrew-tap
-          permission-actions: write
-
+      # The tap's vhid workflow (cask.yml here) is the one writer of the cask, with the
+      # tap's own token; this starts it now, waits for it, and reads the cask it left, so
+      # the release fails when the move does not land. Ten minutes is the release's whole
+      # budget, so a run still going after it has missed it however fast the build was.
+      # The Release is published by then, so the error names what moves the cask without
+      # re-running this job.
       - name: The tap's cask is at this release
         if: env.PRERELEASE == 'false'
-        timeout-minutes: 5
+        timeout-minutes: 10
         env:
           GH_TOKEN: ${{ steps.tap.outputs.token }}
+          READ_TOKEN: ${{ github.token }}
         run: |
           run=$(gh api --method POST repos/promptctl/homebrew-tap/actions/workflows/vhid.yml/dispatches \
-            -f ref=main -F return_run_details=true --jq .workflow_run_id)
+            -f ref=main -F return_run_details=true --jq '.workflow_run_id // error("the dispatch named no run")')
           echo "moving the cask in https://github.com/promptctl/homebrew-tap/actions/runs/$run"
+          stuck() {
+            echo "::error::$1: https://github.com/promptctl/homebrew-tap/actions/runs/$run. vhid $VERSION_NUMBER is published; move the cask with 'gh workflow run vhid.yml --repo promptctl/homebrew-tap' rather than re-running this job (docs/releasing.md)"
+            exit 1
+          }
           gh run watch "$run" --repo promptctl/homebrew-tap --exit-status --interval 5 >/dev/null \
-            || { echo "::error::the tap's run $run did not move the cask to $VERSION_NUMBER: https://github.com/promptctl/homebrew-tap/actions/runs/$run"; exit 1; }
-          echo "the tap's cask is at vhid $VERSION_NUMBER or past it, moved by its run $run in ${SECONDS}s" | tee -a "$GITHUB_STEP_SUMMARY"
+            || stuck "the tap's run $run did not succeed"
+          cask=$RUNNER_TEMP/vhid.rb
+          GH_TOKEN=$READ_TOKEN gh api -H 'Accept: application/vnd.github.raw' repos/promptctl/homebrew-tap/contents/Casks/vhid.rb >"$cask"
+          was=$(scripts/cask-stanza "$cask" version)
+          [ "$(printf '%s\n' "$VERSION_NUMBER" "$was" | sort -V | tail -n 1)" = "$was" ] \
+            || stuck "the tap's run $run succeeded but left the cask at vhid $was, not $VERSION_NUMBER"
+          echo "the tap's cask is vhid $was, at $VERSION_NUMBER or past it, moved by its run $run in ${SECONDS}s" | tee -a "$GITHUB_STEP_SUMMARY"

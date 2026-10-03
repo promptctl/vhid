@@ -1,0 +1,18 @@
+#!/bin/bash
+# Prints the value of one of the vhid cask's one-line stanzas, from its one
+# `  <stanza> "..."` line. scripts/update-cask reads the cask it moves through this, and
+# release.yml reads the tap's cask through it once the tap's run is done, so the cask's
+# shape is written here alone.
+#
+#   scripts/cask-stanza <cask file> <stanza>
+#
+# Held to bash 3.2, like every script here.
+set -euo pipefail
+[ $# -eq 2 ] || { echo "usage: scripts/cask-stanza <cask file> <stanza>" >&2; exit 2; }
+cask=$1 stanza=$2
+# [LAW:no-silent-failure] A cask whose shape has moved on is refused rather than read as
+# naming nothing. grep -c exits 1 on no match, which the count reports; any other failure
+# stops here.
+count=$(grep -c "^  $stanza \"[^\"]*\"\$" "$cask") || [ $? -eq 1 ]
+[ "$count" = 1 ] || { echo "cask-stanza: $cask has $count lines of the form '  $stanza \"...\"', not one" >&2; exit 1; }
+sed -n "s/^  $stanza \"\(.*\)\"\$/\1/p" "$cask"
