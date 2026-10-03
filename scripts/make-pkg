@@ -100,15 +100,18 @@ if $signed; then
 fi
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/vhid-pkg.XXXXXX")
-# A build still running in the background when this exits is stopped with it, and the
-# swift build it started first: a subshell's TERM does not reach its children.
-# [LAW:no-silent-failure] exception: a job that ended after jobs -p listed it has nothing
-# left to stop, which is all a failed pkill or kill here can mean.
+# A build still running in the background when this exits is cancelled, and waited for
+# before its scratch path goes. SwiftPM cancels on INT and stops its compilers; on TERM it
+# dies and leaves them compiling into $work (measured, Swift 6.3). A subshell's signal
+# does not reach its children, so the INT goes to the swift build the subshell started.
+# [LAW:no-silent-failure] exception: a cancelled build exits non-zero, and a job that
+# ended after jobs -p listed it has nothing left to signal; the failure that brought the
+# script here has already been reported.
 cleanup() {
   local job
   for job in $(jobs -p); do
-    pkill -TERM -P "$job" || :
-    kill "$job" || :
+    pkill -INT -P "$job" || :
+    wait "$job" || :
   done
   rm -rf "$work"
 }
@@ -139,12 +142,16 @@ eyes_job=$!
 # swiftbuild, because the Xcode build system a two-arch build otherwise takes cannot
 # resolve the VersionStamp plugin and fails before compiling anything (Swift 6.3).
 build() { swift build -c release --arch arm64 --arch x86_64 --build-system swiftbuild --scratch-path "$work/build" "$@"; }
+started=$SECONDS
 build >&2
+vhid_seconds=$((SECONDS - started))
 bin=$(build --show-bin-path)
 eyes_built=true
 wait "$eyes_job" || eyes_built=false
 cat "$work/eyes.log" >&2
 $eyes_built || fail "eyes did not build; its log is above"
+# What building eyes beside vhid cost: the wait for eyes once vhid was done.
+echo "make-pkg: vhid built in ${vhid_seconds}s; eyes, built beside it, added $((SECONDS - started - vhid_seconds))s" >&2
 
 payload="$work/root"
 mkdir -p "$payload/usr/local/bin" "$payload/usr/local/libexec" "$payload/Library/LaunchDaemons" "$payload/Library/LaunchAgents"

@@ -73,7 +73,7 @@ jobs:
       # minutes of building. A pre-release may come from any branch, so a release
       # candidate can be tried before it lands.
       - name: The tagged commit is master's
-        if: steps.version.outputs.prerelease == 'false'
+        if: env.PRERELEASE == 'false'
         run: |
           git merge-base --is-ancestor "$GITHUB_SHA" origin/master \
             || { echo "::error::$TAG is not on master"; exit 1; }
