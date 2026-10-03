@@ -1,0 +1,23 @@
+#!/bin/bash
+# Asks Gatekeeper about a pkg the way a Mac that downloaded it would, and requires the
+# verdict a release has: notarized, and signed by the team's Developer ID Installer.
+# scripts/notarize ends with it, and .github/workflows/cask.yml holds every pkg the cask
+# would name to it.
+#
+#   scripts/assess-pkg <pkg>
+#
+# Held to bash 3.2, like every script here.
+set -euo pipefail
+pkg=${1:?usage: scripts/assess-pkg <pkg>}
+team=$("$(dirname "$0")/make-pkg" --team)
+
+fail() { echo "assess-pkg: $*" >&2; exit 1; }
+
+# Anything but a notarized Developer ID verdict is a pkg a downloading Mac would warn
+# about; any signer but the team is a pkg this project did not make.
+assessment=$(spctl --assess --type install -vv "$pkg" 2>&1) || fail "Gatekeeper refuses $pkg: $assessment"
+grep -qx 'source=Notarized Developer ID' <<<"$assessment" \
+  || fail "Gatekeeper accepts $pkg, but not as notarized: $assessment"
+grep -qE "^origin=Developer ID Installer: .* \\($team\\)\$" <<<"$assessment" \
+  || fail "$pkg is not signed by a Developer ID Installer certificate of team $team: $assessment"
+echo "$assessment" >&2

@@ -11,14 +11,9 @@ commit is on master (a `-tag` pre-release may come from any branch) with its `vh
 `eyes` and `pkg` checks green, and that `CHANGELOG.md` has a `## [<version>]` section.
 It then runs `scripts/release` in a keychain `scripts/release-keychain` makes for the
 job and deletes at its end, and attaches the notarized pkg to a GitHub Release whose
-notes are that section, marked a pre-release when the version has a `-tag`. A release
-that is not a pre-release then moves the cask in
-[promptctl/homebrew-tap](https://github.com/promptctl/homebrew-tap) to it:
-`scripts/update-cask` sets the cask's version, and its sha256 to that of the pkg
-fetched from the cask's own URL, and the job commits that to the tap and pushes it.
-Both jobs read secrets of the `release` environment, which admits only `v*` tags and
-waits for a maintainer to approve each job in the Actions tab before handing them over,
-so a release asks for two approvals:
+notes are that section, marked a pre-release when the version has a `-tag`. The job
+reads secrets of the `release` environment, which admits only `v*` tags and waits for a
+maintainer to approve it in the Actions tab before handing them over:
 
 | Secret | What it holds |
 | --- | --- |
@@ -27,7 +22,6 @@ so a release asks for two approvals:
 | `DEVELOPER_ID_P12_PASSWORD` | the password both .p12 files were exported with |
 | `NOTARY_APPLE_ID` | the Apple ID notarytool submits as |
 | `NOTARY_PASSWORD` | an app-specific password for that Apple ID, made at account.apple.com |
-| `HOMEBREW_TAP_DEPLOY_KEY` | the private half of an SSH deploy key with write access to promptctl/homebrew-tap |
 
 Export each identity from Keychain Access (the certificate with its private key, as
 .p12, both with one password) on the Mac that holds it, then set the secrets from the
@@ -37,28 +31,6 @@ files. The files are redirected in because Homebrew's `base64` has no `-i`:
 base64 <application.p12 | gh secret set DEVELOPER_ID_APPLICATION_P12 --env release
 base64 <installer.p12 | gh secret set DEVELOPER_ID_INSTALLER_P12 --env release
 ```
-
-The deploy key is made once, its public half given to the tap and its private half to
-the environment:
-
-```sh
-ssh-keygen -t ed25519 -N '' -f tap-key
-gh repo deploy-key add tap-key.pub --repo promptctl/homebrew-tap --allow-write --title release.yml
-gh secret set HOMEBREW_TAP_DEPLOY_KEY --env release <tap-key && rm tap-key tap-key.pub
-```
-
-If the cask job fails after the Release is published, re-running that job alone moves
-the cask without publishing again. When the job never ran (the release job failed
-after publishing, or the release was made on a Mac as below), the cask is moved by
-hand, from a clone of the tap, with the pkg as published:
-
-```sh
-gh release download v<version> --repo promptctl/vhid --pattern 'vhid-<version>.pkg' --dir /tmp
-scripts/update-cask <tap clone> <version> /tmp/vhid-<version>.pkg && git -C <tap clone> push
-```
-
-`scripts/update-cask` moves the cask only forward, and only to a release: an older
-version, or one with a `-tag`, is refused and the tap left as it was.
 
 The same release can be made on that Mac directly:
 
@@ -97,3 +69,37 @@ Mac the pkg's own Developer ID Installer signature is what covers the driver too
 but Accepted, staples the ticket, and requires Gatekeeper to assess the pkg as
 `source=Notarized Developer ID`. The notary profile is made once per Mac with
 `xcrun notarytool store-credentials <profile>`.
+
+## The cask
+
+The cask in [promptctl/homebrew-tap](https://github.com/promptctl/homebrew-tap) names
+one version and its pkg's sha256, so each release moves it. The tap moves it itself:
+its `vhid` workflow runs `.github/workflows/cask.yml` from this repository every half
+hour, which finds vhid's newest release (the highest version that is not a draft or a
+pre-release, which a version with a `-tag` is), fetches its pkg through the cask's own
+URL, and runs `scripts/update-cask` on the tap and pushes, once `scripts/assess-pkg` has
+found the pkg notarized and signed by the team. The write is the tap's own token, so no
+secret for it is held here. A run that finds the cask current changes nothing.
+
+It reads GitHub Releases alone, so a release made on a Mac reaches the cask once it is
+published there, with `--prerelease` added for a `-tag` version as the workflow adds it:
+
+```sh
+gh release create v<version> dist/vhid-<version>.pkg --verify-tag --notes-file <its CHANGELOG section>
+```
+
+`release.yml`'s `cask` job waits up to 90 minutes for the tap's cask to name the
+release, or a later one, and fails when it does not. GitHub disables a scheduled
+workflow after 60 days with no activity in its repository, which a quiet tap reaches
+between releases; then,
+and to move the cask at once:
+
+```sh
+gh workflow enable vhid.yml --repo promptctl/homebrew-tap
+gh workflow run vhid.yml --repo promptctl/homebrew-tap
+```
+
+`scripts/update-cask` moves the cask only forward, and only to a release: an older
+version, or one with a `-tag`, is refused and the tap left as it was. A pkg whose sha256
+no longer matches the cask on its own version is refused too, and fails every run until
+someone looks.

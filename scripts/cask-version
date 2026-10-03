@@ -1,0 +1,17 @@
+#!/bin/bash
+# Prints the version the vhid cask names, from its one `  version "..."` line.
+# scripts/update-cask reads the cask it moves through this, and release.yml's cask job
+# reads the tap's cask through it, so the cask's shape is written here alone.
+#
+#   scripts/cask-version <cask file>
+#
+# Held to bash 3.2, like every script here.
+set -euo pipefail
+[ $# -eq 1 ] || { echo "usage: scripts/cask-version <cask file>" >&2; exit 2; }
+cask=$1
+# [LAW:no-silent-failure] A cask whose shape has moved on is refused rather than read as
+# naming no version. grep -c exits 1 on no match, which the count reports; any other
+# failure stops here.
+count=$(grep -c '^  version "[^"]*"$' "$cask") || [ $? -eq 1 ]
+[ "$count" = 1 ] || { echo "cask-version: $cask has $count lines of the form '  version \"...\"', not one" >&2; exit 1; }
+sed -n 's/^  version "\(.*\)"$/\1/p' "$cask"

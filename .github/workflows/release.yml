@@ -136,36 +136,43 @@ jobs:
 
   # The tap's cask names one version and its sha256, so each release moves it, or `brew
   # upgrade` never sees the release. A pre-release is left out: the cask is what
-  # `brew install` gives everyone. A job of its own so that, should it fail, re-running
-  # it alone retries the cask without publishing the Release twice. It is the release
-  # environment's for the same reason that job is: the deploy key it reads can rewrite
-  # what every Homebrew install runs.
+  # `brew install` gives everyone. The tap moves it, through cask.yml on the tap's own
+  # schedule, every half hour; this job waits for that and fails loudly when it does not
+  # come, as it would not if GitHub had disabled the tap's schedule for a quiet spell.
+  # It holds no secret, so it is no environment's.
   cask:
     needs: release
     if: ${{ needs.release.outputs.prerelease == 'false' }}
     runs-on: ubuntu-latest
-    environment: release
-    # It writes only to the tap, through the deploy key; this repository it only reads.
     permissions:
       contents: read
-    timeout-minutes: 10
+    timeout-minutes: 100
     env:
       VERSION_NUMBER: ${{ needs.release.outputs.version }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/checkout@v7
         with:
-          repository: promptctl/homebrew-tap
-          ssh-key: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
-          path: tap
+          sparse-checkout: scripts
 
-      # [LAW:one-source-of-truth] The sha256 is of the pkg as published, fetched through
-      # the URL the cask builds from its version, so the hash is of what brew will fetch.
-      - name: The cask is this release's
+      # The tap moves the cask straight to the newest release, so a release it passed over
+      # is served by a cask at a later one, in the order update-cask moves it by. A fetch
+      # that fails is reported and tried again the next minute; a cask that cannot be read
+      # fails here at once.
+      - name: The tap's cask is at this release or past it
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          pkg="$RUNNER_TEMP/vhid-$VERSION_NUMBER.pkg"
-          curl -fsSL -o "$pkg" "https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION_NUMBER/vhid-$VERSION_NUMBER.pkg"
-          git -C tap config user.name 'github-actions[bot]'
-          git -C tap config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          scripts/update-cask tap "$VERSION_NUMBER" "$pkg" | tee -a "$GITHUB_STEP_SUMMARY"
-          git -C tap push origin HEAD
+          cask=$RUNNER_TEMP/vhid.rb
+          was=unread
+          for attempt in $(seq 90); do
+            if gh api -H 'Accept: application/vnd.github.raw' repos/promptctl/homebrew-tap/contents/Casks/vhid.rb >"$cask"; then
+              was=$(scripts/cask-version "$cask")
+              if [ "$(printf '%s\n' "$VERSION_NUMBER" "$was" | sort -V | tail -n 1)" = "$was" ]; then
+                echo "the tap's cask is vhid $was, at $VERSION_NUMBER or past it" | tee -a "$GITHUB_STEP_SUMMARY"
+                exit 0
+              fi
+            fi
+            sleep 60
+          done
+          echo "::error::after 90 minutes the tap's cask is not at $VERSION_NUMBER or past it (last read: $was); see the vhid workflow's runs in promptctl/homebrew-tap (docs/releasing.md)"
+          exit 1
