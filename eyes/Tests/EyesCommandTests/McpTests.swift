@@ -216,12 +216,14 @@ import Testing
             ("find", ["text": "a", "until": "gone"], "until is gone, and it takes one of present, absent"),
             ("find", ["text": "a", "until": "absent", "timeout": 0], "timeout is 0.0, and it takes seconds above 0 and at most 600"),
             ("read", ["limit": 0], "limit must be at least 1"),
-            ("read", ["display": 1, "window": 2], "give at most one of display, window, rect"),
+            ("read", ["display": 1, "window": 2], "give at most one of display, window, page, rect"),
             ("read", ["display": -1], "display is -1, which is not a window-server id (0 to 4294967295)"),
             ("read", ["window": 4_294_967_296], "window is 4294967296, which is not a window-server id (0 to 4294967295)"),
             ("read", ["rect": "1,2,3"], "rect wants x,y,width,height in points - a positive size, nothing past a million - got 1,2,3"),
-            ("read", ["text": "a"], "text is not an argument this tool takes: it takes display, window, rect, limit, source"),
+            ("read", ["text": "a"], "text is not an argument this tool takes: it takes display, window, page, rect, limit, source"),
             ("read", ["source": "ocr"], "source is ocr, and it takes one of tree, pixels, merged"),
+            ("read", ["page": 2, "rect": "1,2,3,4"], "give at most one of display, window, page, rect"),
+            ("find", ["text": "a", "near": " "], "the text to find matches near is blank"),
         ] {
             let (said, isError) = try await call(arguments, tool: tool)
             #expect(isError == true, "\(tool) \(arguments)")

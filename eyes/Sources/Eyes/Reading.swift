@@ -41,11 +41,17 @@ public struct Query: Sendable, Hashable {
     /// The most findings to return. A reading that hit this says so in its scope, so the
     /// cap can never be mistaken for the whole answer. [LAW:no-silent-failure]
     public let limit: Limit
+    /// Text the matches sit beside, which orders them nearest it first - so of three
+    /// "Remove" buttons, the one in Beta's row comes first. Absent keeps reading order.
+    /// A match is only ever placed by what is on screen beside it, so a query naming
+    /// text that is not there matches nothing. [LAW:dataflow-not-control-flow]
+    public let near: Match?
 
-    public init(match: Match?, region: Region, limit: Limit = .default) {
+    public init(match: Match?, region: Region, limit: Limit = .default, near: Match? = nil) {
         self.match = match
         self.region = region
         self.limit = limit
+        self.near = near
     }
 }
 
@@ -98,6 +104,11 @@ public enum Region: Sendable, Hashable {
     case display(CGDirectDisplayID)
     /// One window's bounds, by the id the geometry reading gave it.
     case window(UInt32)
+    /// The web page a browser window shows, without the browser's toolbar and bookmarks:
+    /// the frame its accessibility tree gave the page when the query was made. The tree
+    /// is the only reader that knows where a page is, and this package links none, so the
+    /// frame is found by the caller and carried here with the window it is in.
+    case page(window: UInt32, frame: ScreenRect)
 }
 
 /// What a reader found, and what it can honestly say about having looked.

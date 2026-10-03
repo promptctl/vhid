@@ -209,7 +209,7 @@ extension Node {
         let leaf = if case .answered(let children) = children { children.isEmpty } else { false }
         guard leaf || !areas.contains(facts.role) else { return .excluded(.area) }
         if case .answered(let placed) = facts.frame {
-            guard let placed, !placed.isEmpty, clip.contains(placed.centre) else { return .excluded(.unplaced) }
+            guard let placed, !placed.isThin, clip.contains(placed.centre) else { return .excluded(.unplaced) }
         }
         let text = facts.texts.lazy.compactMap({ $0.answer.flatMap { $0 }.flatMap(Text.init) }).first
         guard text != nil || facts.texts.contains(.unanswered) else { return .excluded(.wordless) }
@@ -224,6 +224,33 @@ extension Node {
         return .found(Found(text: text, frame: placed, source: .tree(role: facts.role)))
     }
 }
+
+extension ScreenRect {
+    /// No more than a point across in either direction: nothing a person reads or clicks.
+    /// Measured on studious: Chrome places a page element scrolled wholly out of view on
+    /// the edge of the viewport nearest it, a strip one point thick and its full length the
+    /// other way, so its centre is inside the page while the element is not.
+    var isThin: Bool { width <= 1 || height <= 1 }
+}
+
+/// The frame of the first web page under `root`, breadth first, so a page is found before
+/// the frames inside it - or nil when no element read holds one. A walk bounded by
+/// `elements`, as the reading walk is, since a page sits a few levels under its window
+/// and a browser's tree is tens of thousands wide. [LAW:effects-at-boundaries]
+func page<Element>(under root: Element, within elements: Limit, read: (Element) throws -> Node<Element>) rethrows -> ScreenRect? {
+    var queue = [root][...]
+    var examined = 0
+    while let element = queue.popFirst(), examined < elements.count {
+        let node = try read(element)
+        examined += 1
+        if node.facts.role == webArea, case .answered(let frame?) = node.facts.frame, !frame.isThin { return frame }
+        queue.append(contentsOf: node.children.answer ?? [])
+    }
+    return nil
+}
+
+/// The role a browser gives the page it shows.
+let webArea = Role(rawValue: "AXWebArea")
 
 /// Roles that draw nothing outside their own frame: a scroll area's rows, and a web page
 /// inside its viewport.

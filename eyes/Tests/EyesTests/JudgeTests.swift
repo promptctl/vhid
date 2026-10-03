@@ -24,6 +24,47 @@ import Testing
         )
     }
 
+    /// Three "Remove" buttons, one per row, each beside its row's name - the probe page's.
+    private func rows(near: String, limit: Limit = .default) -> Reading {
+        let at = { (text: String, x: Double, y: Double, w: Double) in
+            Found(text: Text(text)!, frame: ScreenRect(x: x, y: y, width: w, height: 27), source: .tree(role: Role(rawValue: "AXStaticText")))
+        }
+        let seen = [at("Alpha", 52, 504, 60), at("Remove", 192, 504, 84), at("Beta", 52, 537, 50),
+                    at("Remove", 192, 537, 84), at("Gamma", 52, 570, 70), at("Remove", 192, 570, 84)]
+        return Reading.judging(seen, query: Query(match: .exact("Remove"), region: .rect(Self.region), limit: limit, near: .contains(near)),
+                               region: Self.region, examined: seen.count, excluded: [], reach: .whole)
+    }
+
+    /// The Remove in Beta's row comes first, then the rows either side in reading order.
+    @Test func nearOrdersTheMatchesByTheRowTheyShare() {
+        guard case .matched(let m) = rows(near: "beta").outcome else { Issue.record("no match"); return }
+        #expect(m.all.map(\.frame.y) == [537, 504, 570])
+        guard case .matched(let last) = rows(near: "Gamma", limit: Limit(1)!).outcome else { Issue.record("no match"); return }
+        #expect(last.all.map(\.frame.y) == [570])
+    }
+
+    /// A label touching the link before it and the link after it names the one after:
+    /// Safari reads "Release notes More · Pricing More" with " · Pricing " one run.
+    @Test func ofTwoMatchesTouchingTheTextTheOneAfterItIsNearer() {
+        let at = { (text: String, x: Double, w: Double) in
+            Found(text: Text(text)!, frame: ScreenRect(x: x, y: 368, width: w, height: 18), source: .tree(role: Role(rawValue: "AXLink")))
+        }
+        let seen = [at("Release notes", 200, 110), at("More", 310, 36), at(" · Pricing ", 346, 79), at("More", 425, 36)]
+        let read = Reading.judging(seen, query: Query(match: .exact("More"), region: .rect(Self.region), near: .contains("Pricing")),
+                                   region: Self.region, examined: seen.count, excluded: [], reach: .whole)
+        guard case .matched(let m) = read.outcome else { Issue.record("\(read)"); return }
+        #expect(m.all.map(\.frame.x) == [425, 310])
+    }
+
+    /// Text to be near that is not on screen places nothing, and the rows are its own near
+    /// misses, since it is what was missing.
+    @Test func nearTextThatIsNotThereMatchesNothing() {
+        let read = rows(near: "Bta")
+        guard case .nearest(let near) = read.outcome else { Issue.record("\(read)"); return }
+        #expect(near.first?.found.text.value == "Beta")
+        #expect(read.provesAbsence)
+    }
+
     @Test func containsFindsTheQueryInsideALongerRunIgnoringCase() {
         let read = judge(["File", "Save As…", "Close"], .contains("save"))
         guard case .matched(let matches) = read.outcome else { Issue.record("\(read)"); return }

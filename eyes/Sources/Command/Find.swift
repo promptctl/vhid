@@ -20,6 +20,9 @@ struct Find: AsyncParsableCommand {
     @Option(help: "The most matches to print.")
     var limit = Limit.default.count
 
+    @Option(help: .init(stringLiteral: Help.near))
+    var near: String?
+
     @OptionGroup var place: Where
 
     @Option(help: .init(stringLiteral: Help.source))
@@ -33,6 +36,7 @@ struct Find: AsyncParsableCommand {
 
     func validate() throws {
         _ = try Self.match(text, exact: exact, edits: edits, as: .flag)
+        _ = try Self.near(near)
         _ = try Where.limit(limit, as: .flag)
         _ = try Self.wait(until, timeout: timeout, as: .flag)
     }
@@ -40,7 +44,7 @@ struct Find: AsyncParsableCommand {
     @MainActor
     func run() async throws {
         try await look(Query(match: Self.match(text, exact: exact, edits: edits, as: .flag),
-                             region: place.region, limit: Where.limit(limit, as: .flag)),
+                             region: await place.region, limit: Where.limit(limit, as: .flag), near: Self.near(near)),
                        source: source, wait: Self.wait(until, timeout: timeout, as: .flag))
     }
 
@@ -56,6 +60,15 @@ struct Find: AsyncParsableCommand {
             throw ValidationError("\(s("timeout")) is \(seconds), and it takes seconds above 0 and at most \(Int(Wait.longest))")
         }
         return wait
+    }
+
+    /// The text the matches are ordered beside, or the refusal - one rule for the verb and
+    /// the MCP tool. Contained, as the text found is by default, and as blind to case.
+    static func near(_ text: String?) throws -> Match? {
+        try text.map { text in
+            guard Text(text) != nil else { throw ValidationError("the text to find matches near is blank") }
+            return .contains(text)
+        }
     }
 
     /// What to match, or the refusal - one rule for the verb and the MCP tool, each naming
@@ -78,6 +91,9 @@ struct Read: AsyncParsableCommand {
     @Option(help: "The most runs to print.")
     var limit = Limit.default.count
 
+    @Option(help: .init(stringLiteral: Help.near))
+    var near: String?
+
     @OptionGroup var place: Where
 
     @Option(help: .init(stringLiteral: Help.source))
@@ -89,6 +105,6 @@ struct Read: AsyncParsableCommand {
 
     @MainActor
     func run() async throws {
-        try await look(Query(match: nil, region: place.region, limit: Where.limit(limit, as: .flag)), source: source)
+        try await look(Query(match: nil, region: await place.region, limit: Where.limit(limit, as: .flag)), source: source)
     }
 }

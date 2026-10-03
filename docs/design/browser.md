@@ -10,6 +10,15 @@ Measured on studious on 2026-10-03: macOS 15.0.1, Safari 18.0.1, Chrome 154.0.80
 - **The gaps are in what `eyes` reports, not in what it sees.** It reports a Chrome element that is off screen as on screen. It does not say a row's role, so a page button and a browser button with the same name look the same. And it cannot tell apart three buttons that share one label.
 - **Reaching an element below the fold is vhid's job, and its wheel is broken.** One `vhid scroll` call barely moves the page (vhid-scroll-1m8), and in Firefox the wheel stopped partway for a reason not yet known (vhid-browser-j5d.dap). The End key works today.
 
+## What eyes does about it
+
+The gaps below were measured with eyes 0.2.0. The next release closes the ones that are eyes' own. Each element was checked on the probe page in Safari and Chrome, and spot-checked in Firefox, by clicking the point `eyes find --page` gave with `vhid click`.
+
+- **Off-screen elements.** Chrome places an element scrolled wholly out of view as a strip one point thick on the viewport's nearest edge: "Far below" read as 96x1 at y=877, the page's last row. The tree reader drops any frame no more than a point across as unplaced (`isThin` in [Walk.swift](../../eyes/Sources/Tree/Walk.swift)), so with the page at the top Chrome now answers "not found", as Safari and Firefox do.
+- **Roles.** Every row prints the element's role, or `pixels` for text only pixels saw.
+- **The page apart from the browser.** `--page <window id>` reads the window's `AXWebArea` and nothing around it. In Chrome, "Settings" in the page alone is the page's button, not the "Settings, opens in new tab" bookmark.
+- **Repeated labels.** `--near <text>` puts the match closest to that text first: nearest across lines, then along the line, and on a tie the match that comes after the text. The tie rule is for Safari, which reads " · Pricing " as one run touching both "More" links.
+
 ## What was found
 
 Each cell names the readers that found the element. "Right" means a click on the merged answer's point landed on that element. For the canvas, the page could only tell that the click landed on the canvas, not on the word.
@@ -44,6 +53,6 @@ The tree reads `aria-label` (the button's accessibility description), iframe con
 
 ## Repeating it
 
-The probe page, [browser-probe.html](browser-probe.html), holds one of each element above, and a fixed status line at the top that numbers each click, names the element it landed on (`none` for a miss), and names the focused element. Open it from disk in each browser on studious. For each element's text, run `eyes find "<text>" --window <id>` once per `--source`. Then `vhid click` the merged answer's point and read the status line with `eyes find "Last click" --window <id> --source tree`. Scope Chrome to the page with `--rect` when you want the page's own match, not the bookmark bar's.
+The probe page, [browser-probe.html](browser-probe.html), holds one of each element above, and a fixed status line at the top that numbers each click, names the element it landed on (`none` for a miss), and names the focused element. Open it from disk in each browser on studious. For each element's text, run `eyes find "<text>" --window <id>` once per `--source`. Then `vhid click` the merged answer's point and read the status line with `eyes find "Last click" --window <id> --source tree`. Pass `--page <id>` in place of `--window <id>` for the page's own match, not the bookmark bar's.
 
 Two traps cost time here. A `find` that matches nothing still prints the nearest runs as rows, so a script that clicks "the second line" clicks a near miss, such as the browser's Reload button. And studious is shared: another session's input can take focus mid-run, which showed up as a covered window and clicks reporting the element before.

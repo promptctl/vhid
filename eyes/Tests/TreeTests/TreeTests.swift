@@ -62,6 +62,17 @@ extension Facts {
         #expect(Node(facts: list, children: .answered(["row"])).candidate(in: region, under: .none) == .excluded(.area))
     }
 
+    /// Chrome's place for a page element scrolled out of view: a one-point strip on the
+    /// viewport's edge, whose centre is inside the page while the element is not.
+    @Test func aStripOnePointThickIsUnplaced() {
+        let strip = facts([.answered("Far below")], frame: .answered(ScreenRect(x: 52, y: 777, width: 96, height: 1)))
+        #expect(strip.candidate(in: region, under: .none) == .excluded(.unplaced))
+        let upright = facts([.answered("Far right")], frame: .answered(ScreenRect(x: 999, y: 100, width: 1, height: 27)))
+        #expect(upright.candidate(in: region, under: .none) == .excluded(.unplaced))
+        let small = facts([.answered("x")], frame: .answered(ScreenRect(x: 100, y: 100, width: 2, height: 2)))
+        #expect(small.candidate(in: region, under: .none) != .excluded(.unplaced))
+    }
+
     /// A web page's labelled icon button is a group holding its image, pressed at its centre.
     @Test func aLabelledGroupHoldingAnIconIsFound() {
         let group = facts([.answered("Settings")], role: "AXGroup")
@@ -594,5 +605,28 @@ extension Covers {
         }
         #expect(await asked.grants == [.accessibility])
         #expect(Grant.accessibility.reader == reader.source)
+    }
+}
+
+@Suite struct PageTests {
+    private let tree: [String: Node<String>] = [
+        "window": Node(facts: facts([.answered("Probe")], role: "AXWindow"), children: .answered(["toolbar", "scroll"])),
+        "toolbar": Node(facts: facts([.answered("Settings")], role: "AXToolbar"), children: .answered([])),
+        "scroll": Node(facts: facts([], role: "AXScrollArea"), children: .answered(["page"])),
+        "page": Node(facts: facts([], frame: .answered(ScreenRect(x: 22, y: 190, width: 1200, height: 688)), role: "AXWebArea"),
+                     children: .answered(["frame"])),
+        "frame": Node(facts: facts([], frame: .answered(ScreenRect(x: 53, y: 616, width: 420, height: 90)), role: "AXWebArea"),
+                      children: .answered([])),
+    ]
+
+    /// The page is the outermost web area, not a frame inside it.
+    @Test func thePageIsTheFirstWebAreaBreadthFirst() {
+        #expect(page(under: "window", within: Limit(10)!, read: { tree[$0]! }) == ScreenRect(x: 22, y: 190, width: 1200, height: 688))
+    }
+
+    /// A window with no web area in reach has no page.
+    @Test func aWindowWithNoWebAreaHasNoPage() {
+        #expect(page(under: "toolbar", within: Limit(10)!, read: { tree[$0]! }) == nil)
+        #expect(page(under: "window", within: Limit(3)!, read: { tree[$0]! }) == nil)
     }
 }

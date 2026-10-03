@@ -24,8 +24,30 @@ import Testing
         #expect(Report.lines(reading, query: query, source: .pixels) == [
             "\"Settings\" not found in display 12 -2400,-300 2400x1600 by pixels; 47 runs read; 3 duplicate;"
                 + " whole region read; nearest follow. Points are centres, vhid click coordinates.",
-            "-1880,-50\tSetlings\t1 off",
+            "-1880,-50\tSetlings\tpixels\t1 off",
         ])
+    }
+
+    /// Each row says what it is: the tree's role, kept through a merge, or `pixels` for text
+    /// only pixels saw - so a page's button is told from a bookmark of the same name.
+    @Test func aRowNamesItsRole() {
+        let frame = ScreenRect(x: 0, y: 0, width: 40, height: 20)
+        let button = Source.tree(role: Role(rawValue: "AXButton"))
+        let rows = Report.rows(.matched(Matches([
+            Found(text: Text("Settings")!, frame: frame, source: .tree(role: Role(rawValue: "AXLink"))),
+            Found(text: Text("Settings")!, frame: frame, source: .merged(button, .pixels(confidence: Confidence(1)!))),
+            Found(text: Text("Canvas")!, frame: frame, source: .pixels(confidence: Confidence(1)!)),
+        ])!))
+        #expect(rows == ["20,10\tSettings\tAXLink", "20,10\tSettings\tAXButton", "20,10\tCanvas\tpixels"])
+    }
+
+    /// The scope says a match was ordered beside other text, and that a page was read.
+    @Test func theScopeNamesTheNearTextAndThePage() {
+        let page = ScreenRect(x: 22, y: 190, width: 1200, height: 688)
+        let reading = Reading(outcome: .matched(Matches([found("Remove", x: 100)])!), scope: Scope(region: page, examined: 9, reach: .whole))
+        let query = Query(match: .contains("Remove"), region: .page(window: 219, frame: page), near: .contains("Beta"))
+        #expect(Report.scope(reading, query: query, source: .tree)
+            .hasPrefix("1 matched \"Remove\" near \"Beta\" in the page in window 219 22,190 1200x688 by the tree;"))
     }
 
     /// A blank region promises no rows it does not print.
@@ -101,11 +123,15 @@ import Testing
             _ = try await Report.text(Query(match: .contains("OK"), region: .display(12)), source: .pixels,
                                       wait: Wait(until: .present, seconds: 1)) { _, _ in hit }
             _ = try? await Report.text(Query(match: nil, region: .display(12)), source: .merged) { _, _ in throw PixelsError.noGrant }
+            _ = try await Report.text(Query(match: .contains("OK"), region: .page(window: 7, frame: Self.display), near: .contains("Beta")),
+                                      source: .tree) { _, _ in hit }
         }
         let seen = events.all
-        #expect(seen.map(\.event) == ["look", "look", "look"])
-        #expect(seen.map(\.outcome) == ["not_matched", "settled", "error"])
-        #expect(seen.map { $0.facts["source"] } == ["tree", "pixels", "merged"])
+        #expect(seen.map(\.event) == ["look", "look", "look", "look"])
+        #expect(seen.map(\.outcome) == ["not_matched", "settled", "error", "matched"])
+        #expect(seen.map { $0.facts["source"] } == ["tree", "pixels", "merged", "tree"])
+        #expect(seen.map { $0.facts["region"] } == ["display", "display", "display", "page"])
+        #expect(seen.map { $0.facts["order"] } == ["reading", "reading", "reading", "near"])
         #expect(seen[0].counts == ["reads": 1, "examined": 5, "matched": 0, "nearest": 0])
         #expect(seen[1].counts == ["reads": 1, "examined": 9, "matched": 1, "nearest": 0])
         #expect(seen[1].facts["until"] == "present")

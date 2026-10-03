@@ -23,6 +23,10 @@ enum Help {
     static let display = "Read this display, by its window-server id, which `eyes displays` lists and every scope line names. Defaults to the main display."
     static let window = "Read this window's bounds, by the id `eyes windows` prints."
     static let rect = "Read this rectangle: x,y,width,height in the points vhid clicks."
+    static let page = "Read the web page this window shows, by the id `eyes windows` prints: the page alone,"
+        + " not the browser's toolbar and bookmarks around it. Needs Accessibility, which finds the page."
+    static let near = "Order the matches by how close each sits to a run containing this text, nearest first:"
+        + " the Remove in Beta's row before the others. With nothing on screen containing it, nothing matches."
     static let until = "Read again until the text is present or absent, then answer once with the last reading."
         + " Absent counts only a region read whole, twice running."
     static let timeout = "With until, the most seconds to wait: at most \(Int(Wait.longest)). A wait that runs out answers"
@@ -50,7 +54,7 @@ extension SourceKind: ExpressibleByArgument {
     /// Every reader's gate: a fresh reading, the one `eyes grants` prints, so a reader and
     /// the grants tool cannot disagree - and a grant switched on under a running `eyes mcp`
     /// is seen by its next read. [LAW:one-source-of-truth]
-    private static let granted: Gate = { try await readings.holds($0) }
+    static let granted: Gate = { try await readings.holds($0) }
     private static let readings = SharedReading(take: GrantsVerb.reading)
 
     /// The scope line's name for who looked.
@@ -74,28 +78,47 @@ struct Where: ParsableArguments {
     @Option(help: .init(stringLiteral: Help.rect))
     var rect: String?
 
+    @Option(help: .init(stringLiteral: Help.page))
+    var page: UInt32?
+
     func validate() throws {
-        _ = try region
+        _ = try Self.place(display: display, window: window, page: page, rect: rect, as: .flag)
     }
 
-    var region: Region {
-        get throws { try Self.region(display: display, window: window, rect: rect, as: .flag) }
+    @MainActor var region: Region {
+        get async throws { try await Self.place(display: display, window: window, page: page, rect: rect, as: .flag).region() }
     }
 
-    /// The one place a region is spelled from its three arguments, for the verbs and the
+    /// The one place a region is spelled from its four arguments, for the verbs and the
     /// MCP tools alike, each naming an argument the way its caller spells it.
     /// [LAW:single-enforcer]
     ///
     /// The main display is the default rather than every display, because `Region` has no
     /// word for everywhere; the scope line names which display was read, so the default is
     /// never mistaken for the whole desk.
-    static func region(display: UInt32?, window: UInt32?, rect: String?, as s: Spelling) throws -> Region {
-        guard [display != nil, window != nil, rect != nil].filter({ $0 }).count <= 1 else {
-            throw ValidationError("give at most one of \(s("display")), \(s("window")), \(s("rect"))")
+    static func place(display: UInt32?, window: UInt32?, page: UInt32?, rect: String?, as s: Spelling) throws -> Place {
+        guard [display != nil, window != nil, page != nil, rect != nil].filter({ $0 }).count <= 1 else {
+            throw ValidationError("give at most one of \(s("display")), \(s("window")), \(s("page")), \(s("rect"))")
         }
-        return try rect.map { .rect(try parsedRect($0, as: s)) }
-            ?? window.map(Region.window)
-            ?? .display(display ?? CGMainDisplayID())
+        return try page.map(Place.page) ?? .region(
+            rect.map { .rect(try parsedRect($0, as: s)) }
+                ?? window.map(Region.window)
+                ?? .display(display ?? CGMainDisplayID()))
+    }
+
+    /// Where a verb was told to look: a region as spelled, or a window's web page, whose
+    /// frame only the tree can find - so it is found when the look is made, not when the
+    /// arguments are parsed.
+    enum Place {
+        case region(Region)
+        case page(UInt32)
+
+        @MainActor func region() async throws -> Region {
+            switch self {
+            case .region(let region): region
+            case .page(let id): try await TreeReader(granted: SourceKind.granted).page(in: id)
+            }
+        }
     }
 
     /// How many rows, for both verbs and both tools.
@@ -126,7 +149,7 @@ enum Report {
     /// [LAW:no-silent-failure]
     static func scope(_ reading: Reading, query: Query, source: SourceKind, grantNote: String = "") -> String {
         let s = reading.scope
-        let asked = query.match.map(wanted)
+        let asked = query.match.map { match in wanted(match) + (query.near.map { " near \(wanted($0))" } ?? "") }
         let head: String = switch reading.outcome {
         case .matched(let m):
             asked.map { "\(m.count) matched \($0)" } ?? "\(m.count) run\(m.count == 1 ? "" : "s")"
@@ -143,13 +166,18 @@ enum Report {
         return clauses.compactMap { $0 }.joined(separator: "; ") + ". Points are centres, vhid click coordinates."
     }
 
-    /// One run per row: the centre a click lands on, then the text. The nearest rows add
-    /// how many edits off they were.
+    /// One run per row: the centre a click lands on, the text, and what it is - the role
+    /// the tree gave it, or `pixels` for text only the pixels reader saw, which has none.
+    /// The nearest rows add how many edits off they were.
     static func rows(_ outcome: Outcome) -> [String] {
         switch outcome {
-        case .matched(let m): m.all.map { "\(point($0.frame.centre))\t\($0.text)" }
-        case .nearest(let near): near.map { "\(point($0.found.frame.centre))\t\($0.found.text)\t\($0.distance) off" }
+        case .matched(let m): m.all.map(row)
+        case .nearest(let near): near.map { "\(row($0.found))\t\($0.distance) off" }
         }
+    }
+
+    private static func row(_ found: Found) -> String {
+        "\(point(found.frame.centre))\t\(found.text)\t\(found.source.role?.rawValue ?? "pixels")"
     }
 
     private static func wanted(_ match: Match) -> String {
@@ -166,6 +194,7 @@ enum Report {
         // Its bounds, as pixels: a window partly under another reads what is on top.
         case .window(let id): "what is on top over window \(id)"
         case .rect: "rect"
+        case .page(let id, _): "the page in window \(id)"
         }
     }
 
@@ -199,6 +228,18 @@ enum Report {
     private static func point(_ p: ScreenPoint) -> String { "\(Int(p.x.rounded())),\(Int(p.y.rounded()))" }
 }
 
+private extension Region {
+    /// Which kind of place was read, for the look's event.
+    var kind: String {
+        switch self {
+        case .display: "display"
+        case .window: "window"
+        case .page: "page"
+        case .rect: "rect"
+        }
+    }
+}
+
 private extension Outcome {
     var isMatched: Bool { if case .matched = self { true } else { false } }
 }
@@ -221,6 +262,8 @@ extension Report {
         // reads through: which reader, what it read, and how it ended.
         try await Telemetry.unit("look", outcome: \.outcome) {
             Telemetry.note("source", source.rawValue)
+            Telemetry.note("region", query.region.kind)
+            Telemetry.note("order", query.near == nil ? "reading" : "near")
             // Tallied as each read starts, so a look that fails says how many it spent.
             Telemetry.count("reads", 0)
             func counted(_ query: Query) async throws -> Reading { Telemetry.tally("reads"); return try await read(source, query) }
