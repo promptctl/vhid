@@ -1,9 +1,9 @@
 // Renders film-demo's caption band: `swift caption-band.swift <width> <height> <dir>` reads
 // `<second>\t<kind>\t<line>` rows on stdin and writes <dir>/band-<n>.png, the band as it
-// stands once row n has been added - its last three lines, the newest at the bottom, like
-// a terminal. The kind is who produced the line: narration reads dimmer than what was
-// typed, and what a command printed is green. A line wider than the band ends in an
-// ellipsis.
+// stands once n rows have been added - as many of its last lines as the height holds, the
+// newest at the bottom, like a terminal; band-0 is the band before the first row. The kind
+// is who produced the line: narration reads dimmer than what was typed, and what a command
+// printed is green. A line wider than the band ends in an ellipsis.
 import AppKit
 
 enum Kind: String {
@@ -37,10 +37,12 @@ let font = NSFont.monospacedSystemFont(ofSize: 26, weight: .regular)
 let background = NSColor(srgbRed: 0x16 / 255, green: 0x18 / 255, blue: 0x1d / 255, alpha: 1)
 let leading: CGFloat = 38
 let margin: CGFloat = 24
+let bottomMargin: CGFloat = 18
+let rows = Int((CGFloat(height) - bottomMargin) / leading)
 let truncated = NSMutableParagraphStyle()
 truncated.lineBreakMode = .byTruncatingTail
-for n in lines.indices {
-    let shown = lines[max(0, n - 2)...n]
+for n in 0...lines.count {
+    let shown = lines[max(0, n - rows)..<n]
     let image = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height, bitsPerSample: 8,
                                  samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
                                  bytesPerRow: 0, bitsPerPixel: 0)!
@@ -50,7 +52,7 @@ for n in lines.indices {
     NSRect(x: 0, y: 0, width: width, height: height).fill()
     // Bottom-up, newest line lowest.
     for (k, line) in shown.reversed().enumerated() {
-        let row = NSRect(x: margin, y: 18 + CGFloat(k) * leading, width: CGFloat(width) - 2 * margin, height: leading)
+        let row = NSRect(x: margin, y: bottomMargin + CGFloat(k) * leading, width: CGFloat(width) - 2 * margin, height: leading)
         line.text.draw(in: row, withAttributes: [.font: font, .foregroundColor: line.kind.color, .paragraphStyle: truncated])
     }
     NSGraphicsContext.restoreGraphicsState()
