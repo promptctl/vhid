@@ -6,6 +6,10 @@ Two MCP servers over stdio, one for input and one for reading the screen. This p
 `click`, `move`, `scroll`, `drag`, `play`, `cursor` and `doctor`, run as `vhid mcp`. `play` takes
 the script as its `script` argument where the command line reads it from stdin.
 
+`type` and `press` take `into`, an app's name as eyes `windows` prints the frontmost application,
+and refuse, sending nothing, when another app is in front; [cli.md](cli.md) has the
+rule.
+
 Each tool call connects to the daemon and leaves when it returns, so a session holds
 nothing between calls and a `vhid click` from a shell still gets through. Stdout carries
 only JSON-RPC; diagnostics go to stderr. An argument a tool will not act on comes back as

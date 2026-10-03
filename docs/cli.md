@@ -4,6 +4,7 @@ The verbs that type, click and replay, and the rules they share: keyboard layout
 
 ```sh
 vhid type "hello"
+vhid type --into TextEdit "hello"
 vhid press leftCommand+s
 vhid gesture mission-control
 vhid click 800 500 --button left --times 2
@@ -18,8 +19,17 @@ vhid doctor
 ```
 
 It types where the keyboard is pointed and clicks where it is told. There is no
-click-by-element and no target app, because nothing in vhid reads the screen — what is
-under a point is the caller's to know.
+click-by-element, because nothing in vhid reads the screen — what is under a point is
+the caller's to know.
+
+`type` and `press` take `--into <app>` (the MCP tools, `into`): the app the keys are
+for, named as `eyes windows` prints the frontmost application on its first line. Just before the first key, the
+verb asks macOS which app is in front and, when it is another, refuses with nothing
+sent, naming the app that was: `TextEdit is not in front, so nothing was sent: Terminal
+(pid 512) is`. It is asked once, so a window that comes forward while the keys are going
+down still gets the rest, and it is the app that is checked, not the field or a panel of
+another process over it. At the login window, or with another user's session in front,
+the app in front cannot be read from this user's session, so `--into` refuses there too.
 
 Which keys make which characters is the calling user's keyboard layout, read in the CLI
 rather than in the daemon: macOS answers that question per process, and a root daemon

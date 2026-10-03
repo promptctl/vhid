@@ -69,7 +69,7 @@ import Testing
     /// each against a far end of its own so neither counts the other's acts.
     private static func said(_ far: FarEnd) async -> (typed: String, clicked: String) {
         let at = ScreenPoint(x: 5, y: 5)!
-        let typed = await failure(against: far) { try await TypeCommand.type("ab", on: VerbTests.us, with: $0.typist) }
+        let typed = await failure(against: far) { try await TypeCommand.type("ab", on: VerbTests.us, into: .anywhere, with: $0.typist, front: $0.front) }
         let clicked = await failure(against: far) {
             try await ClickCommand.click(at: at, button: .left, times: .single, holding: .none, with: Pointer(mouse: $0.mouse, cursor: { at }), $0.keyboard)
         }
@@ -106,7 +106,7 @@ import Testing
         let unreachable = "no launchd job answers \(Self.far) (NSCocoaErrorDomain 4099): vhidd is not installed or not loaded"
         func helper() -> HelperConnection { HelperConnection(connection: Unanswered(), service: Self.far, replyTimeout: .seconds(20)) }
         let at = ScreenPoint(x: 5, y: 5)!
-        let typed = await Self.failure { try await Devices.using(helper()) { try await TypeCommand.type("ab", on: VerbTests.us, with: $0.typist) } }
+        let typed = await Self.failure { try await Devices.using(helper()) { try await TypeCommand.type("ab", on: VerbTests.us, into: .anywhere, with: $0.typist, front: $0.front) } }
         let clicked = await Self.failure {
             try await Devices.using(helper()) { try await ClickCommand.click(at: at, button: .left, times: .single, holding: .none, with: Pointer(mouse: $0.mouse, cursor: { at }), $0.keyboard) }
         }
@@ -126,6 +126,15 @@ import Testing
         let refused = "\(Self.far) refused: devices not up: the driver extension is awaiting approval"
         #expect(said.typed == "\(refused). 0 of 2 characters had been posted and acknowledged before this, and the rest were not sent")
         #expect(said.clicked == refused)
+    }
+
+    /// Keys aimed into an app ask the daemon before they ask what is in front, so devices
+    /// that are down are what the caller hears, and no key is ever attempted.
+    @Test func keysAimedIntoAnAppAskTheDaemonBeforeAskingWhatIsInFront() async {
+        let typed = await Self.failure(against: .refusing(after: 0, refusal: Self.devicesDown)) {
+            try await TypeCommand.type("ab", on: VerbTests.us, into: .into("TextEdit"), with: $0.typist, front: $0.front)
+        }
+        #expect(typed == "\(Self.far) refused: devices not up: the driver extension is awaiting approval")
     }
 
     /// Once the daemon has acknowledged an act, a failure of the devices after it may leave

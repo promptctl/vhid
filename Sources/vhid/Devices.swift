@@ -20,6 +20,7 @@ struct Devices {
     let keyboard: any Keyboard
     let mouse: any Mouse
     let cursor: @Sendable () async throws -> ScreenPoint
+    let front: @Sendable () async throws -> FrontApp?
 
     /// Runs `body` with the devices over a connection to this installation's daemon, and
     /// hands them back when it returns.
@@ -43,7 +44,8 @@ struct Devices {
         let queue = DeviceQueue()
         let devices = Devices(keyboard: QueuedKeyboard(keyboard: helper.keyboard, queue: queue),
                               mouse: QueuedMouse(pointing: helper.mouse, queue: queue),
-                              cursor: cursor(helper, on: queue))
+                              cursor: cursor(helper, on: queue),
+                              front: front(helper, on: queue))
         let done: T
         do {
             done = try await body(devices)
@@ -76,6 +78,20 @@ struct Devices {
     /// which is the only place the truth about where the pointer went lives, since macOS
     /// accelerates the counts the device sends.
     var pointer: Pointer { Pointer(mouse: mouse, cursor: cursor) }
+
+    /// The app in front, asked once the daemon has answered that the devices are up.
+    ///
+    /// launchd starts vhidd on the first call, so asked any earlier the answer would be as
+    /// old as the daemon's start by the first key - the window `--into` exists to close.
+    /// `status` is answered once the daemon is listening, and refused while its devices
+    /// are down, so a verb that gets past it has devices to send to. It is made on `queue`
+    /// like every other call, and claims nothing. [LAW:no-ambient-temporal-coupling]
+    static func front(_ helper: HelperConnection, on queue: DeviceQueue) -> @Sendable () async throws -> FrontApp? {
+        {
+            _ = try await queue.run { try helper.status() }
+            return try await FrontApp.inFront()
+        }
+    }
 
     /// The cursor as the daemon reads it, in the session in front, which may not be this
     /// process's: at the login window, or with another user in front, a read made here

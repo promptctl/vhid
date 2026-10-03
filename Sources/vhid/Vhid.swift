@@ -4,10 +4,11 @@ import Version
 /// The verbs, against a daemon that owns the two virtual devices.
 ///
 /// **A driver, not a nanny.** It types what it is told to type and clicks where it is
-/// told to click. Which app is in front, whether a dialog is covering it, and whether the
-/// caller meant to do this are not its questions to ask, so no verb here takes a target
-/// app, raises one, or reads the screen - and nothing it prints tells the caller what to
-/// do next. What it reports is what the devices did.
+/// told to click. Whether a dialog is covering an app and whether the caller meant to do
+/// this are not its questions to ask, so no verb here raises an app or reads the screen
+/// - and nothing it prints tells the caller what to do next. What it reports is what the
+/// devices did. The one question it will ask for a caller is which app is in front, when
+/// `type` or `press` is told the app its keys are for, and then only to refuse.
 @main
 struct Vhid: AsyncParsableCommand {
     static let configuration = CommandConfiguration(

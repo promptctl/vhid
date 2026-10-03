@@ -44,11 +44,15 @@ after the act shows it.
 
 ## Before you type
 
-vhid does not check what it types into. Keys go wherever the keyboard is focused:
-another app's window, a chat, a terminal that runs what it receives. Before `type` or
-any `press` that edits, confirm with `windows` that the app you mean is frontmost, and
-click into the field first when focus could be anywhere else. If you cannot confirm
-where the keys will land, say so instead of typing.
+Keys go wherever the keyboard is focused: another app's window, a chat, a terminal
+that runs what it receives. Before `type` or any `press` that edits, confirm with
+`windows` that the app you mean is frontmost, click into the field first when focus
+could be anywhere else, and pass that app as `into`, copied from the frontmost
+application `windows` printed. With `into`, the tool checks the app is still in front just before the first
+key and refuses, sending nothing, when something else came forward; look again rather
+than retrying blind. `into` checks the app, not the field, and a panel of another
+process over it can still hold the keys. If you cannot confirm where the keys will
+land, say so instead of typing.
 
 ## When a tool refuses
 

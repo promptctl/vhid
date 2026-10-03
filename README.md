@@ -171,9 +171,11 @@ to hold the screen permissions.
 
 vhid is new software. What to know before relying on it:
 
-- **vhid does not check what it is typing into.** It types wherever the keyboard is
-  focused and clicks the point it is given, whatever is there. Looking first, with `eyes`
-  or otherwise, is the caller's job.
+- **vhid checks no more than which app is in front.** It types wherever the keyboard is
+  focused and clicks the point it is given, whatever is there. `type` and `press` with
+  `--into <app>` refuse when another app is in front, but not when the wrong field or a
+  panel of another process has the keys. Looking first, with `eyes` or otherwise, is the
+  caller's job.
 - **It cannot reach FileVault's unlock screen.** Before the disk is unlocked, neither the
   daemon nor the driver is running.
 - **Typing follows the caller's keyboard layout.** At the login window over SSH, that may
