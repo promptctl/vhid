@@ -30,9 +30,9 @@ looking is how you do it.
    `absent`) and a `timeout`, which re-reads until it happens; do not sleep and retry.
 
 **Done means step 3 showed the change.** A `click` that answered "clicked left once
-at (812, 604)" is an act that happened, not an outcome: the press landed on that point,
-and what sat there may have been something else. When the user asked for an outcome
-- a file saved, a field filled, a sheet dismissed - you have it only once a look
+at (812, 604) after 1 motion report" is an act that happened, not an outcome: the press landed on that point,
+and what sat there may have been something else. When the user asked for an outcome,
+such as a file saved, a field filled or a sheet dismissed, you have it only once a look
 after the act shows it.
 
 ## Before you type
@@ -55,6 +55,9 @@ do not route around it.
   macOS charges Accessibility and Screen Recording to - the terminal running Claude
   Code, or whichever app started it. Tell the user to switch that app on under System
   Settings > Privacy & Security; a grant switched on counts from the next call.
+- A tool says an argument is not one it takes: the installed vhid is older than this
+  skill, which follows vhid's `master`. Tell the user; `brew upgrade --cask
+  promptctl/tap/vhid` brings the latest release.
 - `find` matched nothing: it lists the nearest runs and how many edits off each is.
   A misread one edit away is still the thing you were looking for.
 
@@ -68,17 +71,23 @@ its step.
 ## Shape of a run
 
 ```
-eyes windows                                  -> TextEdit frontmost, a save sheet on it
-eyes find {"text": "Save", "exact": true}     -> 812,604	Save
-vhid click {"x": 812, "y": 604}               -> clicked left once at (812, 604)
-eyes find {"text": "Save", "exact": true,
-           "until": "absent", "timeout": 5}   -> gone: the sheet closed, the file saved
+eyes windows                         -> 4521  TextEdit  L0  ...  front: a save sheet on it
+eyes find {"text": "Save", "exact": true, "window": 4521}
+                                     -> 812,604	Save
+vhid click {"x": 812, "y": 604}      -> clicked left once at (812, 604) after 1 motion report
+eyes find {"text": "Save", "exact": true, "window": 4521,
+           "until": "absent", "timeout": 5}
+                                     -> absent after 2 reads in 0.6s: the sheet changed
+eyes read {"window": 4521}           -> the title bar reads notes.txt, no sheet: saved
 ```
+
+The sheet going shows only that something changed: Cancel, or a "Replace?" sheet over
+it, makes Save go too. The `read` after it is the look that shows the file saved.
 
 Not this:
 
 ```
-vhid click {"x": 812, "y": 604}               -> clicked left once at (812, 604)
-"Clicked Save."                                  (no look before, no look after:
-                                                  nobody knows what was pressed)
+vhid click {"x": 812, "y": 604}      -> clicked left once at (812, 604) after 1 motion report
+"Clicked Save."                       (no look before, no look after:
+                                      nobody knows what was pressed)
 ```
