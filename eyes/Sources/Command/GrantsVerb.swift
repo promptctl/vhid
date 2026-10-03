@@ -28,7 +28,7 @@ struct GrantsVerb: AsyncParsableCommand {
             print(GrantReading.here().line)
             return
         }
-        let holder = try Holder.current()
+        let holder = try await Holder.current()
         let reading = try await Self.reading()
         // The dialogs return before anyone answers them, so there is nothing new to read yet.
         let asked = ask ? Grant.allCases.filter { !reading.holds($0) } : []
