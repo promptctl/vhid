@@ -2,7 +2,7 @@
 
 A virtual keyboard and mouse for macOS, driven from the command line or by an AI agent.
 
-[![test](https://github.com/promptctl/vhid/actions/workflows/test.yml/badge.svg)](https://github.com/promptctl/vhid/actions/workflows/test.yml)
+[![test](https://github.com/promptctl/vhid/actions/workflows/test.yaml/badge.svg)](https://github.com/promptctl/vhid/actions/workflows/test.yaml)
 [![release](https://img.shields.io/github/v/release/promptctl/vhid)](https://github.com/promptctl/vhid/releases/latest)
 [![license](https://img.shields.io/github/license/promptctl/vhid)](LICENSE)
 
@@ -204,7 +204,7 @@ Report bugs and ask questions in [GitHub issues](https://github.com/promptctl/vh
 A bug report is most useful with the output of `vhid doctor` in it.
 
 To build from source you need Xcode 26. CI builds with the version that
-[test.yml](.github/workflows/test.yml) names, so that one is known to work:
+[test.yaml](.github/workflows/test.yaml) names, so that one is known to work:
 
 ```sh
 git clone https://github.com/promptctl/vhid.git

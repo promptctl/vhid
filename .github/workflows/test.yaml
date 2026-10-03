@@ -4,7 +4,7 @@
 # The job names are the check names ruleset 23733334 requires before a PR can merge
 # into master. Renaming a job renames its check, and the ruleset then waits for a check
 # that will never report, which blocks every PR. Change both together or neither.
-# release.yml reads this file's job names too, and requires each to be green on the tag.
+# release.yaml reads this file's job names too, and requires each to be green on the tag.
 name: test
 
 on:
@@ -73,8 +73,8 @@ jobs:
       - run: scripts/check-bash32
       # The release is built with the toolchain CI tests with, and the workflows cannot
       # share an env, so the two copies are held equal here.
-      - run: diff <(grep '^  DEVELOPER_DIR:' .github/workflows/test.yml) <(grep '^  DEVELOPER_DIR:' .github/workflows/release.yml)
-      # The cache release.yml restores is written here, by the runs on master.
+      - run: diff <(grep '^  DEVELOPER_DIR:' .github/workflows/test.yaml) <(grep '^  DEVELOPER_DIR:' .github/workflows/release.yaml)
+      # The cache release.yaml restores is written here, by the runs on master.
       - uses: ./.github/actions/swiftpm-cache
       # Two lines, so the step fails with make-pkg: an echo of a failed substitution would
       # succeed and leave the failure to be blamed on the next step.

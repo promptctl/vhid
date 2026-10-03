@@ -33,6 +33,22 @@ git -C "$TAP" commit --quiet -m start
 PKG=$SCRATCH/vhid.pkg
 echo "a pkg" >"$PKG"
 SHA=$(shasum -a 256 "$PKG" | cut -d ' ' -f 1)
+# The body as pkg/vhid.rb holds it at a tag: no release of its own, and a stanza the
+# tap's cask lacks, so writing the body is told apart from moving two lines.
+BODY=$SCRATCH/body.rb
+cat >"$BODY" <<'R'
+cask "vhid" do
+  version "@VERSION@"
+  sha256 "@SHA256@"
+
+  url "https://github.com/promptctl/vhid/releases/download/v#{version}/vhid-#{version}.pkg"
+  pkg "vhid-#{version}.pkg"
+
+  zap trash: "~/Library/vhid"
+end
+R
+# The cask update-cask should write from $BODY for a version and sha256.
+written() { sed -e "s/@VERSION@/$1/" -e "s/@SHA256@/$2/" "$BODY"; }
 
 # Runs update-cask, holding what it said and its status; a run that should be refused
 # must leave the tap's cask and history as they were.
@@ -47,44 +63,64 @@ refused() {
   git -C "$TAP" diff --quiet || fail "update-cask $* left the tap dirty"
 }
 
-# A release moves version and sha256, line for line, in one commit; nothing else moves.
-run "$TAP" 0.1.10 "$PKG"
+# A release writes the cask as its body, version and sha256 filled in, in one commit:
+# a changed body ships with the version it came with.
+run "$TAP" 0.1.10 "$PKG" "$BODY"
 [ "$status" -eq 0 ] || fail "update-cask to 0.1.10 exited $status: $out"
 echo "$out" | grep -qF "vhid 0.1.9 -> 0.1.10, sha256 $SHA" || fail "update-cask to 0.1.10 said: $out"
 [ "$(git -C "$TAP" log -1 --format=%s)" = "vhid 0.1.10" ] || fail "the tap's commit is '$(git -C "$TAP" log -1 --format=%s)', not 'vhid 0.1.10'"
-[ "$(git -C "$TAP" diff --numstat HEAD~1 HEAD)" = "$(printf '2\t2\tCasks/vhid.rb')" ] || fail "the commit changed more than two lines: $(git -C "$TAP" diff HEAD~1 HEAD)"
-grep -qx '  version "0.1.10"' "$TAP/Casks/vhid.rb" || fail "the cask's version is not 0.1.10"
-grep -qx "  sha256 \"$SHA\"" "$TAP/Casks/vhid.rb" || fail "the cask's sha256 is not the pkg's"
+[ "$(cat "$TAP/Casks/vhid.rb")" = "$(written 0.1.10 "$SHA")" ] || fail "the cask is not the body for 0.1.10: $(cat "$TAP/Casks/vhid.rb")"
+git -C "$TAP" diff --quiet || fail "update-cask to 0.1.10 left the tap dirty"
 
 # The release the cask names already is left alone, so long as its pkg is unchanged.
 head=$(git -C "$TAP" rev-parse HEAD)
-run "$TAP" 0.1.10 "$PKG"
+run "$TAP" 0.1.10 "$PKG" "$BODY"
 [ "$status" -eq 0 ] || fail "update-cask to 0.1.10 again exited $status: $out"
 echo "$out" | grep -qF "vhid 0.1.10 already, sha256 $SHA" || fail "update-cask to 0.1.10 again said: $out"
 [ "$(git -C "$TAP" rev-parse HEAD)" = "$head" ] || fail "update-cask to 0.1.10 again committed"
 REPLACED=$SCRATCH/replaced.pkg
 echo "another pkg" >"$REPLACED"
-refused "the cask names 0.1.10 with sha256 $SHA, but its pkg's is $(shasum -a 256 "$REPLACED" | cut -d ' ' -f 1)" "$TAP" 0.1.10 "$REPLACED"
+refused "the cask names 0.1.10 with sha256 $SHA, but its pkg's is $(shasum -a 256 "$REPLACED" | cut -d ' ' -f 1)" "$TAP" 0.1.10 "$REPLACED" "$BODY"
+
+# The tap holds no cask of its own: a hand edit to it is written over from the body.
+echo '# edited by hand' >>"$TAP/Casks/vhid.rb" && git -C "$TAP" commit --quiet -am "hand edit"
+run "$TAP" 0.1.10 "$PKG" "$BODY"
+[ "$status" -eq 0 ] || fail "update-cask over a hand edit exited $status: $out"
+[ "$(cat "$TAP/Casks/vhid.rb")" = "$(written 0.1.10 "$SHA")" ] || fail "the hand edit outlived update-cask"
+
+# A body that names a release of its own is refused.
+NAMED=$SCRATCH/named.rb
+sed 's/@VERSION@/0.1.11/' "$BODY" >"$NAMED"
+refused "$NAMED's version is not \"@VERSION@\"" "$TAP" 0.1.11 "$PKG" "$NAMED"
+sed 's/@SHA256@/0/' "$BODY" >"$NAMED"
+refused "$NAMED's sha256 is not \"@SHA256@\"" "$TAP" 0.1.11 "$PKG" "$NAMED"
+refused "No such file" "$TAP" 0.1.11 "$PKG" "$SCRATCH/nowhere.rb"
 
 # The cask only moves forward, and only to a release.
-refused "the cask names 0.1.10, which 0.1.9 does not follow" "$TAP" 0.1.9 "$PKG"
-refused "the cask names 0.1.10, which 0.1 does not follow" "$TAP" 0.1 "$PKG"
-refused "'0.2.0-rc.1' is not a release version" "$TAP" 0.2.0-rc.1 "$PKG"
-refused "'0.2/0' is not a release version" "$TAP" 0.2/0 "$PKG"
-refused "'' is not a release version" "$TAP" "" "$PKG"
+refused "the cask names 0.1.10, which 0.1.9 does not follow" "$TAP" 0.1.9 "$PKG" "$BODY"
+refused "the cask names 0.1.10, which 0.1 does not follow" "$TAP" 0.1 "$PKG" "$BODY"
+refused "'0.2.0-rc.1' is not a release version" "$TAP" 0.2.0-rc.1 "$PKG" "$BODY"
+refused "'0.2/0' is not a release version" "$TAP" 0.2/0 "$PKG" "$BODY"
+refused "'' is not a release version" "$TAP" "" "$PKG" "$BODY"
 
-# Versions are told apart by their spelling and ordered as cask.yml orders them, so a
+# The real body, pkg/vhid.rb, is one update-cask takes, and what it writes is Ruby.
+run "$TAP" 0.1.11 "$PKG" pkg/vhid.rb
+[ "$status" -eq 0 ] || fail "update-cask with pkg/vhid.rb exited $status: $out"
+ruby -c "$TAP/Casks/vhid.rb" >/dev/null || fail "the cask written from pkg/vhid.rb is not Ruby"
+grep -qx '  version "0.1.11"' "$TAP/Casks/vhid.rb" || fail "the cask written from pkg/vhid.rb does not name 0.1.11"
+
+# Versions are told apart by their spelling and ordered as cask.yaml orders them, so a
 # respelling of the version the cask names is a release after it, not a refusal.
-run "$TAP" 0.1.10.0 "$PKG"
-[ "$status" -eq 0 ] || fail "update-cask to 0.1.10.0 exited $status: $out"
-echo "$out" | grep -qF "vhid 0.1.10 -> 0.1.10.0" || fail "update-cask to 0.1.10.0 said: $out"
+run "$TAP" 0.1.11.0 "$PKG" "$BODY"
+[ "$status" -eq 0 ] || fail "update-cask to 0.1.11.0 exited $status: $out"
+echo "$out" | grep -qF "vhid 0.1.11 -> 0.1.11.0" || fail "update-cask to 0.1.11.0 said: $out"
 
 # A cask whose shape has moved on is refused, as is a tap with no cask at all.
 sed -i '' 's/^  sha256 /  sha256 :no_check # /' "$TAP/Casks/vhid.rb" && git -C "$TAP" commit --quiet -am reshaped
-refused "has 0 lines of the form '  sha256 \"...\"', not one" "$TAP" 0.2.0 "$PKG"
+refused "has 0 lines of the form '  sha256 \"...\"', not one" "$TAP" 0.2.0 "$PKG" "$BODY"
 sed -i '' 's/^  version "/  version :latest # "/' "$TAP/Casks/vhid.rb" && git -C "$TAP" commit --quiet -am reshaped
-refused "has 0 lines of the form '  version \"...\"', not one" "$TAP" 0.2.0 "$PKG"
-refused "No such file" "$SCRATCH/nowhere" 0.2.0 "$PKG"
+refused "has 0 lines of the form '  version \"...\"', not one" "$TAP" 0.2.0 "$PKG" "$BODY"
+refused "No such file" "$SCRATCH/nowhere" 0.2.0 "$PKG" "$BODY"
 
 [ "$failed" -eq 0 ] && echo "update-cask-test: ok"
 exit "$failed"

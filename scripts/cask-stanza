@@ -1,7 +1,7 @@
 #!/bin/bash
 # Prints the value of one of the vhid cask's one-line stanzas, from its one
 # `  <stanza> "..."` line. scripts/update-cask reads the cask it moves through this, and
-# release.yml reads the tap's cask through it once the tap's run is done, so the cask's
+# release.yaml reads the tap's cask through it once the tap's run is done, so the cask's
 # shape is written here alone.
 #
 #   scripts/cask-stanza <cask file> <stanza>
