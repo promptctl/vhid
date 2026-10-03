@@ -69,29 +69,14 @@ jobs:
           echo "version=$version" >>"$GITHUB_OUTPUT"
           echo "prerelease=$prerelease" >>"$GITHUB_OUTPUT"
 
-      # What is published is what master holds and CI passed: a tag on a branch, or on a
-      # commit whose required checks are not all green, is refused. A pre-release may
-      # come from any branch, so a release candidate can be tried before it lands.
-      - name: The tagged commit is master's and tested
-        env:
-          GH_TOKEN: ${{ github.token }}
+      # What is published is what master holds: a tag on a branch is refused before
+      # minutes of building. A pre-release may come from any branch, so a release
+      # candidate can be tried before it lands.
+      - name: The tagged commit is master's
+        if: env.PRERELEASE == 'false'
         run: |
-          if ! $PRERELEASE; then
-            git merge-base --is-ancestor "$GITHUB_SHA" origin/master \
-              || { echo "::error::$TAG is not on master"; exit 1; }
-          fi
-          # Every job test.yml runs, by its own list, and each one's latest run: a check
-          # still running is waited for, up to half an hour, since a tag is often pushed
-          # moments after the merge that started them.
-          checks=$(ruby -ryaml -e 'puts YAML.load_file(".github/workflows/test.yml")["jobs"].keys')
-          for check in $checks; do
-            for attempt in $(seq 60); do
-              latest=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?check_name=$check" \
-                --jq '.check_runs | sort_by(.started_at) | last | if . == null then "none" else (.conclusion // .status) end')
-              case $latest in queued | in_progress | pending | waiting | requested) sleep 30 ;; *) break ;; esac
-            done
-            [ "$latest" = success ] || { echo "::error::check $check on $GITHUB_SHA is $latest, not success"; exit 1; }
-          done
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/master \
+            || { echo "::error::$TAG is not on master"; exit 1; }
 
       # The notes, read before minutes of building, so a version with no changelog
       # section fails here. A section is everything from its "## [<version>]" heading
@@ -115,10 +100,32 @@ jobs:
           NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
         run: scripts/release-keychain create "$NOTARY_KEYCHAIN" "$NOTARY_PROFILE"
 
+      - uses: ./.github/actions/swiftpm-cache
+
       - name: Built, signed, notarized and stapled
         run: |
           pkg=$(scripts/release dist)
           echo "PKG=$pkg" >>"$GITHUB_ENV"
+
+      # What is published is what CI passed: every job test.yml runs, by its own list,
+      # each one's latest run green on the tagged commit. Asked after the build rather
+      # than before it, since a tag is often pushed moments after the merge that started
+      # those checks and nothing above depends on them: they run while this job builds,
+      # and a check still running is waited for, up to half an hour.
+      - name: The tagged commit is tested
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          checks=$(ruby -ryaml -e 'puts YAML.load_file(".github/workflows/test.yml")["jobs"].keys')
+          for check in $checks; do
+            for attempt in $(seq 180); do
+              latest=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?check_name=$check" \
+                --jq '.check_runs | sort_by(.started_at) | last | if . == null then "none" else (.conclusion // .status) end')
+              case $latest in queued | in_progress | pending | waiting | requested) sleep 10 ;; *) break ;; esac
+            done
+            [ "$latest" = success ] || { echo "::error::check $check on $GITHUB_SHA is $latest, not success"; exit 1; }
+          done
+          echo "checks $(echo $checks) green on $GITHUB_SHA, after waiting ${SECONDS}s for them once the build was done" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Published
         env:

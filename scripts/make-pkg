@@ -100,7 +100,41 @@ if $signed; then
 fi
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/vhid-pkg.XXXXXX")
-trap 'rm -rf "$work"' EXIT
+# A build still running in the background when this exits is cancelled, and waited for
+# before its scratch path goes. SwiftPM cancels on INT and stops its compilers; on TERM it
+# dies and leaves them compiling into $work (measured, Swift 6.3). A subshell's signal
+# does not reach its children, so the INT goes to the swift build the subshell started.
+# [LAW:no-silent-failure] exception: a cancelled build exits non-zero, and a job that
+# ended after jobs -p listed it has nothing left to signal; the failure that brought the
+# script here has already been reported.
+cleanup() {
+  local job
+  for job in $(jobs -p); do
+    pkill -INT -P "$job" || :
+    wait "$job" || :
+  done
+  rm -rf "$work"
+}
+trap cleanup EXIT
+
+# eyes is a package of its own (docs/development.md "Two packages"), built once per architecture and
+# joined: swiftbuild links its executable with no _main (the entry point of a target not
+# named for its product, measured with Swift 6.3), and it needs none of swiftbuild's
+# plugin support.
+# One scratch path: SwiftPM keeps each triple's products apart under it and shares the checkouts.
+eyes_build() { swift build --package-path eyes -c release --triple "$1-apple-macosx15.0" --scratch-path "$work/eyes" "${@:2}"; }
+eyes_bin=$work/eyes-universal
+eyes_universal() {
+  eyes_build arm64
+  eyes_build x86_64
+  mkdir -p "$eyes_bin"
+  lipo -create -output "$eyes_bin/eyes" "$(eyes_build arm64 --show-bin-path)/eyes" "$(eyes_build x86_64 --show-bin-path)/eyes"
+}
+# Built beside vhid rather than after it: neither build reads the other's products, and
+# a release build leaves cores idle while one large module compiles. Its log is held
+# until vhid's is done, so the two do not interleave.
+eyes_universal >"$work/eyes.log" 2>&1 &
+eyes_job=$!
 
 # Both architectures, because the driver package serves both and a Mac is either.
 # A scratch path of its own, so a release never packs a product a debug build left
@@ -108,19 +142,16 @@ trap 'rm -rf "$work"' EXIT
 # swiftbuild, because the Xcode build system a two-arch build otherwise takes cannot
 # resolve the VersionStamp plugin and fails before compiling anything (Swift 6.3).
 build() { swift build -c release --arch arm64 --arch x86_64 --build-system swiftbuild --scratch-path "$work/build" "$@"; }
+started=$SECONDS
 build >&2
+vhid_seconds=$((SECONDS - started))
 bin=$(build --show-bin-path)
-# eyes is a package of its own (docs/development.md "Two packages"), built once per architecture and
-# joined: swiftbuild links its executable with no _main (the entry point of a target not
-# named for its product, measured with Swift 6.3), and it needs none of swiftbuild's
-# plugin support.
-# One scratch path: SwiftPM keeps each triple's products apart under it and shares the checkouts.
-eyes_build() { swift build --package-path eyes -c release --triple "$1-apple-macosx15.0" --scratch-path "$work/eyes" "${@:2}"; }
-eyes_build arm64 >&2
-eyes_build x86_64 >&2
-eyes_bin=$work/eyes-universal
-mkdir -p "$eyes_bin"
-lipo -create -output "$eyes_bin/eyes" "$(eyes_build arm64 --show-bin-path)/eyes" "$(eyes_build x86_64 --show-bin-path)/eyes"
+eyes_built=true
+wait "$eyes_job" || eyes_built=false
+cat "$work/eyes.log" >&2
+$eyes_built || fail "eyes did not build; its log is above"
+# What building eyes beside vhid cost: the wait for eyes once vhid was done.
+echo "make-pkg: vhid built in ${vhid_seconds}s; eyes, built beside it, added $((SECONDS - started - vhid_seconds))s" >&2
 
 payload="$work/root"
 mkdir -p "$payload/usr/local/bin" "$payload/usr/local/libexec" "$payload/Library/LaunchDaemons" "$payload/Library/LaunchAgents"

@@ -1,0 +1,22 @@
+# SwiftPM's shared cache - its clones of the dependencies and its compiled manifests -
+# carried between runs, so a build resolves its pins from disk rather than the network.
+# Keyed on the toolchain and both packages' pins: a run whose toolchain or pins changed
+# starts from the newest cache of this runner's kind and leaves one under its own key, so
+# the manifests a new toolchain compiles are saved rather than compiled on every run. Release and CI build with the
+# same pins, so they share this one definition. [LAW:one-source-of-truth]
+#
+# A run reads only the caches of its own ref and of master, so what a release restores
+# was written by a run on master. SwiftPM checks out each pin by its commit hash, so a
+# cached clone cannot hand it other source.
+name: SwiftPM cache
+description: SwiftPM's dependency clones and manifests, keyed on the toolchain, Package.resolved and eyes/Package.resolved
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@v6
+      with:
+        path: |
+          ~/Library/Caches/org.swift.swiftpm/repositories
+          ~/Library/Caches/org.swift.swiftpm/manifests
+        key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ env.DEVELOPER_DIR }}-${{ hashFiles('Package.resolved', 'eyes/Package.resolved') }}
+        restore-keys: swiftpm-${{ runner.os }}-${{ runner.arch }}-
