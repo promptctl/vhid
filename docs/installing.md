@@ -66,8 +66,7 @@ sudo /usr/local/libexec/vhid-uninstall --driver   # vhid and the pqrs driver pac
 
 `brew uninstall --cask vhid` runs `vhid-uninstall` without `--driver`, then stops listing
 vhid. Each of these stops the daemon and the menu bar item, removes every file in the
-table above (both uninstall scripts among them) and forgets the pkg's receipt; the script, run
-again, says there is nothing to remove. None touches the development job a build of this
+table above (both uninstall scripts among them) and forgets the pkg's receipt. None touches the development job a build of this
 tree registers.
 
 Since the script deletes itself, running it on a Homebrew install leaves Homebrew listing
