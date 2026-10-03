@@ -1,0 +1,42 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Probe</title>
+<style>
+body { font: 18px -apple-system, sans-serif; margin: 0; padding: 70px 30px 30px; }
+#status { position: fixed; top: 0; left: 0; right: 0; background: #ffd; padding: 12px 30px; font-size: 20px; border-bottom: 1px solid #aa8; z-index: 9; }
+section { margin: 18px 0; }
+.row { display: flex; gap: 20px; align-items: center; margin: 6px 0; }
+.row span { width: 120px; }
+button { font-size: 18px; }
+#icon { width: 44px; height: 44px; padding: 6px; }
+#far { margin-top: 3000px; }
+iframe { width: 420px; height: 90px; border: 1px solid #888; }
+</style></head>
+<body>
+<div id="status">Last click #0: none · focus: none</div>
+<section><button id="textbutton">Send report</button></section>
+<section><a href="#" id="link">Read the changelog</a></section>
+<section>Release notes <a href="#" id="more1">More</a> · Pricing <a href="#" id="more2">More</a></section>
+<section><button id="icon" aria-label="Settings"><svg viewBox="0 0 24 24" width="28" height="28"><circle cx="12" cy="12" r="8" fill="none" stroke="#333" stroke-width="3"/><circle cx="12" cy="12" r="3" fill="#333"/></svg></button></section>
+<section><label for="email">Email address</label> <input id="email" type="text" size="24"></section>
+<section>
+  <div class="row"><span>Alpha</span><button id="remove-alpha">Remove</button></div>
+  <div class="row"><span>Beta</span><button id="remove-beta">Remove</button></div>
+  <div class="row"><span>Gamma</span><button id="remove-gamma">Remove</button></div>
+</section>
+<section><iframe id="frame" srcdoc="<html onclick='parent.postMessage(event.target.id || &quot;none&quot;, &quot;*&quot;)'><body style='font:18px -apple-system,sans-serif'><button id='inner'>Inside frame</button></body></html>"></iframe></section>
+<section><canvas id="canvas" width="320" height="70" style="border:1px solid #888"></canvas></section>
+<section><button id="far">Far below</button></section>
+<script>
+let clicks = 0, last = 'none';
+const show = () => { document.getElementById('status').textContent = 'Last click #' + clicks + ': ' + last + ' · focus: ' + (document.activeElement.id || 'none'); };
+const hit = id => { clicks += 1; last = id; show(); };
+document.addEventListener('click', e => { const t = e.target.closest('[id]'); if (t) e.preventDefault(); hit(!t ? 'none' : t.id === 'canvas' && !onWord(e) ? 'canvas, off the word' : t.id); });
+document.addEventListener('focusin', show);
+document.addEventListener('focusout', () => setTimeout(show));
+window.addEventListener('message', e => { if (e.source === document.getElementById('frame').contentWindow && ['inner', 'none'].includes(e.data)) hit(e.data === 'inner' ? 'inner' : 'frame, off the button'); });
+const c = document.getElementById('canvas').getContext('2d');
+c.font = '28px -apple-system, sans-serif'; c.fillText('Canvas word', 20, 45);
+const word = { x: 20, y: 17, w: c.measureText('Canvas word').width, h: 36 };
+function onWord(e) { return e.offsetX >= word.x && e.offsetX <= word.x + word.w && e.offsetY >= word.y && e.offsetY <= word.y + word.h; }
+</script>
+</body></html>
