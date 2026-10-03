@@ -82,18 +82,23 @@ REPLACED=$SCRATCH/replaced.pkg
 echo "another pkg" >"$REPLACED"
 refused "the cask names 0.1.10 with sha256 $SHA, but its pkg's is $(shasum -a 256 "$REPLACED" | cut -d ' ' -f 1)" "$TAP" 0.1.10 "$REPLACED" "$BODY"
 
-# The tap holds no cask of its own: a hand edit to it is written over from the body.
+# A body only ever arrives with its version: a hand edit to the tap's cask stays while
+# the version it names does, and the next version writes over it.
 echo '# edited by hand' >>"$TAP/Casks/vhid.rb" && git -C "$TAP" commit --quiet -am "hand edit"
+edited=$(cat "$TAP/Casks/vhid.rb")
 run "$TAP" 0.1.10 "$PKG" "$BODY"
 [ "$status" -eq 0 ] || fail "update-cask over a hand edit exited $status: $out"
-[ "$(cat "$TAP/Casks/vhid.rb")" = "$(written 0.1.10 "$SHA")" ] || fail "the hand edit outlived update-cask"
+[ "$(cat "$TAP/Casks/vhid.rb")" = "$edited" ] || fail "update-cask changed the body under 0.1.10"
 
-# A body that names a release of its own is refused.
+# A body that names a release of its own is refused, as is an @-word left anywhere but
+# the two lines update-cask fills in.
 NAMED=$SCRATCH/named.rb
 sed 's/@VERSION@/0.1.11/' "$BODY" >"$NAMED"
-refused "$NAMED's version is not \"@VERSION@\"" "$TAP" 0.1.11 "$PKG" "$NAMED"
+refused "$NAMED's version is \"0.1.11\", not \"@VERSION@\"" "$TAP" 0.1.11 "$PKG" "$NAMED"
 sed 's/@SHA256@/0/' "$BODY" >"$NAMED"
-refused "$NAMED's sha256 is not \"@SHA256@\"" "$TAP" 0.1.11 "$PKG" "$NAMED"
+refused "$NAMED's sha256 is \"0\", not \"@SHA256@\"" "$TAP" 0.1.11 "$PKG" "$NAMED"
+sed 's|zap trash: "~/Library/vhid"|zap trash: "~/Library/vhid-@VERSION@"|' "$BODY" >"$NAMED"
+refused "has the @-words above outside its version and sha256 lines" "$TAP" 0.1.11 "$PKG" "$NAMED"
 refused "No such file" "$TAP" 0.1.11 "$PKG" "$SCRATCH/nowhere.rb"
 
 # The cask only moves forward, and only to a release.
@@ -107,7 +112,8 @@ refused "'' is not a release version" "$TAP" "" "$PKG" "$BODY"
 run "$TAP" 0.1.11 "$PKG" pkg/vhid.rb
 [ "$status" -eq 0 ] || fail "update-cask with pkg/vhid.rb exited $status: $out"
 ruby -c "$TAP/Casks/vhid.rb" >/dev/null || fail "the cask written from pkg/vhid.rb is not Ruby"
-grep -qx '  version "0.1.11"' "$TAP/Casks/vhid.rb" || fail "the cask written from pkg/vhid.rb does not name 0.1.11"
+[ "$(cat "$TAP/Casks/vhid.rb")" = "$(sed -e 's/@VERSION@/0.1.11/' -e "s/@SHA256@/$SHA/" pkg/vhid.rb)" ] \
+  || fail "the cask written from pkg/vhid.rb is not pkg/vhid.rb for 0.1.11"
 
 # Versions are told apart by their spelling and ordered as cask.yaml orders them, so a
 # respelling of the version the cask names is a release after it, not a refusal.

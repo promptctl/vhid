@@ -24,17 +24,22 @@ echo "$version" | grep -Eqx '[0-9]+(\.[0-9]+)*' || {
 # sha256 are the two @-words this fills in, so a body naming a release of its own is
 # refused rather than written over.
 for blank in "version @VERSION@" "sha256 @SHA256@"; do
-  [ "$("$stanza" "$body" "${blank% *}")" = "${blank#* }" ] \
-    || { echo "update-cask: $body's ${blank% *} is not \"${blank#* }\"" >&2; exit 1; }
+  value=$("$stanza" "$body" "${blank% *}")
+  [ "$value" = "${blank#* }" ] \
+    || { echo "update-cask: $body's ${blank% *} is \"$value\", not \"${blank#* }\"" >&2; exit 1; }
 done
 sha256=$(shasum -a 256 "$pkg" | cut -d ' ' -f 1)
 was=$("$stanza" "$cask" version)
 had=$("$stanza" "$cask" sha256)
-# The release the cask names already keeps its pkg: a sha256 that moved under a
-# published version is a pkg replaced after release, and every Homebrew install of it
-# would fail its checksum.
+# The release the cask names already is left as it is, so long as its pkg is unchanged: a
+# sha256 that moved under a published version is a pkg replaced after release, and every
+# Homebrew install of it would fail its checksum. Its body is left too, hand edits and
+# all, because brew uninstalls and zaps by the caskfile an install was made with; a
+# body changed under one version would split that version's installs in two.
 if [ "$version" = "$was" ]; then
   [ "$sha256" = "$had" ] || { echo "update-cask: the cask names $was with sha256 $had, but its pkg's is $sha256" >&2; exit 1; }
+  echo "update-cask: vhid $was already, sha256 $sha256"
+  exit 0
 fi
 # The cask only moves forward: a backport released after a newer version, or a re-run of
 # an older release's job, would otherwise take every Homebrew install back.
@@ -44,12 +49,12 @@ fi
 
 sed -e "s/^  version \"@VERSION@\"\$/  version \"$version\"/" \
   -e "s/^  sha256 \"@SHA256@\"\$/  sha256 \"$sha256\"/" "$body" >"$cask.new"
-# A cask already written from this release is left as it is, so a run that finds the tap
-# current commits nothing.
-if cmp -s "$cask.new" "$cask"; then
+# Only the two stanza lines are filled in, so an @-word anywhere else in the body would
+# reach every install as written.
+if grep -n '@VERSION@\|@SHA256@' "$cask.new" >&2; then
   rm "$cask.new"
-  echo "update-cask: vhid $was already, sha256 $sha256"
-  exit 0
+  echo "update-cask: $body has the @-words above outside its version and sha256 lines" >&2
+  exit 1
 fi
 mv "$cask.new" "$cask"
 git -C "$tap" commit --quiet -m "vhid $version" -- Casks/vhid.rb

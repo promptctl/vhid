@@ -124,5 +124,6 @@ gh workflow run vhid.yaml --repo promptctl/homebrew-tap
 `scripts/update-cask` moves the cask only forward, and only to a release: an older
 version, or one with a `-tag`, is refused and the tap left as it was. A pkg whose sha256
 no longer matches the cask on its own version is refused too, and so is a tag with no
-`pkg/vhid.rb`; either fails every run until someone looks. A hand edit to the tap's cask
-is written over by the next run.
+`pkg/vhid.rb`; either fails every run until someone looks. A cask already on the newest
+release is left as it is, so a hand edit to the tap's cask lasts until the next release
+writes over it, unless it moves `version` or `sha256`, which fails every run instead.
