@@ -27,6 +27,8 @@ typed 16 characters on com.apple.keylayout.US
 Each line of output has the shape the command prints; the first line of `eyes find` is
 longer than shown.
 
+[promptctl.github.io/vhid](https://promptctl.github.io/vhid/) shows it working, filmed.
+
 ## Contents
 
 - [Where the input reaches](#where-the-input-reaches)

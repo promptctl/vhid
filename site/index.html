@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vhid</title>
+<meta name="description" content="A virtual keyboard and mouse for macOS, driven from the command line or by an AI agent.">
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1d1f24;
+    --muted: #5d6370;
+    --rule: #e3e5ea;
+    --code-bg: #16181d;
+    --code-fg: #e8eaee;
+    --code-muted: #8b919c;
+    --link: #0b62c4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101216;
+      --fg: #e8eaee;
+      --muted: #9aa0ab;
+      --rule: #262a31;
+      --code-bg: #1a1d23;
+      --link: #6cb0ff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 17px/1.55 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  }
+  main { max-width: 760px; margin: 0 auto; padding: 48px 16px 64px; }
+  h1 { font-size: 40px; margin: 0; letter-spacing: -0.02em; }
+  h2 { font-size: 22px; margin: 48px 0 12px; }
+  p { margin: 12px 0; }
+  .lede { font-size: 20px; margin-top: 6px; }
+  .muted { color: var(--muted); }
+  a { color: var(--link); }
+  code { font: 0.9em ui-monospace, Menlo, monospace; }
+  pre {
+    background: var(--code-bg);
+    color: var(--code-fg);
+    padding: 14px 16px;
+    border-radius: 8px;
+    overflow-x: auto;
+    font-size: 15px;
+    line-height: 1.5;
+  }
+  figure { margin: 28px 0 0; }
+  video {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 8px;
+    background: var(--code-bg);
+  }
+  figcaption { margin-top: 8px; color: var(--muted); font-size: 15px; }
+  ol { padding-left: 22px; }
+  li { margin: 4px 0; }
+  footer {
+    margin-top: 56px;
+    padding-top: 16px;
+    border-top: 1px solid var(--rule);
+    color: var(--muted);
+    font-size: 15px;
+  }
+  .docs { list-style: none; padding: 0; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>vhid</h1>
+<p class="lede">A virtual keyboard and mouse for macOS, driven from the command line or by an AI agent.</p>
+<p>macOS treats vhid's input as coming from hardware, so a script or an agent can type and
+click where software-generated input is blocked, such as the lock screen and password
+prompts, without the Accessibility permission. Its companion, <code>eyes</code>, reads the
+screen and prints where things are, as the points <code>vhid click</code> takes.</p>
+
+<figure>
+  <video src="demo/look-click-look.mp4#t=0.1" controls muted autoplay loop playsinline preload="metadata"></video>
+  <figcaption>An agent's loop: <code>eyes</code> finds the 7 on Calculator, <code>vhid</code> clicks it and
+  types the rest, and <code>eyes</code> looks again for the answer.
+  <a href="https://github.com/promptctl/vhid/blob/master/site/demo/look-click-look.sh">The script</a></figcaption>
+</figure>
+
+<figure>
+  <video src="demo/record-play.mp4#t=0.1" controls muted loop playsinline preload="metadata"></video>
+  <figcaption><code>vhid record</code> captures a person's clicks and keys, and <code>vhid play</code>
+  replays them with their timing.
+  <a href="https://github.com/promptctl/vhid/blob/master/site/demo/record-play.sh">The script</a></figcaption>
+</figure>
+
+<h2>Install</h2>
+<p>You need macOS 15 or later, on Apple silicon or Intel, and an administrator account.
+With <a href="https://brew.sh">Homebrew</a>:</p>
+<pre>brew install --cask promptctl/tap/vhid</pre>
+<p>Or download the pkg from the <a href="https://github.com/promptctl/vhid/releases/latest">Releases page</a>
+and open it.</p>
+<p>One step is left to you, because macOS lets only the person at the Mac approve a driver:</p>
+<ol>
+  <li>Open <b>System Settings &gt; General &gt; Login Items &amp; Extensions</b>.</li>
+  <li>Click the <b>(i)</b> beside <b>Driver Extensions</b>.</li>
+  <li>Turn on <b>org.pqrs.Karabiner-DriverKit-VirtualHIDDevice</b>.</li>
+</ol>
+<p>Then <code>vhid doctor</code> prints <code>ready</code>, or names the step still to take.
+<a href="https://github.com/promptctl/vhid#install">The README</a> has the rest: what the pkg
+installs and how to remove it.</p>
+
+<h2>Give it to an agent</h2>
+<p>In Claude Code, once vhid is installed:</p>
+<pre>/plugin marketplace add promptctl/vhid
+/plugin install vhid@vhid</pre>
+<p>The plugin adds <code>vhid</code> and <code>eyes</code> as MCP servers and teaches the agent to
+look, act, and look again.
+<a href="https://github.com/promptctl/vhid/blob/master/docs/mcp.md">docs/mcp.md</a> covers other
+clients and the screen permissions.</p>
+
+<h2>Documentation</h2>
+<ul class="docs">
+  <li><a href="https://github.com/promptctl/vhid#readme">README</a>: what vhid is, where its input reaches, its limits</li>
+  <li><a href="https://github.com/promptctl/vhid/blob/master/docs/cli.md">docs/cli.md</a>: the <code>vhid</code> verbs, keyboard layouts, coordinates</li>
+  <li><a href="https://github.com/promptctl/vhid/blob/master/docs/eyes.md">docs/eyes.md</a>: reading the screen</li>
+  <li><a href="https://github.com/promptctl/vhid/blob/master/docs/installing.md">docs/installing.md</a>: what the pkg installs, <code>vhid doctor</code>, uninstalling</li>
+</ul>
+
+<footer>
+  <a href="https://github.com/promptctl/vhid">promptctl/vhid on GitHub</a> · Apache License 2.0 ·
+  built on <a href="https://github.com/pqrs-org/Karabiner-DriverKit-VirtualHIDDevice">Karabiner-DriverKit-VirtualHIDDevice</a>
+</footer>
+
+</main>
+</body>
+</html>

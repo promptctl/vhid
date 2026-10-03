@@ -1,0 +1,25 @@
+#!/bin/bash
+# Fails when a command the site shows is not in README.md: each line of every <pre>
+# block in site/index.html has to be a line of the README, as written there.
+#
+#   scripts/check-site
+#
+# [LAW:one-source-of-truth] The README is where vhid's install steps live; the page
+# repeats the few a visitor needs to install from it, and this is what keeps those a
+# copy of the README's rather than a second version of them.
+# Held to bash 3.2, like every script here.
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+# The lines between <pre> and </pre>, tags dropped and the three entities the page
+# escapes turned back into what the README has.
+shown=$(awk '/<pre>/ { inside = 1 } inside { print } /<\/pre>/ { inside = 0 }' site/index.html |
+  sed -e 's/<\/*pre>//g' -e 's/&lt;/</g' -e 's/&gt;/>/g' -e 's/&amp;/\&/g')
+[ -n "$shown" ] || { echo "check-site: site/index.html shows no <pre> block" >&2; exit 1; }
+
+missing=0
+while IFS= read -r line; do
+  grep -qxF -- "$line" README.md || { echo "check-site: not a line of README.md: $line" >&2; missing=1; }
+done <<<"$shown"
+[ "$missing" = 0 ] && echo "check-site: $(printf '%s\n' "$shown" | wc -l | tr -d ' ') lines shown on the site are in README.md"
+exit "$missing"

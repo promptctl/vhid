@@ -103,6 +103,10 @@ fails on a wider pool, so a run that has lost the narrow one says so.
 
 The README's table of where input reaches over SSH is measured, and [design/remote-hands.md](design/remote-hands.md) has the evidence for each cell. `scripts/reach <host> <place>` checks one row again on a real Mac; with no place, it lists what to put on screen for each.
 
+## The site
+
+[promptctl.github.io/vhid](https://promptctl.github.io/vhid/) is `site/` as committed, published by [pages.yml](../.github/workflows/pages.yml) on every push to `master`. The page repeats the README's install commands, and `scripts/check-site`, run by `make test`, fails when a line the page shows is not a line of README.md; change the README first and copy from it.
+
 ## Filming the demo
 
 The clips in `site/demo/` are filmed by `scripts/film-demo site/demo/<name>.sh` on the Mac being filmed. The `.sh` beside each clip lists the commands it shows, and `film-demo` writes the clip and its `.steps.tsv`. Whatever runs `film-demo` needs Screen Recording for the capture, and Automation of System Events to hide every app but the one filmed; `record-play.sh` also needs Post Event for its stand-in person and Input Monitoring for `vhid-record.app`. Over SSH, all but the last are charged to `/usr/libexec/sshd-keygen-wrapper`. `vhid record` leaves vhid's own input out, so vhid cannot play the person in `record-play.sh`; events posted through CoreGraphics do instead.
