@@ -105,7 +105,8 @@ pixel_width=$(ffprobe -v error -select_streams v -show_entries stream=width -of 
 awk -F'\t' -v OFS='\t' -v zero="$zero" '{ $1 = sprintf("%.3f", $1 - zero); print }' "$work/lines.tsv" > "$work/steps.tsv"
 swift "$here/caption-band.swift" "$clip_width" "$band" "$work" < "$work/steps.tsv"
 
-# Band n shows from line n's second until line n+1's; the last, to the end.
+# Band n, the band once n lines are on it, shows from line n's second until line n+1's,
+# and band 0 from the clip's zero, so the band is never missing; the last, to the end.
 count=0
 inputs=()
 chain="[0:v]setpts=PTS-STARTPTS,crop=$((view[0] * scale)):$((view[1] * scale)):$((view_x * scale)):$((view_y * scale)),scale=$clip_width:$clip_height:flags=lanczos,pad=$clip_width:$((clip_height + band)):0:0[v0]"
@@ -113,7 +114,7 @@ while read -r from until; do
     inputs+=(-i "$work/band-$count.png")
     chain+=";[v$count][$((count + 1)):v]overlay=0:$clip_height:enable='between(t,$from,$until)'[v$((count + 1))]"
     count=$((count + 1))
-done < <(awk -F'\t' '{ t[NR] = $1 } END { for (n = 1; n <= NR; n++) print t[n], (n < NR ? t[n + 1] : 1e9) }' "$work/steps.tsv")
+done < <(awk -F'\t' 'BEGIN { t[0] = 0 } { t[NR] = $1 } END { for (n = 0; n <= NR; n++) print t[n], (n < NR ? t[n + 1] : 1e9) }' "$work/steps.tsv")
 ffmpeg -hide_banner -loglevel error -i "$work/screen.mkv" ${inputs[@]+"${inputs[@]}"} -filter_complex "$chain" \
     -map "[v$count]" -an -c:v libx264 -preset slow -crf 30 -pix_fmt yuv420p -movflags +faststart "$work/clip.mp4"
 
@@ -122,4 +123,4 @@ clip=${demo%.sh}.mp4
 mv "$work/clip.mp4" "$clip"
 mv "$work/steps.tsv" "${demo%.sh}.steps.tsv"
 seconds=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$clip")
-echo "film-demo: $(basename "$clip"): $count band lines, ${seconds}s, $(wc -c < "$clip" | tr -d ' ') bytes" >&2
+echo "film-demo: $(basename "$clip"): $((count - 1)) band lines, ${seconds}s, $(wc -c < "$clip" | tr -d ' ') bytes" >&2
