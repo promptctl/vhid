@@ -21,7 +21,8 @@ separate servers, and a client runs both.
 Each server's answer to a client's initialize carries the same instructions,
 [mcp-instructions.txt](mcp-instructions.txt): the other server's name, the one screen-point
 space, and the loop below. Any MCP client learns the pairing from that, with or without the
-Claude Code plugin; a test in each package holds its server's copy to that file.
+Claude Code plugin, whose look-click-look skill opens with the same text; tests hold both
+servers' copies and the skill's to that file.
 
 In Claude Code, the vhid plugin adds both servers, a skill that teaches the loop below,
 a skill that invokes an app's menu item by its name, and a check at the start of each

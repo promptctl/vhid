@@ -5,12 +5,19 @@ description: Operate apps on this Mac through its real screen, keyboard and mous
 
 # Look, act, look again
 
-The `vhid` and `eyes` MCP servers state the contract this skill works in the
-instructions each gave your client when it connected: every point either one prints or
-takes is the same screen point, neither decides anything, and done means a look after
-the act showed the change. This is how to work it.
+vhid and eyes are two MCP servers that work as a pair. eyes reads the screen: what is in front, and where text is. vhid drives a virtual keyboard and mouse that macOS takes for hardware. A client with only one of them is half the pair; both come with vhid, served by `vhid mcp` and `eyes mcp`.
 
-## The loop
+Every point either server prints or takes is the same screen point. The point eyes `find` prints is the point vhid `click` takes, as printed: no scaling, no offset, negative on a display left of or above the main one.
+
+Neither server decides anything. `click` presses whatever is at the point it is given, `type` types into whatever has keyboard focus, and `find` reports what is on screen, not whether an act did what was meant. So work in a loop:
+
+1. Look with eyes: `windows` for what is in front, `find` for where the text is.
+2. Act with vhid on what you saw.
+3. Look again at the same place. `find` with `until` and a `timeout` waits for the change; do not sleep and retry.
+
+Done means a look after the act showed the change. An act's answer says the act happened, not what it did.
+
+## Each step
 
 1. **Look.** `windows` says what is in front and which app is frontmost. `find` with
    the text you want says where it is - `{"text": "Save"}`, narrowed with `window` or
@@ -27,13 +34,13 @@ the act showed the change. This is how to work it.
    the field or window that should receive the keys is in front.
 3. **Look again** at the same place. `find` the result you expected - the dialog's
    title, the new text, the button gone. To wait for it, pass `until` (`present` or
-   `absent`) and a `timeout`, which re-reads until it happens; do not sleep and retry.
+   `absent`) and a `timeout`, which re-reads until it happens.
 
-A `click` that answered "clicked left once
-at (812, 604) after 1 motion report" is an act that happened, not an outcome: the press landed on that point,
-and what sat there may have been something else. When the user asked for an outcome,
-such as a file saved, a field filled or a sheet dismissed, you have it only once a look
-after the act shows it.
+A `click` that answered "clicked left once at (812, 604) after 1 motion report" is an
+act that happened, not an outcome: the press landed on that point, and what sat there
+may have been something else. When the user asked for an outcome, such as a file
+saved, a field filled or a sheet dismissed, you have it only once a look after the act
+shows it.
 
 ## Before you type
 

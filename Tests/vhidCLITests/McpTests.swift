@@ -21,6 +21,16 @@ import Testing
         #expect(Tools.all.filter { $0.tool.annotations.readOnlyHint == true }.map(\.tool.name) == ["cursor", "doctor"])
     }
 
+    /// The plugin's skill opens with the pairing as both servers word it at initialize, so a
+    /// client running a release whose servers send no instructions still reads it, and the
+    /// two never become two versions. [LAW:one-source-of-truth]
+    @Test func theSkillCarriesThePairingTheServersSend() throws {
+        let root = URL(filePath: #filePath).deletingLastPathComponent().appending(path: "../..").standardized
+        let pairing = try String(contentsOf: root.appending(path: "docs/mcp-instructions.txt"), encoding: .utf8)
+        let skill = try String(contentsOf: root.appending(path: "claude-plugin/skills/look-click-look/SKILL.md"), encoding: .utf8)
+        #expect(skill.contains(pairing.trimmingCharacters(in: .newlines)))
+    }
+
     /// The doctor tool answers with every row, in order, under a one-word verdict. Against
     /// a service nothing registers, the verdict is always "not ready" - whatever Mac runs
     /// this - and a Mac that is not ready is an answer, not a failed call.
