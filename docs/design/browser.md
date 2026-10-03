@@ -8,7 +8,7 @@ Measured on studious on 2026-10-03: macOS 15.0.1, Safari 18.0.1, Chrome 154.0.80
 
 - **No browser-side piece.** Every element the page offered was found at the right point by one reader or the other, once it was on screen. Nothing measured needs a DevTools connection or an extension, so neither clears [the scope bar](../development.md#scope).
 - **The gaps are in what `eyes` reports, not in what it sees.** It reports a Chrome element that is off screen as on screen. It does not say a row's role, so a page button and a browser button with the same name look the same. And it cannot tell apart three buttons that share one label.
-- **Reaching an element below the fold is vhid's job, and its wheel is broken.** One `vhid scroll` call barely moves the page (vhid-scroll-1m8), and in Firefox the wheel stopped partway for a reason not yet known (vhid-browser-j5d.dap). The End key works today.
+- **Reaching an element below the fold is vhid's job, and vhid's wheel is broken.** `vhid scroll` packs up to 127 ticks into one wheel event, so in Safari a call barely moves the page (vhid-scroll-1m8). Firefox moves much further per event, so many calls get there. In Firefox the End key reached the bottom at once.
 
 ## What eyes does about it
 
@@ -49,10 +49,10 @@ The tree reads `aria-label` (the button's accessibility description), iframe con
 
 **Repeated labels have only their position.** The three "Remove" buttons come back as three points in reading order. "The Remove in Beta's row" means matching each point's y to the row text's y, which an agent can do but `eyes` does not.
 
-**Below the fold needs scrolling, and the wheel does not deliver it.** In Safari, `vhid scroll 800 600 --vertical 100` moved the page 13 points, while twenty `--vertical 1` calls moved it more than 500 (vhid-scroll-1m8). In Firefox, the wheel moved the page part of the way and then nothing, across separate calls the packing bug does not explain (vhid-browser-j5d.dap), but `vhid press end` reached the bottom at once. Once the element was on screen, all three browsers found it at the right point.
+**Below the fold needs scrolling, and vhid's wheel falls short in Safari.** In Safari, `vhid scroll 800 600 --vertical 100` moved the page 13 points, while twenty `--vertical 1` calls moved it more than 500 (vhid-scroll-1m8). Firefox moves 230 to 300 points per `--vertical 5` call. A first run on the probe page seemed to stall partway. A rerun on a separate page that shows its scroll position and counts wheel events found no stall: each of 180 `--vertical 5` calls reached the page as one wheel event, and the page hit bottom before call 80 (vhid-browser-j5d.dap). Once the element was on screen, all three browsers found it at the right point.
 
 ## Repeating it
 
 The probe page, [browser-probe.html](browser-probe.html), holds one of each element above, and a fixed status line at the top that numbers each click, names the element it landed on (`none` for a miss), and names the focused element. Open it from disk in each browser on studious. For each element's text, run `eyes find "<text>" --window <id>` once per `--source`. Then `vhid click` the merged answer's point and read the status line with `eyes find "Last click" --window <id> --source tree`. Pass `--page <id>` in place of `--window <id>` for the page's own match, not the bookmark bar's.
 
-Two traps cost time here. A `find` that matches nothing still prints the nearest runs as rows, so a script that clicks "the second line" clicks a near miss, such as the browser's Reload button. And studious is shared: another session's input can take focus mid-run, which showed up as a covered window and clicks reporting the element before.
+Three traps cost time here. A `find` that matches nothing still prints the nearest runs as rows, so a script that clicks "the second line" clicks a near miss, such as the browser's Reload button. A scroll or click goes to whatever window is on top at the point, so with another app's window over it a scroll reaches nothing and looks like a browser that stopped scrolling. And studious is shared: another session's input can take focus mid-run, which showed up as a covered window and clicks reporting the element before.
