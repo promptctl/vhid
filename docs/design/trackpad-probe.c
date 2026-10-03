@@ -4,7 +4,7 @@
 // can match it. Creating it needs com.apple.developer.hid.virtual.device in a
 // provisioning profile; without one the kernel refuses (docs/design/trackpad.md).
 //   trackpad-probe hold [seconds]         create the device and keep it
-//   trackpad-probe swipe up|down|left|right [fingers]
+//   trackpad-probe swipe up|down|left|right [fingers 1-5]
 // Build: clang -framework IOKit -framework CoreFoundation -o trackpad-probe trackpad-probe.c
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/hid/IOHIDKeys.h>
@@ -27,6 +27,7 @@
     0x05, 0x01, 0x26, 0xFF, 0x0F, 0x75, 0x10, 0x55, 0x0F, 0x65, 0x11,          \
     0x09, 0x30, 0x35, 0x00, 0x46, 0xA0, 0x00, 0x81, 0x02, /* X, 160 mm    */   \
     0x09, 0x31, 0x46, 0x73, 0x00, 0x81, 0x02,       /* Y, 115 mm            */ \
+    0x65, 0x00, 0x55, 0x00, 0x45, 0x00, /* unit, exponent, physical off */ \
     0x05, 0x0D, 0xC0
 
 static const uint8_t descriptor[] = {
@@ -50,21 +51,40 @@ static void cfset(CFMutableDictionaryRef d, CFStringRef k, int v) {
     CFRelease(n);
 }
 
-static void send(int n, int x0, int y0, int down) {
+// Positions in mm on the 160 x 115 mm surface, scaled to the 0..4095 range.
+static void send(int n, double xmm, double ymm, int down) {
     struct report r = { .rid = 1 };
     for (int i = 0; i < n; i++) {
         r.f[i].tip = down;
         r.f[i].id = i + 1;
-        r.f[i].x = x0 + i * 500; // fingers ~20 mm apart
-        r.f[i].y = y0;
+        r.f[i].x = (xmm + (i - (n - 1) / 2.0) * 15) * 4095 / 160; // fingers 15 mm apart
+        r.f[i].y = ymm * 4095 / 115;
     }
     r.count = n;
     IOReturn rc = IOHIDUserDeviceHandleReportWithTimeStamp(dev, mach_absolute_time(), (uint8_t *)&r, sizeof r);
     if (rc) fprintf(stderr, "report: 0x%x\n", rc);
 }
 
+static int usage(const char *me) {
+    fprintf(stderr, "usage: %s hold [seconds] | swipe up|down|left|right [fingers 1-%d]\n", me, FINGERS);
+    return 2;
+}
+
 int main(int argc, char **argv) {
-    if (argc < 2) { fprintf(stderr, "usage: %s hold [s] | swipe dir [fingers]\n", argv[0]); return 2; }
+    int hold = 0, n = 3, dx = 0, dy = 0;
+    if (argc >= 2 && argc <= 3 && !strcmp(argv[1], "hold")) {
+        hold = argc == 3 ? atoi(argv[2]) : 30;
+        if (hold < 1) return usage(argv[0]);
+    } else if (argc >= 3 && argc <= 4 && !strcmp(argv[1], "swipe")) {
+        if (!strcmp(argv[2], "up")) dy = -1; else if (!strcmp(argv[2], "down")) dy = 1;
+        else if (!strcmp(argv[2], "left")) dx = -1; else if (!strcmp(argv[2], "right")) dx = 1;
+        else return usage(argv[0]);
+        if (argc == 4) n = atoi(argv[3]);
+        if (n < 1 || n > FINGERS) return usage(argv[0]);
+    } else {
+        return usage(argv[0]);
+    }
+
     CFMutableDictionaryRef p = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
     CFDataRef d = CFDataCreate(NULL, descriptor, sizeof descriptor);
     CFDictionarySetValue(p, CFSTR(kIOHIDReportDescriptorKey), d);
@@ -72,7 +92,6 @@ int main(int argc, char **argv) {
     cfset(p, CFSTR(kIOHIDProductIDKey), 0x7D7);
     CFDictionarySetValue(p, CFSTR(kIOHIDProductKey), CFSTR("vhid trackpad probe"));
     CFDictionarySetValue(p, CFSTR(kIOHIDManufacturerKey), CFSTR("Apple"));
-    CFDictionarySetValue(p, CFSTR(kIOHIDTransportKey), CFSTR("Virtual"));
     dev = IOHIDUserDeviceCreateWithProperties(NULL, p, 0);
     if (!dev) { fprintf(stderr, "IOHIDUserDeviceCreateWithProperties failed\n"); return 1; }
     IOHIDUserDeviceRegisterGetReportBlock(dev, ^IOReturn(IOHIDReportType type, uint32_t id, uint8_t *buf, CFIndex *len) {
@@ -85,19 +104,15 @@ int main(int argc, char **argv) {
     fflush(stdout);
     sleep(2); // let services match
 
-    if (!strcmp(argv[1], "hold")) {
-        sleep(argc > 2 ? atoi(argv[2]) : 30);
-    } else if (!strcmp(argv[1], "swipe") && argc > 2) {
-        int n = argc > 3 ? atoi(argv[3]) : 3;
-        int dx = 0, dy = 0;
-        if (!strcmp(argv[2], "up")) dy = -1; else if (!strcmp(argv[2], "down")) dy = 1;
-        else if (!strcmp(argv[2], "left")) dx = -1; else if (!strcmp(argv[2], "right")) dx = 1;
-        int x = 1200, y = 2000;
-        for (int i = 0; i <= 40; i++) { // 40 steps of 30 units (~1.2 mm) at 8 ms
-            send(n, x + dx * 30 * i, y + dy * 30 * i, 1);
+    if (hold) {
+        sleep(hold);
+    } else {
+        double x = 80, y = 57.5; // start at the centre; 5 fingers span 60 mm
+        for (int i = 0; i <= 40; i++) { // 40 steps of 1.2 mm at 8 ms: 48 mm
+            send(n, x + dx * 1.2 * i, y + dy * 1.2 * i, 1);
             usleep(8000);
         }
-        send(n, x + dx * 1200, y + dy * 1200, 0);
+        send(n, x + dx * 48, y + dy * 48, 0);
         sleep(1);
     }
     IOHIDUserDeviceCancel(dev);
