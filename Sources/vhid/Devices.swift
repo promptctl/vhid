@@ -20,6 +20,7 @@ struct Devices {
     let keyboard: any Keyboard
     let mouse: any Mouse
     let cursor: @Sendable () async throws -> ScreenPoint
+    let front: @Sendable () async throws -> FrontApp?
 
     /// Runs `body` with the devices over a connection to this installation's daemon, and
     /// hands them back when it returns.
@@ -43,7 +44,8 @@ struct Devices {
         let queue = DeviceQueue()
         let devices = Devices(keyboard: QueuedKeyboard(keyboard: helper.keyboard, queue: queue),
                               mouse: QueuedMouse(pointing: helper.mouse, queue: queue),
-                              cursor: cursor(helper, on: queue))
+                              cursor: cursor(helper, on: queue),
+                              front: front(helper, on: queue))
         let done: T
         do {
             done = try await body(devices)
@@ -82,6 +84,19 @@ struct Devices {
     /// answers (0, 0). [LAW:single-enforcer] Every verb that steers the pointer, and
     /// `cursor`, reads it here. The wait for the daemon's answer is made on `queue`, for
     /// the reason the devices' are.
+    /// The app in front, asked once the daemon has answered that the devices are up.
+    ///
+    /// launchd starts vhidd on the first call and its devices take about a second to come
+    /// up, so asked any earlier the answer would be that long old by the first key - the
+    /// window `--into` exists to close. The daemon's answer is the wait, made on `queue`
+    /// like every other, and it claims nothing. [LAW:no-ambient-temporal-coupling]
+    static func front(_ helper: HelperConnection, on queue: DeviceQueue) -> @Sendable () async throws -> FrontApp? {
+        {
+            _ = try await queue.run { try helper.status() }
+            return await FrontApp.inFront()
+        }
+    }
+
     static func cursor(_ helper: HelperConnection, on queue: DeviceQueue) -> @Sendable () async throws -> ScreenPoint {
         {
             let at = try await queue.run { try helper.cursor() }

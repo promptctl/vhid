@@ -72,7 +72,7 @@ enum Tools {
         let text = Parameter.text("text", Help.text)
         return VerbTool(Help.type, [text, layoutName, into]) { arguments, installation in
             let (text, layout, aim) = (try arguments[text], try KeyboardLayout.chosen(try arguments[layoutName]), try arguments[into])
-            return try await Devices.using(installation) { try await TypeCommand.type(text, on: layout, into: aim, with: $0.typist) }
+            return try await Devices.using(installation) { try await TypeCommand.type(text, on: layout, into: aim, with: $0.typist, front: $0.front) }
         }
     }()
 
@@ -80,7 +80,7 @@ enum Tools {
         let chords = Parameter.texts("chords", Help.chords)
         return VerbTool(Help.press, [chords, layoutName, into]) { arguments, installation in
             let (chords, layout, aim) = (try arguments[chords], try KeyboardLayout.chosen(try arguments[layoutName]), try arguments[into])
-            return try await Devices.using(installation) { try await PressCommand.press(chords, on: layout, into: aim, with: $0.typist) }
+            return try await Devices.using(installation) { try await PressCommand.press(chords, on: layout, into: aim, with: $0.typist, front: $0.front) }
         }
     }()
 

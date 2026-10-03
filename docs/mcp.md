@@ -6,7 +6,7 @@ Two MCP servers over stdio, one for input and one for reading the screen. This p
 `click`, `move`, `scroll`, `drag`, `play`, `cursor` and `doctor`, run as `vhid mcp`. `play` takes
 the script as its `script` argument where the command line reads it from stdin.
 
-`type` and `press` take `into`, an app's name as eyes `windows` prints a window's owner,
+`type` and `press` take `into`, an app's name as eyes `windows` prints the frontmost application,
 and refuse, sending nothing, when another app is in front; [cli.md](cli.md) has the
 rule.
 

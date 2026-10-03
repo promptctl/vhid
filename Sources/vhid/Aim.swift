@@ -8,19 +8,17 @@ import ArgumentParser
 /// after everything it will send has been read, and sends nothing when it is another.
 /// It asks once, before the first key: a window that comes forward while the keys are
 /// going down still gets the rest of them.
-///
-/// [LAW:dataflow-not-control-flow] Every verb that takes it admits through it; an aim
-/// of `anywhere` is the check that admits everything, not a branch that skips the check.
 enum Aim: Sendable, Equatable {
     case anywhere
-    /// An application's name, as `eyes windows` prints a window's owner.
+    /// An application's name, as `eyes windows` prints the frontmost application.
     case into(String)
 
     /// Throws `NotInFront`, before a key has gone down, unless `front` is the app aimed at.
-    /// `front` is read only when there is an app to compare it with.
-    func admit(_ front: () async -> FrontApp?) async throws {
+    /// `front` is read only when there is an app to compare it with, so keys aimed
+    /// `anywhere` cost no question of the daemon or of macOS.
+    func admit(_ front: () async throws -> FrontApp?) async throws {
         guard case .into(let app) = self else { return }
-        let inFront = await front()
+        let inFront = try await front()
         // Exact: a name taken from eyes is spelled as macOS spells it, and a looser match
         // would let "Notes" admit Sticky Notes. [LAW:parse-dont-validate]
         guard inFront?.name == app else { throw NotInFront(aimed: app, front: inFront) }
@@ -54,6 +52,11 @@ struct FrontApp: Sendable, Equatable, CustomStringConvertible {
 
     /// Asked of macOS on every call, never kept: what was in front a moment ago is the
     /// question this exists to stop answering. [LAW:no-ambient-temporal-coupling]
+    ///
+    /// The same reading as eyes' `Frontmost` (eyes/Sources/Command/Windows.swift), the
+    /// name on its scope line, so a name copied from there matches. A window's owner
+    /// column is the window server's name for the app, which usually but not always reads
+    /// the same.
     static let inFront: @Sendable () async -> FrontApp? = {
         await MainActor.run {
             NSWorkspace.shared.frontmostApplication.map { FrontApp(pid: $0.processIdentifier, name: $0.localizedName) }
@@ -71,7 +74,7 @@ struct NotInFront: Error, Equatable, CustomStringConvertible {
     }
 }
 
-/// `--into`, taken by every verb that sends keys. [LAW:one-source-of-truth]
+/// `--into`, taken by `type` and `press`. [LAW:one-source-of-truth]
 struct AimOption: ParsableArguments {
     @Option(name: .customLong("into"), help: Help.sentence(Help.into))
     var app: String?

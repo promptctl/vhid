@@ -23,7 +23,7 @@ click-by-element, because nothing in vhid reads the screen — what is under a p
 the caller's to know.
 
 `type` and `press` take `--into <app>` (the MCP tools, `into`): the app the keys are
-for, named as `eyes windows` prints a window's owner. Just before the first key, the
+for, named as `eyes windows` prints the frontmost application on its first line. Just before the first key, the
 verb asks macOS which app is in front and, when it is another, refuses with nothing
 sent, naming the app that was: `TextEdit is not in front, so nothing was sent: Terminal
 (pid 512) is`. It is asked once, so a window that comes forward while the keys are going
