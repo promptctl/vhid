@@ -1,7 +1,7 @@
 # Moves the vhid cask in promptctl/homebrew-tap to vhid's newest release. The tap calls
 # this from its own .github/workflows/vhid.yml, so the write to the tap is the tap's own
 # token: the promptctl org admits no deploy keys. release.yml starts that workflow once a
-# release is published and fails when the run does not succeed.
+# release is published and fails when the cask is not at that release afterward.
 #
 # A caller gives the job contents: write on itself, the tap; vhid it only reads, and
 # vhid is public. The job runs on macOS because Gatekeeper is what judges the pkg.

@@ -14,8 +14,9 @@ pkg is notarized it requires the tagged commit's `vhid`, `eyes` and `pkg` checks
 green, waiting for any still running, so a tag pushed right after its merge builds while
 CI tests it. Then it attaches the pkg to a GitHub Release whose notes are that section,
 marked a pre-release when the version has a `-tag`, and for a release moves the tap's
-cask (below). The job reads secrets of the `release` environment, which admits only `v*` tags and waits for a
-maintainer to approve it in the Actions tab before handing them over:
+cask (below). The job reads secrets of the `release` environment, which admits only
+`v*` tags and waits for a maintainer to approve it in the Actions tab before handing
+them over:
 
 | Secret | What it holds |
 | --- | --- |
@@ -86,16 +87,17 @@ with a `-tag` is), fetches its pkg through the cask's own URL, and runs
 notarized and signed by the team. The write is the tap's own token. A run that finds the
 cask current changes nothing.
 
-Once a release is published, `release.yml` starts that workflow, waits for its run, and
-reads the cask once the run ends, failing the release when the cask is short of the
-release or the run is not done within ten minutes. The cask is the verdict, so a run the
-tap's concurrency group cancelled for a later one that moved the cask passes. The Release is public by then, so
-re-running the job would only fail at publishing; `gh workflow run vhid.yml --repo
-promptctl/homebrew-tap` moves the cask instead, and the tap's own half-hourly schedule
-runs the same workflow. `release.yml` starts it with a token of the promptctl tap App, a
-GitHub App owned by the org and installed on the tap alone with Actions: write, so the
-token can start the tap's workflows and nothing else. The token is minted before the
-build, so a missing App fails the release before anything is published.
+Once a release is published, `release.yml` starts that workflow and waits until the cask
+is at the release, failing when the run ends with the cask short of it or ten minutes
+pass. The cask is the verdict, not the run: a run the tap's concurrency group cancels
+leaves the cask to the run that replaced it. A workflow GitHub disabled after 60 days of
+a quiet tap is enabled again; one disabled by hand fails the step. The Release is public
+by then, so re-running the job would only fail at publishing; `gh workflow run vhid.yml
+--repo promptctl/homebrew-tap` moves the cask instead, and the tap's own half-hourly
+schedule runs the same workflow. `release.yml` starts it with a token of the promptctl
+tap App, a GitHub App owned by the org and installed on the tap alone with Actions:
+write, so the token can start the tap's workflows and nothing else. The token is minted
+before the build, so a missing App fails the release before anything is published.
 The App is made once, at github.com/organizations/promptctl/settings/apps, with no
 webhook, then installed on promptctl/homebrew-tap; its client ID and a private key go to
 the `release` environment:
