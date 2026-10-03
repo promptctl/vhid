@@ -15,7 +15,7 @@
 # the pkg's receipt identifier, and pkg/scripts/stop-job, so the job stopped here is the
 # job the install started, stopped the way preinstall stops it. [LAW:one-source-of-truth]
 #
-# VHID_UNINSTALL_ROOT prefixes every path, for scripts/uninstall-test, which runs as
+# VHID_UNINSTALL_ROOT prefixes every path it removes, for scripts/uninstall-test, which runs as
 # nobody's root; as root it is refused, since launchctl and pkgutil would still act on
 # this Mac while the files removed were somewhere else.
 #
@@ -62,23 +62,26 @@ fi
 removed=0
 pqrs_scripts="/Library/Application Support/org.pqrs/Karabiner-DriverKit-VirtualHIDDevice/scripts/uninstall"
 
-# The driver, when asked for, by the removal scripts/virtual-hid-driver makes - the copy
-# the pkg ships beside this script - read through the installed vhid. [LAW:one-source-of-truth]
+# The driver, when asked for, by the removal scripts/virtual-hid-driver makes, read through
+# vhid: both the copies packed with this script, found from where it runs. As installed
+# that is /usr/local; the Homebrew cask keeps a copy of all three in the same layout, which
+# outlives the files this run deletes, so `brew uninstall --zap` can run --driver after
+# brew's uninstall has already removed vhid. [LAW:one-source-of-truth]
 # It runs as a bash of its own: its steps count on stopping at the first failure, which a
 # function called on the left of || here would not do. Its refusals - Karabiner-Elements
 # installed, a registration it cannot read, nobody logged in to withdraw it - are asked
 # before any job is stopped, so a refused --driver leaves vhid running as it found it; the
 # removal itself goes after vhid's jobs let go of the driver and before the files it needs.
-driver_script=$root/usr/local/libexec/vhid-virtual-hid-driver
-[ -f "$driver_script" ] || driver_script=
+tools=$(cd "$(dirname "$0")/.." && pwd)
+driver_script=$tools/libexec/vhid-virtual-hid-driver
 driver_step() {
   VHID_DRIVER_ROOT=$root REMOVE_AGAIN="sudo $0 --driver" \
     CONFIRM_ABSENT="systemextensionsctl list, which should list no org.pqrs extension" \
-    /bin/bash -c 'source "$1"; VHID=$2; "$3"' _ "$driver_script" "$root/usr/local/bin/vhid" "$1"
+    /bin/bash -c 'source "$1"; VHID=$2; "$3"' _ "$driver_script" "$tools/bin/vhid" "$1"
 }
 if $driver; then
-  if [ -z "$driver_script" ]; then
-    say "the driver removal vhid's pkg ships is not here, so neither is vhid; if the pqrs driver is, its own scripts remove it: $pqrs_scripts"
+  if [ ! -f "$driver_script" ]; then
+    say "the driver removal packed with this script is not at $driver_script; if the pqrs driver is here, its own scripts remove it: $pqrs_scripts"
   else
     # The development daemon a build of this tree runs uses this same driver.
     if record=$(launchctl print "system/$service.dev" 2>&1); then
@@ -122,7 +125,7 @@ for uid in $(ps -axo uid=,comm= | awk '$2 ~ /(^|\/)loginwindow$/ && $1 >= 500 { 
   fi
 done
 
-if $driver && [ -n "$driver_script" ]; then
+if $driver && [ -f "$driver_script" ]; then
   # Where the removal left the driver is read afresh rather than taken from its exit
   # status: 2 is how it reports a restart pending, but a failed step under its errexit can
   # end it with 2 as well.
@@ -135,7 +138,7 @@ if $driver && [ -n "$driver_script" ]; then
   case "$status $verdict" in
     "0 already-absent") ;;
     "0 absent" | "0 pending-reboot" | "2 pending-reboot") removed=$((removed + 1)) ;;
-    *) fail "the driver's removal did not finish (above says why; it now reads '$verdict'). vhid's jobs are stopped and its files are in place: run sudo $0 --driver again once that is fixed, or sudo $0 to remove vhid alone" ;;
+    *) fail "the driver's removal did not finish (above says why; it now reads '$verdict'). vhid's jobs are stopped and this run removed none of its files: run sudo $0 --driver again once that is fixed, or sudo $0 to remove vhid alone" ;;
   esac
 fi
 

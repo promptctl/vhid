@@ -13,7 +13,11 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 SERVICE=ai.promptctl.vhid.vhidd
 STUB=$(mktemp -d) || exit 1
 trap 'rm -rf "$STUB"' EXIT
-scripts/stage-uninstall "$SERVICE" "$(scripts/make-pkg --identifier)" >"$STUB/vhid-uninstall" && chmod +x "$STUB/vhid-uninstall" || exit 1
+# The script runs from the copy the Homebrew cask keeps: libexec/ and bin/ under one
+# directory, as under /usr/local, and outside the scratch root, so nothing it removes is it.
+KIT=$STUB/kit UNINSTALL=$STUB/kit/libexec/vhid-uninstall
+mkdir -p "$KIT/libexec" "$KIT/bin"
+scripts/stage-uninstall "$SERVICE" "$(scripts/make-pkg --identifier)" >"$UNINSTALL" && chmod +x "$UNINSTALL" || exit 1
 
 mkdir "$STUB/bin"
 # Loaded jobs are lines of $STUB/loaded. UNREADABLE (a target, or "all") makes print fail
@@ -83,9 +87,9 @@ state() {
   return 0
 }
 left() { (cd "$STUB/root" 2>/dev/null && find . -type f | sort | tr '\n' ' '); }
-run() { out=$("$STUB/vhid-uninstall" 2>&1); status=$?; }
+run() { out=$("$UNINSTALL" 2>&1); status=$?; }
 
-ALL=$("$STUB/vhid-uninstall" --paths | tr '\n' ' ')
+ALL=$("$UNINSTALL" --paths | tr '\n' ' ')
 DAEMON=system/$SERVICE AGENT=gui/501/$SERVICE.menubar DEV=system/$SERVICE.dev
 
 state "$DAEMON $AGENT" "$ALL" yes; run
@@ -148,14 +152,14 @@ state "$DAEMON" "$ALL" yes; before=$(left); STUB_UID=0 run
 check "root with the test's root set: refused" 1 "$status"
 check "root with the test's root set: touches nothing" "$before|" "$(left)|$(cat "$STUB/reached")"
 
-# --driver: the installed vhid answers the driver readings from the scratch Mac, and the
+# --driver: the vhid packed beside the script answers the driver readings from the scratch Mac, and the
 # Manager's deactivate withdraws the registration, as the real ones do.
 MANAGER_REL="/Applications/.Karabiner-VirtualHIDDevice-Manager.app/Contents/MacOS/Karabiner-VirtualHIDDevice-Manager"
 SUPPORT_REL="/Library/Application Support/org.pqrs/Karabiner-DriverKit-VirtualHIDDevice"
 driver_mac() {  # <driver installed: yes|no>
   state "$DAEMON" "$ALL" yes
-  cp scripts/virtual-hid-driver "$STUB/root/usr/local/libexec/vhid-virtual-hid-driver"
-  cat >"$STUB/root/usr/local/bin/vhid" <<'S'
+  cp scripts/virtual-hid-driver "$KIT/libexec/vhid-virtual-hid-driver"
+  cat >"$KIT/bin/vhid" <<'S'
 #!/bin/bash
 root=$VHID_UNINSTALL_ROOT
 case "$2" in
@@ -169,7 +173,7 @@ case "$2" in
 esac
 exit 0
 S
-  chmod +x "$STUB/root/usr/local/bin/vhid"
+  chmod +x "$KIT/bin/vhid"
   rm -f "$STUB/driver-receipt"
   if [ "$1" = yes ]; then
     echo enabled >"$STUB/registration"; : >"$STUB/driver-receipt"
@@ -180,7 +184,7 @@ S
     echo unregistered >"$STUB/registration"
   fi
 }
-run_driver() { out=$("$STUB/vhid-uninstall" --driver 2>&1); status=$?; }
+run_driver() { out=$("$UNINSTALL" --driver 2>&1); status=$?; }
 
 driver_mac yes; run_driver
 check "driver present: exit" 0 "$status"
@@ -218,8 +222,32 @@ check "dev job unreadable: vhid left running and in place" "$DAEMON|$before" "$(
 
 driver_mac yes; printf '#!/bin/bash\necho "manager $*" >>"$STUB/reached"\n' >"$STUB/root$MANAGER_REL"; before=$(left); run_driver
 check "withdrawal does not take: fails" 1 "$status"
-check "withdrawal does not take: says vhid is stopped, files in place" 1 "$(grep -c "vhid's jobs are stopped and its files are in place" <<<"$out")"
+check "withdrawal does not take: says vhid is stopped, files in place" 1 "$(grep -c "vhid's jobs are stopped and this run removed none of its files" <<<"$out")"
 check "withdrawal does not take: vhid's files in place" "$before" "$(left)"
+
+# brew uninstall --zap: brew's uninstall has already removed vhid, and the zap stanza runs
+# --driver from the cask's copy.
+driver_mac yes; : >"$STUB/loaded"; rm -f "$STUB/receipt"; for path in $ALL; do rm -f "$STUB/root$path"; done; run_driver
+check "zap after vhid is gone: exit" 0 "$status"
+check "zap after vhid is gone: driver withdrawn" "manager deactivate" "$(grep -m1 '^manager' "$STUB/reached")"
+check "zap after vhid is gone: nothing left" "no|" "$([ -f "$STUB/driver-receipt" ] && echo yes || echo no)|$(left)"
+
+driver_mac yes; : >"$STUB/loaded"; for path in $ALL; do rm -f "$STUB/root$path"; done; before=$(left); ELEMENTS=15.5.0 run_driver
+check "zap with Karabiner-Elements present: refused" 1 "$status"
+check "zap with Karabiner-Elements present: driver untouched" "$before|" "$(left)|$(grep '^manager\|^sudo rm' "$STUB/reached")"
+
+# As installed: the script under /usr/local/libexec reads the vhid and the removal installed
+# beside it, and goes with the rest.
+driver_mac yes
+cp "$UNINSTALL" "$STUB/root/usr/local/libexec/vhid-uninstall"
+cp "$KIT/libexec/vhid-virtual-hid-driver" "$STUB/root/usr/local/libexec/"
+cp "$KIT/bin/vhid" "$STUB/root/usr/local/bin/vhid"
+chmod +x "$STUB/root/usr/local/libexec/vhid-uninstall" "$STUB/root/usr/local/libexec/vhid-virtual-hid-driver" "$STUB/root/usr/local/bin/vhid"
+mv "$KIT" "$STUB/kit.away"
+out=$("$STUB/root/usr/local/libexec/vhid-uninstall" --driver 2>&1); status=$?
+mv "$STUB/kit.away" "$KIT"
+check "installed: exit" 0 "$status"
+check "installed: driver and vhid gone, the script with them" "no|" "$([ -f "$STUB/driver-receipt" ] && echo yes || echo no)|$(left)"
 
 state "" "" no; run_driver
 check "--driver on a clean Mac: exit" 0 "$status"
