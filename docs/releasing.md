@@ -103,3 +103,22 @@ gh workflow run vhid.yml --repo promptctl/homebrew-tap
 version, or one with a `-tag`, is refused and the tap left as it was. A pkg whose sha256
 no longer matches the cask on its own version is refused too, and fails every run until
 someone looks.
+
+A release that also changes the cask's body has to move the cask by hand, in one commit.
+The workflow moves only `version` and `sha256`. Brew keeps the caskfile an install or
+upgrade was made with, and uninstalls and zaps by it, so anyone who upgrades between the
+workflow's bump and the body change keeps the old body until the next version. Disable
+the workflow before pushing the tag:
+
+```sh
+gh workflow disable vhid.yml --repo promptctl/homebrew-tap
+```
+
+Once the release is published, fetch its pkg, hold it to `scripts/assess-pkg`, and run
+`scripts/update-cask <tap checkout> <version> <pkg>` on the tap branch that carries the
+body change. Merge that within the `cask` job's 90 minutes, then enable the workflow
+again; its next run finds the cask current:
+
+```sh
+gh workflow enable vhid.yml --repo promptctl/homebrew-tap
+```

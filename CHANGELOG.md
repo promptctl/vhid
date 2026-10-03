@@ -4,6 +4,8 @@ Each release's section is its GitHub Release notes, which keep line breaks, so e
 
 ## [Unreleased]
 
+## [0.3.0]
+
 - A Claude Code plugin, `/plugin marketplace add promptctl/vhid` then `/plugin install vhid@vhid`, adds the `vhid` and `eyes` MCP servers, a skill for the look, act, look again loop, and a check at the start of each session that tells the agent when vhid is missing or not `ready`.
 - `brew uninstall --zap --cask vhid` removes the pqrs driver package with vhid, refusing as `vhid-uninstall --driver` does, for instance while Karabiner-Elements is installed. On an install made or upgraded with this release's cask, `brew uninstall --cask vhid` also works after `vhid-uninstall` has been run by hand.
 
@@ -39,6 +41,7 @@ The first release: a virtual keyboard and mouse that macOS sees as hardware, dri
 - One signed, notarized pkg installs both CLIs, the root daemon that owns the devices, the menu bar item, the `vhid record` tap, an uninstaller, and the pinned Karabiner-DriverKit-VirtualHIDDevice package.
 - After installing, turn on `org.pqrs.Karabiner-DriverKit-VirtualHIDDevice` under System Settings > General > Login Items & Extensions > Driver Extensions; no installer can do this for you. `vhid doctor` prints `ready` once everything vhid needs is met.
 
-[Unreleased]: https://github.com/promptctl/vhid/compare/v0.2.0...master
+[Unreleased]: https://github.com/promptctl/vhid/compare/v0.3.0...master
+[0.3.0]: https://github.com/promptctl/vhid/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/promptctl/vhid/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/promptctl/vhid/releases/tag/v0.1.0
