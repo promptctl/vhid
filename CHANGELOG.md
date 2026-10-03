@@ -4,6 +4,11 @@ Each release's section is its GitHub Release notes, which keep line breaks, so e
 
 ## [Unreleased]
 
+- `eyes find` and `eyes read` print each row's role, such as `AXButton`, or `pixels` for text only the pixels reader saw, as a third column before a near miss's edit count.
+- `eyes find --page <window id>` and `eyes read --page <window id>` read only the web page a browser window shows, not its toolbar and bookmarks. The MCP tools take `page`.
+- `eyes find --near <text>` orders matches by how close each sits to that text, so `eyes find Remove --near Beta --limit 1` gives the Remove button in Beta's row. The MCP tool takes `near`.
+- In Chrome, `eyes find` no longer answers an element scrolled out of view as a match on the viewport's edge, where a click misses it.
+
 ## [0.3.0]
 
 - A Claude Code plugin, `/plugin marketplace add promptctl/vhid` then `/plugin install vhid@vhid`, adds the `vhid` and `eyes` MCP servers, a skill for the look, act, look again loop, and a check at the start of each session that tells the agent when vhid is missing or not `ready`.

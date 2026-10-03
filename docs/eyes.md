@@ -10,6 +10,8 @@ eyes find Settings --exact --display 3
 eyes read --window 4127           # every run of text in one window, in reading order
 eyes find OK --source tree        # only the accessibility tree: exact text, no Screen Recording
 eyes find Saving --window 4127 --until absent --timeout 30   # returns once the text is gone
+eyes find Settings --page 219     # only the web page in browser window 219, not its toolbar or bookmarks
+eyes find Remove --near Beta      # every "Remove", the one beside "Beta" first
 eyes grants                       # Screen Recording and Accessibility: held or not, and the app they are charged to
 eyes grants --ask                 # raise macOS's dialog for each missing grant (once per app); run eyes grants again once answered
 eyes mcp                          # the verbs as MCP tools over stdio: windows, displays, find, read, grants
@@ -22,6 +24,22 @@ both saw once. A merge with one grant missing still answers from the other and s
 reader could not look. Each prints a scope line first — where it looked, which reader
 looked, how many runs it read, what it set aside, whether it read the whole region. A `find` that matches nothing prints the nearest runs
 and how many edits off each is, so a misread one edit away is not taken for an absence.
+
+Each row is a point, the text, and what it is: the role the accessibility tree gives the
+element (`AXButton`, `AXLink`, `AXTextField`, ...), or `pixels` for text only the pixels
+reader saw, such as words drawn on a canvas. The role is what tells a page's Settings
+button from a browser bookmark of the same name, or a field from its label.
+
+`--page <window id>` reads the web page a browser window shows, without the browser's
+toolbar and bookmarks. The accessibility tree finds the page, so it needs Accessibility
+even with `--source pixels`. A window showing no page, or two side by side such as a page
+and a docked DevTools, is refused; read one of the two with `--rect`.
+
+`--near <text>` orders the matches by how close each sits to a run containing that text,
+on the same line first: of three "Remove" buttons, the one in Beta's row comes first, and
+`--limit 1` leaves only it. When nothing on screen contains the `--near` text, no match
+is answered, since which one was meant is unknown: the scope line names that text as not
+found, the rows are its near misses, and a wait settles neither present nor absent on it.
 
 `find --until present|absent` re-reads the same rectangle until the text appears or is
 gone, then answers once, its scope line led by how many reads it took and how long. A

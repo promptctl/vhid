@@ -102,11 +102,12 @@ enum EyesTools {
         frontmost: @escaping FrontmostApp = { await Frontmost.now() },
         displays: @escaping DisplayList = { Geometry.displays() },
         reading look: @escaping Look = { source, query in try await source.reader.read(query) },
-        grants: @escaping GrantsLook = { (try await GrantsVerb.reading(), try Holder.current()) }
+        grants: @escaping GrantsLook = { (try await GrantsVerb.reading(), try Holder.current()) },
+        pages: @escaping Where.Place.Pages = Where.Place.tree
     ) -> [EyesTool] {
         let serial = OneAtATime(look)
         let read: Look = { try await serial.read($0, $1) }
-        return [windows(listing, frontmost: frontmost), Self.displays(displays), find(read), Self.read(read), Self.grants(grants)]
+        return [windows(listing, frontmost: frontmost), Self.displays(displays), find(read, pages), Self.read(read, pages), Self.grants(grants)]
     }
 
     /// Where `find` and `read` look, as `--display`, `--window` and `--rect` take it.
@@ -114,6 +115,7 @@ enum EyesTools {
         "display": .object(["type": "integer", "description": .string(Help.display)]),
         "window": .object(["type": "integer", "description": .string(Help.window)]),
         "rect": .object(["type": "string", "description": .string(Help.rect)]),
+        "page": .object(["type": "integer", "description": .string(Help.page)]),
         "limit": .object(["type": "integer", "minimum": 1, "description": "The most rows to answer with. Defaults to \(Limit.default.count)."]),
         "source": .object(["type": "string", "enum": .array(SourceKind.allCases.map { .string($0.rawValue) }), "description": .string(Help.source)]),
     ]
@@ -127,7 +129,7 @@ enum EyesTools {
     /// Where a missing grant is held, for a server: the app hosting it, not eyes.
     static let grantNote = " Under eyes mcp the grant is the app's that runs this server, not eyes'."
 
-    static func find(_ look: @escaping Look) -> EyesTool { EyesTool(
+    static func find(_ look: @escaping Look, _ pages: @escaping Where.Place.Pages) -> EyesTool { EyesTool(
         tool: Tool(
             name: "find",
             description: Find.configuration.abstract + " " + (Find.configuration.discussion) + grant,
@@ -137,6 +139,7 @@ enum EyesTools {
                     "text": .object(["type": "string", "description": .string(Help.text)]),
                     "exact": .object(["type": "boolean", "description": .string(Help.exact)]),
                     "edits": .object(["type": "integer", "minimum": 0, "description": .string(Help.edits)]),
+                    "near": .object(["type": "string", "description": .string(Help.near)]),
                     "until": .object(["type": "string", "enum": .array(Until.allCases.map { .string($0.rawValue) }),
                                       "description": .string(Help.until)]),
                     "timeout": .object(["type": "number", "exclusiveMinimum": 0, "maximum": .double(Wait.longest),
@@ -147,7 +150,7 @@ enum EyesTools {
             ]),
             annotations: .init(readOnlyHint: true, openWorldHint: true)),
         call: { given in
-            try refuseStray(given, taken: ["text", "exact", "edits", "display", "window", "rect", "limit", "source", "until", "timeout"])
+            try refuseStray(given, taken: ["text", "exact", "edits", "near", "display", "window", "page", "rect", "limit", "source", "until", "timeout"])
             guard let text = try argument("text", in: given, \.stringValue, "a string") else {
                 throw ArgumentRefused(description: "text is required: the text to look for")
             }
@@ -161,10 +164,11 @@ enum EyesTools {
             }
             let wait = try Find.wait(until, timeout: try argument("timeout", in: given, { Double($0) }, "a number"),
                                      as: .argument)
-            return try await answer(try query(match, given), try source(given), look, wait: wait)
+            let near = try Find.near(try argument("near", in: given, \.stringValue, "a string"))
+            return try await answer(try await query(match, given, near: near, pages: pages), try source(given), look, wait: wait)
         }) }
 
-    static func read(_ look: @escaping Look) -> EyesTool { EyesTool(
+    static func read(_ look: @escaping Look, _ pages: @escaping Where.Place.Pages) -> EyesTool { EyesTool(
         tool: Tool(
             name: "read",
             description: Read.configuration.abstract + grant,
@@ -175,12 +179,14 @@ enum EyesTools {
             ]),
             annotations: .init(readOnlyHint: true, openWorldHint: true)),
         call: { given in
-            try refuseStray(given, taken: ["display", "window", "rect", "limit", "source"])
-            return try await answer(try query(nil, given), try source(given), look)
+            try refuseStray(given, taken: ["display", "window", "page", "rect", "limit", "source"])
+            return try await answer(try await query(nil, given, pages: pages), try source(given), look)
         }) }
 
     /// The region and limit `find` and `read` share, through the verbs' own rules.
-    private static func query(_ match: Match?, _ given: [String: Value]) throws -> Query {
+    @MainActor private static func query(
+        _ match: Match?, _ given: [String: Value], near: Match? = nil, pages: Where.Place.Pages
+    ) async throws -> Query {
         let id = { (name: String) throws -> UInt32? in
             try argument(name, in: given, \.intValue, "an integer").map { n in
                 guard let id = UInt32(exactly: n) else {
@@ -189,10 +195,16 @@ enum EyesTools {
                 return id
             }
         }
-        let region = try Where.region(display: try id("display"), window: try id("window"),
-                                      rect: try argument("rect", in: given, \.stringValue, "a string"), as: .argument)
+        let place = try Where.place(display: try id("display"), window: try id("window"), page: try id("page"),
+                                    rect: try argument("rect", in: given, \.stringValue, "a string"), as: .argument)
         let limit = try Where.limit(try argument("limit", in: given, \.intValue, "an integer") ?? Limit.default.count, as: .argument)
-        return Query(match: match, region: region, limit: limit)
+        // Finding a page reads the tree, so a missing grant names the app holding it, as a
+        // reading's does.
+        let region: Region
+        do { region = try await place.region(pages: pages) } catch let error as ReaderError where error.missingGrant {
+            throw ArgumentRefused(description: served(error))
+        }
+        return Query(match: match, region: region, limit: limit, near: near)
     }
 
     /// Which reader, as `--source` takes it.

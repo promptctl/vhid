@@ -2,7 +2,7 @@ import Eyes
 import Grants
 import MCP
 import Pixels
-import Tree
+@testable import Tree
 import Version
 import Telemetry
 import TelemetryTesting
@@ -49,11 +49,21 @@ import Testing
         return Reading(outcome: .matched(Matches([save])!), scope: Scope(region: ScreenRect(x: -1512, y: 316, width: 1512, height: 982), examined: 1, reach: .whole))
     }
 
+    static let viewport = ScreenRect(x: 22, y: 190, width: 1200, height: 688)
+    /// Window 219 shows one page, 220 two side by side, and 221's tree has no grant.
+    private static let pages: Where.Place.Pages = { id in
+        switch id {
+        case 219: return Paged(pages: [viewport], examined: 40, stop: nil)
+        case 220: return Paged(pages: [viewport, viewport], examined: 52, stop: nil)
+        default: throw TreeError.noGrant
+        }
+    }
+
     /// A client connected to a server over `listing`, both torn down before this returns.
     private func connected<T>(_ body: (Client) async throws -> T) async throws -> T {
         let (clientSide, serverSide) = await InMemoryTransport.createConnectedPair()
         let transport = AnsweringTransport(serverSide)
-        let server = await Mcp.server(EyesTools.all(windows: { Self.listing }, frontmost: { Self.front }, displays: { DisplaysCommandTests.desk }, reading: Self.look, grants: { (Self.grantReading, Self.holder) }), on: transport)
+        let server = await Mcp.server(EyesTools.all(windows: { Self.listing }, frontmost: { Self.front }, displays: { DisplaysCommandTests.desk }, reading: Self.look, grants: { (Self.grantReading, Self.holder) }, pages: Self.pages), on: transport)
         try await server.start(transport: transport)
         let client = Client(name: "test", version: "0")
         let result: Result<T, any Error>
@@ -216,12 +226,14 @@ import Testing
             ("find", ["text": "a", "until": "gone"], "until is gone, and it takes one of present, absent"),
             ("find", ["text": "a", "until": "absent", "timeout": 0], "timeout is 0.0, and it takes seconds above 0 and at most 600"),
             ("read", ["limit": 0], "limit must be at least 1"),
-            ("read", ["display": 1, "window": 2], "give at most one of display, window, rect"),
+            ("read", ["display": 1, "window": 2], "give at most one of display, window, page, rect"),
             ("read", ["display": -1], "display is -1, which is not a window-server id (0 to 4294967295)"),
             ("read", ["window": 4_294_967_296], "window is 4294967296, which is not a window-server id (0 to 4294967295)"),
             ("read", ["rect": "1,2,3"], "rect wants x,y,width,height in points - a positive size, nothing past a million - got 1,2,3"),
-            ("read", ["text": "a"], "text is not an argument this tool takes: it takes display, window, rect, limit, source"),
+            ("read", ["text": "a"], "text is not an argument this tool takes: it takes display, window, page, rect, limit, source"),
             ("read", ["source": "ocr"], "source is ocr, and it takes one of tree, pixels, merged"),
+            ("read", ["page": 2, "rect": "1,2,3,4"], "give at most one of display, window, page, rect"),
+            ("find", ["text": "a", "near": " "], "the text to find matches near is blank"),
         ] {
             let (said, isError) = try await call(arguments, tool: tool)
             #expect(isError == true, "\(tool) \(arguments)")
@@ -317,5 +329,17 @@ import Testing
         _ = try await first.value
         await #expect(throws: CancellationError.self) { try await second.value }
         #expect(await count.n == 1)
+    }
+
+    /// A page is found through the server's own search: its frame is the region read, and
+    /// a window with two pages, or a tree with no grant, is refused as the verb refuses it.
+    @Test func findReadsThePageTheSearchFound() async throws {
+        let (_, isError) = try await call(["text": "Save", "page": 219], tool: "find")
+        #expect(isError != true)
+        #expect(await Self.asked.queries.last?.region == .page(window: 219, frame: Self.viewport))
+        let (two, refused) = try await call(["text": "Save", "page": 220], tool: "find")
+        #expect(refused == true && two.contains("2 web pages"))
+        let (blind, _) = try await call(["page": 221], tool: "read")
+        #expect(blind == "\(TreeError.noGrant)\(EyesTools.grantNote)")
     }
 }

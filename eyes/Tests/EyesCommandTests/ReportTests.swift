@@ -2,6 +2,7 @@
 import Pixels
 import Telemetry
 import TelemetryTesting
+@testable import Tree
 import Testing
 @testable import EyesCommand
 
@@ -24,8 +25,30 @@ import Testing
         #expect(Report.lines(reading, query: query, source: .pixels) == [
             "\"Settings\" not found in display 12 -2400,-300 2400x1600 by pixels; 47 runs read; 3 duplicate;"
                 + " whole region read; nearest follow. Points are centres, vhid click coordinates.",
-            "-1880,-50\tSetlings\t1 off",
+            "-1880,-50\tSetlings\tpixels\t1 off",
         ])
+    }
+
+    /// Each row says what it is: the tree's role, kept through a merge, or `pixels` for text
+    /// only pixels saw - so a page's button is told from a bookmark of the same name.
+    @Test func aRowNamesItsRole() {
+        let frame = ScreenRect(x: 0, y: 0, width: 40, height: 20)
+        let button = Source.tree(role: Role(rawValue: "AXButton"))
+        let rows = Report.rows(.matched(Matches([
+            Found(text: Text("Settings")!, frame: frame, source: .tree(role: Role(rawValue: "AXLink"))),
+            Found(text: Text("Settings")!, frame: frame, source: .merged(button, .pixels(confidence: Confidence(1)!))),
+            Found(text: Text("Canvas")!, frame: frame, source: .pixels(confidence: Confidence(1)!)),
+        ])!))
+        #expect(rows == ["20,10\tSettings\tAXLink", "20,10\tSettings\tAXButton", "20,10\tCanvas\tpixels"])
+    }
+
+    /// The scope says a match was ordered beside other text, and that a page was read.
+    @Test func theScopeNamesTheNearTextAndThePage() {
+        let page = ScreenRect(x: 22, y: 190, width: 1200, height: 688)
+        let reading = Reading(outcome: .matched(Matches([found("Remove", x: 100)])!), scope: Scope(region: page, examined: 9, reach: .whole))
+        let query = Query(match: .contains("Remove"), region: .page(window: 219, frame: page), near: .contains("Beta"))
+        #expect(Report.scope(reading, query: query, source: .tree)
+            .hasPrefix("1 matched \"Remove\" near \"Beta\" in the page in window 219 22,190 1200x688 by the tree;"))
     }
 
     /// A blank region promises no rows it does not print.
@@ -101,14 +124,53 @@ import Testing
             _ = try await Report.text(Query(match: .contains("OK"), region: .display(12)), source: .pixels,
                                       wait: Wait(until: .present, seconds: 1)) { _, _ in hit }
             _ = try? await Report.text(Query(match: nil, region: .display(12)), source: .merged) { _, _ in throw PixelsError.noGrant }
+            _ = try await Report.text(Query(match: .contains("OK"), region: .page(window: 7, frame: Self.display), near: .contains("Beta")),
+                                      source: .tree) { _, _ in hit }
         }
         let seen = events.all
-        #expect(seen.map(\.event) == ["look", "look", "look"])
-        #expect(seen.map(\.outcome) == ["not_matched", "settled", "error"])
-        #expect(seen.map { $0.facts["source"] } == ["tree", "pixels", "merged"])
+        #expect(seen.map(\.event) == ["look", "look", "look", "look"])
+        #expect(seen.map(\.outcome) == ["not_matched", "settled", "error", "matched"])
+        #expect(seen.map { $0.facts["source"] } == ["tree", "pixels", "merged", "tree"])
+        #expect(seen.map { $0.facts["region"] } == ["display", "display", "display", "page"])
+        #expect(seen.map { $0.facts["order"] } == ["reading", "reading", "reading", "near"])
         #expect(seen[0].counts == ["reads": 1, "examined": 5, "matched": 0, "nearest": 0])
         #expect(seen[1].counts == ["reads": 1, "examined": 9, "matched": 1, "nearest": 0])
         #expect(seen[1].facts["until"] == "present")
         #expect(seen[2].error != nil && seen[2].counts == ["reads": 1])
+    }
+
+    /// Matches whose anchor is missing say which text was not found - the one the rows are
+    /// near misses of - and their look ends unanchored, apart from not matched.
+    @Test func anUnanchoredLookNamesTheAnchorAndSaysSo() async throws {
+        let events = Collected()
+        let beta = Near(found: found("Beta", x: 52), distance: 1)
+        let unanchored = Reading(outcome: .unanchored([beta]), scope: Scope(region: Self.display, examined: 6, reach: .whole))
+        let query = Query(match: .exact("Remove"), region: .display(12), near: .contains("Bta"))
+        let text = try await Telemetry.$export.withValue(events.export) {
+            try await Report.text(query, source: .tree) { _, _ in unanchored }
+        }
+        #expect(text.hasPrefix("\"Bta\" not found to place exactly \"Remove\" near in "))
+        #expect(text.contains("nearest follow"))
+        #expect(events.all.map(\.outcome) == ["unanchored"])
+        #expect(events.all.first?.counts["nearest"] == 1)
+    }
+
+    /// Finding a page is one event of its own, found or not: how much it read, how many
+    /// pages it saw, and how far it got.
+    @MainActor @Test func findingAPageIsOneEvent() async throws {
+        let events = Collected()
+        let viewport = ScreenRect(x: 22, y: 190, width: 1200, height: 688)
+        try await Telemetry.$export.withValue(events.export) {
+            let found = try await Where.Place.page(219).region { _ in Paged(pages: [viewport], examined: 40, stop: nil) }
+            #expect(found == .page(window: 219, frame: viewport))
+            _ = try? await Where.Place.page(219).region { _ in Paged(pages: [viewport, viewport], examined: 52, stop: nil) }
+            _ = try? await Where.Place.page(219).region { _ in Paged(pages: [], examined: 4000, stop: .elementLimit(Limit(4000)!)) }
+        }
+        let seen = events.all
+        #expect(seen.map(\.event) == ["page", "page", "page"])
+        #expect(seen.map(\.outcome) == ["ok", "error", "error"])
+        #expect(seen.map(\.counts) == [["examined": 40, "pages": 1], ["examined": 52, "pages": 2], ["examined": 4000, "pages": 0]])
+        #expect(seen.map { $0.facts["reach"] } == ["whole", "whole", "element_limit"])
+        #expect(seen[1].error?.contains("2 web pages") == true)
     }
 }

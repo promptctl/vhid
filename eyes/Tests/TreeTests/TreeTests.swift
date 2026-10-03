@@ -62,6 +62,17 @@ extension Facts {
         #expect(Node(facts: list, children: .answered(["row"])).candidate(in: region, under: .none) == .excluded(.area))
     }
 
+    /// Chrome's place for a page element scrolled out of view: a one-point strip on the
+    /// viewport's edge, whose centre is inside the page while the element is not.
+    @Test func aStripOnePointThickIsUnplaced() {
+        let strip = facts([.answered("Far below")], frame: .answered(ScreenRect(x: 52, y: 777, width: 96, height: 1)))
+        #expect(strip.candidate(in: region, under: .none) == .excluded(.unplaced))
+        let upright = facts([.answered("Far right")], frame: .answered(ScreenRect(x: 999, y: 100, width: 1, height: 27)))
+        #expect(upright.candidate(in: region, under: .none) == .excluded(.unplaced))
+        let small = facts([.answered("x")], frame: .answered(ScreenRect(x: 100, y: 100, width: 2, height: 2)))
+        #expect(small.candidate(in: region, under: .none) != .excluded(.unplaced))
+    }
+
     /// A web page's labelled icon button is a group holding its image, pressed at its centre.
     @Test func aLabelledGroupHoldingAnIconIsFound() {
         let group = facts([.answered("Settings")], role: "AXGroup")
@@ -594,5 +605,95 @@ extension Covers {
         }
         #expect(await asked.grants == [.accessibility])
         #expect(Grant.accessibility.reader == reader.source)
+    }
+}
+
+@Suite struct PageTests {
+    static let window = ScreenRect(x: 0, y: 100, width: 1240, height: 800)
+    static let viewport = ScreenRect(x: 22, y: 190, width: 1200, height: 688)
+    static let roomy = Bounds(elements: Limit(100)!, time: .seconds(60))
+
+    private static func area(_ role: String, _ frame: ScreenRect?, _ children: [String]) -> Node<String> {
+        Node(facts: facts([], frame: .answered(frame), role: role), children: .answered(children))
+    }
+
+    /// Chrome's shape: a toolbar, then a scroll area holding the page, which holds an iframe.
+    private static var browser: [String: Node<String>] { [
+        "window": area("AXWindow", window, ["toolbar", "scroll"]),
+        "toolbar": Node(facts: facts([.answered("Settings")], role: "AXToolbar"), children: .answered([])),
+        "scroll": area("AXScrollArea", viewport, ["page"]),
+        "page": area("AXWebArea", viewport, ["frame"]),
+        "frame": area("AXWebArea", ScreenRect(x: 53, y: 616, width: 420, height: 90), []),
+    ] }
+
+    private func search(_ tree: [String: Node<String>], within bounds: Bounds = roomy, elapsed: Duration = .zero) -> Paged {
+        pages(under: "window", in: Self.window, within: bounds, elapsed: { elapsed }, read: { tree[$0]! })
+    }
+
+    /// The page is the outermost web area: an iframe inside it is that page, not another.
+    @Test func thePageIsTheOutermostWebArea() throws {
+        let paged = search(Self.browser)
+        #expect(paged == Paged(pages: [Self.viewport], examined: 4, stop: nil))
+        #expect(try paged.page(in: 219) == Self.viewport)
+    }
+
+    /// A web area as tall as its document - WebKit's - is the part its viewport shows,
+    /// never the browser above it or whatever lies below the window.
+    @Test func aPageIsCutToTheViewportThatClipsIt() {
+        var tree = Self.browser
+        tree["page"] = Self.area("AXWebArea", ScreenRect(x: 22, y: -400, width: 1200, height: 5000), [])
+        #expect(search(tree).pages == [Self.viewport])
+    }
+
+    /// A background tab's web area shows nothing, so it is no page.
+    @Test func aWebAreaShowingNothingIsNoPage() {
+        var tree = Self.browser
+        tree["window"] = Self.area("AXWindow", Self.window, ["toolbar", "scroll", "hidden"])
+        tree["hidden"] = Self.area("AXWebArea", ScreenRect(x: 22, y: 190, width: 0, height: 0), [])
+        #expect(search(tree).pages == [Self.viewport])
+    }
+
+    /// A docked DevTools is a second page beside the first: which one was meant is the
+    /// caller's to say, not the walk order's.
+    @Test func twoPagesSideBySideAreRefused() {
+        var tree = Self.browser
+        tree["window"] = Self.area("AXWindow", Self.window, ["toolbar", "scroll", "devtools"])
+        tree["devtools"] = Self.area("AXWebArea", ScreenRect(x: 900, y: 190, width: 322, height: 688), [])
+        #expect(throws: PageError.self) { try search(tree).page(in: 219) }
+        #expect(search(tree).pages.count == 2)
+    }
+
+    /// No web area at all is no page.
+    @Test func aWindowWithNoWebAreaHasNoPage() {
+        var tree = Self.browser
+        tree["window"] = Self.area("AXWindow", Self.window, ["toolbar"])
+        #expect(search(tree) == Paged(pages: [], examined: 2, stop: nil))
+        #expect { try search(tree).page(in: 219) } throws: { "\($0)".contains("shows no web page") }
+    }
+
+    /// A search cut short by either bound, or by an element whose children did not answer,
+    /// is not "no page" - an element it did not read could hold one, or a second.
+    @Test func aSearchCutShortKnowsNoPage() {
+        #expect(search(Self.browser, within: Bounds(elements: Limit(2)!, time: .seconds(60))).stop == .elementLimit(Limit(2)!))
+        #expect(search(Self.browser, elapsed: .seconds(61)) == Paged(pages: [], examined: 0, stop: .timeBudget(.seconds(60))))
+        var tree = Self.browser
+        tree["scroll"] = Node(facts: facts([], frame: .answered(Self.viewport), role: "AXScrollArea"), children: .unanswered)
+        #expect(search(tree).stop == .unread)
+        // An element that will not name itself may be the page: walked into, its iframe
+        // would be taken for it.
+        var unnamed = Self.browser
+        unnamed["page"] = Node(facts: Facts(role: Role(rawValue: "AXUnknown"), texts: [], frame: .answered(Self.viewport), named: false),
+                               children: .answered(["frame"]))
+        #expect(search(unnamed) == Paged(pages: [], examined: 4, stop: .unread))
+        // A page, or the scroll area clipping it, that will not say where it is.
+        for unplaced in ["page", "scroll"] {
+            var tree = Self.browser
+            tree[unplaced] = Node(facts: facts([], frame: .unanswered, role: Self.browser[unplaced]!.facts.role.rawValue),
+                                  children: Self.browser[unplaced]!.children)
+            #expect(search(tree).stop == .unread)
+        }
+        for cut in [search(tree), search(Self.browser, within: Bounds(elements: Limit(2)!, time: .seconds(60)))] {
+            #expect { try cut.page(in: 219) } throws: { "\($0)".contains("not read whole") }
+        }
     }
 }

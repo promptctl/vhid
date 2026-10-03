@@ -63,6 +63,22 @@ public struct TreeReader: Reader {
         )
     }
 
+    /// What window `id`'s tree says of the web pages in it, for `Paged.page` to make one
+    /// region of. Throws when the window is not on screen. [LAW:no-silent-failure]
+    public func pages(in id: UInt32) async throws -> Paged {
+        guard try await granted(Self.grant) else { throw TreeError.noGrant }
+        let windows = try Geometry.onScreen().windows
+        guard let window = windows.first(where: { $0.id == id }) else { throw NoSuchPlace.window(id) }
+        let clock = ContinuousClock()
+        let start = clock.now
+        // A window its app will not list has nothing read: a search stopped short, not a
+        // window with no page.
+        // Matched among its app's windows, front to back, as a look matches them: two
+        // windows sharing one frame are each claimed by their own.
+        guard let element = try Self.match(windows.filter { $0.pid == window.pid })[id] else { return Paged(pages: [], examined: 0, stop: .unread) }
+        return try Tree.pages(under: element, in: window.frame, within: Self.bounds, elapsed: { clock.now - start }, read: Self.node)
+    }
+
     /// The accessibility window for each on-screen window, by the window server's id.
     ///
     /// The two share no public id, so a window is matched by its owner and its frame, which

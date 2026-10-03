@@ -23,6 +23,13 @@ looking is how you do it.
    the text you want says where it is - `{"text": "Save"}`, narrowed with `window` or
    `display` when the text could be in more than one place. `read` gives every run of
    text in a window in reading order, for when you do not yet know what to look for.
+   Each row is the point, the text, and what it is: the element's role, such as
+   `AXButton` or `AXLink`, or `pixels` for text drawn with no element behind it.
+   In a browser, pass `page` with the window's id instead of `window`: it reads the
+   web page alone, so a bookmark or toolbar button with the same name is not a match.
+   When the same label appears several times, such as a Remove button on every row,
+   `near` orders the matches by the text beside each, so `{"text": "Remove", "near":
+   "Beta"}` puts the Remove in Beta's row first.
 2. **Act** on what you saw: `click` the point `find` printed; `type` or `press` once
    the field or window that should receive the keys is in front.
 3. **Look again** at the same place. `find` the result you expected - the dialog's
@@ -73,7 +80,7 @@ its step.
 ```
 eyes windows                         -> 4521  TextEdit  L0  ...  front: a save sheet on it
 eyes find {"text": "Save", "exact": true, "window": 4521}
-                                     -> 812,604	Save
+                                     -> 812,604	Save	AXButton
 vhid click {"x": 812, "y": 604}      -> clicked left once at (812, 604) after 1 motion report
 eyes find {"text": "Save", "exact": true, "window": 4521,
            "until": "absent", "timeout": 5}

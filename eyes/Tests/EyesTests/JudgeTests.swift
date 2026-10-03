@@ -24,6 +24,67 @@ import Testing
         )
     }
 
+    /// Three "Remove" buttons, one per row, each beside its row's name - the probe page's.
+    /// `pitch` is the step from row to row: 33 leaves the probe page's 6-point gap, 27 packs
+    /// them edge to edge.
+    private func rows(near: String, limit: Limit = .default, pitch: Double = 33, match: String = "Remove") -> Reading {
+        let at = { (text: String, x: Double, row: Double, w: Double) in
+            Found(text: Text(text)!, frame: ScreenRect(x: x, y: 504 + row * pitch, width: w, height: 27),
+                  source: .tree(role: Role(rawValue: "AXStaticText")))
+        }
+        let seen = [at("Alpha", 52, 0, 60), at("Remove", 192, 0, 84), at("Beta", 52, 1, 50),
+                    at("Remove", 192, 1, 84), at("Gamma", 52, 2, 70), at("Remove", 192, 2, 84)]
+        return Reading.judging(seen, query: Query(match: .exact(match), region: .rect(Self.region), limit: limit, near: .contains(near)),
+                               region: Self.region, examined: seen.count, excluded: [], reach: .whole)
+    }
+
+    /// The Remove in Beta's row comes first, then the rows either side in reading order.
+    @Test func nearOrdersTheMatchesByTheRowTheyShare() {
+        guard case .matched(let m) = rows(near: "beta").outcome else { Issue.record("no match"); return }
+        #expect(m.all.map(\.frame.y) == [537, 504, 570])
+        guard case .matched(let last) = rows(near: "Gamma", limit: Limit(1)!).outcome else { Issue.record("no match"); return }
+        #expect(last.all.map(\.frame.y) == [570])
+    }
+
+    /// Rows packed edge to edge touch the row above as well as their own; the row's own
+    /// shares the whole line, so it still comes first.
+    @Test func rowsPackedEdgeToEdgeStillPutTheAnchorsRowFirst() {
+        guard case .matched(let m) = rows(near: "Beta", limit: Limit(1)!, pitch: 27).outcome else { Issue.record("no match"); return }
+        #expect(m.all.map(\.frame.y) == [531])
+    }
+
+    /// A label touching the link before it and the link after it names the one after:
+    /// Safari reads "Release notes More · Pricing More" with " · Pricing " one run.
+    @Test func ofTwoMatchesTouchingTheTextTheOneAfterItIsNearer() {
+        let at = { (text: String, x: Double, w: Double) in
+            Found(text: Text(text)!, frame: ScreenRect(x: x, y: 368, width: w, height: 18), source: .tree(role: Role(rawValue: "AXLink")))
+        }
+        let seen = [at("Release notes", 200, 110), at("More", 310, 36), at(" · Pricing ", 346, 79), at("More", 425, 36)]
+        let read = Reading.judging(seen, query: Query(match: .exact("More"), region: .rect(Self.region), near: .contains("Pricing")),
+                                   region: Self.region, examined: seen.count, excluded: [], reach: .whole)
+        guard case .matched(let m) = read.outcome else { Issue.record("\(read)"); return }
+        #expect(m.all.map(\.frame.x) == [425, 310])
+    }
+
+    /// Text to be near that is not on screen leaves every Remove unplaced: neither found -
+    /// which one was meant is unknown - nor gone, since they are all there. The rows are
+    /// the anchor's own near misses, since it is what was missing.
+    @Test func matchesWithTheirAnchorMissingAreNeitherFoundNorGone() {
+        let read = rows(near: "Bta")
+        guard case .unanchored(let near) = read.outcome else { Issue.record("\(read)"); return }
+        #expect(near.first?.found.text.value == "Beta")
+        #expect(!read.provesAbsence)
+    }
+
+    /// Nothing matching is an absence whatever the anchor.
+    @Test func noMatchIsAnAbsenceWithOrWithoutItsAnchor() {
+        for near in ["Beta", "Bta"] {
+            let read = rows(near: near, match: "Delete")
+            guard case .nearest = read.outcome else { Issue.record("\(read)"); continue }
+            #expect(read.provesAbsence)
+        }
+    }
+
     @Test func containsFindsTheQueryInsideALongerRunIgnoringCase() {
         let read = judge(["File", "Save As…", "Close"], .contains("save"))
         guard case .matched(let matches) = read.outcome else { Issue.record("\(read)"); return }

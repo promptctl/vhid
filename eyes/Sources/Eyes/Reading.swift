@@ -41,12 +41,21 @@ public struct Query: Sendable, Hashable {
     /// The most findings to return. A reading that hit this says so in its scope, so the
     /// cap can never be mistaken for the whole answer. [LAW:no-silent-failure]
     public let limit: Limit
+    /// Text the matches sit beside, which orders them nearest it first - so of three
+    /// "Remove" buttons, the one in Beta's row comes first. Absent keeps reading order.
+    /// A match is only ever placed by what is on screen beside it, so a query naming
+    /// text that is not there matches nothing. [LAW:dataflow-not-control-flow]
+    public let near: Match?
 
-    public init(match: Match?, region: Region, limit: Limit = .default) {
+    public init(match: Match?, region: Region, limit: Limit = .default, near: Match? = nil) {
         self.match = match
         self.region = region
         self.limit = limit
+        self.near = near
     }
+
+    /// The same question asked of another region. [LAW:one-source-of-truth]
+    public func on(_ region: Region) -> Query { Query(match: match, region: region, limit: limit, near: near) }
 }
 
 /// How text is compared.
@@ -98,6 +107,24 @@ public enum Region: Sendable, Hashable {
     case display(CGDirectDisplayID)
     /// One window's bounds, by the id the geometry reading gave it.
     case window(UInt32)
+    /// The web page a browser window shows, without the browser's toolbar and bookmarks:
+    /// the frame its accessibility tree gave the page when the query was made. The tree
+    /// is the only reader that knows where a page is, and this package links none, so the
+    /// frame is found by the caller and carried here with the window it is in.
+    case page(window: UInt32, frame: ScreenRect)
+
+    /// Where a wait looks after its first read resolved this region to `resolved`.
+    /// A window or a page is held to that rectangle, so one that closes is its region with
+    /// the text gone rather than a place that can no longer be found - measured on
+    /// studious, waiting on a dialog by its window id threw "no on-screen window" the
+    /// moment it closed. A display keeps its id, which follows the monitor through sleep
+    /// and rearrangement where its old rectangle would not, and a rectangle is already one.
+    func pinned(to resolved: ScreenRect) -> Region {
+        switch self {
+        case .window, .page: .rect(resolved)
+        case .display, .rect: self
+        }
+    }
 }
 
 /// What a reader found, and what it can honestly say about having looked.
@@ -147,6 +174,10 @@ public enum Outcome: Sendable, Hashable {
     /// Nothing matched. What was closest, nearest first, which is empty when nothing on
     /// screen was close enough to be worth reporting.
     case nearest([Near])
+    /// Text matched, but the text it was to be found `near` is on no part of the screen
+    /// read, so which match was meant is unknown: neither a finding nor an absence. The
+    /// anchor's own near misses, nearest first.
+    case unanchored([Near])
 }
 
 /// Something on screen that did not match, and how far off it was.

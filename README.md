@@ -15,7 +15,7 @@ password prompts, and it needs no Accessibility permission to do it. A companion
 ```console
 $ eyes find Save
 1 matched "Save" in display 1 0,0 1600x900 by tree and pixels, merged; …
-812,604	Save
+812,604	Save	AXButton
 
 $ vhid click 812 604
 clicked left once at (812, 604) after 4 motion reports

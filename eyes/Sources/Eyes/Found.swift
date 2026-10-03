@@ -89,6 +89,16 @@ public enum Source: Sendable, Hashable {
     /// Found by both readers of a merged read at the same place, first reader first -
     /// each still carrying what only it can know.
     indirect case merged(Source, Source)
+
+    /// The element's role, when a reader that knows roles saw it: what tells a page's
+    /// button from a browser bookmark of the same name, or a field from its label.
+    public var role: Role? {
+        switch self {
+        case .tree(let role): role
+        case .pixels: nil
+        case .merged(let a, let b): a.role ?? b.role
+        }
+    }
 }
 
 /// An accessibility role string such as `AXButton`. Apps define their own, so this is an
