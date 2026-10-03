@@ -96,6 +96,15 @@ import Testing
         })
     }
 
+    /// Matches with their anchor missing are neither found nor gone, so a wait for either
+    /// runs out rather than settling on the wrong row or on a false absence.
+    @Test func anUnanchoredReadingSettlesNeitherWay() async throws {
+        let unanchored = Reading(outcome: .unanchored([]), scope: Scope(region: Self.region, examined: 6, reach: .whole))
+        for until in [Until.present, .absent] {
+            #expect(try await !wait(until, 0.1, Script([unanchored])).settled)
+        }
+    }
+
     /// A display keeps its id on every read: its old rectangle may be another monitor.
     @Test func aDisplayIsReadByItsIdEveryTime() async throws {
         let query = Query(match: .contains("Save"), region: .display(3))

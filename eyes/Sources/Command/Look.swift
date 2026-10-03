@@ -26,7 +26,8 @@ enum Help {
     static let page = "Read the web page this window shows, by the id `eyes windows` prints: the page alone,"
         + " not the browser's toolbar and bookmarks around it. Needs Accessibility, which finds the page."
     static let near = "Order the matches by how close each sits to a run containing this text, nearest first:"
-        + " the Remove in Beta's row before the others. With nothing on screen containing it, nothing matches."
+        + " the Remove in Beta's row before the others. With nothing on screen containing it, no match is answered:"
+        + " which one was meant is unknown, and a wait settles neither present nor absent."
     static let until = "Read again until the text is present or absent, then answer once with the last reading."
         + " Absent counts only a region read whole, twice running."
     static let timeout = "With until, the most seconds to wait: at most \(Int(Wait.longest)). A wait that runs out answers"
@@ -113,9 +114,11 @@ struct Where: ParsableArguments {
         case region(Region)
         case page(UInt32)
 
-        @MainActor func region(
-            pages: (UInt32) async throws -> Paged = { try await TreeReader(granted: SourceKind.granted).pages(in: $0) }
-        ) async throws -> Region {
+        /// What a window's tree says of its pages: the tree in the process, a fake in a test.
+        typealias Pages = @Sendable @MainActor (UInt32) async throws -> Paged
+        static let tree: Pages = { try await TreeReader(granted: SourceKind.granted).pages(in: $0) }
+
+        @MainActor func region(pages: Pages = tree) async throws -> Region {
             switch self {
             case .region(let region): region
             case .page(let id): try await Self.page(id, pages: pages)
@@ -125,7 +128,7 @@ struct Where: ParsableArguments {
         /// [LAW:nothing-unseen] Finding a page is a walk of its own, before any look starts,
         /// so it is a unit of its own: how much it read, how many pages it saw, and why it
         /// stopped short when it did.
-        @MainActor private static func page(_ id: UInt32, pages: (UInt32) async throws -> Paged) async throws -> Region {
+        @MainActor private static func page(_ id: UInt32, pages: Pages) async throws -> Region {
             try await Telemetry.unit("page") {
                 let paged = try await pages(id)
                 Telemetry.count("examined", paged.examined)
@@ -170,13 +173,17 @@ enum Report {
             asked.map { "\(m.count) matched \($0)" } ?? "\(m.count) run\(m.count == 1 ? "" : "s")"
         case .nearest:
             asked.map { "\($0) not found" } ?? "no text"
+        case .unanchored:
+            // The near misses that follow are the anchor's, so the anchor is what is named
+            // not found. [LAW:no-silent-failure]
+            "\(query.near.map(wanted) ?? "") not found to place \(query.match.map(wanted) ?? "the text") near"
         }
         let clauses: [String?] = [
             "\(head) in \(place(query.region)) \(s.region) \(looked(source, s.reach))",
             "\(s.examined) run\(s.examined == 1 ? "" : "s") read",
             s.excluded.isEmpty ? nil : s.excluded.map { "\($0.count) \($0.reason.rawValue)" }.joined(separator: ", "),
             reach(s.reach, grantNote),
-            reading.outcome == .nearest([]) || reading.outcome.isMatched ? nil : "nearest follow",
+            reading.outcome.misses.isEmpty ? nil : "nearest follow",
         ]
         return clauses.compactMap { $0 }.joined(separator: "; ") + ". Points are centres, vhid click coordinates."
     }
@@ -187,7 +194,7 @@ enum Report {
     static func rows(_ outcome: Outcome) -> [String] {
         switch outcome {
         case .matched(let m): m.all.map(row)
-        case .nearest(let near): near.map { "\(row($0.found))\t\($0.distance) off" }
+        case .nearest(let near), .unanchored(let near): near.map { "\(row($0.found))\t\($0.distance) off" }
         }
     }
 
@@ -267,7 +274,22 @@ private extension Region {
 }
 
 private extension Outcome {
-    var isMatched: Bool { if case .matched = self { true } else { false } }
+    /// The near misses that follow the scope line: none when something matched.
+    var misses: [Near] {
+        switch self {
+        case .matched: []
+        case .nearest(let n), .unanchored(let n): n
+        }
+    }
+
+    /// How a single look ended, for its event.
+    var said: String {
+        switch self {
+        case .matched: "matched"
+        case .nearest: "not_matched"
+        case .unanchored: "unanchored"
+        }
+    }
 }
 
 /// Reads with the chosen reader and prints. The one place the verbs meet the screen.
@@ -297,7 +319,7 @@ extension Report {
                 let reading = try await counted(query)
                 Self.count(reading)
                 return (text: lines(reading, query: query, source: source, grantNote: grantNote).joined(separator: "\n"),
-                        outcome: reading.outcome.isMatched ? "matched" : "not_matched")
+                        outcome: reading.outcome.said)
             }
             Telemetry.note("until", wait.until.rawValue)
             let waited = try await waiting(for: wait, on: query, read: counted)
@@ -313,7 +335,7 @@ extension Report {
         Telemetry.count("examined", reading.scope.examined)
         switch reading.outcome {
         case .matched(let m): Telemetry.count("matched", m.count); Telemetry.count("nearest", 0)
-        case .nearest(let n): Telemetry.count("matched", 0); Telemetry.count("nearest", n.count)
+        case .nearest(let n), .unanchored(let n): Telemetry.count("matched", 0); Telemetry.count("nearest", n.count)
         }
     }
 

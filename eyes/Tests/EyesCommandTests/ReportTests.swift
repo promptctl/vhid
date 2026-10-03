@@ -139,6 +139,22 @@ import Testing
         #expect(seen[2].error != nil && seen[2].counts == ["reads": 1])
     }
 
+    /// Matches whose anchor is missing say which text was not found - the one the rows are
+    /// near misses of - and their look ends unanchored, apart from not matched.
+    @Test func anUnanchoredLookNamesTheAnchorAndSaysSo() async throws {
+        let events = Collected()
+        let beta = Near(found: found("Beta", x: 52), distance: 1)
+        let unanchored = Reading(outcome: .unanchored([beta]), scope: Scope(region: Self.display, examined: 6, reach: .whole))
+        let query = Query(match: .exact("Remove"), region: .display(12), near: .contains("Bta"))
+        let text = try await Telemetry.$export.withValue(events.export) {
+            try await Report.text(query, source: .tree) { _, _ in unanchored }
+        }
+        #expect(text.hasPrefix("\"Bta\" not found to place exactly \"Remove\" near in "))
+        #expect(text.contains("nearest follow"))
+        #expect(events.all.map(\.outcome) == ["unanchored"])
+        #expect(events.all.first?.counts["nearest"] == 1)
+    }
+
     /// Finding a page is one event of its own, found or not: how much it read, how many
     /// pages it saw, and how far it got.
     @MainActor @Test func findingAPageIsOneEvent() async throws {

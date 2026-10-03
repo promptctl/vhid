@@ -54,25 +54,27 @@ public extension Reading {
         let scored = candidates.map { (found: $0, distance: query.match.distance(to: $0.text.value)) }
         let matching = scored.filter { query.match.tolerates($0.distance) }.flatMap { query.match.narrowing($0.found) }
         // Absent `near` is one anchor everywhere at once: every match beside it, reading
-        // order kept by the stable sort. Named text that is not on screen anchors nothing,
-        // so nothing matches and the nearest rows are its own near misses - the text that
-        // was missing is the one worth showing. [LAW:dataflow-not-control-flow]
+        // order kept by the stable sort. [LAW:dataflow-not-control-flow]
         let anchors = query.near.map { near in candidates.filter { near.tolerates(near.distance(to: $0.text.value)) }.flatMap(near.narrowing) }
-        let ordered = anchors.map { anchors in
-            anchors.isEmpty ? [] : matching.map { m in (m, anchors.map { m.frame.gap(to: $0.frame) }.min()!) }
+        func misses(_ wanted: Match?) -> [Near] {
+            candidates.map { (found: $0, distance: wanted.distance(to: $0.text.value)) }
+                .sorted { $0.distance < $1.distance }
+                .prefix(nearestShown)
+                .map { Near(found: $0.found, distance: $0.distance) }
+        }
+        // Nothing matching is an absence whatever the anchor. Matches with named text
+        // nowhere to stand beside are neither found nor gone: which one was meant is
+        // unknown, so none is answered, and the rows are that text's own near misses.
+        let unanchored = !matching.isEmpty && anchors?.isEmpty == true
+        let ordered = unanchored ? [] : anchors.map { anchors in
+            matching.map { m in (m, anchors.map { m.frame.gap(to: $0.frame) }.min()!) }
                 .enumerated().sorted { ($0.element.1, $0.offset) < ($1.element.1, $1.offset) }.map(\.element.0)
         } ?? matching
         let kept = Array(ordered.prefix(query.limit.count))
         let cut = ordered.count - kept.count
-        let missing = anchors?.isEmpty == true ? query.near : query.match
 
-        let outcome: Outcome = Matches(kept).map(Outcome.matched)
-            ?? .nearest(
-                candidates.map { (found: $0, distance: missing.distance(to: $0.text.value)) }
-                    .sorted { $0.distance < $1.distance }
-                    .prefix(nearestShown)
-                    .map { Near(found: $0.found, distance: $0.distance) }
-            )
+        let outcome: Outcome = unanchored ? .unanchored(misses(query.near))
+            : Matches(kept).map(Outcome.matched) ?? .nearest(misses(query.match))
         let scope = Scope(
             region: region,
             examined: examined,

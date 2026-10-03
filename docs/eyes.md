@@ -37,8 +37,9 @@ and a docked DevTools, is refused; read one of the two with `--rect`.
 
 `--near <text>` orders the matches by how close each sits to a run containing that text,
 on the same line first: of three "Remove" buttons, the one in Beta's row comes first, and
-`--limit 1` leaves only it. When nothing on screen contains the `--near` text, nothing
-matches, and the nearest rows are that text's near misses.
+`--limit 1` leaves only it. When nothing on screen contains the `--near` text, no match
+is answered, since which one was meant is unknown: the scope line names that text as not
+found, the rows are its near misses, and a wait settles neither present nor absent on it.
 
 `find --until present|absent` re-reads the same rectangle until the text appears or is
 gone, then answers once, its scope line led by how many reads it took and how long. A

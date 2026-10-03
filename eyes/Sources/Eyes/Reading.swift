@@ -174,6 +174,10 @@ public enum Outcome: Sendable, Hashable {
     /// Nothing matched. What was closest, nearest first, which is empty when nothing on
     /// screen was close enough to be worth reporting.
     case nearest([Near])
+    /// Text matched, but the text it was to be found `near` is on no part of the screen
+    /// read, so which match was meant is unknown: neither a finding nor an absence. The
+    /// anchor's own near misses, nearest first.
+    case unanchored([Near])
 }
 
 /// Something on screen that did not match, and how far off it was.

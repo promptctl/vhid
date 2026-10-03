@@ -679,6 +679,12 @@ extension Covers {
         var tree = Self.browser
         tree["scroll"] = Node(facts: facts([], frame: .answered(Self.viewport), role: "AXScrollArea"), children: .unanswered)
         #expect(search(tree).stop == .unread)
+        // An element that will not name itself may be the page: walked into, its iframe
+        // would be taken for it.
+        var unnamed = Self.browser
+        unnamed["page"] = Node(facts: Facts(role: Role(rawValue: "AXUnknown"), texts: [], frame: .answered(Self.viewport), named: false),
+                               children: .answered(["frame"]))
+        #expect(search(unnamed) == Paged(pages: [], examined: 4, stop: .unread))
         // A page, or the scroll area clipping it, that will not say where it is.
         for unplaced in ["page", "scroll"] {
             var tree = Self.browser

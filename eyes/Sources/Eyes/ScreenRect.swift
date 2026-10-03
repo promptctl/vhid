@@ -74,8 +74,11 @@ public struct ScreenRect: Sendable, Hashable {
     /// further down; and of two links touching one label, the one after it is nearer, as
     /// a label comes before what it names in left-to-right reading - measured in Safari,
     /// whose " · Pricing " run touches the "More" before it and the one after.
+    ///
+    /// Across is negative where the two share lines, by how much they share: rows packed
+    /// edge to edge touch the row above as well as their own, and the row's own shares more.
     func gap(to other: ScreenRect) -> Gap {
-        Gap(across: max(0, max(y, other.y) - min(y + height, other.y + other.height)),
+        Gap(across: max(y, other.y) - min(y + height, other.y + other.height),
             along: max(0, max(x, other.x) - min(x + width, other.x + other.width)),
             leads: x < other.x)
     }

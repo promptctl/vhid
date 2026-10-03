@@ -28,7 +28,8 @@ public extension Region {
         case .page(let id, let frame):
             // The page goes with its window: a window closed since leaves no page to read.
             guard try Geometry.onScreen().windows.contains(where: { $0.id == id }) else { throw NoSuchPlace.window(id) }
-            return frame
+            // On a display, as any rectangle must be: a wait reads it as one from then on.
+            return try Region.rect(frame).bounds()
         }
     }
 }

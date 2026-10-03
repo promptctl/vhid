@@ -2,7 +2,7 @@ import Eyes
 import Grants
 import MCP
 import Pixels
-import Tree
+@testable import Tree
 import Version
 import Telemetry
 import TelemetryTesting
@@ -49,11 +49,21 @@ import Testing
         return Reading(outcome: .matched(Matches([save])!), scope: Scope(region: ScreenRect(x: -1512, y: 316, width: 1512, height: 982), examined: 1, reach: .whole))
     }
 
+    static let viewport = ScreenRect(x: 22, y: 190, width: 1200, height: 688)
+    /// Window 219 shows one page, 220 two side by side, and 221's tree has no grant.
+    private static let pages: Where.Place.Pages = { id in
+        switch id {
+        case 219: return Paged(pages: [viewport], examined: 40, stop: nil)
+        case 220: return Paged(pages: [viewport, viewport], examined: 52, stop: nil)
+        default: throw TreeError.noGrant
+        }
+    }
+
     /// A client connected to a server over `listing`, both torn down before this returns.
     private func connected<T>(_ body: (Client) async throws -> T) async throws -> T {
         let (clientSide, serverSide) = await InMemoryTransport.createConnectedPair()
         let transport = AnsweringTransport(serverSide)
-        let server = await Mcp.server(EyesTools.all(windows: { Self.listing }, frontmost: { Self.front }, displays: { DisplaysCommandTests.desk }, reading: Self.look, grants: { (Self.grantReading, Self.holder) }), on: transport)
+        let server = await Mcp.server(EyesTools.all(windows: { Self.listing }, frontmost: { Self.front }, displays: { DisplaysCommandTests.desk }, reading: Self.look, grants: { (Self.grantReading, Self.holder) }, pages: Self.pages), on: transport)
         try await server.start(transport: transport)
         let client = Client(name: "test", version: "0")
         let result: Result<T, any Error>
@@ -319,5 +329,17 @@ import Testing
         _ = try await first.value
         await #expect(throws: CancellationError.self) { try await second.value }
         #expect(await count.n == 1)
+    }
+
+    /// A page is found through the server's own search: its frame is the region read, and
+    /// a window with two pages, or a tree with no grant, is refused as the verb refuses it.
+    @Test func findReadsThePageTheSearchFound() async throws {
+        let (_, isError) = try await call(["text": "Save", "page": 219], tool: "find")
+        #expect(isError != true)
+        #expect(await Self.asked.queries.last?.region == .page(window: 219, frame: Self.viewport))
+        let (two, refused) = try await call(["text": "Save", "page": 220], tool: "find")
+        #expect(refused == true && two.contains("2 web pages"))
+        let (blind, _) = try await call(["page": 221], tool: "read")
+        #expect(blind == "\(TreeError.noGrant)\(EyesTools.grantNote)")
     }
 }

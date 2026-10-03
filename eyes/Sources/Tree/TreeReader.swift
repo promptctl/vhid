@@ -67,12 +67,15 @@ public struct TreeReader: Reader {
     /// region of. Throws when the window is not on screen. [LAW:no-silent-failure]
     public func pages(in id: UInt32) async throws -> Paged {
         guard try await granted(Self.grant) else { throw TreeError.noGrant }
-        guard let window = try Geometry.onScreen().windows.first(where: { $0.id == id }) else { throw NoSuchPlace.window(id) }
+        let windows = try Geometry.onScreen().windows
+        guard let window = windows.first(where: { $0.id == id }) else { throw NoSuchPlace.window(id) }
         let clock = ContinuousClock()
         let start = clock.now
         // A window its app will not list has nothing read: a search stopped short, not a
         // window with no page.
-        guard let element = try Self.match([window])[id] else { return Paged(pages: [], examined: 0, stop: .unread) }
+        // Matched among its app's windows, front to back, as a look matches them: two
+        // windows sharing one frame are each claimed by their own.
+        guard let element = try Self.match(windows.filter { $0.pid == window.pid })[id] else { return Paged(pages: [], examined: 0, stop: .unread) }
         return try Tree.pages(under: element, in: window.frame, within: Self.bounds, elapsed: { clock.now - start }, read: Self.node)
     }
 

@@ -184,8 +184,8 @@ let areas: Set<Role> = Set([
     kAXApplicationRole, kAXWindowRole, kAXSheetRole, kAXDrawerRole, kAXScrollAreaRole,
     kAXSplitGroupRole, kAXTabGroupRole, kAXToolbarRole, kAXListRole, kAXOutlineRole, kAXTableRole,
     kAXColumnRole, kAXBrowserRole, kAXLayoutAreaRole, kAXGridRole, kAXRadioGroupRole, kAXMenuRole,
-    kAXMenuBarRole, kAXPopoverRole, "AXWebArea",
-].map { Role(rawValue: $0) })
+    kAXMenuBarRole, kAXPopoverRole,
+].map { Role(rawValue: $0) } + [webArea])
 
 extension Node {
     /// The element as a finding: its first text that is not blank, at its own frame, if it
@@ -289,16 +289,14 @@ func pages<Element>(
         guard elapsed() < bounds.time else { return Paged(pages: pages, examined: examined, stop: .timeBudget(bounds.time)) }
         let node = try read(element)
         examined += 1
-        // A page or a clipping area that will not say where it is leaves unknown which page
-        // is shown and how much of it: dropping it could leave a DevTools pane the one page,
-        // and passing the window down could hand back the toolbar. [LAW:no-silent-failure]
-        if node.facts.role == webArea || clips.contains(node.facts.role), case .unanswered = node.facts.frame { unread = true; continue }
-        let placed = node.facts.frame.answer.flatMap { $0 }
-        let inner = placed.map { clips.contains(node.facts.role) && !$0.isEmpty ? ScreenRect(bound.cgRect.intersection($0.cgRect)) : bound } ?? bound
+        // An element that will not name itself may be the page, and one that clips but will
+        // not say where it is leaves unknown which page is shown and how much of it:
+        // descending into the first finds its iframes, dropping the second could leave a
+        // DevTools pane the one page or hand back the toolbar. [LAW:no-silent-failure]
+        guard node.facts.named, !(clips.contains(node.facts.role) && node.facts.frame == .unanswered) else { unread = true; continue }
+        let inner = node.facts.bound(within: bound)
         if node.facts.role == webArea {
-            if let placed, case let shown = bound.cgRect.intersection(placed.cgRect), !shown.isNull, !ScreenRect(shown).isThin {
-                pages.append(ScreenRect(shown))
-            }
+            if case .answered(let placed?) = node.facts.frame, !placed.isEmpty, !inner.isThin { pages.append(inner) }
             continue
         }
         guard case .answered(let children) = node.children else { unread = true; continue }
@@ -331,7 +329,7 @@ let webArea = Role(rawValue: "AXWebArea")
 
 /// Roles that draw nothing outside their own frame: a scroll area's rows, and a web page
 /// inside its viewport.
-let clips: Set<Role> = Set([kAXScrollAreaRole, "AXWebArea"].map { Role(rawValue: $0) })
+let clips: Set<Role> = [Role(rawValue: kAXScrollAreaRole), webArea]
 
 /// What the walk does under an element: how its children are read.
 enum Descent: Equatable {
@@ -368,13 +366,21 @@ extension Facts {
     /// 2.7 times the elements pruning at the region read, and at most a fifth of a second
     /// more. The walk's own bounds cap it, and say so in the reach.
     ///
+    /// Where what this element holds can be drawn: `bound`, cut to its own frame when it
+    /// clips - the one rule the reading walk and the page search narrow by.
+    /// [LAW:single-enforcer]
+    func bound(within bound: ScreenRect) -> ScreenRect {
+        guard clips.contains(role), case .answered(let placed?) = frame, !placed.isEmpty else { return bound }
+        return ScreenRect(bound.cgRect.intersection(placed.cgRect))
+    }
+
     /// The one place the descend, probe and prune decision is made. [LAW:single-enforcer]
     func descent(clip: ScreenRect, bound: ScreenRect, under covers: Covers) -> Descent {
         guard case .answered(let placed?) = frame, !placed.isEmpty else { return .descend(clip: clip, bound: bound) }
         let clipping = clips.contains(role)
         if let shown = visible(placed, in: clip, under: covers) {
             guard clipping else { return .descend(clip: clip, bound: bound) }
-            return .descend(clip: shown, bound: ScreenRect(bound.cgRect.intersection(placed.cgRect)))
+            return .descend(clip: shown, bound: self.bound(within: bound))
         }
         guard !clipping, placed.intersects(bound) else { return .prune }
         return named ? .probe : .unsure
