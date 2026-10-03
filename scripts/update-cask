@@ -1,7 +1,8 @@
 #!/bin/bash
 # Points the vhid cask in a checkout of the tap at a release, and commits it there: the
 # cask's version becomes <version> and its sha256 the pkg's. Pushing is the caller's.
-# release.yml runs it on the pkg as published, fetched through the URL the cask builds.
+# .github/workflows/cask.yml runs it, from the tap, on vhid's newest release as
+# published, fetched through the URL the cask builds.
 #
 #   scripts/update-cask <tap checkout> <version> <pkg>
 #
@@ -26,6 +27,15 @@ for key in version sha256; do
   [ "$count" = 1 ] || { echo "update-cask: $cask has $count lines of the form '  $key \"...\"', not one" >&2; exit 1; }
 done
 was=$(sed -n 's/^  version "\(.*\)"$/\1/p' "$cask")
+had=$(sed -n 's/^  sha256 "\(.*\)"$/\1/p' "$cask")
+# The cask already on this release is left as it is, provided the pkg is still the one
+# it names: a sha256 that moved under a published version is a pkg replaced after
+# release, and every Homebrew install of it would fail its checksum.
+if [ "$version" = "$was" ]; then
+  [ "$sha256" = "$had" ] || { echo "update-cask: the cask names $was with sha256 $had, but its pkg's is $sha256" >&2; exit 1; }
+  echo "update-cask: vhid $was already, sha256 $sha256"
+  exit 0
+fi
 # The cask only moves forward: a backport released after a newer version, or a re-run of
 # an older release's job, would otherwise take every Homebrew install back.
 awk -v new="$version" -v old="$was" 'BEGIN {

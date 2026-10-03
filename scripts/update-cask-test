@@ -56,8 +56,17 @@ echo "$out" | grep -qF "vhid 0.1.9 -> 0.1.10, sha256 $SHA" || fail "update-cask 
 grep -qx '  version "0.1.10"' "$TAP/Casks/vhid.rb" || fail "the cask's version is not 0.1.10"
 grep -qx "  sha256 \"$SHA\"" "$TAP/Casks/vhid.rb" || fail "the cask's sha256 is not the pkg's"
 
+# The release the cask names already is left alone, so long as its pkg is unchanged.
+head=$(git -C "$TAP" rev-parse HEAD)
+run "$TAP" 0.1.10 "$PKG"
+[ "$status" -eq 0 ] || fail "update-cask to 0.1.10 again exited $status: $out"
+echo "$out" | grep -qF "vhid 0.1.10 already, sha256 $SHA" || fail "update-cask to 0.1.10 again said: $out"
+[ "$(git -C "$TAP" rev-parse HEAD)" = "$head" ] || fail "update-cask to 0.1.10 again committed"
+REPLACED=$SCRATCH/replaced.pkg
+echo "another pkg" >"$REPLACED"
+refused "the cask names 0.1.10 with sha256 $SHA, but its pkg's is $(shasum -a 256 "$REPLACED" | cut -d ' ' -f 1)" "$TAP" 0.1.10 "$REPLACED"
+
 # The cask only moves forward, and only to a release.
-refused "the cask names 0.1.10, which 0.1.10 does not follow" "$TAP" 0.1.10 "$PKG"
 refused "the cask names 0.1.10, which 0.1.9 does not follow" "$TAP" 0.1.9 "$PKG"
 refused "the cask names 0.1.10, which 0.1 does not follow" "$TAP" 0.1 "$PKG"
 refused "'0.2.0-rc.1' is not a release version" "$TAP" 0.2.0-rc.1 "$PKG"
