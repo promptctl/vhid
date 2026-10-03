@@ -213,22 +213,27 @@ check "driver_registration forwards a failed reading as the sentinel" probe-fail
 STUB_REG= STUB_REG_STATUS=0
 check "driver_registration reads an empty answer as the sentinel" probe-failed "$(driver_registration)"
 
+STUB_REG=withdrawing
+: > "$STUB_REG_READINGS"
+check "driver_registration reports a teardown as the moment it is" withdrawing "$(driver_registration)"
+check "driver_registration takes one reading" 1 "$(wc -l < "$STUB_REG_READINGS" | tr -d ' ')"
+
 # The teardown a deactivation leaves behind for tens of milliseconds is read past, not
 # acted on: removal died on it on studious, 2026-10-03. The waits are stubbed so a
 # teardown that never settles costs nothing to show.
 sleep() { :; }
 STUB_REG="withdrawing withdrawing unregistered" STUB_REG_STATUS=0
 : > "$STUB_REG_READINGS"
-check "driver_registration reads past a teardown to where it settled" unregistered "$(driver_registration 2>/dev/null)"
-check "driver_registration took one reading per answer" 3 "$(wc -l < "$STUB_REG_READINGS" | tr -d ' ')"
+check "settled_registration reads past a teardown to where it settled" unregistered "$(settled_registration 2>/dev/null)"
+check "settled_registration took one reading per answer" 3 "$(wc -l < "$STUB_REG_READINGS" | tr -d ' ')"
 STUB_REG="withdrawing pending-reboot"
 : > "$STUB_REG_READINGS"
-check_contains "driver_registration says how many readings it took" "registration 'pending-reboot' after 2 reading(s)" \
-  "$(driver_registration 2>&1 >/dev/null)"
+check_contains "settled_registration says how many readings it took" "registration 'pending-reboot' after 2 reading(s)" \
+  "$(settled_registration 2>&1 >/dev/null)"
 STUB_REG=withdrawing
 : > "$STUB_REG_READINGS"
-check "driver_registration hands back a teardown that never settles as itself" withdrawing "$(driver_registration 2>/dev/null)"
-check "driver_registration stops reading after fifty" 50 "$(wc -l < "$STUB_REG_READINGS" | tr -d ' ')"
+check "settled_registration hands back a teardown that never settles as itself" withdrawing "$(settled_registration 2>/dev/null)"
+check "settled_registration stops reading after fifty" 50 "$(wc -l < "$STUB_REG_READINGS" | tr -d ' ')"
 unset -f sleep
 STUB_REG=enabled STUB_REG_STATUS=0
 
@@ -336,6 +341,35 @@ STUB_RECEIPT= STUB_RECEIPT_STATUS=1
 check "cmd_remove refuses when it cannot tell whether Karabiner-Elements is installed" 1 "$?"
 check "cmd_remove withdraws and deletes nothing when it cannot tell" "" "$(cat "$REACHED")"
 STUB_RECEIPT= STUB_RECEIPT_STATUS=0
+
+# ---------------------------------------------------------------------------
+# cmd_remove - the files wait for the withdrawal to settle
+# ---------------------------------------------------------------------------
+
+# A Mac without Karabiner-Elements, and a Manager whose deactivation is accepted. The
+# readings are, in order: remove_refusals, the decision to deactivate, then the check
+# after it. sudo still refuses, so reaching it is the proof the deletion was let through.
+printf '#!/bin/bash\necho "manager $*" >> "%s"\n' "$REACHED" > "$MANAGER"
+sleep() { :; }
+STUB_REG="enabled enabled withdrawing unregistered"
+: > "$REACHED"; : > "$STUB_REG_READINGS"
+( cmd_remove ) >/dev/null 2>&1
+check "cmd_remove deactivates once and deletes once the teardown settles" \
+  "manager deactivate"$'\n'"sudo rm -rf $MANAGER_APP $SUPPORT_DIR" "$(head -2 "$REACHED")"
+STUB_REG="enabled enabled withdrawing"
+: > "$REACHED"; : > "$STUB_REG_READINGS"
+check_contains "cmd_remove names a teardown that never settles" "still registered as 'withdrawing'" \
+  "$( ( cmd_remove ) 2>&1 )"
+check "cmd_remove deletes nothing while the teardown has not settled" "manager deactivate" "$(cat "$REACHED")"
+# Found mid-teardown, by another removal: already being withdrawn, so not withdrawn again.
+STUB_REG="withdrawing withdrawing unregistered"
+: > "$REACHED"; : > "$STUB_REG_READINGS"
+( cmd_remove ) >/dev/null 2>&1
+check "cmd_remove withdraws no teardown already under way" "sudo rm -rf $MANAGER_APP $SUPPORT_DIR" "$(head -1 "$REACHED")"
+unset -f sleep
+printf '#!/bin/bash\necho "manager $*" >> "%s"\nexit 97\n' "$REACHED" > "$MANAGER"
+STUB_REG=enabled
+: > "$STUB_REG_READINGS"
 
 # ---------------------------------------------------------------------------
 # remove_outcome - the exit codes a caller scripts against

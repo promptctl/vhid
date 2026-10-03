@@ -149,12 +149,15 @@ public enum DriverProbe {
             return state
         }
         // A Mac upgraded but not yet restarted lists the bundle twice: the incoming
-        // registration, and the outgoing one still waiting on a reboot. The outgoing
-        // entry governs nothing, so what remains after dropping it is the answer.
-        let live = states.filter { $0 != "terminated waiting to uninstall on reboot" }
+        // registration, and the outgoing one, still being torn down or waiting on a
+        // reboot. The outgoing entry governs nothing, so what remains after dropping it
+        // is the answer; with nothing remaining, the outgoing entry still moving is.
+        let registrations = states.map(Registration.init(bracketText:))
+        let outgoing: Set<Registration> = [.withdrawing, .pendingReboot]
+        let live = registrations.filter { !outgoing.contains($0) }
         switch live.count {
-        case 0: return .pendingReboot
-        case 1: return Registration(bracketText: live[0])
+        case 0: return registrations.contains(.withdrawing) ? .withdrawing : .pendingReboot
+        case 1: return live[0]
         default: return .ambiguous
         }
     }
