@@ -2,7 +2,8 @@
 
 What the pkg puts on a Mac, the one step it leaves to you, how to tell whether vhid is ready, and how to take it all out again.
 
-vhid ships as one signed, notarized pkg. It installs:
+vhid ships as one signed, notarized pkg, which `brew install --cask promptctl/tap/vhid`
+installs as well as Installer does. It installs:
 
 | path | what it is |
 |---|---|
@@ -62,7 +63,10 @@ sudo /usr/local/libexec/vhid-uninstall            # vhid, leaving the pqrs drive
 sudo /usr/local/libexec/vhid-uninstall --driver   # vhid and the pqrs driver package
 ```
 
-Either stops the daemon and the menu bar item, removes every file in the table
+`brew uninstall --cask vhid` runs the first of these, and is the one to use when Homebrew
+installed vhid, so that Homebrew stops listing it.
+
+Either script stops the daemon and the menu bar item, removes every file in the table
 above (both uninstall scripts among them) and forgets the pkg's receipt; run again,
 it says there is nothing to remove. Neither touches the development job a build of this
 tree registers.
