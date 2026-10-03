@@ -1,0 +1,27 @@
+#!/bin/bash
+# Points the vhid cask in a checkout of the tap at a release, and commits it there: the
+# cask's version becomes <version> and its sha256 the pkg's. Pushing is the caller's.
+# release.yml runs it on the pkg as published, fetched through the URL the cask builds.
+#
+#   scripts/update-cask <tap checkout> <version> <pkg>
+#
+# Held to bash 3.2, like every script here.
+set -euo pipefail
+[ $# -eq 3 ] || { echo "usage: scripts/update-cask <tap checkout> <version> <pkg>" >&2; exit 2; }
+tap=$1 version=$2 pkg=$3
+cask=$tap/Casks/vhid.rb
+
+sha256=$(shasum -a 256 "$pkg" | cut -d ' ' -f 1)
+# [LAW:no-silent-failure] Each line is rewritten where it is, so a cask whose shape has
+# moved on from `  version "..."` and `  sha256 "..."` is refused rather than left stale.
+for key in version sha256; do
+  count=$(grep -c "^  $key \"[^\"]*\"\$" "$cask") || true
+  [ "$count" = 1 ] || { echo "update-cask: $cask has $count lines of the form '  $key \"...\"', not one" >&2; exit 1; }
+done
+was=$(sed -n 's/^  version "\(.*\)"$/\1/p' "$cask")
+
+sed -e "s/^  version \".*\"\$/  version \"$version\"/" \
+  -e "s/^  sha256 \".*\"\$/  sha256 \"$sha256\"/" "$cask" >"$cask.new"
+mv "$cask.new" "$cask"
+git -C "$tap" commit --quiet -m "vhid $version" -- Casks/vhid.rb
+echo "update-cask: vhid $was -> $version, sha256 $sha256, tap commit $(git -C "$tap" rev-parse --short HEAD)"
