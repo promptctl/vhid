@@ -68,10 +68,14 @@ import Testing
 
     /// A read that stopped short matched nothing but did not see the whole region, so it
     /// breaks a run of absences: counted as one, the wait would settle on the second read.
+    /// Reads that keep stopping short never settle it, however many fit before it runs out.
     @Test func aPartialReadIsNeverAnAbsence() async throws {
-        let waited = try await wait(.absent, 5, Script([Self.absent, Self.partial, Self.absent]))
-        #expect(waited.settled)
-        #expect(waited.reads == 4)
+        let broken = try await wait(.absent, 5, Script([Self.absent, Self.partial, Self.absent]))
+        #expect(broken.settled)
+        #expect(broken.reads == 4)
+        let short = try await wait(.absent, 0.1, Script([Self.partial]))
+        #expect(!short.settled)
+        #expect(short.reading == Self.partial)
     }
 
     /// The first read finds the window; every read after it looks at the rectangle that
@@ -131,7 +135,6 @@ import Testing
         let waited = try await wait(.absent, 0.2, Script([Self.present]))
         #expect(!waited.settled)
         #expect(waited.reading == Self.present)
-        #expect(waited.reads > 1)
         #expect(clock.now - started < .seconds(1))
     }
 

@@ -74,10 +74,47 @@ struct GrantMappingTests {
 }
 
 /// Every gate of a process answers from one reading while it is fresh, and takes a new one after.
-@Suite(.eventsKept) struct SharedReadingTests {
+@Suite(.eventsKept, .timeLimit(.minutes(1))) struct SharedReadingTests {
     actor Takes {
         var count = 0
         func take() -> GrantReading { count += 1; return GrantReading { $0 == .accessibility } }
+    }
+
+    /// [LAW:no-ambient-temporal-coupling] A reading held open until the test lets it go, so a
+    /// gate asked while it is held is asked mid-reading on any runner's speed. Fresh for no
+    /// time at all: only a reading still being taken is shared.
+    struct HeldReading {
+        let takes = Takes()
+        let shared: SharedReading
+        let begun: AsyncStream<Void>
+        let letGo: AsyncStream<Void>.Continuation
+        let ended: AsyncStream<Void>
+
+        init() {
+            let takes = takes
+            let (begun, begin) = AsyncStream<Void>.makeStream()
+            let (held, letGo) = AsyncStream<Void>.makeStream()
+            let (ended, end) = AsyncStream<Void>.makeStream()
+            shared = SharedReading(fresh: .zero) {
+                defer { end.finish() }
+                begin.yield()
+                for await _ in held {}
+                try Task.checkCancellation()
+                return await takes.take()
+            }
+            (self.begun, self.letGo, self.ended) = (begun, letGo, ended)
+        }
+
+        /// Whether a gate asked now shares the reading or takes its own, read off its event.
+        /// The gate is cancelled as it asks, so it gives up instead of waiting: the choice is
+        /// made the moment it asks, whatever the reading is still doing.
+        func choice() async -> String? {
+            let events = Collected()
+            let gate = Task { try await Telemetry.$export.withValue(events.export) { try await shared.holds(.accessibility) } }
+            gate.cancel()
+            await #expect(throws: CancellationError.self) { try await gate.value }
+            return events.all.first?.facts["reading"]
+        }
     }
 
     @Test func gatesAskedTogetherShareOneReading() async throws {
@@ -98,39 +135,32 @@ struct GrantMappingTests {
     }
 
     @Test func aReadingSlowerThanFreshIsStillTakenOnce() async throws {
-        let takes = Takes()
-        let shared = SharedReading(fresh: .zero) { try await Task.sleep(for: .milliseconds(200)); return await takes.take() }
-        async let first = shared.holds(.accessibility)
-        try await Task.sleep(for: .milliseconds(50))
-        async let second = shared.holds(.accessibility)
-        _ = try await (first, second)
-        #expect(await takes.count == 1)
+        let held = HeldReading()
+        async let first = held.shared.holds(.accessibility)
+        for await _ in held.begun { break }
+        #expect(await held.choice() == "shared")
+        held.letGo.finish()
+        #expect(try await first)
+        #expect(await held.takes.count == 1)
     }
 
-    /// [LAW:no-ambient-temporal-coupling] The reading is held open until the test lets it
-    /// go, so the gate giving up while it is held is the proof, on any runner's speed. A
-    /// gate that cannot give up would wait on it forever: at the limit the test lets the
-    /// reading go, and that gate fails by answering instead of hanging the run.
-    @Test(.timeLimit(.minutes(1))) func aCancelledGateStopsWaitingOnTheReading() async throws {
-        let takes = Takes()
-        let (begun, begin) = AsyncStream<Void>.makeStream()
-        let (held, letGo) = AsyncStream<Void>.makeStream()
-        let shared = SharedReading(fresh: .seconds(60)) {
-            begin.yield()
-            for await _ in held {}
-            try Task.checkCancellation()
-            return await takes.take()
-        }
-        let gate = Task { try await shared.holds(.accessibility) }
-        for await _ in begun { break }
+    /// The gate giving up while the reading is held is the proof. A gate that cannot give up
+    /// would wait on it forever: at the limit the test lets the reading go, and that gate
+    /// fails by answering instead of hanging the run.
+    @Test func aCancelledGateStopsWaitingOnTheReading() async throws {
+        let held = HeldReading()
+        let gate = Task { try await held.shared.holds(.accessibility) }
+        for await _ in held.begun { break }
         gate.cancel()
         await #expect(throws: CancellationError.self) {
-            try await withTaskCancellationHandler { try await gate.value } onCancel: { letGo.finish() }
+            try await withTaskCancellationHandler { try await gate.value } onCancel: { held.letGo.finish() }
         }
-        // The reading goes on, uncancelled, and is still the one a later gate is answered by.
-        letGo.finish()
-        #expect(try await shared.holds(.accessibility))
-        #expect(await takes.count == 1)
+        // Not stamped finished by the gate that gave up: still the one being taken, so a
+        // gate asked now shares it; and it goes on, uncancelled, to its end.
+        #expect(await held.choice() == "shared")
+        held.letGo.finish()
+        for await _ in held.ended {}
+        #expect(await held.takes.count == 1)
     }
 }
 
