@@ -80,17 +80,14 @@ driver_step() {
     /bin/bash -c 'source "$1"; VHID=$2; "$3"' _ "$driver_script" "$tools/bin/vhid" "$1"
 }
 if $driver; then
-  if [ ! -f "$driver_script" ]; then
-    say "the driver removal packed with this script is not at $driver_script; if the pqrs driver is here, its own scripts remove it: $pqrs_scripts"
-  else
-    # The development daemon a build of this tree runs uses this same driver.
-    if record=$(launchctl print "system/$service.dev" 2>&1); then
-      fail "the development job $service.dev is loaded and uses the driver; stop it (scripts/dev-daemon remove) before removing the driver, or run without --driver"
-    elif ! grep -q "Could not find service" <<<"$record"; then
-      fail "could not read whether the development job $service.dev, which would use the driver, is loaded, so nothing was stopped or removed: $record"
-    fi
-    driver_step remove_refusals || fail "nothing was stopped or removed"
+  [ -f "$driver_script" ] || fail "the driver removal packed with this script is not at $driver_script, so nothing was stopped or removed; run the script where it was installed, or remove the pqrs driver with its own scripts: $pqrs_scripts"
+  # The development daemon a build of this tree runs uses this same driver.
+  if record=$(launchctl print "system/$service.dev" 2>&1); then
+    fail "the development job $service.dev is loaded and uses the driver; stop it (scripts/dev-daemon remove) before removing the driver, or run without --driver"
+  elif ! grep -q "Could not find service" <<<"$record"; then
+    fail "could not read whether the development job $service.dev, which would use the driver, is loaded, so nothing was stopped or removed: $record"
   fi
+  driver_step remove_refusals || fail "nothing was stopped or removed"
 fi
 
 # The daemon first: its record is the one whose reading decides whether anything is
@@ -125,7 +122,7 @@ for uid in $(ps -axo uid=,comm= | awk '$2 ~ /(^|\/)loginwindow$/ && $1 >= 500 { 
   fi
 done
 
-if $driver && [ -f "$driver_script" ]; then
+if $driver; then
   # Where the removal left the driver is read afresh rather than taken from its exit
   # status: 2 is how it reports a restart pending, but a failed step under its errexit can
   # end it with 2 as well.

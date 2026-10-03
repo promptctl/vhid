@@ -5,7 +5,7 @@ Each release's section is its GitHub Release notes, which keep line breaks, so e
 ## [Unreleased]
 
 - A Claude Code plugin, `/plugin marketplace add promptctl/vhid` then `/plugin install vhid@vhid`, adds the `vhid` and `eyes` MCP servers, a skill for the look, act, look again loop, and a check at the start of each session that tells the agent when vhid is missing or not `ready`.
-- `brew uninstall --zap --cask vhid` removes the pqrs driver package with vhid, refusing as `vhid-uninstall --driver` does, for instance while Karabiner-Elements is installed. `brew uninstall --cask vhid` works after `vhid-uninstall` has been run by hand.
+- `brew uninstall --zap --cask vhid` removes the pqrs driver package with vhid, refusing as `vhid-uninstall --driver` does, for instance while Karabiner-Elements is installed. On an install made or upgraded with this release's cask, `brew uninstall --cask vhid` also works after `vhid-uninstall` has been run by hand.
 
 ## [0.2.0]
 

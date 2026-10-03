@@ -92,7 +92,7 @@ is registered but the Manager app that withdraws it is gone (reinstalling the pk
 it back), or a reading it needs cannot be taken. Under `--zap`, Homebrew has already removed vhid by
 then, so a refusal leaves the driver in place and Homebrew still listing vhid: run
 `brew uninstall --zap --cask vhid` again once the cause is fixed, or
-`brew uninstall --cask vhid` to keep the driver. If the removal fails partway, vhid is left stopped with its
-files in place, and the message says so; run the same command again once the cause is
-fixed, or drop `--driver` to remove vhid alone. A withdrawn extension can stay
+`brew uninstall --cask vhid` to keep the driver. If the removal fails partway, vhid's jobs
+are left stopped and that run removes none of vhid's files, and the message says so; run
+the same command again once the cause is fixed, or drop `--driver` to remove vhid alone. A withdrawn extension can stay
 registered until the next restart.

@@ -225,16 +225,21 @@ check "withdrawal does not take: fails" 1 "$status"
 check "withdrawal does not take: says vhid is stopped, files in place" 1 "$(grep -c "vhid's jobs are stopped and this run removed none of its files" <<<"$out")"
 check "withdrawal does not take: vhid's files in place" "$before" "$(left)"
 
-# brew uninstall --zap: brew's uninstall has already removed vhid, and the zap stanza runs
-# --driver from the cask's copy.
-driver_mac yes; : >"$STUB/loaded"; rm -f "$STUB/receipt"; for path in $ALL; do rm -f "$STUB/root$path"; done; run_driver
+# brew uninstall --zap: brew's uninstall runs the cask's copy plain, then the zap stanza
+# runs it again with --driver.
+driver_mac yes; run; run_driver
 check "zap after vhid is gone: exit" 0 "$status"
 check "zap after vhid is gone: driver withdrawn" "manager deactivate" "$(grep -m1 '^manager' "$STUB/reached")"
 check "zap after vhid is gone: nothing left" "no|" "$([ -f "$STUB/driver-receipt" ] && echo yes || echo no)|$(left)"
 
-driver_mac yes; : >"$STUB/loaded"; for path in $ALL; do rm -f "$STUB/root$path"; done; before=$(left); ELEMENTS=15.5.0 run_driver
+driver_mac yes; run; before=$(left); : >"$STUB/reached"; ELEMENTS=15.5.0 run_driver
 check "zap with Karabiner-Elements present: refused" 1 "$status"
+check "zap with Karabiner-Elements present: says why" 1 "$(grep -c 'Karabiner-Elements 15.5.0 is installed and shares' <<<"$out")"
 check "zap with Karabiner-Elements present: driver untouched" "$before|" "$(left)|$(grep '^manager\|^sudo rm' "$STUB/reached")"
+
+driver_mac yes; rm "$KIT/libexec/vhid-virtual-hid-driver"; before=$(left); run_driver
+check "driver removal missing: refused" 1 "$status"
+check "driver removal missing: vhid left running and in place" "$DAEMON|$before" "$(cat "$STUB/loaded")|$(left)"
 
 # As installed: the script under /usr/local/libexec reads the vhid and the removal installed
 # beside it, and goes with the rest.
