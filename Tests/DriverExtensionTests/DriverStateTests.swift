@@ -23,7 +23,7 @@ import Testing
         .absent, .installed(version: "15.5.0"), .unreadable(reason: "pkgutil exited 70"),
     ]
 
-    /// All 84 of them. An arm that matched one case too many, or a key that quietly
+    /// All 96 of them. An arm that matched one case too many, or a key that quietly
     /// stopped being reachable, survives any example anyone thought to write down.
     @Test func everyCombinationOfReadingsLandsOnTheWordTheTableNames() {
         for payload in Payload.allCases {
@@ -32,7 +32,9 @@ import Testing
                     for ioNode in [false, true] {
                         let facts = DriverFacts(payload: payload, receipt: receipt, registration: registration, ioNode: ioNode, elementsReceipt: .absent)
                         let unreadable = registration == .unknown || registration == .ambiguous
-                        let want = unreadable ? .unknown : (Self.named[facts] ?? .residue)
+                        let want: DriverState = unreadable ? .unknown
+                            : registration == .withdrawing ? .withdrawing
+                            : (Self.named[facts] ?? .residue)
                         #expect(DriverState(facts) == want, "\(facts)")
                     }
                 }
@@ -121,7 +123,7 @@ import Testing
     @Test func theVerdictWordsAreTheOnesEveryReaderSpells() {
         #expect(Set(DriverState.allCases.map(\.rawValue)) == [
             "absent", "installed-inactive", "awaiting-approval", "disabled",
-            "enabled", "running", "pending-reboot", "residue", "unknown",
+            "enabled", "running", "pending-reboot", "withdrawing", "residue", "unknown",
         ])
     }
 
@@ -131,7 +133,7 @@ import Testing
     /// [LAW:one-source-of-truth]
     @Test func theRegistrationWordsAreTheOnesTheScriptSpells() {
         #expect(Set(Registration.allCases.map(\.rawValue)) == [
-            "unregistered", "enabled", "disabled", "waiting", "pending-reboot", "unknown", "ambiguous",
+            "unregistered", "enabled", "disabled", "waiting", "pending-reboot", "withdrawing", "unknown", "ambiguous",
         ])
     }
 }

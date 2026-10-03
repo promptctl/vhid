@@ -37,6 +37,8 @@ import Testing
             "activated disabled": .disabled,
             "activated waiting for user": .waiting,
             "terminated waiting to uninstall on reboot": .pendingReboot,
+            "terminating for uninstall": .withdrawing,
+            "terminating for uninstall but still running": .withdrawing,
         ]
         for (text, want) in expected {
             #expect(try DriverProbe.registration(inListing: Self.listing(driverLines: [Self.driverLine(state: text)])) == want)
@@ -85,6 +87,26 @@ import Testing
             Self.driverLine(state: "activated enabled"),
         ])
         #expect(try DriverProbe.registration(inListing: listing) == .enabled)
+    }
+
+    /// The same window a moment earlier, while macOS is still tearing the outgoing entry
+    /// down: it governs nothing either.
+    @Test func anUpgradeStillWithdrawingTheOldRegistrationReadsAsItsIncomingOne() throws {
+        let listing = Self.listing(driverLines: [
+            Self.driverLine(state: "terminating for uninstall"),
+            Self.driverLine(state: "activated waiting for user"),
+        ])
+        #expect(try DriverProbe.registration(inListing: listing) == .waiting)
+    }
+
+    /// Two outgoing entries and no incoming one: the one still moving is the answer, since
+    /// reading again lands on where it settles.
+    @Test func aTeardownBesideAnEntryAwaitingARebootIsWithdrawing() throws {
+        let listing = Self.listing(driverLines: [
+            Self.driverLine(state: "terminated waiting to uninstall on reboot"),
+            Self.driverLine(state: "terminating for uninstall but still running"),
+        ])
+        #expect(try DriverProbe.registration(inListing: listing) == .withdrawing)
     }
 
     @Test func twoLiveRegistrationsForOneBundleAreAmbiguous() throws {

@@ -133,6 +133,25 @@ driver_registration() {
   if (( status != 0 )) || [ -z "$word" ]; then echo probe-failed; else echo "$word"; fi
 }
 
+# The registration once macOS has finished tearing it down. A withdrawal does not end when
+# the Manager returns: the listing reads `withdrawing` for a moment after, 40ms when
+# measured on studious. That is not yet an answer to "may the Manager be deleted", so it
+# is read again, up to fifty readings 0.2s apart, each bounded by the CLI's own deadline.
+# A registration still withdrawing after that is handed back as itself.
+# [LAW:no-ambient-temporal-coupling] The withdrawal owns this wait, so removal is its only
+# caller; every other reader reports `withdrawing` as the moment it is.
+settled_registration() {
+  local word readings=0
+  while :; do
+    word=$(driver_registration)
+    readings=$((readings + 1))
+    [[ $word == withdrawing ]] && (( readings < 50 )) || break
+    sleep 0.2
+  done
+  echo "virtual-hid-driver: extension registration '$word' after $readings reading(s)" >&2
+  echo "$word"
+}
+
 # The version of one installer receipt, `none`, or the sentinel. The receipt outlives
 # the files, because the package's own uninstall scripts never call `pkgutil --forget`.
 #
@@ -398,7 +417,7 @@ remove_refusals() {
   # nobody logged in there is no one to make that request, and nothing is deleted.
   registered=$(driver_registration)
   case "$registered" in
-    unregistered|pending-reboot) ;;
+    unregistered|pending-reboot|withdrawing) ;;
     probe-failed) die "could not read whether the extension is still registered, and deleting the Manager while it is would strand the registration with nothing able to retract it; refusing to guess" ;;
     *)
       [[ -x $MANAGER ]] || die "the extension is registered as '$registered' but $MANAGER is missing, so nothing here can withdraw it; reinstall the package, then run: $REMOVE_AGAIN"
@@ -426,13 +445,12 @@ cmd_remove() {
   # removing the files deletes the Manager; do it the other way round and the
   # registration is stranded with nothing left on the machine able to retract it.
   # Only a live registration needs withdrawing, and only the withdrawal needs the
-  # Manager. An extension already retired has nothing to do here, which is what lets a
-  # `remove` interrupted after the files were deleted come back and finish the receipt
-  # instead of being sent to reinstall the package first.
-  # [LAW:dataflow-not-control-flow]
+  # Manager. An extension already retired, or already being withdrawn, has nothing to do
+  # here, which is what lets a `remove` interrupted after the files were deleted come
+  # back and finish the receipt instead of being sent to reinstall the package first.
   registered=$(driver_registration)
   case "$registered" in
-    unregistered|pending-reboot) ;;
+    unregistered|pending-reboot|withdrawing) ;;
     probe-failed) die "could not read whether the extension is still registered, and deleting the Manager while it is would strand the registration with nothing able to retract it; refusing to guess" ;;
     *)
       echo "==> deactivating the driver extension" >&2
@@ -441,22 +459,22 @@ cmd_remove() {
       # and outlive the Manager it runs from, so it is ended first, as postinstall ends
       # one a previous install left.
       pkill -f "$MANAGER activate" || true
-      as_console_user "$MANAGER" deactivate
+      as_console_user "$MANAGER" deactivate ;;
+  esac
 
-      # The Manager prints "request ... is failed" and still exits 0, so the withdrawal
-      # is confirmed against the registration itself and never against that exit
-      # status. Deleting the files while the extension is still registered is the one
-      # ordering mistake this verb can make, and it is unrecoverable without
-      # reinstalling, so it is checked here rather than trusted.
-      # [LAW:no-ambient-temporal-coupling]
-      withdrawn=$(driver_registration)
-      case "$withdrawn" in
-        pending-reboot|unregistered) ;;
-        # A sentinel is not a registration state: reporting it as one sends an operator
-        # after a stuck registration that may not exist. [LAW:no-silent-failure]
-        probe-failed) die "could not confirm the extension was withdrawn because its registration could not be read; refusing to delete the Manager that is the only thing able to withdraw it" ;;
-        *) die "the extension is still registered as '$withdrawn' after deactivation; refusing to delete the Manager that is the only thing able to withdraw it" ;;
-      esac ;;
+  # The Manager prints "request ... is failed" and still exits 0, so the withdrawal is
+  # confirmed against the registration itself and never against that exit status.
+  # Deleting the files while the extension is still registered is the one ordering
+  # mistake this verb can make, and it is unrecoverable without reinstalling, so it is
+  # checked here rather than trusted, whether this run withdrew it or found it withdrawn.
+  # [LAW:dataflow-not-control-flow]
+  withdrawn=$(settled_registration)
+  case "$withdrawn" in
+    pending-reboot|unregistered) ;;
+    # A sentinel is not a registration state: reporting it as one sends an operator
+    # after a stuck registration that may not exist. [LAW:no-silent-failure]
+    probe-failed) die "could not confirm the extension was withdrawn because its registration could not be read; refusing to delete the Manager that is the only thing able to withdraw it" ;;
+    *) die "the extension is still registered as '$withdrawn'; refusing to delete the Manager that is the only thing able to withdraw it" ;;
   esac
 
   echo "==> removing files (sudo)" >&2

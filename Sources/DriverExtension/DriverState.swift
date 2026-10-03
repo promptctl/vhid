@@ -32,6 +32,10 @@ public enum Registration: String, Sendable, Hashable, CaseIterable {
     case disabled
     case waiting
     case pendingReboot = "pending-reboot"
+    /// macOS is tearing the registration down after a deactivation it accepted. It lasts
+    /// tens of milliseconds and ends `unregistered` or `pending-reboot`: measured on
+    /// studious 2026-10-03, the Manager returned while the listing still read it.
+    case withdrawing
     /// Bracket text this build cannot name.
     case unknown
     /// Two live registrations for one bundle id at once.
@@ -44,6 +48,7 @@ public enum Registration: String, Sendable, Hashable, CaseIterable {
         case "activated disabled": self = .disabled
         case "activated waiting for user": self = .waiting
         case "terminated waiting to uninstall on reboot": self = .pendingReboot
+        case "terminating for uninstall", "terminating for uninstall but still running": self = .withdrawing
         default: self = .unknown
         }
     }
@@ -134,6 +139,9 @@ public enum DriverState: String, Sendable, Hashable, CaseIterable {
     case running
     /// The files and the receipt are gone; macOS keeps the registration until a restart.
     case pendingReboot = "pending-reboot"
+    /// macOS is still tearing down a registration a deactivation withdrew; reading again a
+    /// moment later lands on where it settled.
+    case withdrawing
     /// Some of the package is here and some is not, in a combination that is not one of
     /// the states install or remove can leave behind.
     case residue
@@ -152,6 +160,9 @@ public enum DriverState: String, Sendable, Hashable, CaseIterable {
         // does. Collapsed here so the table's keys stay readable.
         switch (facts.payload, facts.receipt != nil, facts.registration, facts.ioNode) {
         case (_, _, .unknown, _), (_, _, .ambiguous, _): self = .unknown
+        // Mid-removal, so whatever payload and receipt are still on disk say nothing yet:
+        // this is a moment, not a mess.
+        case (_, _, .withdrawing, _): self = .withdrawing
         case (.none, false, .unregistered, false): self = .absent
         case (.both, true, .unregistered, false): self = .installedInactive
         case (.both, true, .waiting, false): self = .awaitingApproval
