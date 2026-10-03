@@ -37,6 +37,8 @@ import Testing
             "activated disabled": .disabled,
             "activated waiting for user": .waiting,
             "terminated waiting to uninstall on reboot": .pendingReboot,
+            "terminating for uninstall": .withdrawing,
+            "terminating for uninstall but still running": .withdrawing,
         ]
         for (text, want) in expected {
             #expect(try DriverProbe.registration(inListing: Self.listing(driverLines: [Self.driverLine(state: text)])) == want)

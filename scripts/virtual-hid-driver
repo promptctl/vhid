@@ -127,10 +127,24 @@ report_state() {
 # How macOS has the extension registered, as one word. Removal reasons about this fact
 # alone: only a live registration needs withdrawing, and only the withdrawal needs the
 # Manager app that removal is about to delete.
+#
+# [LAW:no-ambient-temporal-coupling] The Manager returns from a deactivation while macOS
+# is still tearing the registration down, and that teardown is read as `withdrawing`. It
+# is not an answer to "is the extension still registered", so it is read again until
+# macOS settles it, for up to ten seconds; the teardown measured on studious took 40ms.
+# A registration still withdrawing after that is handed back as itself, for the caller to
+# refuse by name.
 driver_registration() {
-  local word status
-  word=$("$VHID" driver registration) && status=0 || status=$?
-  if (( status != 0 )) || [ -z "$word" ]; then echo probe-failed; else echo "$word"; fi
+  local word status readings=0
+  while :; do
+    word=$("$VHID" driver registration) && status=0 || status=$?
+    readings=$((readings + 1))
+    (( status == 0 )) && [ -n "$word" ] || word=probe-failed
+    [[ $word == withdrawing ]] && (( readings < 50 )) || break
+    sleep 0.2
+  done
+  echo "virtual-hid-driver: extension registration '$word' after $readings reading(s)" >&2
+  echo "$word"
 }
 
 # The version of one installer receipt, `none`, or the sentinel. The receipt outlives

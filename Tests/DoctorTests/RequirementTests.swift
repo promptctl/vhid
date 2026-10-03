@@ -48,6 +48,7 @@ import Testing
             .awaitingApproval: ["Login Items & Extensions", DriverProbe.bundleID],
             .disabled: ["switched off", "Login Items & Extensions", DriverProbe.bundleID],
             .pendingReboot: ["Restart the Mac"],
+            .withdrawing: ["finishing a removal", "Read it again", "vhid driver state"],
             .residue: ["scripts/virtual-hid-driver remove", "scripts/virtual-hid-driver install", "install vhid's pkg again", "restart the", "run vhid doctor again"],
             .unknown: ["vhid driver state"],
         ]

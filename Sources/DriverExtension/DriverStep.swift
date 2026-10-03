@@ -75,6 +75,12 @@ public extension DriverState {
             The driver was removed, and macOS keeps it registered until this
             Mac restarts. Restart the Mac.
             """
+        case .withdrawing:
+            """
+            macOS is finishing a removal of the driver. Read it again in a
+            moment:
+                vhid driver state
+            """
         case .residue:
             """
             Part of the driver package is here and part is not. From a clone
