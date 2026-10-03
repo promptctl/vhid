@@ -39,7 +39,7 @@ It changes nothing on the machine, which the App Shortcut route cannot say.
 
 **Down picks the first menu result, which may not be the one meant.** Read the rows between "Menu Items" and "Help Topics" before pressing Return. A search with no menu result still has Help Topics below it.
 
-**eyes reads menus by pixels only.** The tree reader walks an app's windows (`kAXWindowsAttribute` in [TreeReader.swift](../../eyes/Sources/Tree/TreeReader.swift)) and never its menu bar, and an open menu is not one of those windows. So every menu title and item comes from Vision. Three things follow:
+**eyes reads menus by pixels only.** The tree reader walks an app's windows (`kAXWindowsAttribute` in [TreeReader.swift](../../eyes/Sources/Tree/TreeReader.swift)) and never its menu bar, and an open menu is not one of those windows. So every menu title and item comes from Vision. Four things follow:
 
 - Pixels reads "…" as "...", so `eyes find "Export as PDF…"` answers "not found", one edit off. Search for the name without its ellipsis.
 - A menu bar can read as one run ("TextEdit File Edit Format View"). `eyes find File --rect 0,0,800,30` still answered File's own point.
