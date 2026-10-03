@@ -2,7 +2,8 @@
 
 What the pkg puts on a Mac, the one step it leaves to you, how to tell whether vhid is ready, and how to take it all out again.
 
-vhid ships as one signed, notarized pkg. It installs:
+vhid ships as one signed, notarized pkg; `brew install --cask promptctl/tap/vhid`
+downloads and installs the same pkg. It installs:
 
 | path | what it is |
 |---|---|
@@ -58,17 +59,23 @@ the next login. The item from a build of this tree,
 ## Uninstalling
 
 ```sh
+brew uninstall --cask vhid                        # vhid, if Homebrew installed it
 sudo /usr/local/libexec/vhid-uninstall            # vhid, leaving the pqrs driver
 sudo /usr/local/libexec/vhid-uninstall --driver   # vhid and the pqrs driver package
 ```
 
-Either stops the daemon and the menu bar item, removes every file in the table
-above (both uninstall scripts among them) and forgets the pkg's receipt; run again,
-it says there is nothing to remove. Neither touches the development job a build of this
-tree registers.
+`brew uninstall --cask vhid` runs `vhid-uninstall` without `--driver`, then stops listing
+vhid. Each of these stops the daemon and the menu bar item, removes every file in the
+table above (both uninstall scripts among them) and forgets the pkg's receipt. None
+touches the development job a build of this tree registers.
 
-The first leaves the pqrs driver installed, since Karabiner-Elements may use it. To
-remove the driver with vhid, choose `--driver` on that first run: afterwards the script
+Since the script deletes itself, running it on a Homebrew install leaves Homebrew listing
+vhid, and a plain `brew uninstall --cask vhid` then fails, saying the script does not
+exist. `brew uninstall --cask --force vhid` skips the script and forgets vhid.
+
+Without `--driver` the script leaves the pqrs driver installed, since Karabiner-Elements
+may use it. To remove the driver with vhid, choose `--driver` on that first run (under
+Homebrew, follow it with `brew uninstall --cask --force vhid`): afterwards the script
 that removes it is gone, and pqrs's own scripts in
 `/Library/Application Support/org.pqrs/Karabiner-DriverKit-VirtualHIDDevice/scripts/uninstall`
 are what is left.

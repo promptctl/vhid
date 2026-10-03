@@ -60,7 +60,13 @@ came later.
 
 You need macOS 15 or later, on Apple silicon or Intel, and an administrator account.
 
-Download the latest pkg from the [Releases page](https://github.com/promptctl/vhid/releases/latest)
+With [Homebrew](https://brew.sh):
+
+```sh
+brew install --cask promptctl/tap/vhid
+```
+
+Or download the latest pkg from the [Releases page](https://github.com/promptctl/vhid/releases/latest)
 and open it, or do the same from a terminal with the [GitHub CLI](https://cli.github.com):
 
 ```sh
@@ -96,7 +102,8 @@ Keyboard Setup Assistant: answered ANSI for the virtual keyboard
 
 If it prints `not ready`, the row that is wrong names the step to take.
 
-To remove vhid, run `sudo /usr/local/libexec/vhid-uninstall`.
+To remove vhid, run `brew uninstall --cask vhid` if Homebrew installed it, and
+`sudo /usr/local/libexec/vhid-uninstall` if you installed the pkg yourself.
 [docs/installing.md](docs/installing.md) lists every file the pkg installs and covers
 removing the driver too.
 
