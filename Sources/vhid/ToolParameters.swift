@@ -72,6 +72,16 @@ extension Parameter where Taken == String? {
     }
 }
 
+extension Parameter where Taken == Aim {
+    /// An application's name, read by `Aim.init(named:)` as `--into` is, and `anywhere`
+    /// when it is left out. [LAW:single-enforcer]
+    static func aim(_ name: String) -> Self {
+        Self(name: name, expected: Help.into, schema: ["type": "string", "minLength": 1], absent: .anywhere) {
+            $0.stringValue.flatMap(Aim.init(named:))
+        }
+    }
+}
+
 extension Parameter where Taken == [String] {
     static func texts(_ name: String, _ expected: String) -> Self {
         Self(name: name, expected: expected, schema: ["type": "array", "items": ["type": "string"], "minItems": 1], absent: nil) {

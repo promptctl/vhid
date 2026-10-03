@@ -10,15 +10,17 @@ struct PressCommand: AsyncParsableCommand {
     var chords: [String]
 
     @OptionGroup var layoutOption: LayoutOption
+    @OptionGroup var aimOption: AimOption
     @OptionGroup var service: ServiceOption
 
     func run() async throws {
-        let layout = try layoutOption.layout()
-        print(try await Devices.using(try service.installation()) { try await Self.press(chords, on: layout, with: $0.typist) })
+        let (layout, aim) = (try layoutOption.layout(), try aimOption.aim())
+        print(try await Devices.using(try service.installation()) { try await Self.press(chords, on: layout, into: aim, with: $0.typist) })
     }
 
     /// The verb itself, over a typist from anywhere. [LAW:decomposition]
-    static func press(_ chords: [String], on layout: KeyboardLayout, with typist: Typist) async throws -> String {
+    static func press(_ chords: [String], on layout: KeyboardLayout, into aim: Aim, with typist: Typist,
+                      front: () async -> FrontApp? = FrontApp.inFront) async throws -> String {
         // [LAW:parse-dont-validate] Both crossings - the spelling, then whether the device
         // can press what it names - are made for every chord before any key goes down. A
         // list that stops half way through has already pressed the chords before the bad
@@ -27,6 +29,7 @@ struct PressCommand: AsyncParsableCommand {
             let chord = try KeyChord(spelled: spelling, on: layout)
             return (chord, try typist.lower(chord))
         }
+        try await aim.admit(front)
         for (pressed, chord) in pressable.enumerated() {
             do {
                 try await typist.press(chord.pressable)
@@ -39,7 +42,7 @@ struct PressCommand: AsyncParsableCommand {
         // this layout puts `s` on. The chords say how many there were, so a count beside
         // them would only be a second way to get the number wrong.
         // [LAW:no-silent-failure] [LAW:polishing-by-subtraction]
-        return "pressed \(pressable.map { "\($0.chord)" }.joined(separator: ", ")) on \(layout.name)"
+        return "pressed \(pressable.map { "\($0.chord)" }.joined(separator: ", ")) on \(layout.name)\(aim.said)"
     }
 }
 

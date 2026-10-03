@@ -58,6 +58,7 @@ enum Tools {
     private static let y = Parameter.number("y", Help.y)
     private static let modifiers = Parameter.modifiers("modifiers").absent(.none)
     private static let layoutName = Parameter.layout("layout")
+    private static let into = Parameter.aim("into")
 
     /// Two coordinates as one place. Never refused for a JSON number: every number JSON
     /// hands over is finite, and the one that is not, `1e400`, never gets this far.
@@ -69,17 +70,17 @@ enum Tools {
 
     static let type: VerbTool = {
         let text = Parameter.text("text", Help.text)
-        return VerbTool(Help.type, [text, layoutName]) { arguments, installation in
-            let (text, layout) = (try arguments[text], try KeyboardLayout.chosen(try arguments[layoutName]))
-            return try await Devices.using(installation) { try await TypeCommand.type(text, on: layout, with: $0.typist) }
+        return VerbTool(Help.type, [text, layoutName, into]) { arguments, installation in
+            let (text, layout, aim) = (try arguments[text], try KeyboardLayout.chosen(try arguments[layoutName]), try arguments[into])
+            return try await Devices.using(installation) { try await TypeCommand.type(text, on: layout, into: aim, with: $0.typist) }
         }
     }()
 
     static let press: VerbTool = {
         let chords = Parameter.texts("chords", Help.chords)
-        return VerbTool(Help.press, [chords, layoutName]) { arguments, installation in
-            let (chords, layout) = (try arguments[chords], try KeyboardLayout.chosen(try arguments[layoutName]))
-            return try await Devices.using(installation) { try await PressCommand.press(chords, on: layout, with: $0.typist) }
+        return VerbTool(Help.press, [chords, layoutName, into]) { arguments, installation in
+            let (chords, layout, aim) = (try arguments[chords], try KeyboardLayout.chosen(try arguments[layoutName]), try arguments[into])
+            return try await Devices.using(installation) { try await PressCommand.press(chords, on: layout, into: aim, with: $0.typist) }
         }
     }()
 

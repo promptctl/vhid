@@ -4,6 +4,7 @@ Each release's section is its GitHub Release notes, which keep line breaks, so e
 
 ## [Unreleased]
 
+- `vhid type` and `vhid press` take `--into <app>`, and the MCP tools `into`: with another app in front just before the first key, nothing is sent and the refusal names the app that was. The app is named as `eyes windows` prints a window's owner.
 - `vhid gesture <name>` does what a trackpad gesture does, by pressing the key that does it: back and forward, zoom in and out, Look Up, the next or previous Space, Mission Control, App Exposé, Show Desktop, Launchpad and Notification Center. A system shortcut is the one the user has set, and one that is off is refused, naming the setting. `vhid mcp` serves it as the `gesture` tool.
 - The Claude Code plugin has a second skill, `menu-item`, which invokes any app's menu item by its name: it searches for the item from the app's Help menu and checks the result before choosing it, and clicks down the menu path for an item in the Help menu itself.
 - `eyes find` and `eyes read` print each row's role, such as `AXButton`, or `pixels` for text only the pixels reader saw, as a third column before a near miss's edit count.
