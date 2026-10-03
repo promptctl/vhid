@@ -4,6 +4,8 @@ Each release's section is its GitHub Release notes, which keep line breaks, so e
 
 ## [Unreleased]
 
+## [0.2.0]
+
 - `brew install --cask promptctl/tap/vhid` installs the release pkg, and `brew uninstall --cask vhid` removes it as `vhid-uninstall` does.
 - `vhid click`, `move`, `scroll`, `drag` and `cursor` work at the login window and behind fast user switching: vhidd reads the cursor in the session in front. In 0.1.0 a cursor read made there answers (0, 0), so those verbs cannot place the pointer.
 - `vhid type` and `vhid press` take `--layout <input source id>`, and the MCP tools `layout`, to type on a keyboard layout other than the caller's.

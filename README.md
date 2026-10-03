@@ -54,7 +54,7 @@ can't reach. Measured over SSH on macOS 15:
 
 [docs/design/remote-hands.md](docs/design/remote-hands.md) has the evidence for each cell.
 On the 0.1.0 pkg the two login window rows take typing only; placing the cursor there
-came later.
+came in 0.2.0.
 
 ## Install
 
