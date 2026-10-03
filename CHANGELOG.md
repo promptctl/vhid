@@ -14,6 +14,10 @@ Each release's section is its GitHub Release notes, which keep line breaks, so e
 - Over ssh, `eyes grants` names `sshd-keygen-wrapper`, the program macOS holds the grants under, where it named `sshd-session`, whose switch does nothing.
 - In Chrome, `eyes find` no longer answers an element scrolled out of view as a match on the viewport's edge, where a click misses it.
 
+## [0.4.0-rehearsal.1]
+
+- A throwaway pre-release that times the release job (vhid-release-83z.d72). Not for install.
+
 ## [0.3.0]
 
 - A Claude Code plugin, `/plugin marketplace add promptctl/vhid` then `/plugin install vhid@vhid`, adds the `vhid` and `eyes` MCP servers, a skill for the look, act, look again loop, and a check at the start of each session that tells the agent when vhid is missing or not `ready`.
