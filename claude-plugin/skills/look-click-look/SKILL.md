@@ -68,11 +68,11 @@ its step.
 ## Shape of a run
 
 ```
-eyes windows                                  -> TextEdit frontmost, window 4127
-eyes find {"text": "Save", "window": 4127}    -> 812,604	Save
+eyes windows                                  -> TextEdit frontmost, a save sheet on it
+eyes find {"text": "Save", "exact": true}     -> 812,604	Save
 vhid click {"x": 812, "y": 604}               -> clicked left once at (812, 604)
-eyes find {"text": "Save As:", "until": "present", "timeout": 5}
-                                              -> the save sheet is open: done
+eyes find {"text": "Save", "exact": true,
+           "until": "absent", "timeout": 5}   -> gone: the sheet closed, the file saved
 ```
 
 Not this:
