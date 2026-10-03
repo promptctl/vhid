@@ -24,6 +24,12 @@ concurrency:
 env:
   DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
 
+# A step whose pipe ends in tee fails when the command before it does: GitHub's default
+# shell for a run step without one named is bash -e, with no pipefail.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   # The secrets are the release environment's, not the repository's, and the environment
   # waits for a maintainer's approval before any run gets them: a tag pushed from a
@@ -35,6 +41,7 @@ jobs:
     timeout-minutes: 60
     outputs:
       version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
     env:
       TAG: ${{ github.ref_name }}
       NOTARY_PROFILE: vhid-release
@@ -47,14 +54,20 @@ jobs:
 
       # [LAW:one-source-of-truth] The tag names the version VERSION already holds, or
       # nothing is built: a tag that disagrees would publish a pkg under a name its
-      # binaries contradict. make-pkg asks again, of the tree and of the packed CLI.
+      # binaries contradict. make-pkg asks again, of the tree and of the packed CLI. A
+      # version with a -tag is a pre-release, decided here alone: the steps below read
+      # PRERELEASE and the cask job this step's output.
       - name: The tag is VERSION's
         id: version
         run: |
           version=$(scripts/version --base)
           [ "$TAG" = "v$version" ] || { echo "::error::tag $TAG is not v$version, the version in VERSION"; exit 1; }
           echo "VERSION_NUMBER=$version" >>"$GITHUB_ENV"
+          prerelease=false
+          [[ $version == *-* ]] && prerelease=true
+          echo "PRERELEASE=$prerelease" >>"$GITHUB_ENV"
           echo "version=$version" >>"$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >>"$GITHUB_OUTPUT"
 
       # What is published is what master holds and CI passed: a tag on a branch, or on a
       # commit whose required checks are not all green, is refused. A pre-release may
@@ -63,7 +76,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if [[ $VERSION_NUMBER != *-* ]]; then
+          if ! $PRERELEASE; then
             git merge-base --is-ancestor "$GITHUB_SHA" origin/master \
               || { echo "::error::$TAG is not on master"; exit 1; }
           fi
@@ -112,7 +125,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           prerelease=()
-          [[ $VERSION_NUMBER == *-* ]] && prerelease=(--prerelease)
+          $PRERELEASE && prerelease=(--prerelease)
           gh release create "$TAG" "$PKG" --verify-tag --title "vhid $VERSION_NUMBER" \
             --notes-file "$RUNNER_TEMP/notes.md" "${prerelease[@]}"
 
@@ -129,9 +142,12 @@ jobs:
   # what every Homebrew install runs.
   cask:
     needs: release
-    if: ${{ !contains(needs.release.outputs.version, '-') }}
+    if: ${{ needs.release.outputs.prerelease == 'false' }}
     runs-on: ubuntu-latest
     environment: release
+    # It writes only to the tap, through the deploy key; this repository it only reads.
+    permissions:
+      contents: read
     timeout-minutes: 10
     env:
       VERSION_NUMBER: ${{ needs.release.outputs.version }}

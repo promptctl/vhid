@@ -48,7 +48,17 @@ gh secret set HOMEBREW_TAP_DEPLOY_KEY --env release <tap-key && rm tap-key tap-k
 ```
 
 If the cask job fails after the Release is published, re-running that job alone moves
-the cask without publishing again.
+the cask without publishing again. When the job never ran (the release job failed
+after publishing, or the release was made on a Mac as below), the cask is moved by
+hand, from a clone of the tap, with the pkg as published:
+
+```sh
+gh release download v<version> --repo promptctl/vhid --pattern 'vhid-<version>.pkg' --dir /tmp
+scripts/update-cask <tap clone> <version> /tmp/vhid-<version>.pkg && git -C <tap clone> push
+```
+
+`scripts/update-cask` moves the cask only forward, and only to a release: an older
+version, or one with a `-tag`, is refused and the tap left as it was.
 
 The same release can be made on that Mac directly:
 
