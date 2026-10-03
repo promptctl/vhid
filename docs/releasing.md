@@ -76,13 +76,13 @@ The cask in [promptctl/homebrew-tap](https://github.com/promptctl/homebrew-tap) 
 one version and its pkg's sha256, so each release moves it. The tap moves it itself:
 its `vhid` workflow runs `.github/workflows/cask.yml` from this repository every half
 hour, which finds vhid's newest release (the highest version that is not a draft or a
-pre-release), fetches its pkg through the cask's own URL, and runs `scripts/update-cask`
-on the tap and pushes, once `scripts/assess-pkg` has found the pkg notarized and signed
+pre-release, which a version with a `-tag` is), fetches its pkg through the cask's own
+URL, and runs `scripts/update-cask` on the tap and pushes, once `scripts/assess-pkg` has found the pkg notarized and signed
 by the team. The write is the tap's own token, so no secret for it is held here. A run
 that finds the cask current changes nothing.
 
 It reads GitHub Releases alone, so a release made on a Mac reaches the cask once it is
-published there:
+published there, with `--prerelease` added for a `-tag` version as the workflow adds it:
 
 ```sh
 gh release create v<version> dist/vhid-<version>.pkg --verify-tag --notes-file <its CHANGELOG section>

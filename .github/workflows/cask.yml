@@ -31,8 +31,9 @@ jobs:
           path: vhid
 
       # [LAW:one-source-of-truth] The newest release is the highest version vhid has
-      # published that is not a draft or a pre-release, read off its Releases each run;
-      # the cask holds no other record of it. The sha256 is of the pkg as published,
+      # published, not as a draft, read off its Releases each run; the cask holds no other
+      # record of it. A version with a -tag is a pre-release by its shape, as release.yml
+      # and update-cask hold, whatever GitHub's flag on it says. The sha256 is of the pkg as published,
       # fetched through the URL the cask builds from its version, so the hash is of what
       # brew will fetch. [LAW:single-enforcer] That pkg is held to a release's Gatekeeper
       # verdict here, the one writer of the cask, so a Release made by any hand moves the
@@ -43,8 +44,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          version=$(gh release list --repo promptctl/vhid --exclude-drafts --exclude-pre-releases \
-            --limit 1000 --json tagName --jq '.[].tagName | ltrimstr("v")' | sort -V | tail -n 1)
+          version=$(gh release list --repo promptctl/vhid --exclude-drafts --limit 1000 --json tagName \
+            --jq '.[].tagName | ltrimstr("v")' | grep -Ex '[0-9]+(\.[0-9]+)*' | sort -V | tail -n 1)
           pkg="$RUNNER_TEMP/vhid-$version.pkg"
           curl -fsSL -o "$pkg" "https://github.com/promptctl/vhid/releases/download/v$version/vhid-$version.pkg"
           vhid/scripts/assess-pkg "$pkg"
