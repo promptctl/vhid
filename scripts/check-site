@@ -32,6 +32,7 @@ awk '
     kind = ""
   }
   END {
+    if (kind) { print "check-site: site/index.html has a <" kind "> with no </" kind ">" > "/dev/stderr"; exit 1 }
     if (!blocks) { print "check-site: site/index.html has no <pre> or <ol> block" > "/dev/stderr"; exit 1 }
     if (!bad) print "check-site: the " blocks " blocks (" lines " lines) the site copies are in README.md"
     exit bad
