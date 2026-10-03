@@ -27,11 +27,13 @@ others reach around the devices.
    header: its "Frontmost:" name can differ from the owner ("Code" for "Visual
    Studio Code"). If the app is not in front, click one of its visible windows on the
    title bar, not content that could act, or its Dock icon found with `find`; then
-   `windows` again until its rows are `front`. Not `open -a`, not `osascript`.
+   `windows` again, three looks in all, until its rows are `front`. Not `open -a`,
+   not `osascript`.
 2. **Find the Help title.** `find {"text": "Help", "rect": "0,0,800,30"}` - the strip
    of the main display's menu bar that reached Help in every app measured; widen the
    rect for an app with more titles. No titles in the strip (full screen, a hidden
-   bar): `move {"x": 400, "y": 0}` to the top edge to show the bar, then find again.
+   bar): `move {"x": 400, "y": 0}` to the top edge to show the bar; it slides in late,
+   so find the title again with `until` `present` and a `timeout`.
    In a localized app the title is in its language ("Aide" in French); when you do
    not know the word, `read` the strip: Help is the last of the app's titles, the run
    after the Apple menu - not the rightmost text, which can be a status item or the
@@ -45,32 +47,32 @@ others reach around the devices.
    `type {"text": "Export as PDF"}`. Do not open search with ⇧⌘/: TextEdit's own Help
    took that key instead. The search field opens holding the last query, selected,
    with its results showing; your typing replaces it.
-5. **Wait for the results, then read them;** a list read before it updates is the
-   last search's. `find` the typed text in the layer-101 window with `until`
-   `present` and a `timeout`; the field echoes it at once, so a match only there is
-   not the results yet - find again. Then `read {"window": <id>}`; rows are point,
-   text, role, and you compare the text. Down takes the first row under "Menu Items"
-   (above "Help Topics"), whatever it is. That row must be the whole name, compared
-   loosely: "..." for "…", drifted case, and a stray glyph before the name, which is
-   the item's icon (TextEdit read `EJ Export as PDF...`). An item in a top-level menu
-   shows no path (Chrome's Window > Task Manager reads `Task Manager`); only a submenu
-   item does ("New Window with Profile > New Profile..."). The name plus more words
-   is another item: `Close All` is not `Close`. If the first row is not the item,
-   type more of the name and read again; if it still is not first, take the path
-   route.
+5. **Read the results:** `read {"window": <id>}` the layer-101 window; rows are
+   point, text, role, and you compare the text. Down takes the first row under
+   "Menu Items" (above "Help Topics"), whatever it is. That row must be the whole
+   name, compared loosely: "..." for "…", drifted case, and a stray glyph before
+   the name, which is the item's icon (TextEdit read `EJ Export as PDF...`). An item
+   in a top-level menu shows no path (Chrome's Window > Task Manager reads `Task
+   Manager`); only a submenu item does ("New Window with Profile > New
+   Profile..."). The name plus more words is another item: `Close All` is not
+   `Close`. If the first row is not the item, the list may still be the last
+   search's: read again, three reads in all, no more. Still not first: type more of
+   the name and read the same way; if it still is not first, take the path route.
 6. **Choose it:** `press {"chords": ["down"]}`, then `press {"chords": ["return"]}`.
 7. **Look for what it does:** a window, a sheet, or a changed state (a checkmark
    toggled, a panel shown or hidden). TextEdit's export sheet came back as a new
-   window, larger than the document. Wait for it (`find` with `until`, `timeout`),
-   then `windows` and `read` the new window for something of the item's. Done means
-   you saw it. "Save" found in the document window proves nothing: a plain Save As
-   sheet has it too. One empty look is not "nothing happened", nor a reason to run
-   the item again.
+   window, larger than the document. `windows` for the new window; not there yet,
+   look again, three looks in all - one empty look is not "nothing happened", nor a
+   reason to run the item again. Then wait inside it: `find` something of the
+   item's with `"window": <new id>`, `until` `present` and a `timeout`. Done means
+   you saw it there. "Save" found in the document window proves nothing: a plain
+   Save As sheet has it too.
 
-   Nothing by the timeout: `windows`. A layer-101 window still there means the item
-   did not run - often disabled, which Help search still lists. Escape until it is
-   gone, one press per look, as in "No item matches", and tell the user the item was
-   listed but did not run. While the menu is open, type and press nothing else.
+   No new window, or nothing by the timeout: `windows`. A layer-101 window still
+   there means the item did not run - often disabled, which Help search still
+   lists. Escape until it is gone, one press per look, as in "No item matches", and
+   tell the user the item was listed but did not run. While the menu is open, type
+   and press nothing else.
 
 ## No item matches
 
@@ -103,19 +105,15 @@ eyes find {"text": "Help", "rect": "0,0,800,30"}
 vhid click {"x": 422, "y": 14}
 eyes windows      -> 263	TextEdit	L101	395,25 360x59	front    the menu is open
 vhid type {"text": "Export as PDF"}
-eyes find {"text": "Export as PDF", "window": 263, "until": "present", "timeout": 5}
-                  -> 472,95	EJ Export as PDF...	pixels      a results row, not just the field
 eyes read {"window": 263}
                   -> 444,73	Menu Items	pixels
                      472,95	EJ Export as PDF...	pixels      first row, the whole name: this one
                      445,116	Help Topics	pixels
 vhid press {"chords": ["down"]}
 vhid press {"chords": ["return"]}
-eyes find {"text": "Save", "until": "present", "timeout": 5}
-                  -> the wait only; Save alone proves nothing, so:
 eyes windows      -> 272	TextEdit	L0	502,53 800x448	front     a new window
-eyes read {"window": 272}
-                  -> ... rows Cancel and Save: the new window is the export
+eyes find {"text": "Save", "window": 272, "until": "present", "timeout": 5}
+                  -> a Save row at 1246,471, in the new window: the export
                      sheet: invoked
 ```
 
