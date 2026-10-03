@@ -79,11 +79,6 @@ struct Devices {
     /// accelerates the counts the device sends.
     var pointer: Pointer { Pointer(mouse: mouse, cursor: cursor) }
 
-    /// The cursor as the daemon reads it, in the session in front, which may not be this
-    /// process's: at the login window, or with another user in front, a read made here
-    /// answers (0, 0). [LAW:single-enforcer] Every verb that steers the pointer, and
-    /// `cursor`, reads it here. The wait for the daemon's answer is made on `queue`, for
-    /// the reason the devices' are.
     /// The app in front, asked once the daemon has answered that the devices are up.
     ///
     /// launchd starts vhidd on the first call and its devices take about a second to come
@@ -93,10 +88,15 @@ struct Devices {
     static func front(_ helper: HelperConnection, on queue: DeviceQueue) -> @Sendable () async throws -> FrontApp? {
         {
             _ = try await queue.run { try helper.status() }
-            return await FrontApp.inFront()
+            return try await FrontApp.inFront()
         }
     }
 
+    /// The cursor as the daemon reads it, in the session in front, which may not be this
+    /// process's: at the login window, or with another user in front, a read made here
+    /// answers (0, 0). [LAW:single-enforcer] Every verb that steers the pointer, and
+    /// `cursor`, reads it here. The wait for the daemon's answer is made on `queue`, for
+    /// the reason the devices' are.
     static func cursor(_ helper: HelperConnection, on queue: DeviceQueue) -> @Sendable () async throws -> ScreenPoint {
         {
             let at = try await queue.run { try helper.cursor() }

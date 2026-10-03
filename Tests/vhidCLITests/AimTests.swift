@@ -62,6 +62,13 @@ import Testing
         #expect("\(NotInFront(aimed: "TextEdit", front: nil))" == "TextEdit is not in front, so nothing was sent: no application is")
     }
 
+    /// Another user's session in front is refused, naming it and the way past it.
+    @Test func anotherSessionInFrontSaysWhoseAndHowToSendAnyway() {
+        #expect("\(AnotherSessionInFront(user: "ana"))"
+            == "ana's session is in front, not this user's, so which app is in front cannot be read here and nothing was sent; without into, the keys go to whatever is in front")
+        #expect("\(AnotherSessionInFront(user: "loginwindow"))".hasPrefix("the login window is in front"))
+    }
+
     // MARK: the command line
 
     @Test func bothKeyboardVerbsReadIt() throws {
