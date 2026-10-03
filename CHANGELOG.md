@@ -8,7 +8,7 @@ Each release's section is its GitHub Release notes, which keep line breaks, so e
 
 - vhid is a Homebrew cask: `brew install --cask promptctl/tap/vhid` installs the newest release's pkg, and `brew uninstall --cask vhid` removes it as `vhid-uninstall` does.
 - `vhid click`, `move`, `scroll`, `drag` and `cursor` work at the login window and behind fast user switching: vhidd reads the cursor in the session in front. In 0.1.0 a cursor read made there answers (0, 0), so those verbs cannot place the pointer.
-- `vhid type` and `vhid press` take `--layout <input source id>`, and the MCP tools `layout`, to type on a keyboard layout other than the caller's. With none named and none readable, as at the login window over SSH, they type with US English; in 0.1.0 they refuse.
+- `vhid type` and `vhid press` take `--layout <input source id>`, and the MCP tools `layout`, to type on a keyboard layout other than the caller's. With none named and the system reporting no current layout at all, they type with US English; in 0.1.0 they refuse.
 - `eyes find --until present|absent` waits for text to appear or go, for as long as `--timeout` allows, on the command line and as the MCP tool.
 - `eyes grants` says whether Screen Recording and Accessibility are held and which app macOS charges them to, without prompting; `eyes grants --ask` raises macOS's dialogs. `eyes mcp` serves `grants` as a tool.
 - A grant switched on while `eyes mcp` is running counts from its next call. In 0.1.0, quit and reopen the client after granting.
