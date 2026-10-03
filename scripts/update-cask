@@ -1,0 +1,41 @@
+#!/bin/bash
+# Points the vhid cask in a checkout of the tap at a release, and commits it there: the
+# cask's version becomes <version> and its sha256 the pkg's. Pushing is the caller's.
+# release.yml runs it on the pkg as published, fetched through the URL the cask builds.
+#
+#   scripts/update-cask <tap checkout> <version> <pkg>
+#
+# Held to bash 3.2, like every script here.
+set -euo pipefail
+[ $# -eq 3 ] || { echo "usage: scripts/update-cask <tap checkout> <version> <pkg>" >&2; exit 2; }
+tap=$1 version=$2 pkg=$3
+cask=$tap/Casks/vhid.rb
+
+# [LAW:parse-dont-validate] The cask is what `brew install` gives everyone, so it takes a
+# release, never a pre-release: dotted numbers alone.
+echo "$version" | grep -Eqx '[0-9]+(\.[0-9]+)*' || {
+  echo "update-cask: '$version' is not a release version, dotted numbers such as 0.2.0" >&2
+  exit 2
+}
+sha256=$(shasum -a 256 "$pkg" | cut -d ' ' -f 1)
+# [LAW:no-silent-failure] Each line is rewritten where it is, so a cask whose shape has
+# moved on from `  version "..."` and `  sha256 "..."` is refused rather than left stale.
+# grep -c exits 1 on no match, which the count reports; any other failure stops here.
+for key in version sha256; do
+  count=$(grep -c "^  $key \"[^\"]*\"\$" "$cask") || [ $? -eq 1 ]
+  [ "$count" = 1 ] || { echo "update-cask: $cask has $count lines of the form '  $key \"...\"', not one" >&2; exit 1; }
+done
+was=$(sed -n 's/^  version "\(.*\)"$/\1/p' "$cask")
+# The cask only moves forward: a backport released after a newer version, or a re-run of
+# an older release's job, would otherwise take every Homebrew install back.
+awk -v new="$version" -v old="$was" 'BEGIN {
+  n = split(new, a, "."); m = split(old, b, "."); if (m > n) n = m
+  for (i = 1; i <= n; i++) { if (a[i] + 0 > b[i] + 0) exit 0; if (a[i] + 0 < b[i] + 0) exit 1 }
+  exit 1
+}' || { echo "update-cask: the cask names $was, which $version does not follow" >&2; exit 1; }
+
+sed -e "s/^  version \".*\"\$/  version \"$version\"/" \
+  -e "s/^  sha256 \".*\"\$/  sha256 \"$sha256\"/" "$cask" >"$cask.new"
+mv "$cask.new" "$cask"
+git -C "$tap" commit --quiet -m "vhid $version" -- Casks/vhid.rb
+echo "update-cask: vhid $was -> $version, sha256 $sha256, tap commit $(git -C "$tap" rev-parse --short HEAD)"

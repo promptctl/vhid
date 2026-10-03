@@ -11,9 +11,14 @@ commit is on master (a `-tag` pre-release may come from any branch) with its `vh
 `eyes` and `pkg` checks green, and that `CHANGELOG.md` has a `## [<version>]` section.
 It then runs `scripts/release` in a keychain `scripts/release-keychain` makes for the
 job and deletes at its end, and attaches the notarized pkg to a GitHub Release whose
-notes are that section, marked a pre-release when the version has a `-tag`. It reads
-five secrets of the `release` environment, which admits only `v*` tags and waits for a
-maintainer to approve each run in the Actions tab before handing them over:
+notes are that section, marked a pre-release when the version has a `-tag`. A release
+that is not a pre-release then moves the cask in
+[promptctl/homebrew-tap](https://github.com/promptctl/homebrew-tap) to it:
+`scripts/update-cask` sets the cask's version, and its sha256 to that of the pkg
+fetched from the cask's own URL, and the job commits that to the tap and pushes it.
+Both jobs read secrets of the `release` environment, which admits only `v*` tags and
+waits for a maintainer to approve each job in the Actions tab before handing them over,
+so a release asks for two approvals:
 
 | Secret | What it holds |
 | --- | --- |
@@ -22,6 +27,7 @@ maintainer to approve each run in the Actions tab before handing them over:
 | `DEVELOPER_ID_P12_PASSWORD` | the password both .p12 files were exported with |
 | `NOTARY_APPLE_ID` | the Apple ID notarytool submits as |
 | `NOTARY_PASSWORD` | an app-specific password for that Apple ID, made at account.apple.com |
+| `HOMEBREW_TAP_DEPLOY_KEY` | the private half of an SSH deploy key with write access to promptctl/homebrew-tap |
 
 Export each identity from Keychain Access (the certificate with its private key, as
 .p12, both with one password) on the Mac that holds it, then set the secrets from the
@@ -31,6 +37,28 @@ files. The files are redirected in because Homebrew's `base64` has no `-i`:
 base64 <application.p12 | gh secret set DEVELOPER_ID_APPLICATION_P12 --env release
 base64 <installer.p12 | gh secret set DEVELOPER_ID_INSTALLER_P12 --env release
 ```
+
+The deploy key is made once, its public half given to the tap and its private half to
+the environment:
+
+```sh
+ssh-keygen -t ed25519 -N '' -f tap-key
+gh repo deploy-key add tap-key.pub --repo promptctl/homebrew-tap --allow-write --title release.yml
+gh secret set HOMEBREW_TAP_DEPLOY_KEY --env release <tap-key && rm tap-key tap-key.pub
+```
+
+If the cask job fails after the Release is published, re-running that job alone moves
+the cask without publishing again. When the job never ran (the release job failed
+after publishing, or the release was made on a Mac as below), the cask is moved by
+hand, from a clone of the tap, with the pkg as published:
+
+```sh
+gh release download v<version> --repo promptctl/vhid --pattern 'vhid-<version>.pkg' --dir /tmp
+scripts/update-cask <tap clone> <version> /tmp/vhid-<version>.pkg && git -C <tap clone> push
+```
+
+`scripts/update-cask` moves the cask only forward, and only to a release: an older
+version, or one with a `-tag`, is refused and the tap left as it was.
 
 The same release can be made on that Mac directly:
 
