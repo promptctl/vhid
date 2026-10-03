@@ -50,7 +50,10 @@ let package = Package(
         // Whether the readers' grants are held and which app holds them. Apart from both
         // readers, because the answer is about the process, not about any reading; each
         // reader asks it before looking. [LAW:one-way-deps]
-        .target(name: "Grants", dependencies: ["Eyes", "Telemetry"]),
+        .target(name: "Grants", dependencies: ["Eyes", "Telemetry", "Responsibility"]),
+        // The calls tccd's attribution rests on, which libSystem exports and the SDK has no
+        // header for. A header of its own, so they are linked and type-checked, not looked up.
+        .target(name: "Responsibility"),
         // One event per unit of work and the one edge it leaves by. Links nothing of
         // eyes', so every target can report through it. [LAW:nothing-unseen]
         .target(name: "Telemetry"),

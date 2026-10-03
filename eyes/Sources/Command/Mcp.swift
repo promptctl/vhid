@@ -102,7 +102,7 @@ enum EyesTools {
         frontmost: @escaping FrontmostApp = { await Frontmost.now() },
         displays: @escaping DisplayList = { Geometry.displays() },
         reading look: @escaping Look = { source, query in try await source.reader.read(query) },
-        grants: @escaping GrantsLook = { (try await GrantsVerb.reading(), try Holder.current()) },
+        grants: @escaping GrantsLook = { try await GrantsVerb.look() },
         pages: @escaping Where.Place.Pages = Where.Place.tree
     ) -> [EyesTool] {
         let serial = OneAtATime(look)

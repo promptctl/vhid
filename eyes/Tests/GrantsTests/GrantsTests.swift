@@ -151,3 +151,15 @@ struct GrantMappingTests {
     #expect(events.all.map(\.outcome) == ["ok", "error"])
     #expect(events.all[1].error != nil)
 }
+
+/// Naming the holder is one event, carrying the executable macOS attributed this process to:
+/// a file on disk, by its absolute path, and the one the holder was made from.
+@Test func namingTheHolderIsAnEvent() async throws {
+    let events = Collected()
+    let holder = try await Telemetry.$export.withValue(events.export) { try await Holder.current() }
+    #expect(events.all.map(\.event) == ["holder"])
+    let executable = try #require(events.all.first?.facts["executable"])
+    #expect(executable.hasPrefix("/"))
+    #expect(FileManager.default.isExecutableFile(atPath: executable))
+    #expect(executable.hasPrefix(holder.path))
+}

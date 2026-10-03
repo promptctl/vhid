@@ -10,6 +10,7 @@ Each release's section is its GitHub Release notes, which keep line breaks, so e
 - `eyes find` and `eyes read` print each row's role, such as `AXButton`, or `pixels` for text only the pixels reader saw, as a third column before a near miss's edit count.
 - `eyes find --page <window id>` and `eyes read --page <window id>` read only the web page a browser window shows, not its toolbar and bookmarks. The MCP tools take `page`.
 - `eyes find --near <text>` orders matches by how close each sits to that text, so `eyes find Remove --near Beta --limit 1` gives the Remove button in Beta's row. The MCP tool takes `near`.
+- Over ssh, `eyes grants` names `sshd-keygen-wrapper`, the program macOS holds the grants under, where it named `sshd-session`, whose switch does nothing.
 - In Chrome, `eyes find` no longer answers an element scrolled out of view as a match on the viewport's edge, where a click misses it.
 
 ## [0.3.0]

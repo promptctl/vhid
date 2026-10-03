@@ -3,6 +3,7 @@ import CoreGraphics
 import Darwin
 import Eyes
 import Foundation
+import Responsibility
 import Telemetry
 
 /// The two privacy grants eyes' readers need.
@@ -256,22 +257,42 @@ public struct Holder: Sendable, Equatable {
         }
     }
 
-    /// The responsible process of this one, as macOS attributes it.
+    /// The responsible process of this one, as tccd attributes it. One event per naming,
+    /// carrying the executable the attribution named. [LAW:nothing-unseen]
+    public static func current() async throws(GrantReadingFailure) -> Holder {
+        try await Telemetry.unit("holder") { () throws(GrantReadingFailure) -> Holder in
+            let executable = try attributed()
+            Telemetry.note("executable", executable)
+            return named(executable)
+        }
+    }
+
+    /// The executable the attribution records: the one the responsible process was spawned
+    /// from, which is what tccd matches a grant against. [LAW:one-source-of-truth] The
+    /// responsible pid's current image is not it - over ssh, sshd-keygen-wrapper is spawned
+    /// and then execs sshd-session, and the grant is held under the wrapper.
     ///
-    /// `responsibility_get_pid_responsible_for_pid` is the call tccd's attribution rests
-    /// on. It is not in the SDK's headers, so it is looked up by name; its absence is said,
-    /// never guessed past. [LAW:no-silent-failure]
-    public static func current() throws(GrantReadingFailure) -> Holder {
-        typealias Responsible = @convention(c) (pid_t) -> pid_t
-        guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "responsibility_get_pid_responsible_for_pid") else {
-            throw GrantReadingFailure("this macOS has no responsibility_get_pid_responsible_for_pid, so the app holding the grants cannot be named")
+    /// A path is all the pane can list, so an attribution naming none is said, never printed
+    /// as a blank app. [LAW:no-silent-failure]
+    private static func attributed() throws(GrantReadingFailure) -> String {
+        var token = audit_token_t()
+        let read = responsibility_self_audit_token(&token)
+        guard read == KERN_SUCCESS else {
+            throw GrantReadingFailure("this process cannot read its own audit token: \(String(cString: mach_error_string(read)))")
         }
-        let pid = unsafeBitCast(symbol, to: Responsible.self)(getpid())
-        var buffer = [CChar](repeating: 0, count: Int(MAXPATHLEN) * 4)
-        guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else {
-            throw GrantReadingFailure("the responsible process \(pid) has no path to read: \(String(cString: strerror(errno)))")
+        guard let identity = responsibility_get_attribution_for_audittoken(&token, 0) else {
+            throw GrantReadingFailure("macOS gave no attribution for this process")
         }
-        let found = Holder(executable: String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self))
+        defer { responsibility_identity_release(identity) }
+        guard let path = responsibility_identity_get_binary_path(identity), path.pointee != 0 else {
+            throw GrantReadingFailure("macOS's attribution for this process names no executable")
+        }
+        return String(cString: path)
+    }
+
+    /// The holder `executable` makes, by the name the pane lists it under.
+    private static func named(_ executable: String) -> Holder {
+        let found = Holder(executable: executable)
         // The pane lists an app by its Finder name, which its file name need not be; that name
         // carries ".app" when Finder shows every extension, and the pane never does.
         let listed = FileManager.default.displayName(atPath: found.path)

@@ -1,4 +1,6 @@
 import Grants
+import Telemetry
+import TelemetryTesting
 import Testing
 @testable import EyesCommand
 
@@ -20,5 +22,13 @@ struct GrantsReportTests {
         let asked = GrantsVerb.report(GrantReading { _ in false }, holder: holder, asked: Grant.allCases)
         #expect(asked.hasSuffix("Asked for Screen Recording and Accessibility: answer macOS's dialog, then run eyes grants to read again. If no dialog appeared, macOS already has an answer from iTerm, and only its switch in the pane changes it."))
         #expect(!GrantsVerb.report(GrantReading { _ in true }, holder: holder, asked: []).contains("Asked for"))
+    }
+
+    /// One look at the grants is one unit, and the holder it names reads under its trace.
+    @Test(.eventsKept) func aLookAtTheGrantsIsOneTrace() async throws {
+        let events = Collected()
+        _ = try await Telemetry.$export.withValue(events.export) { try await GrantsVerb.look { GrantReading { _ in true } } }
+        #expect(events.all.map(\.event) == ["holder", "grants"])
+        #expect(Set(events.all.map(\.traceID)).count == 1)
     }
 }

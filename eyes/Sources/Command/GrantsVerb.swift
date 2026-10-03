@@ -1,6 +1,7 @@
 import ArgumentParser
 import Foundation
 import Grants
+import Telemetry
 
 /// Whether the readers' grants are held, and by which app, asked before a reading needs
 /// them rather than learned from a refusal halfway through a task.
@@ -28,12 +29,18 @@ struct GrantsVerb: AsyncParsableCommand {
             print(GrantReading.here().line)
             return
         }
-        let holder = try Holder.current()
-        let reading = try await Self.reading()
+        let (reading, holder) = try await Self.look()
         // The dialogs return before anyone answers them, so there is nothing new to read yet.
         let asked = ask ? Grant.allCases.filter { !reading.holds($0) } : []
         asked.forEach { $0.ask() }
         print(Self.report(reading, holder: holder, asked: asked))
+    }
+
+    /// A fresh reading and the app it is charged to, as one unit, so the holder named and the
+    /// reading it was reported with share a trace. The verb and the MCP tool both ask here.
+    /// [LAW:nothing-unseen] [LAW:one-source-of-truth]
+    static func look(reading: () async throws -> GrantReading = { try await reading() }) async throws -> (GrantReading, Holder) {
+        try await Telemetry.unit("grants") { (try await reading(), try await Holder.current()) }
     }
 
     /// A fresh reading, from a child of this process. [LAW:no-ambient-temporal-coupling]
