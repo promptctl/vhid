@@ -94,6 +94,16 @@ $drift"
   [ "$forgets" = "$identifier" ] || fail "vhid-uninstall forgets receipt '$forgets', but the pkg's is '$identifier'"
 fi
 
+# The cask's postflight copies these out of the install, so each is a file the pkg
+# installs; one that moves fails `brew install` at its postflight.
+kit=$(sed -n 's/^ *%w\[\(.*\)\]\.each do |path|$/\1/p' pkg/vhid.rb)
+[ -n "$kit" ] || fail "pkg/vhid.rb has no postflight %w[...] list of what it copies"
+installed=$(lsbom -f -p f "$x/vhid.pkg/Bom")
+for path in $kit; do
+  grep -qx "\./usr/local/$path" <<<"$installed" \
+    || fail "pkg/vhid.rb's postflight copies /usr/local/$path, which the pkg does not install"
+done
+
 # The job's three names for the service, which launchd, the daemon and the CLI must agree on.
 daemon=$x/vhid.pkg/Payload/Library/LaunchDaemons/$service.plist
 if [ -f "$daemon" ]; then

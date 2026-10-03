@@ -1,16 +1,18 @@
 #!/bin/bash
-# Points the vhid cask in a checkout of the tap at a release, and commits it there: the
-# cask's version becomes <version> and its sha256 the pkg's. Pushing is the caller's.
-# .github/workflows/cask.yml runs it, from the tap, on vhid's newest release as
-# published, fetched through the URL the cask builds.
+# Writes the vhid cask in a checkout of the tap for a release, and commits it there: the
+# cask becomes <cask body>, pkg/vhid.rb as of the release's tag, with <version> and the
+# pkg's sha256 filled in. Pushing is the caller's. .github/workflows/cask.yaml runs it,
+# from the tap, on vhid's newest release as published, fetched through the URL the cask
+# builds.
 #
-#   scripts/update-cask <tap checkout> <version> <pkg>
+#   scripts/update-cask <tap checkout> <version> <pkg> <cask body>
 #
 # Held to bash 3.2, like every script here.
 set -euo pipefail
-[ $# -eq 3 ] || { echo "usage: scripts/update-cask <tap checkout> <version> <pkg>" >&2; exit 2; }
-tap=$1 version=$2 pkg=$3
+[ $# -eq 4 ] || { echo "usage: scripts/update-cask <tap checkout> <version> <pkg> <cask body>" >&2; exit 2; }
+tap=$1 version=$2 pkg=$3 body=$4
 cask=$tap/Casks/vhid.rb
+stanza=$(dirname "$0")/cask-stanza
 
 # [LAW:parse-dont-validate] The cask is what `brew install` gives everyone, so it takes a
 # release, never a pre-release: dotted numbers alone.
@@ -18,14 +20,22 @@ echo "$version" | grep -Eqx '[0-9]+(\.[0-9]+)*' || {
   echo "update-cask: '$version' is not a release version, dotted numbers such as 0.2.0" >&2
   exit 2
 }
+# [LAW:one-source-of-truth] The body says nothing of any one release: its version and
+# sha256 are the two @-words this fills in, so a body naming a release of its own is
+# refused rather than written over.
+for blank in "version @VERSION@" "sha256 @SHA256@"; do
+  value=$("$stanza" "$body" "${blank% *}")
+  [ "$value" = "${blank#* }" ] \
+    || { echo "update-cask: $body's ${blank% *} is \"$value\", not \"${blank#* }\"" >&2; exit 1; }
+done
 sha256=$(shasum -a 256 "$pkg" | cut -d ' ' -f 1)
-# The version and sha256 lines are rewritten where they are, so a cask whose shape has
-# moved on is refused by cask-stanza rather than read as naming nothing or left stale.
-was=$("$(dirname "$0")/cask-stanza" "$cask" version)
-had=$("$(dirname "$0")/cask-stanza" "$cask" sha256)
-# The cask already on this release is left as it is, provided the pkg is still the one
-# it names: a sha256 that moved under a published version is a pkg replaced after
-# release, and every Homebrew install of it would fail its checksum.
+was=$("$stanza" "$cask" version)
+had=$("$stanza" "$cask" sha256)
+# The release the cask names already is left as it is, so long as its pkg is unchanged: a
+# sha256 that moved under a published version is a pkg replaced after release, and every
+# Homebrew install of it would fail its checksum. Its body is left too, hand edits and
+# all, because brew uninstalls and zaps by the caskfile an install was made with; a
+# body changed under one version would split that version's installs in two.
 if [ "$version" = "$was" ]; then
   [ "$sha256" = "$had" ] || { echo "update-cask: the cask names $was with sha256 $had, but its pkg's is $sha256" >&2; exit 1; }
   echo "update-cask: vhid $was already, sha256 $sha256"
@@ -33,12 +43,19 @@ if [ "$version" = "$was" ]; then
 fi
 # The cask only moves forward: a backport released after a newer version, or a re-run of
 # an older release's job, would otherwise take every Homebrew install back.
-# sort -V is the order cask.yml finds the newest release by, so the two cannot disagree.
+# sort -V is the order cask.yaml finds the newest release by, so the two cannot disagree.
 [ "$(printf '%s\n' "$was" "$version" | sort -V | tail -n 1)" = "$version" ] \
   || { echo "update-cask: the cask names $was, which $version does not follow" >&2; exit 1; }
 
-sed -e "s/^  version \".*\"\$/  version \"$version\"/" \
-  -e "s/^  sha256 \".*\"\$/  sha256 \"$sha256\"/" "$cask" >"$cask.new"
+sed -e "s/^  version \"@VERSION@\"\$/  version \"$version\"/" \
+  -e "s/^  sha256 \"@SHA256@\"\$/  sha256 \"$sha256\"/" "$body" >"$cask.new"
+# Only the two stanza lines are filled in, so an @-word anywhere else in the body would
+# reach every install as written.
+if grep -n '@VERSION@\|@SHA256@' "$cask.new" >&2; then
+  rm "$cask.new"
+  echo "update-cask: $body has the @-words above outside its version and sha256 lines" >&2
+  exit 1
+fi
 mv "$cask.new" "$cask"
 git -C "$tap" commit --quiet -m "vhid $version" -- Casks/vhid.rb
 echo "update-cask: vhid $was -> $version, sha256 $sha256, tap commit $(git -C "$tap" rev-parse --short HEAD)"

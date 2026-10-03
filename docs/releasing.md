@@ -6,7 +6,7 @@ A release is published by pushing its tag, once `CHANGELOG.md` has its section:
 git tag v$(scripts/version --base) && git push origin v$(scripts/version --base)
 ```
 
-`.github/workflows/release.yml` checks that the tag is `VERSION`'s, that the tagged
+`.github/workflows/release.yaml` checks that the tag is `VERSION`'s, that the tagged
 commit is on master (a `-tag` pre-release may come from any branch), and that
 `CHANGELOG.md` has a `## [<version>]` section. It then runs `scripts/release` in a
 keychain `scripts/release-keychain` makes for the job and deletes at its end. Once the
@@ -78,23 +78,28 @@ but Accepted, staples the ticket, and requires Gatekeeper to assess the pkg as
 
 ## The cask
 
-The cask in [promptctl/homebrew-tap](https://github.com/promptctl/homebrew-tap) names
-one version and its pkg's sha256, so each release moves it. The tap's `vhid` workflow
-moves it, running `.github/workflows/cask.yml` from this repository: it finds vhid's
-newest release (the highest version that is not a draft or a pre-release, which a version
-with a `-tag` is), fetches its pkg through the cask's own URL, and runs
-`scripts/update-cask` on the tap and pushes, once `scripts/assess-pkg` has found the pkg
-notarized and signed by the team. The write is the tap's own token. A run that finds the
-cask current changes nothing.
+The cask in [promptctl/homebrew-tap](https://github.com/promptctl/homebrew-tap) is
+[pkg/vhid.rb](../pkg/vhid.rb) as of the release it names, with that release's version
+and its pkg's sha256 in place of `@VERSION@` and `@SHA256@`. The cask is edited there,
+like any other file, and a change to it ships with the next release: brew keeps the
+caskfile an install or upgrade was made with, and uninstalls and zaps by it, so a body
+only ever arrives with the version it was tagged with.
 
-Once a release is published, `release.yml` starts that workflow and waits until the cask
+The tap's `vhid` workflow writes it, running `.github/workflows/cask.yaml` from this
+repository: it finds vhid's newest release (the highest version that is not a draft or a
+pre-release, which a version with a `-tag` is), fetches its pkg through the cask's own
+URL and `pkg/vhid.rb` at its tag, and runs `scripts/update-cask` on the tap and pushes,
+once `scripts/assess-pkg` has found the pkg notarized and signed by the team. The write
+is the tap's own token. A run that finds the cask current changes nothing.
+
+Once a release is published, `release.yaml` starts that workflow and waits until the cask
 is at the release, failing when the run ends with the cask short of it or ten minutes
 pass. The cask is the verdict, not the run: a run the tap's concurrency group cancels
 leaves the cask to the run that replaced it. A workflow GitHub disabled after 60 days of
 a quiet tap is enabled again; one disabled by hand fails the step. The Release is public
-by then, so re-running the job would only fail at publishing; `gh workflow run vhid.yml
+by then, so re-running the job would only fail at publishing; `gh workflow run vhid.yaml
 --repo promptctl/homebrew-tap` moves the cask instead, and the tap's own half-hourly
-schedule runs the same workflow. `release.yml` starts it with a token of the promptctl
+schedule runs the same workflow. `release.yaml` starts it with a token of the promptctl
 tap App, a GitHub App owned by the org and installed on the tap alone with Actions:
 write, so the token can start the tap's workflows and nothing else. The token is minted
 before the build, so a missing App fails the release before anything is published.
@@ -113,30 +118,12 @@ workflow is run:
 
 ```sh
 gh release create v<version> dist/vhid-<version>.pkg --verify-tag --notes-file <its CHANGELOG section>
-gh workflow run vhid.yml --repo promptctl/homebrew-tap
+gh workflow run vhid.yaml --repo promptctl/homebrew-tap
 ```
 
 `scripts/update-cask` moves the cask only forward, and only to a release: an older
 version, or one with a `-tag`, is refused and the tap left as it was. A pkg whose sha256
-no longer matches the cask on its own version is refused too, and fails every run until
-someone looks.
-
-A release that also changes the cask's body has to move the cask by hand, in one commit.
-The workflow moves only `version` and `sha256`. Brew keeps the caskfile an install or
-upgrade was made with, and uninstalls and zaps by it, so anyone who upgrades between the
-workflow's bump and the body change keeps the old body until the next version. Disable
-the workflow before pushing the tag:
-
-```sh
-gh workflow disable vhid.yml --repo promptctl/homebrew-tap
-```
-
-Once the release is published, fetch its pkg, hold it to `scripts/assess-pkg`, and run
-`scripts/update-cask <tap checkout> <version> <pkg>` on the tap branch that carries the
-body change. The release fails at its cask step, since the workflow it starts is
-disabled. Merge the tap branch, then enable the workflow again; its next run finds the
-cask current:
-
-```sh
-gh workflow enable vhid.yml --repo promptctl/homebrew-tap
-```
+no longer matches the cask on its own version is refused too, and so is a tag with no
+`pkg/vhid.rb`; either fails every run until someone looks. A cask already on the newest
+release is left as it is, so a hand edit to the tap's cask lasts until the next release
+writes over it, unless it moves `version` or `sha256`, which fails every run instead.

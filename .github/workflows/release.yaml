@@ -20,7 +20,7 @@ permissions:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
 
-# The toolchain test.yml names; its pkg job fails when the two differ.
+# The toolchain test.yaml names; its pkg job fails when the two differ.
 env:
   DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
 
@@ -120,7 +120,7 @@ jobs:
           pkg=$(scripts/release dist)
           echo "PKG=$pkg" >>"$GITHUB_ENV"
 
-      # What is published is what CI passed: every job test.yml runs, by its own list,
+      # What is published is what CI passed: every job test.yaml runs, by its own list,
       # each one's latest run green on the tagged commit. Asked after the build rather
       # than before it, since a tag is often pushed moments after the merge that started
       # those checks and nothing above depends on them: they run while this job builds,
@@ -129,7 +129,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          checks=$(ruby -ryaml -e 'puts YAML.load_file(".github/workflows/test.yml")["jobs"].keys')
+          checks=$(ruby -ryaml -e 'puts YAML.load_file(".github/workflows/test.yaml")["jobs"].keys')
           for check in $checks; do
             for attempt in $(seq 180); do
               latest=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?check_name=$check" \
@@ -154,7 +154,7 @@ jobs:
         if: always()
         run: scripts/release-keychain delete "$NOTARY_KEYCHAIN"
 
-      # The tap's vhid workflow (cask.yml here) is the one writer of the cask, with the
+      # The tap's vhid workflow (cask.yaml here) is the one writer of the cask, with the
       # tap's own token; this starts it and waits until the cask is at this release, so
       # the release fails when the move does not land. [LAW:one-source-of-truth] The cask
       # is the verdict, not the run: a run the tap's concurrency group cancelled leaves the
@@ -170,8 +170,8 @@ jobs:
           GH_TOKEN: ${{ steps.tap.outputs.token }}
           READ_TOKEN: ${{ github.token }}
         run: |
-          trap '[ $? -eq 0 ] || echo "::error::vhid $VERSION_NUMBER is published; move the cask with \`gh workflow run vhid.yml --repo promptctl/homebrew-tap\` rather than re-running this job (docs/releasing.md)"' EXIT
-          workflow=repos/promptctl/homebrew-tap/actions/workflows/vhid.yml
+          trap '[ $? -eq 0 ] || echo "::error::vhid $VERSION_NUMBER is published; move the cask with \`gh workflow run vhid.yaml --repo promptctl/homebrew-tap\` rather than re-running this job (docs/releasing.md)"' EXIT
+          workflow=repos/promptctl/homebrew-tap/actions/workflows/vhid.yaml
           state=$(gh api "$workflow" --jq .state)
           case $state in
             active) ;;
