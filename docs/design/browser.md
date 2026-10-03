@@ -12,7 +12,7 @@ Measured on studious on 2026-10-03: macOS 15.0.1, Safari 18.0.1, Chrome 154.0.80
 
 ## What was found
 
-Each cell names the readers that found the element. "Right" means a click on the merged answer's point landed on that element.
+Each cell names the readers that found the element. "Right" means a click on the merged answer's point landed on that element. For the canvas, the page could only tell that the click landed on the canvas, not on the word.
 
 | Element | Safari | Chrome | Firefox |
 | --- | --- | --- | --- |
@@ -23,7 +23,7 @@ Each cell names the readers that found the element. "Right" means a click on the
 | Text field by its `<label>` ("Email address") | right: the label and the field both match, and a click on either reaches the field | right, same | right, same |
 | Three "Remove" buttons, one per row | three right points, nothing to tell them apart | same | same |
 | Button in an iframe ("Inside frame") | right, tree and pixels | right, tree and pixels | right, tree and pixels |
-| Text drawn on a canvas ("Canvas word") | right, pixels only | right, pixels only | right, pixels only |
+| Text drawn on a canvas ("Canvas word") | on the canvas, pixels only | on the canvas, pixels only | on the canvas, pixels only |
 | Button 3000 points below the fold ("Far below") | not found; found and right after scrolling | **found at a wrong point**: the tree places it on the viewport's bottom edge, and a click there misses the button; right after scrolling | not found; found and right after the End key |
 
 The tree reads `aria-label` (the button's accessibility description), iframe content and labelled fields in all three browsers. Pixels covers canvas text, which has no tree node. The default merged reader found every on-screen element at the right point, though in Chrome its first "Settings" row was the bookmark's.
