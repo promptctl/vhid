@@ -108,12 +108,17 @@ A release that also changes the cask's body has to move the cask by hand, in one
 The workflow moves only `version` and `sha256`. Brew keeps the caskfile an install or
 upgrade was made with, and uninstalls and zaps by it, so anyone who upgrades between the
 workflow's bump and the body change keeps the old body until the next version. Disable
-the workflow before pushing the tag. Once the release is published, fetch its pkg, hold it
-to `scripts/assess-pkg`, run `scripts/update-cask <tap checkout> <version> <pkg>` on the
-tap branch that carries the body change, merge it within
-the `cask` job's 90 minutes, and enable the workflow again. Its next run then finds the
-cask current:
+the workflow before pushing the tag:
 
 ```sh
 gh workflow disable vhid.yml --repo promptctl/homebrew-tap
+```
+
+Once the release is published, fetch its pkg, hold it to `scripts/assess-pkg`, and run
+`scripts/update-cask <tap checkout> <version> <pkg>` on the tap branch that carries the
+body change. Merge that within the `cask` job's 90 minutes, then enable the workflow
+again; its next run finds the cask current:
+
+```sh
+gh workflow enable vhid.yml --repo promptctl/homebrew-tap
 ```
