@@ -156,9 +156,10 @@ In Claude Code, install the vhid plugin once vhid itself is installed:
 ```
 
 The plugin adds both tools as [MCP](https://modelcontextprotocol.io) servers, MCP being
-the protocol that AI clients such as Claude use to call external tools, and a skill that
-teaches the agent to look with `eyes`, act with `vhid`, and look again to see what
-changed. When vhid is missing or `vhid doctor` is not `ready`, each new session tells the
+the protocol that AI clients such as Claude use to call external tools, and two skills:
+one teaches the agent to look with `eyes`, act with `vhid`, and look again to see what
+changed; the other invokes any app's menu item by its name, through the Help menu's
+search. When vhid is missing or `vhid doctor` is not `ready`, each new session tells the
 agent so, with the step to take.
 
 [docs/mcp.md](docs/mcp.md) adds the two servers to Claude Code without the plugin or to

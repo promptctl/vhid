@@ -4,6 +4,7 @@ Each release's section is its GitHub Release notes, which keep line breaks, so e
 
 ## [Unreleased]
 
+- The Claude Code plugin has a second skill, `menu-item`, which invokes any app's menu item by its name: it searches for the item from the app's Help menu and checks the result before choosing it, and clicks down the menu path for an item in the Help menu itself.
 - `eyes find` and `eyes read` print each row's role, such as `AXButton`, or `pixels` for text only the pixels reader saw, as a third column before a near miss's edit count.
 - `eyes find --page <window id>` and `eyes read --page <window id>` read only the web page a browser window shows, not its toolbar and bookmarks. The MCP tools take `page`.
 - `eyes find --near <text>` orders matches by how close each sits to that text, so `eyes find Remove --near Beta --limit 1` gives the Remove button in Beta's row. The MCP tool takes `near`.

@@ -15,7 +15,7 @@ a tool error naming it, before anything is connected.
 separate servers, and a client runs both.
 
 In Claude Code, the vhid plugin adds both servers, a skill that teaches the loop below,
-and a check at the start of each session that tells the agent when vhid is missing or not
+a skill that invokes an app's menu item by its name, and a check at the start of each session that tells the agent when vhid is missing or not
 `ready`:
 
 ```
