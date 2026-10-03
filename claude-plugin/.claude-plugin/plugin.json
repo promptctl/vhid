@@ -1,0 +1,12 @@
+{
+  "name": "vhid",
+  "description": "Type, click and read the screen on this Mac through vhid and eyes. Needs vhid installed: brew install --cask promptctl/tap/vhid.",
+  "author": {
+    "name": "promptctl",
+    "url": "https://github.com/promptctl"
+  },
+  "homepage": "https://github.com/promptctl/vhid#readme",
+  "repository": "https://github.com/promptctl/vhid",
+  "license": "Apache-2.0",
+  "keywords": ["macos", "keyboard", "mouse", "screen", "accessibility", "automation"]
+}

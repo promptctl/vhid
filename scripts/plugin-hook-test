@@ -1,0 +1,99 @@
+#!/bin/bash
+# The Claude Code plugin's SessionStart hook run against a scratch plugin root, whose
+# .mcp.json names stub vhid and eyes binaries, so nothing here reads this Mac's install.
+#
+# [LAW:behavior-not-structure] What is checked is what the hook said, on which stream,
+# and what it exited with, for each state an install can be in.
+#
+# Held to bash 3.2, like every script here.
+set -uo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+SCRATCH=$(mktemp -d) || exit 1
+trap 'rm -rf "$SCRATCH"' EXIT
+failed=0
+fail() { echo "plugin-hook-test: $1" >&2; failed=1; }
+
+VHID=$SCRATCH/bin/vhid
+EYES=$SCRATCH/bin/eyes
+mkdir -p "$SCRATCH/bin"
+servers() {
+  printf '{"mcpServers": {%s}}\n' "$1" >"$SCRATCH/.mcp.json"
+}
+servers "\"vhid\": {\"command\": \"$VHID\", \"args\": [\"mcp\"]}, \"eyes\": {\"command\": \"$EYES\", \"args\": [\"mcp\"]}"
+# A vhid whose doctor prints a verdict and row and exits with the status given.
+vhid_doctor() {
+  printf '#!/bin/sh\n[ "$1" = doctor ] || exit 64\nprintf "%%s\\nDriver extension: %%s\\n" "%s" "%s"\nexit %s\n' "$1" "$2" "$3" >"$VHID"
+  chmod +x "$VHID"
+}
+eyes_present() { printf '#!/bin/sh\nexit 0\n' >"$EYES"; chmod +x "$EYES"; }
+
+run() {
+  out=$(CLAUDE_PLUGIN_ROOT=$SCRATCH claude-plugin/hooks/session-start 2>"$SCRATCH/err" </dev/null); status=$?
+  err=$(cat "$SCRATCH/err")
+}
+said() {
+  local want=$1 case=$2
+  [ "$status" -eq 0 ] || fail "$case: exited $status: $err"
+  [ -z "$err" ] || fail "$case: wrote to stderr: $err"
+  echo "$out" | grep -qF -- "$want" || fail "$case: said '$out', not '$want'"
+}
+
+# Ready: nothing to tell the agent.
+vhid_doctor ready running 0; eyes_present
+run
+[ "$status" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ] || fail "ready: exited $status, said '$out', '$err'; should say nothing"
+
+# Not ready: the doctor's reading, rows and all, and that its tools will refuse.
+vhid_doctor "not ready" "awaiting approval" 1
+run
+said "vhid is installed but not ready" "not ready"
+said "Driver extension: awaiting approval" "not ready"
+
+# A doctor that fails some other way is not taken for either verdict.
+vhid_doctor "" crashed 3
+run
+said "failed with exit status 3, so whether its tools can type or click is unknown" "doctor failed"
+said "Driver extension: crashed" "doctor failed"
+
+# Exit 1 with no verdict is a doctor that threw, not one that said "not ready".
+printf '#!/bin/sh\necho "Error: no installation" >&2\nexit 1\n' >"$VHID"
+run
+said "failed with exit status 1, so whether its tools can type or click is unknown" "doctor threw"
+said "Error: no installation" "doctor threw"
+echo "$out" | grep -qF "not ready" && fail "doctor threw: said not ready: '$out'"
+
+# Missing binaries: each named, with what it takes away and the install step.
+rm -f "$EYES"; vhid_doctor ready running 0
+run
+said "there is no $EYES, so" "eyes missing"
+said "this session cannot read the screen." "eyes missing"
+said "brew install --cask promptctl/tap/vhid" "eyes missing"
+# With eyes missing, vhid's own readiness is still asked and said.
+vhid_doctor "not ready" "awaiting approval" 1
+run
+said "there is no $EYES, so" "eyes missing, vhid not ready"
+said "Driver extension: awaiting approval" "eyes missing, vhid not ready"
+rm -f "$VHID"
+run
+said "there is no $VHID or $EYES, so" "both missing"
+said "this session cannot type or click, or read the screen." "both missing"
+eyes_present
+run
+said "there is no $VHID, so" "vhid missing"
+said "this session cannot type or click." "vhid missing"
+
+# A manifest that names no command for a server is the plugin's own fault, said loudly.
+servers "\"vhid\": {\"command\": \"$VHID\", \"args\": [\"mcp\"]}"
+run
+[ "$status" -ne 0 ] || fail "no eyes server: exited 0, should fail"
+echo "$err" | grep -qF "names no command for the eyes server" || fail "no eyes server: said '$err'"
+
+# The hook reads the plugin's real manifest, and that manifest names both servers.
+for server in vhid eyes; do
+  plutil -extract "mcpServers.$server.command" raw -o - claude-plugin/.mcp.json >/dev/null \
+    || fail "claude-plugin/.mcp.json names no command for the $server server"
+done
+
+[ "$failed" -eq 0 ] && echo "plugin-hook-test: ok"
+exit "$failed"

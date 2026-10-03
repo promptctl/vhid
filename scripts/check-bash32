@@ -4,7 +4,7 @@
 # is parsed by /bin/bash itself, every sh script by /bin/sh, and the bash 4+ features
 # 3.2 only refuses when it reaches them are looked for by name.
 #
-#   scripts/check-bash32 [file...]     defaults to scripts/*, pkg/scripts/* and pkg/uninstall
+#   scripts/check-bash32 [file...]     defaults to scripts/*, pkg/scripts/*, pkg/uninstall and the plugin hook
 #
 # Held to bash 3.2, like every script here.
 set -uo pipefail
@@ -12,7 +12,7 @@ set -uo pipefail
 failed=0
 if [ $# -eq 0 ]; then
   cd "$(dirname "${BASH_SOURCE[0]}")/.."
-  set -- scripts/* pkg/scripts/* pkg/uninstall
+  set -- scripts/* pkg/scripts/* pkg/uninstall claude-plugin/hooks/session-start
 fi
 for file in "$@"; do
   [ -f "$file" ] || { echo "check-bash32: no file at $file" >&2; failed=1; continue; }

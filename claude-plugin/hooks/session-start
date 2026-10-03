@@ -1,0 +1,57 @@
+#!/bin/bash
+# Claude Code's SessionStart hook for the vhid plugin. Says, before the agent reaches for
+# a tool, why vhid or eyes cannot answer on this Mac and the step that fixes it, so the
+# first the agent hears of a missing install is not a server that failed to start or a
+# click that was refused. Prints nothing when both are installed and `vhid doctor` says
+# `ready`; whatever it prints, Claude Code adds to the session's context.
+#
+# The binaries are the ones the plugin's .mcp.json runs, read from it rather than named
+# again here, so the check and the servers cannot come to look in different places.
+# [LAW:one-source-of-truth]
+#
+# hooks.json gives it 90 seconds: `vhid doctor` reads in series, and its slowest probes,
+# the driver's and launchd's, have Command.limit (30 s) each and the daemon's status call
+# HelperConnection.replyTimeout (5 s), asked twice after a refusal. A hook stopped short of
+# that says nothing at all, in the one state where there is most to say.
+#
+# Held to bash 3.2, like every script here.
+set -uo pipefail
+
+root=${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
+servers=$root/.mcp.json
+
+command_of() {
+  plutil -extract "mcpServers.$1.command" raw -o - "$servers" 2>/dev/null \
+    || { echo "vhid plugin: $servers names no command for the $1 server" >&2; exit 1; }
+}
+vhid=$(command_of vhid) || exit 1
+eyes=$(command_of eyes) || exit 1
+
+# What each missing binary takes away, joined into the one sentence the agent is told.
+missing= cannot=
+[ -x "$vhid" ] || { missing=$vhid; cannot="type or click"; }
+[ -x "$eyes" ] || { missing="${missing:+$missing or }$eyes"; cannot="${cannot:+$cannot, or }read the screen"; }
+[ -z "$missing" ] || cat <<EOF
+vhid is not installed on this Mac, or not all of it: there is no $missing, so what this plugin's MCP servers run is missing and this session cannot $cannot. If the user asks for that, tell them so and give them the steps: \`brew install --cask promptctl/tap/vhid\` (or the pkg from https://github.com/promptctl/vhid/releases/latest), then turn on the driver extension as https://github.com/promptctl/vhid#install describes, then start a new Claude Code session.
+
+EOF
+# Without vhid there is no doctor to ask. With it, the doctor is asked even when eyes is
+# missing, since vhid's tools answer without eyes and its readiness is still news.
+[ -x "$vhid" ] || exit 0
+
+doctor=$("$vhid" doctor 2>&1)
+status=$?
+# Exit 1 is the doctor's "not ready" only when its verdict says so: ArgumentParser also
+# exits 1 for an error the doctor threw, which prints that error and no rows.
+case "$status:$doctor" in
+  0:*) exit 0 ;;
+  "1:not ready"*) verdict="vhid is installed but not ready, so the vhid tools will refuse to type or click until the row below that is not met is put right. \`vhid doctor\` says:" ;;
+  *) verdict="vhid is installed, but \`vhid doctor\` failed with exit status $status, so whether its tools can type or click is unknown. It printed:" ;;
+esac
+cat <<EOF
+$verdict
+
+$doctor
+
+If the user asks for input on screen, tell them this and the step the row names. A driver extension can be turned on only by the person at the Mac. The eyes tools do not need vhid to be ready.
+EOF
