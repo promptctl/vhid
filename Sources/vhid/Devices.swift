@@ -81,10 +81,11 @@ struct Devices {
 
     /// The app in front, asked once the daemon has answered that the devices are up.
     ///
-    /// launchd starts vhidd on the first call and its devices take about a second to come
-    /// up, so asked any earlier the answer would be that long old by the first key - the
-    /// window `--into` exists to close. The daemon's answer is the wait, made on `queue`
-    /// like every other, and it claims nothing. [LAW:no-ambient-temporal-coupling]
+    /// launchd starts vhidd on the first call, so asked any earlier the answer would be as
+    /// old as the daemon's start by the first key - the window `--into` exists to close.
+    /// `status` is answered once the daemon is listening, and refused while its devices
+    /// are down, so a verb that gets past it has devices to send to. It is made on `queue`
+    /// like every other call, and claims nothing. [LAW:no-ambient-temporal-coupling]
     static func front(_ helper: HelperConnection, on queue: DeviceQueue) -> @Sendable () async throws -> FrontApp? {
         {
             _ = try await queue.run { try helper.status() }

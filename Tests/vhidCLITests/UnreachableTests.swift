@@ -128,9 +128,9 @@ import Testing
         #expect(said.clicked == refused)
     }
 
-    /// Keys aimed into an app ask the daemon before they ask what is in front, so a daemon
-    /// that is not ready is what the caller hears, and no key is ever attempted.
-    @Test func keysAimedIntoAnAppWaitForTheDaemonBeforeAskingWhatIsInFront() async {
+    /// Keys aimed into an app ask the daemon before they ask what is in front, so devices
+    /// that are down are what the caller hears, and no key is ever attempted.
+    @Test func keysAimedIntoAnAppAskTheDaemonBeforeAskingWhatIsInFront() async {
         let typed = await Self.failure(against: .refusing(after: 0, refusal: Self.devicesDown)) {
             try await TypeCommand.type("ab", on: VerbTests.us, into: .into("TextEdit"), with: $0.typist, front: $0.front)
         }

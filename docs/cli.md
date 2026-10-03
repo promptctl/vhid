@@ -28,7 +28,8 @@ verb asks macOS which app is in front and, when it is another, refuses with noth
 sent, naming the app that was: `TextEdit is not in front, so nothing was sent: Terminal
 (pid 512) is`. It is asked once, so a window that comes forward while the keys are going
 down still gets the rest, and it is the app that is checked, not the field or a panel of
-another process over it.
+another process over it. At the login window, or with another user's session in front,
+the app in front cannot be read from this user's session, so `--into` refuses there too.
 
 Which keys make which characters is the calling user's keyboard layout, read in the CLI
 rather than in the daemon: macOS answers that question per process, and a root daemon

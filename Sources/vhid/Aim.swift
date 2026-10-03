@@ -62,12 +62,11 @@ struct FrontApp: Sendable, Equatable, CustomStringConvertible {
     /// NSWorkspace answers for this user's session, and the keys go to the session in
     /// front. So the console's user is asked first, and when it is another, or the login
     /// window's, the answer here would be about a session the keys do not reach: that is
-    /// refused rather than read, and the refusal says the way past it: leave out the aim.
-    /// [LAW:no-silent-failure]
+    /// refused rather than read. [LAW:no-silent-failure]
     static let inFront: @Sendable () async throws -> FrontApp? = {
         var console: uid_t = 0
         let user = SCDynamicStoreCopyConsoleUser(nil, &console, nil) as String?
-        guard user != nil, user != "loginwindow", console == getuid() else { throw AnotherSessionInFront(user: user) }
+        try AnotherSessionInFront.check(user: user, console: console, mine: getuid())
         return await MainActor.run {
             NSWorkspace.shared.frontmostApplication.map { FrontApp(pid: $0.processIdentifier, name: $0.localizedName) }
         }
@@ -78,9 +77,15 @@ struct FrontApp: Sendable, Equatable, CustomStringConvertible {
 struct AnotherSessionInFront: Error, Equatable, CustomStringConvertible {
     let user: String?
 
+    /// Throws unless the console's session is `mine`: a user's, not the login window's.
+    /// [LAW:effects-at-boundaries] The reads are the caller's; this is only the rule.
+    static func check(user: String?, console: uid_t, mine: uid_t) throws {
+        guard let user, user != "loginwindow", console == mine else { throw AnotherSessionInFront(user: user) }
+    }
+
     var description: String {
         let front = user.map { $0 == "loginwindow" ? "the login window is" : "\($0)'s session is" } ?? "no session is"
-        return "\(front) in front, not this user's, so which app is in front cannot be read here and nothing was sent; without into, the keys go to whatever is in front"
+        return "\(front) in front, not this user's, so which app is in front cannot be read here and nothing was sent"
     }
 }
 

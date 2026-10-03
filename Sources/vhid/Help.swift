@@ -34,7 +34,7 @@ enum Help {
     static let text = "the text to type: anything the keyboard layout has keys for, dead-key sequences and line breaks included"
     static let chords = "the chords, pressed in order"
     static let layout = "the keyboard layout to read keys off, by input source id, e.g. com.apple.keylayout.Dvorak; left out, the calling user's own layout, or US English when the system reports none. Name it when the Mac is at the login window or another user is in front, whose layout the caller cannot see"
-    static let into = "the application the keys are for, named as eyes windows prints the frontmost application, e.g. TextEdit. Asked of macOS once, just before the first key: with another application in front, nothing is sent and the refusal names it. Left out, the keys go wherever the keyboard is pointed"
+    static let into = "the application the keys are for, named as eyes windows prints the frontmost application, e.g. TextEdit. Asked of macOS once, just before the first key: with another application in front, or another session, nothing is sent and the refusal names it. Left out, the keys go wherever the keyboard is pointed"
     static let button = "which button: left, right, middle, or a number from 1 to 32"
     static let times = "how many presses without moving between them, at least 1"
     static let vertical = "wheel ticks, positive rolling the wheel away from the hand. With macOS's Natural scrolling on, as it is by default, that moves the view toward the end of what is scrolled, so the content slides up; with it off, toward the start. Negative is the other way"
