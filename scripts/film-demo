@@ -34,6 +34,7 @@ band=132
 out=''
 started=''
 : > "$work/lines.tsv"
+: > "$work/progress"
 mkfifo "$work/keys"
 
 # Each band line is stamped with the wall clock; the stamps become clip seconds once the
@@ -77,12 +78,16 @@ view_y=$(clamp $((wy + wh / 2 - view[1] / 2)) $((screen_height - view[1])))
 # [LAW:no-ambient-temporal-coupling]
 ffmpeg -hide_banner -loglevel error -f avfoundation -capture_cursor 1 -capture_mouse_clicks 1 \
     -framerate 30 -pixel_format nv12 -use_wallclock_as_timestamps 1 -i 'Capture screen 0:none' \
-    -c:v libx264 -preset ultrafast -crf 14 -copyts "$work/screen.mkv" < "$work/keys" &
+    -c:v libx264 -preset ultrafast -crf 14 -copyts -progress "$work/progress" "$work/screen.mkv" < "$work/keys" &
 capture=$!
 # q on its stdin is what ends an ffmpeg capture cleanly; SIGINT ends it with 255.
 exec 3> "$work/keys"
 # A capture that ended early printed why; filming on would only bury that under the demo.
 capturing() { kill -0 "$capture" || { echo "film-demo: the screen capture ended early" >&2; exit 1; }; }
+# Filming starts once the capture holds a frame, so no step comes before the clip's zero
+# however slowly avfoundation starts; the beat after it is only a lead-in.
+# [LAW:no-ambient-temporal-coupling]
+until grep -q '^frame=[1-9]' "$work/progress"; do capturing; sleep 0.1; done
 sleep "$beat"
 capturing
 film
