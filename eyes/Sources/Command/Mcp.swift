@@ -26,10 +26,29 @@ struct Mcp: AsyncParsableCommand {
             answer with what those verbs print, scope line first.
             """)
 
+    /// What a client's initialize tells it about pairing this server with vhid's: the
+    /// shared screen points and the look-act-look loop. A copy of docs/mcp-instructions.txt,
+    /// which vhid's server carries too: the packages link nothing of each other's, so each
+    /// holds the text, and a test in each holds it to the file. [LAW:one-source-of-truth]
+    static let instructions = """
+        vhid and eyes are two MCP servers that work as a pair. eyes reads the screen: what is in front, and where text is. vhid drives a virtual keyboard and mouse that macOS takes for hardware. A client with only one of them is half the pair; both come with vhid, served by `vhid mcp` and `eyes mcp`.
+
+        Every point either server prints or takes is the same screen point. The point eyes `find` prints is the point vhid `click` takes, as printed: no scaling, no offset, negative on a display left of or above the main one.
+
+        Neither server decides anything. `click` presses whatever is at the point it is given, `type` types into whatever has keyboard focus, and `find` reports what is on screen, not whether an act did what was meant. So work in a loop:
+
+        1. Look with eyes: `windows` for what is in front, `find` for where the text is.
+        2. Act with vhid on what you saw.
+        3. Look again at the same place. `find` with `until` and a `timeout` waits for the change; do not sleep and retry.
+
+        Done means a look after the act showed the change. An act's answer says the act happened, not what it did.
+        """
+
     /// The server as a client's initialize finds it, with its tools attached, each call
     /// held `underway` on the transport it will be started on.
     static func server(_ tools: [EyesTool] = EyesTools.all(), on transport: AnsweringTransport) async -> Server {
-        let server = Server(name: "eyes", version: Version.current, capabilities: .init(tools: .init(listChanged: false)))
+        let server = Server(name: "eyes", version: Version.current, instructions: instructions,
+                            capabilities: .init(tools: .init(listChanged: false)))
         await server.withMethodHandler(ListTools.self) { _ in .init(tools: tools.map(\.tool)) }
         await server.withMethodHandler(CallTool.self) { request in
             guard let verb = tools.first(where: { $0.tool.name == request.name }) else {

@@ -1,3 +1,4 @@
+import Foundation
 import Eyes
 import Grants
 import MCP
@@ -84,8 +85,9 @@ import Testing
         return (said, isError)
     }
 
-    /// The binary and the server report the one stamped version. [LAW:one-source-of-truth]
-    @Test func theVersionIsTheStampedOne() async throws {
+    /// The binary and the server report the one stamped version, and the server the one
+    /// wording of its pairing with vhid. [LAW:one-source-of-truth]
+    @Test func theVersionIsTheStampedOneAndThePairingTheDocumentedOne() async throws {
         #expect(Eye.configuration.version == Version.current)
         let (clientSide, serverSide) = await InMemoryTransport.createConnectedPair()
         let transport = AnsweringTransport(serverSide)
@@ -101,6 +103,10 @@ import Testing
         await server.stop()
         #expect(result.serverInfo.name == "eyes")
         #expect(result.serverInfo.version == Version.current)
+        // The pairing with vhid, as docs/mcp-instructions.txt words it for both servers.
+        let root = URL(filePath: #filePath).deletingLastPathComponent().appending(path: "../../..").standardized
+        let pairing = try String(contentsOf: root.appending(path: "docs/mcp-instructions.txt"), encoding: .utf8)
+        #expect(result.instructions == pairing.trimmingCharacters(in: .newlines))
     }
 
     @Test func theToolsAreListedAndReadOnly() async throws {
