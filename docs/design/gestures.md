@@ -1,6 +1,6 @@
 # Trackpad gestures: which ones vhid's devices reach
 
-No trackpad gesture reaches macOS as a gesture through vhid's devices. The driver presents a keyboard and a mouse, and nothing a gesture is built from: no touches, no digitizer. What vhid can reach is what each gesture *does*. Almost every gesture's action has a keyboard shortcut, a mouse button or a click that gets the same result, and on studious each of those worked. The exception is smart zoom, which has no route of its own. Rotate has one only where an app offers a rotate command.
+No trackpad gesture reaches macOS as a gesture through vhid's devices. The driver presents a keyboard and a mouse, and nothing a gesture is built from: no touches, no digitizer. What vhid can reach is what each gesture *does*. Almost every gesture's action has a keyboard shortcut, a mouse button or a click that gets the same result, and on studious each one tried worked. The exception is smart zoom, which has no route of its own. Rotate has one only where an app offers a rotate command.
 
 Measured on studious on 2026-10-03: macOS 15.0.1, Safari 18.0.1, Chrome 154, Maps 3.0, TextEdit, Preview; vhid 0.2.0, eyes 0.3.0-dev+a5e9794. Every act went through vhid's devices. Each result was checked by what changed on screen: the URL eyes read in the address bar, or a `screencapture` taken over ssh.
 
@@ -8,26 +8,26 @@ Measured on studious on 2026-10-03: macOS 15.0.1, Safari 18.0.1, Chrome 154, Map
 
 | Gesture | What it does | Route through the devices | On studious |
 | --- | --- | --- | --- |
-| Two-finger scroll | scrolls | the wheel: `vhid scroll` | vhid's existing verb |
+| Two-finger scroll | scrolls | the wheel: `vhid scroll` | vhid's existing verb; how far it goes is vhid-scroll-1m8 |
 | Two-finger click | secondary click | the right button: `vhid click --button right` | vhid's existing verb |
 | Tap to click, three-finger drag | click, drag | the left button: `vhid click`, `vhid drag` | vhid's existing verbs |
-| Two-finger swipe left or right | back or forward a page | ⌘[ and ⌘] | worked in Safari and Chrome |
+| Two-finger swipe right or left | back or forward a page | ⌘[ and ⌘] | worked in Safari and Chrome |
 | | | buttons 4 and 5: `vhid click --button 4` | worked in Chrome; did nothing in Safari |
 | | | the horizontal wheel | did nothing in either |
 | Pinch | zoom in or out | ⌘= and ⌘- | zoomed Safari's page and Maps' map |
 | Two-finger double-tap | smart zoom on the block under the pointer | none; ⌘= zooms the whole page instead | |
 | Two-finger rotate | rotates | the app's own command, where it has one: Preview's ⌘R and ⌘L | worked in Preview |
 | Force click, three-finger tap | Look Up | select the word, then ⌃⌘D | worked in TextEdit |
-| Three- or four-finger swipe left or right | next or previous Space or full-screen app | ⌃→ and ⌃← | worked between the desktop and a full-screen TextEdit |
+| Three- or four-finger swipe left or right | next or previous Space or full-screen app | its shortcuts: ⌃→ and ⌃← by default | worked between the desktop and a full-screen TextEdit |
 | Three- or four-finger swipe up | Mission Control | its shortcut: ⌃↑ by default, ⌥Q on studious | worked |
-| Three- or four-finger swipe down | App Exposé | its shortcut: ⌃↓ | worked |
-| Spread thumb and three fingers | Show Desktop | its shortcut: F11 | worked; F11 again brought the windows back |
-| Pinch thumb and three fingers | Launchpad | no shortcut by default; ⌘Space, type `Launchpad`, Return | opened through Spotlight |
+| Three- or four-finger swipe down | App Exposé | its shortcut: ⌃↓ by default | worked |
+| Spread thumb and three fingers | Show Desktop | its shortcut: F11 by default | worked; F11 again brought the windows back |
+| Pinch thumb and three fingers | Launchpad | no shortcut by default; Spotlight's shortcut (⌘Space by default), type `Launchpad`, Return | opened through Spotlight |
 | Two-finger swipe in from the right edge | Notification Center | click the date and time in the menu bar | worked; Escape closed it |
 
 ## What the measurements found
 
-**Mission Control's shortcuts belong to the user.** On studious, Mission Control is ⌥Q, not the default ⌃↑. A route that presses the default would do nothing there, or would do whatever the user bound that key to. The bindings are under System Settings > Keyboard > Keyboard Shortcuts > Mission Control, and are stored as numbered entries in `~/Library/Preferences/com.apple.symbolichotkeys.plist`: 32 Mission Control, 33 App Exposé, 36 Show Desktop, 79 and 81 one Space left and right, 160 Launchpad. Each entry has `enabled` and its `parameters`: the character, the virtual key code and the modifier flags. On studious, 32 read `[113, 12, 524288]`, which is q, key code 12 and Option. Launchpad's entry 160 was disabled and had no key.
+**The shortcuts belong to the user.** On studious, Mission Control is ⌥Q, not the default ⌃↑. A route that presses the default would do nothing there, or would do whatever the user bound that key to. The same holds for every shortcut in the table marked "by default". The bindings are under System Settings > Keyboard > Keyboard Shortcuts, and are stored as numbered entries in `~/Library/Preferences/com.apple.symbolichotkeys.plist`: 32 Mission Control, 33 App Exposé, 36 Show Desktop, 64 Spotlight, 79 and 81 one Space left and right, 160 Launchpad. Each entry has `enabled` and its `parameters`: the character, the virtual key code and the modifier flags. On studious, 32 read `[113, 12, 524288]`, which is q, key code 12 and Option. Launchpad's entry 160 was disabled and had no key.
 
 **The horizontal wheel does not swipe between pages.** Ten ticks sent as one act, and 41 single-tick reports 16 ms apart, in both directions, left Safari and Chrome on the page they were on. The single ticks rule out vhid packing its ticks into one report (vhid-scroll-1m8). Back and forward are ⌘[ and ⌘], which both browsers took. Chrome also took buttons 4 and 5, and Safari ignored them.
 
@@ -48,6 +48,6 @@ Apple's vendor keyboard page has usages for Spotlight (0x01), Launchpad (0x04), 
 On studious, with vhid at `/usr/local/bin/vhid` and eyes at hand, and the app brought to the front with `open -a`:
 
 - Back and forward: open two pages in one tab (⌘T, type the first, Return; ⌘L, type the second, Return), then read the address bar with `eyes read --rect` over the window's top 40 points after each act.
-- Spaced wheel ticks: a `vhid play` script whose lines are `{"t_ms":<16·i>,"wheel":{"v":0,"h":1}}`.
+- Spaced wheel ticks: a `vhid play` script whose first line puts the pointer over the browser window, `{"to":{"x":…,"y":…}}`, and whose other lines are `{"t_ms":<16·i>,"wheel":{"v":0,"h":1}}`.
 - Spaces: ⌃⌘F puts TextEdit in a full-screen Space of its own; ⌃⌘F again takes it out.
 - The shortcuts in force: `plutil -convert json -o - ~/Library/Preferences/com.apple.symbolichotkeys.plist`, then read the entries above.
