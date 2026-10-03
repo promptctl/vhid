@@ -87,8 +87,9 @@ notarized and signed by the team. The write is the tap's own token. A run that f
 cask current changes nothing.
 
 Once a release is published, `release.yml` starts that workflow, waits for its run, and
-reads the cask it left, failing the release when the run fails, takes more than ten
-minutes, or leaves the cask short of the release. The Release is public by then, so
+reads the cask once the run ends, failing the release when the cask is short of the
+release or the run is not done within ten minutes. The cask is the verdict, so a run the
+tap's concurrency group cancelled for a later one that moved the cask passes. The Release is public by then, so
 re-running the job would only fail at publishing; `gh workflow run vhid.yml --repo
 promptctl/homebrew-tap` moves the cask instead, and the tap's own half-hourly schedule
 runs the same workflow. `release.yml` starts it with a token of the promptctl tap App, a

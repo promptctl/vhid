@@ -155,14 +155,15 @@ jobs:
         run: scripts/release-keychain delete "$NOTARY_KEYCHAIN"
 
       # The tap's vhid workflow (cask.yml here) is the one writer of the cask, with the
-      # tap's own token; this starts it now, waits for it, and reads the cask it left, so
-      # the release fails when the move does not land. Ten minutes is the release's whole
-      # budget, so a run still going after it has missed it however fast the build was.
-      # The Release is published by then, so the error names what moves the cask without
-      # re-running this job.
+      # tap's own token; this starts it now, waits for its run, and reads the cask, so the
+      # release fails when the move does not land. [LAW:one-source-of-truth] The cask is
+      # the verdict, not the run: a run the tap's concurrency group cancelled for a later
+      # one leaves the cask to that one. [LAW:single-enforcer] The ten minutes, the
+      # release's whole budget, are this script's deadline alone, so missing it still
+      # prints what to do. The Release is published by then, so the error names what
+      # moves the cask without re-running this job.
       - name: The tap's cask is at this release
         if: env.PRERELEASE == 'false'
-        timeout-minutes: 10
         env:
           GH_TOKEN: ${{ steps.tap.outputs.token }}
           READ_TOKEN: ${{ github.token }}
@@ -174,11 +175,15 @@ jobs:
             echo "::error::$1: https://github.com/promptctl/homebrew-tap/actions/runs/$run. vhid $VERSION_NUMBER is published; move the cask with 'gh workflow run vhid.yml --repo promptctl/homebrew-tap' rather than re-running this job (docs/releasing.md)"
             exit 1
           }
-          gh run watch "$run" --repo promptctl/homebrew-tap --exit-status --interval 5 >/dev/null \
-            || stuck "the tap's run $run did not succeed"
+          while :; do
+            status=$(gh run view "$run" --repo promptctl/homebrew-tap --json status,conclusion --jq 'if .status == "completed" then .conclusion else .status end')
+            case $status in queued | in_progress | pending | waiting | requested) ;; *) break ;; esac
+            [ "$SECONDS" -lt 600 ] || stuck "the tap's run $run is still $status after ${SECONDS}s"
+            sleep 5
+          done
           cask=$RUNNER_TEMP/vhid.rb
           GH_TOKEN=$READ_TOKEN gh api -H 'Accept: application/vnd.github.raw' repos/promptctl/homebrew-tap/contents/Casks/vhid.rb >"$cask"
           was=$(scripts/cask-stanza "$cask" version)
           [ "$(printf '%s\n' "$VERSION_NUMBER" "$was" | sort -V | tail -n 1)" = "$was" ] \
-            || stuck "the tap's run $run succeeded but left the cask at vhid $was, not $VERSION_NUMBER"
-          echo "the tap's cask is vhid $was, at $VERSION_NUMBER or past it, moved by its run $run in ${SECONDS}s" | tee -a "$GITHUB_STEP_SUMMARY"
+            || stuck "the tap's run $run ended $status and left the cask at vhid $was, not $VERSION_NUMBER"
+          echo "the tap's cask is vhid $was, at $VERSION_NUMBER or past it; the tap's run $run ended $status after ${SECONDS}s" | tee -a "$GITHUB_STEP_SUMMARY"
