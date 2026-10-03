@@ -609,24 +609,78 @@ extension Covers {
 }
 
 @Suite struct PageTests {
-    private let tree: [String: Node<String>] = [
-        "window": Node(facts: facts([.answered("Probe")], role: "AXWindow"), children: .answered(["toolbar", "scroll"])),
-        "toolbar": Node(facts: facts([.answered("Settings")], role: "AXToolbar"), children: .answered([])),
-        "scroll": Node(facts: facts([], role: "AXScrollArea"), children: .answered(["page"])),
-        "page": Node(facts: facts([], frame: .answered(ScreenRect(x: 22, y: 190, width: 1200, height: 688)), role: "AXWebArea"),
-                     children: .answered(["frame"])),
-        "frame": Node(facts: facts([], frame: .answered(ScreenRect(x: 53, y: 616, width: 420, height: 90)), role: "AXWebArea"),
-                      children: .answered([])),
-    ]
+    static let window = ScreenRect(x: 0, y: 100, width: 1240, height: 800)
+    static let viewport = ScreenRect(x: 22, y: 190, width: 1200, height: 688)
+    static let roomy = Bounds(elements: Limit(100)!, time: .seconds(60))
 
-    /// The page is the outermost web area, not a frame inside it.
-    @Test func thePageIsTheFirstWebAreaBreadthFirst() {
-        #expect(page(under: "window", within: Limit(10)!, read: { tree[$0]! }) == ScreenRect(x: 22, y: 190, width: 1200, height: 688))
+    private static func area(_ role: String, _ frame: ScreenRect?, _ children: [String]) -> Node<String> {
+        Node(facts: facts([], frame: .answered(frame), role: role), children: .answered(children))
     }
 
-    /// A window with no web area in reach has no page.
+    /// Chrome's shape: a toolbar, then a scroll area holding the page, which holds an iframe.
+    private static var browser: [String: Node<String>] { [
+        "window": area("AXWindow", window, ["toolbar", "scroll"]),
+        "toolbar": Node(facts: facts([.answered("Settings")], role: "AXToolbar"), children: .answered([])),
+        "scroll": area("AXScrollArea", viewport, ["page"]),
+        "page": area("AXWebArea", viewport, ["frame"]),
+        "frame": area("AXWebArea", ScreenRect(x: 53, y: 616, width: 420, height: 90), []),
+    ] }
+
+    private func search(_ tree: [String: Node<String>], within bounds: Bounds = roomy, elapsed: Duration = .zero) -> Paged {
+        pages(under: "window", in: Self.window, within: bounds, elapsed: { elapsed }, read: { tree[$0]! })
+    }
+
+    /// The page is the outermost web area: an iframe inside it is that page, not another.
+    @Test func thePageIsTheOutermostWebArea() throws {
+        let paged = search(Self.browser)
+        #expect(paged == Paged(pages: [Self.viewport], examined: 4, stop: nil))
+        #expect(try paged.page(in: 219) == Self.viewport)
+    }
+
+    /// A web area as tall as its document - WebKit's - is the part its viewport shows,
+    /// never the browser above it or whatever lies below the window.
+    @Test func aPageIsCutToTheViewportThatClipsIt() {
+        var tree = Self.browser
+        tree["page"] = Self.area("AXWebArea", ScreenRect(x: 22, y: -400, width: 1200, height: 5000), [])
+        #expect(search(tree).pages == [Self.viewport])
+    }
+
+    /// A background tab's web area shows nothing, so it is no page.
+    @Test func aWebAreaShowingNothingIsNoPage() {
+        var tree = Self.browser
+        tree["window"] = Self.area("AXWindow", Self.window, ["toolbar", "scroll", "hidden"])
+        tree["hidden"] = Self.area("AXWebArea", ScreenRect(x: 22, y: 190, width: 0, height: 0), [])
+        #expect(search(tree).pages == [Self.viewport])
+    }
+
+    /// A docked DevTools is a second page beside the first: which one was meant is the
+    /// caller's to say, not the walk order's.
+    @Test func twoPagesSideBySideAreRefused() {
+        var tree = Self.browser
+        tree["window"] = Self.area("AXWindow", Self.window, ["toolbar", "scroll", "devtools"])
+        tree["devtools"] = Self.area("AXWebArea", ScreenRect(x: 900, y: 190, width: 322, height: 688), [])
+        #expect(throws: PageError.self) { try search(tree).page(in: 219) }
+        #expect(search(tree).pages.count == 2)
+    }
+
+    /// No web area at all is no page.
     @Test func aWindowWithNoWebAreaHasNoPage() {
-        #expect(page(under: "toolbar", within: Limit(10)!, read: { tree[$0]! }) == nil)
-        #expect(page(under: "window", within: Limit(3)!, read: { tree[$0]! }) == nil)
+        var tree = Self.browser
+        tree["window"] = Self.area("AXWindow", Self.window, ["toolbar"])
+        #expect(search(tree) == Paged(pages: [], examined: 2, stop: nil))
+        #expect { try search(tree).page(in: 219) } throws: { "\($0)".contains("shows no web page") }
+    }
+
+    /// A search cut short by either bound, or by an element whose children did not answer,
+    /// is not "no page" - an element it did not read could hold one, or a second.
+    @Test func aSearchCutShortKnowsNoPage() {
+        #expect(search(Self.browser, within: Bounds(elements: Limit(2)!, time: .seconds(60))).stop == .elementLimit(Limit(2)!))
+        #expect(search(Self.browser, elapsed: .seconds(61)) == Paged(pages: [], examined: 0, stop: .timeBudget(.seconds(60))))
+        var tree = Self.browser
+        tree["scroll"] = Node(facts: facts([], frame: .answered(Self.viewport), role: "AXScrollArea"), children: .unanswered)
+        #expect(search(tree).stop == .unread)
+        for cut in [search(tree), search(Self.browser, within: Bounds(elements: Limit(2)!, time: .seconds(60)))] {
+            #expect { try cut.page(in: 219) } throws: { "\($0)".contains("not read whole") }
+        }
     }
 }

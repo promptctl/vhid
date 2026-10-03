@@ -53,6 +53,9 @@ public struct Query: Sendable, Hashable {
         self.limit = limit
         self.near = near
     }
+
+    /// The same question asked of another region. [LAW:one-source-of-truth]
+    public func on(_ region: Region) -> Query { Query(match: match, region: region, limit: limit, near: near) }
 }
 
 /// How text is compared.
@@ -109,6 +112,19 @@ public enum Region: Sendable, Hashable {
     /// is the only reader that knows where a page is, and this package links none, so the
     /// frame is found by the caller and carried here with the window it is in.
     case page(window: UInt32, frame: ScreenRect)
+
+    /// Where a wait looks after its first read resolved this region to `resolved`.
+    /// A window or a page is held to that rectangle, so one that closes is its region with
+    /// the text gone rather than a place that can no longer be found - measured on
+    /// studious, waiting on a dialog by its window id threw "no on-screen window" the
+    /// moment it closed. A display keeps its id, which follows the monitor through sleep
+    /// and rearrangement where its old rectangle would not, and a rectangle is already one.
+    func pinned(to resolved: ScreenRect) -> Region {
+        switch self {
+        case .window, .page: .rect(resolved)
+        case .display, .rect: self
+        }
+    }
 }
 
 /// What a reader found, and what it can honestly say about having looked.

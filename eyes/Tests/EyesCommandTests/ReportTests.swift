@@ -2,6 +2,7 @@
 import Pixels
 import Telemetry
 import TelemetryTesting
+@testable import Tree
 import Testing
 @testable import EyesCommand
 
@@ -136,5 +137,24 @@ import Testing
         #expect(seen[1].counts == ["reads": 1, "examined": 9, "matched": 1, "nearest": 0])
         #expect(seen[1].facts["until"] == "present")
         #expect(seen[2].error != nil && seen[2].counts == ["reads": 1])
+    }
+
+    /// Finding a page is one event of its own, found or not: how much it read, how many
+    /// pages it saw, and how far it got.
+    @MainActor @Test func findingAPageIsOneEvent() async throws {
+        let events = Collected()
+        let viewport = ScreenRect(x: 22, y: 190, width: 1200, height: 688)
+        try await Telemetry.$export.withValue(events.export) {
+            let found = try await Where.Place.page(219).region { _ in Paged(pages: [viewport], examined: 40, stop: nil) }
+            #expect(found == .page(window: 219, frame: viewport))
+            _ = try? await Where.Place.page(219).region { _ in Paged(pages: [viewport, viewport], examined: 52, stop: nil) }
+            _ = try? await Where.Place.page(219).region { _ in Paged(pages: [], examined: 4000, stop: .elementLimit(Limit(4000)!)) }
+        }
+        let seen = events.all
+        #expect(seen.map(\.event) == ["page", "page", "page"])
+        #expect(seen.map(\.outcome) == ["ok", "error", "error"])
+        #expect(seen.map(\.counts) == [["examined": 40, "pages": 1], ["examined": 52, "pages": 2], ["examined": 4000, "pages": 0]])
+        #expect(seen.map { $0.facts["reach"] } == ["whole", "whole", "element_limit"])
+        #expect(seen[1].error?.contains("2 web pages") == true)
     }
 }

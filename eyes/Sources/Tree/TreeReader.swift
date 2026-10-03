@@ -63,15 +63,17 @@ public struct TreeReader: Reader {
         )
     }
 
-    /// The web page window `id` shows, as the region that reads it and nothing of the
-    /// browser around it. Throws when the window is not on screen, when its app will not
-    /// list it, or when no page is in it. [LAW:no-silent-failure]
-    public func page(in id: UInt32) async throws -> Region {
+    /// What window `id`'s tree says of the web pages in it, for `Paged.page` to make one
+    /// region of. Throws when the window is not on screen. [LAW:no-silent-failure]
+    public func pages(in id: UInt32) async throws -> Paged {
         guard try await granted(Self.grant) else { throw TreeError.noGrant }
         guard let window = try Geometry.onScreen().windows.first(where: { $0.id == id }) else { throw NoSuchPlace.window(id) }
-        guard let element = try Self.match([window])[id],
-              let frame = try Tree.page(under: element, within: Self.bounds.elements, read: Self.node) else { throw NoSuchPlace.page(id) }
-        return .page(window: id, frame: frame)
+        let clock = ContinuousClock()
+        let start = clock.now
+        // A window its app will not list has nothing read: a search stopped short, not a
+        // window with no page.
+        guard let element = try Self.match([window])[id] else { return Paged(pages: [], examined: 0, stop: .unread) }
+        return try Tree.pages(under: element, in: window.frame, within: Self.bounds, elapsed: { clock.now - start }, read: Self.node)
     }
 
     /// The accessibility window for each on-screen window, by the window server's id.

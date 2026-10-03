@@ -91,9 +91,6 @@ struct Read: AsyncParsableCommand {
     @Option(help: "The most runs to print.")
     var limit = Limit.default.count
 
-    @Option(help: .init(stringLiteral: Help.near))
-    var near: String?
-
     @OptionGroup var place: Where
 
     @Option(help: .init(stringLiteral: Help.source))

@@ -32,11 +32,13 @@ button from a browser bookmark of the same name, or a field from its label.
 
 `--page <window id>` reads the web page a browser window shows, without the browser's
 toolbar and bookmarks. The accessibility tree finds the page, so it needs Accessibility
-even with `--source pixels`. `--near <text>` orders the matches by how close each sits
-to a run containing that text, on the same line first: of three "Remove" buttons, the
-one in Beta's row comes first, and `--limit 1` leaves only it. When nothing on screen
-contains the `--near` text, nothing matches, and the nearest rows are that text's near
-misses.
+even with `--source pixels`. A window showing no page, or two side by side such as a page
+and a docked DevTools, is refused; read one of the two with `--rect`.
+
+`--near <text>` orders the matches by how close each sits to a run containing that text,
+on the same line first: of three "Remove" buttons, the one in Beta's row comes first, and
+`--limit 1` leaves only it. When nothing on screen contains the `--near` text, nothing
+matches, and the nearest rows are that text's near misses.
 
 `find --until present|absent` re-reads the same rectangle until the text appears or is
 gone, then answers once, its scope line led by how many reads it took and how long. A

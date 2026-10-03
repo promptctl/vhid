@@ -92,10 +92,8 @@ public let waitInterval: Duration = .milliseconds(100)
 /// once. It reports; it retries no action. A read that throws ends the wait with that
 /// error: a reader that could not look has not seen the text go. [LAW:no-silent-failure]
 ///
-/// For a window, every read after the first looks at the rectangle the first one
-/// resolved, so the wait re-reads the same place: a window that closes is its region with the text gone, not a
-/// window that can no longer be found. Measured on studious, waiting on a dialog by its
-/// window id threw "no on-screen window" the moment the dialog closed.
+/// Every read after the first asks the same question of the region the first one
+/// resolved, as `Region.pinned` holds it.
 ///
 /// Over a read and not a `Reader`, so any reader - or a server's serialised one - waits
 /// the same way. [LAW:composability]
@@ -111,11 +109,7 @@ public func waiting(
         let began = clock.now
         let reading = try await read(asked)
         reads += 1
-        // Only a window is pinned. A display keeps its id, which follows the monitor
-        // through sleep and rearrangement where its old rectangle would not.
-        if case .window = query.region {
-            asked = Query(match: query.match, region: .rect(reading.scope.region), limit: query.limit)
-        }
+        asked = query.on(query.region.pinned(to: reading.scope.region))
         // A merge one of whose readers could not look can never read the region whole,
         // so an absence it waits for would only ever time out: that reader's error ends
         // the wait instead. [LAW:no-silent-failure]

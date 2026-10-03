@@ -82,6 +82,20 @@ import Testing
         #expect(script.asked.dropFirst().allSatisfy { $0 == Query(match: .contains("Save"), region: .rect(Self.region)) })
     }
 
+    /// A page is held to its rectangle as a window is, so a closed tab is the text gone;
+    /// and every read asks the whole question, `near` and the limit too, so the one beside
+    /// Beta is still the one answered once the region is pinned.
+    @Test func aPinnedPageKeepsTheWholeQuestion() async throws {
+        let query = Query(match: .contains("Remove"), region: .page(window: 219, frame: Self.region), limit: Limit(1)!,
+                          near: .contains("Beta"))
+        let script = Script([Self.present, Self.absent])
+        _ = try await waiting(for: Wait(until: .absent, seconds: 5)!, on: query, every: .milliseconds(1)) { try script.read($0) }
+        #expect(script.asked.first == query)
+        #expect(script.asked.dropFirst().allSatisfy {
+            $0 == Query(match: .contains("Remove"), region: .rect(Self.region), limit: Limit(1)!, near: .contains("Beta"))
+        })
+    }
+
     /// A display keeps its id on every read: its old rectangle may be another monitor.
     @Test func aDisplayIsReadByItsIdEveryTime() async throws {
         let query = Query(match: .contains("Save"), region: .display(3))

@@ -113,10 +113,25 @@ struct Where: ParsableArguments {
         case region(Region)
         case page(UInt32)
 
-        @MainActor func region() async throws -> Region {
+        @MainActor func region(
+            pages: (UInt32) async throws -> Paged = { try await TreeReader(granted: SourceKind.granted).pages(in: $0) }
+        ) async throws -> Region {
             switch self {
             case .region(let region): region
-            case .page(let id): try await TreeReader(granted: SourceKind.granted).page(in: id)
+            case .page(let id): try await Self.page(id, pages: pages)
+            }
+        }
+
+        /// [LAW:nothing-unseen] Finding a page is a walk of its own, before any look starts,
+        /// so it is a unit of its own: how much it read, how many pages it saw, and why it
+        /// stopped short when it did.
+        @MainActor private static func page(_ id: UInt32, pages: (UInt32) async throws -> Paged) async throws -> Region {
+            try await Telemetry.unit("page") {
+                let paged = try await pages(id)
+                Telemetry.count("examined", paged.examined)
+                Telemetry.count("pages", paged.pages.count)
+                Telemetry.note("reach", paged.stop?.kind ?? "whole")
+                return .page(window: id, frame: try paged.page(in: id))
             }
         }
     }
@@ -226,6 +241,17 @@ enum Report {
     }
 
     private static func point(_ p: ScreenPoint) -> String { "\(Int(p.x.rounded())),\(Int(p.y.rounded()))" }
+}
+
+private extension Paged.Stop {
+    /// Why a page search stopped short, for the page's event.
+    var kind: String {
+        switch self {
+        case .elementLimit: "element_limit"
+        case .timeBudget: "time_budget"
+        case .unread: "unread"
+        }
+    }
 }
 
 private extension Region {

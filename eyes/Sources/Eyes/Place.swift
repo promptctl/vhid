@@ -78,15 +78,12 @@ public enum NoSuchPlace: Error, CustomStringConvertible {
     case display(CGDirectDisplayID)
     case window(UInt32)
     case offScreen(ScreenRect)
-    /// A window whose accessibility tree holds no web page.
-    case page(UInt32)
 
     public var description: String {
         switch self {
         case .offScreen(let r): "\(r) is on no display, so there is nothing there to read"
         case .display(let id): "no display with id \(id) is attached"
         case .window(let id): "no on-screen window has id \(id); `eyes windows` lists the ones that do"
-        case .page(let id): "window \(id) shows no web page: its accessibility tree holds no AXWebArea"
         }
     }
 }

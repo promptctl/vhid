@@ -233,20 +233,93 @@ extension ScreenRect {
     var isThin: Bool { width <= 1 || height <= 1 }
 }
 
-/// The frame of the first web page under `root`, breadth first, so a page is found before
-/// the frames inside it - or nil when no element read holds one. A walk bounded by
-/// `elements`, as the reading walk is, since a page sits a few levels under its window
-/// and a browser's tree is tens of thousands wide. [LAW:effects-at-boundaries]
-func page<Element>(under root: Element, within elements: Limit, read: (Element) throws -> Node<Element>) rethrows -> ScreenRect? {
-    var queue = [root][...]
+/// What a window's tree said of the pages in it: the frame of each web area shown, cut to
+/// where the window and the areas clipping it let it draw, and how far the search got.
+public struct Paged: Sendable, Equatable {
+    public let pages: [ScreenRect]
+    public let examined: Int
+    /// Why the search ended before reading every element it reached, if it did.
+    public let stop: Stop?
+
+    /// The three ways a search for a page ends short - its own, since no result limit or
+    /// merge applies to it. [LAW:types-are-the-program]
+    public enum Stop: Sendable, Equatable, CustomStringConvertible {
+        case elementLimit(Limit)
+        case timeBudget(Duration)
+        /// An element's children did not answer, or the window's app would not list it.
+        case unread
+
+        public var description: String {
+            switch self {
+            case .elementLimit(let l): "it stopped at \(l.count) elements"
+            case .timeBudget(let d): "it stopped after \(d)"
+            case .unread: "parts of it did not answer"
+            }
+        }
+    }
+
+    /// The one page shown, or the refusal saying why there is not exactly one: a page
+    /// is known only from a search that read everything it reached, since an element
+    /// left unread could hold a second one. [LAW:no-silent-failure]
+    public func page(in window: UInt32) throws(PageError) -> ScreenRect {
+        if let stop { throw .unread(window, stop) }
+        guard let page = pages.first else { throw .none(window) }
+        guard pages.count == 1 else { throw .several(window, pages.count) }
+        return page
+    }
+}
+
+/// Every web page shown under `root`, breadth first and never inside one another: what
+/// is inside a page - its iframes - is that page. Each is cut to `window` and to every
+/// area above it that clips what it holds, as the reading walk's bound is, so a page
+/// scrolled partly out of its viewport is the part a person sees. A web area left with
+/// nothing to show - a background tab - is no page. Bounded as the reading walk is, by
+/// elements and by time, since a browser's tree is tens of thousands wide.
+/// [LAW:effects-at-boundaries]
+func pages<Element>(
+    under root: Element, in window: ScreenRect, within bounds: Bounds,
+    elapsed: () -> Duration, read: (Element) throws -> Node<Element>
+) rethrows -> Paged {
+    var queue = [(element: root, bound: window)][...]
+    var pages: [ScreenRect] = []
     var examined = 0
-    while let element = queue.popFirst(), examined < elements.count {
+    var unread = false
+    while let (element, bound) = queue.popFirst() {
+        guard examined < bounds.elements.count else { return Paged(pages: pages, examined: examined, stop: .elementLimit(bounds.elements)) }
+        guard elapsed() < bounds.time else { return Paged(pages: pages, examined: examined, stop: .timeBudget(bounds.time)) }
         let node = try read(element)
         examined += 1
-        if node.facts.role == webArea, case .answered(let frame?) = node.facts.frame, !frame.isThin { return frame }
-        queue.append(contentsOf: node.children.answer ?? [])
+        let placed = node.facts.frame.answer.flatMap { $0 }
+        let inner = placed.map { clips.contains(node.facts.role) && !$0.isEmpty ? ScreenRect(bound.cgRect.intersection($0.cgRect)) : bound } ?? bound
+        if node.facts.role == webArea {
+            if let placed, case let shown = bound.cgRect.intersection(placed.cgRect), !shown.isNull, !ScreenRect(shown).isThin {
+                pages.append(ScreenRect(shown))
+            }
+            continue
+        }
+        guard case .answered(let children) = node.children else { unread = true; continue }
+        queue.append(contentsOf: children.map { ($0, inner) })
     }
-    return nil
+    return Paged(pages: pages, examined: examined, stop: unread ? .unread : nil)
+}
+
+/// Why a window has no one page to read.
+public enum PageError: Error, CustomStringConvertible {
+    case none(UInt32)
+    /// More than one web area shown side by side, such as a page and a docked DevTools.
+    case several(UInt32, Int)
+    /// The search ended before it read every element it reached.
+    case unread(UInt32, Paged.Stop)
+
+    public var description: String {
+        switch self {
+        case .none(let id): "window \(id) shows no web page: its accessibility tree holds no AXWebArea on screen"
+        case .several(let id, let n): "window \(id) shows \(n) web pages side by side, such as a page and a docked DevTools;"
+            + " read the one meant with a rect"
+        case .unread(let id, let stop): "window \(id)'s accessibility tree was not read whole looking for its page (\(stop)),"
+            + " so whether it shows one is unknown; read it with a rect"
+        }
+    }
 }
 
 /// The role a browser gives the page it shows.
