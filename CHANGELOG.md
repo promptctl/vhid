@@ -4,6 +4,8 @@ Each release's section is its GitHub Release notes, which keep line breaks, so e
 
 ## [Unreleased]
 
+- A Claude Code plugin, `/plugin marketplace add promptctl/vhid` then `/plugin install vhid@vhid`, adds the `vhid` and `eyes` MCP servers, a skill for the look, act, look again loop, and a check at the start of each session that tells the agent when vhid is missing or not `ready`.
+
 ## [0.2.0]
 
 - vhid is a Homebrew cask: `brew install --cask promptctl/tap/vhid` installs the newest release's pkg, and `brew uninstall --cask vhid` removes it as `vhid-uninstall` does.

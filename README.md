@@ -146,21 +146,22 @@ Security**. With only one granted, they answer from that one and say which was m
 
 ### From an AI agent
 
-Both tools are also [MCP](https://modelcontextprotocol.io) servers, MCP being the
-protocol that AI clients such as Claude use to call external tools. `vhid mcp` serves
-the input verbs and `eyes mcp` serves the screen-reading ones, so an agent can look,
-click, and look again.
+In Claude Code, install the vhid plugin once vhid itself is installed:
 
-In Claude Code:
-
-```sh
-claude mcp add --scope user vhid -- /usr/local/bin/vhid mcp
-claude mcp add --scope user eyes -- /usr/local/bin/eyes mcp
+```
+/plugin marketplace add promptctl/vhid
+/plugin install vhid@vhid
 ```
 
-[docs/mcp.md](docs/mcp.md) has the configuration for Claude Desktop, lists the tools,
-shows the look-click-look loop step by step, and explains which app has to hold the
-screen permissions.
+The plugin adds both tools as [MCP](https://modelcontextprotocol.io) servers, MCP being
+the protocol that AI clients such as Claude use to call external tools, and a skill that
+teaches the agent to look with `eyes`, act with `vhid`, and look again to see what
+changed. When vhid is missing or `vhid doctor` is not `ready`, each new session tells the
+agent so, with the step to take.
+
+[docs/mcp.md](docs/mcp.md) adds the two servers to Claude Code without the plugin or to
+Claude Desktop, lists the tools, shows the loop step by step, and explains which app has
+to hold the screen permissions.
 
 ## Limits and status
 

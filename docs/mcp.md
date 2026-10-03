@@ -14,7 +14,19 @@ a tool error naming it, before anything is connected.
 `eyes mcp` serves `windows`, `displays`, `find`, `read` and `grants` the same way. The two are
 separate servers, and a client runs both.
 
-In Claude Code:
+In Claude Code, the vhid plugin adds both servers, a skill that teaches the loop below,
+and a check at the start of each session that tells the agent when vhid is missing or not
+`ready`:
+
+```
+/plugin marketplace add promptctl/vhid
+/plugin install vhid@vhid
+```
+
+The plugin does not install vhid; the pkg or the cask does. It follows this repository's
+`master`, so it can teach a tool the latest release does not have yet.
+
+In Claude Code without the plugin:
 
 ```sh
 claude mcp add --scope user vhid -- /usr/local/bin/vhid mcp

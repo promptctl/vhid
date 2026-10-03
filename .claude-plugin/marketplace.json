@@ -1,0 +1,15 @@
+{
+  "name": "vhid",
+  "description": "vhid, a virtual keyboard and mouse for macOS, and eyes, which reads the screen, for Claude Code.",
+  "owner": {
+    "name": "promptctl",
+    "url": "https://github.com/promptctl"
+  },
+  "plugins": [
+    {
+      "name": "vhid",
+      "source": "./claude-plugin",
+      "description": "Type, click and read the screen on this Mac through vhid and eyes"
+    }
+  ]
+}
