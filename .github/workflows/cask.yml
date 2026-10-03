@@ -5,7 +5,7 @@
 # for the move and fails when it does not come.
 #
 # A caller gives the job contents: write on itself, the tap; vhid it only reads, and
-# vhid is public.
+# vhid is public. The job runs on macOS because Gatekeeper is what judges the pkg.
 name: cask
 
 on:
@@ -17,7 +17,7 @@ defaults:
 
 jobs:
   cask:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
@@ -25,15 +25,20 @@ jobs:
           path: tap
       - uses: actions/checkout@v7
         with:
-          repository: promptctl/vhid
+          # The scripts of the commit this workflow is, whatever ref the tap calls it at.
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           path: vhid
 
       # [LAW:one-source-of-truth] The newest release is the highest version vhid has
       # published that is not a draft or a pre-release, read off its Releases each run;
       # the cask holds no other record of it. The sha256 is of the pkg as published,
       # fetched through the URL the cask builds from its version, so the hash is of what
-      # brew will fetch. update-cask leaves a cask already on that release as it is, so
-      # every run runs every step, and the push of an unchanged tap pushes nothing.
+      # brew will fetch. [LAW:single-enforcer] That pkg is held to a release's Gatekeeper
+      # verdict here, the one writer of the cask, so a Release made by any hand moves the
+      # cask only to a notarized pkg of the team's. update-cask leaves a cask already on
+      # that release as it is, so every run runs every step, and the push of an unchanged
+      # tap pushes nothing.
       - name: The cask is vhid's newest release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -42,6 +47,7 @@ jobs:
             --limit 1000 --json tagName --jq '.[].tagName | ltrimstr("v")' | sort -V | tail -n 1)
           pkg="$RUNNER_TEMP/vhid-$version.pkg"
           curl -fsSL -o "$pkg" "https://github.com/promptctl/vhid/releases/download/v$version/vhid-$version.pkg"
+          vhid/scripts/assess-pkg "$pkg"
           git -C tap config user.name 'github-actions[bot]'
           git -C tap config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           vhid/scripts/update-cask tap "$version" "$pkg" | tee -a "$GITHUB_STEP_SUMMARY"

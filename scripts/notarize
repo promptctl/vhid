@@ -38,10 +38,5 @@ fi
 xcrun stapler staple "$pkg" >&2
 xcrun stapler validate "$pkg" >&2
 
-# Gatekeeper judges a pkg as something to install. Anything but a notarized Developer ID
-# verdict is a pkg a downloading Mac would warn about, whatever the steps above said.
-assessment=$(spctl --assess --type install -vv "$pkg" 2>&1) || fail "Gatekeeper refuses $pkg: $assessment"
-grep -q 'source=Notarized Developer ID' <<<"$assessment" \
-  || fail "Gatekeeper accepts $pkg, but not as notarized: $assessment"
-echo "$assessment" >&2
+"$(dirname "$0")/assess-pkg" "$pkg"
 echo "$pkg"

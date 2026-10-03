@@ -77,13 +77,21 @@ one version and its pkg's sha256, so each release moves it. The tap moves it its
 its `vhid` workflow runs `.github/workflows/cask.yml` from this repository every half
 hour, which finds vhid's newest release (the highest version that is not a draft or a
 pre-release), fetches its pkg through the cask's own URL, and runs `scripts/update-cask`
-on the tap and pushes. The write is the tap's own token, so no secret for it is held
-here. A release made any way, the workflow or a Mac, is picked up the same way, and a
-run that finds the cask current changes nothing.
+on the tap and pushes, once `scripts/assess-pkg` has found the pkg notarized and signed
+by the team. The write is the tap's own token, so no secret for it is held here. A run
+that finds the cask current changes nothing.
+
+It reads GitHub Releases alone, so a release made on a Mac reaches the cask once it is
+published there:
+
+```sh
+gh release create v<version> dist/vhid-<version>.pkg --verify-tag --notes-file <its CHANGELOG section>
+```
 
 `release.yml`'s `cask` job waits up to 90 minutes for the tap's cask to name the
-release and fails when it does not. GitHub disables a scheduled workflow after 60 days
-with no activity in its repository, which a quiet tap reaches between releases; then,
+release, or a later one, and fails when it does not. GitHub disables a scheduled
+workflow after 60 days with no activity in its repository, which a quiet tap reaches
+between releases; then,
 and to move the cask at once:
 
 ```sh

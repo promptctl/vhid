@@ -19,14 +19,12 @@ echo "$version" | grep -Eqx '[0-9]+(\.[0-9]+)*' || {
   exit 2
 }
 sha256=$(shasum -a 256 "$pkg" | cut -d ' ' -f 1)
-# [LAW:no-silent-failure] Each line is rewritten where it is, so a cask whose shape has
-# moved on from `  version "..."` and `  sha256 "..."` is refused rather than left stale.
-# grep -c exits 1 on no match, which the count reports; any other failure stops here.
-for key in version sha256; do
-  count=$(grep -c "^  $key \"[^\"]*\"\$" "$cask") || [ $? -eq 1 ]
-  [ "$count" = 1 ] || { echo "update-cask: $cask has $count lines of the form '  $key \"...\"', not one" >&2; exit 1; }
-done
-was=$(sed -n 's/^  version "\(.*\)"$/\1/p' "$cask")
+was=$("$(dirname "$0")/cask-version" "$cask")
+# [LAW:no-silent-failure] The sha256 line is rewritten where it is, so a cask whose shape
+# has moved on from `  sha256 "..."` is refused rather than left stale. grep -c exits 1 on
+# no match, which the count reports; any other failure stops here.
+count=$(grep -c '^  sha256 "[^"]*"$' "$cask") || [ $? -eq 1 ]
+[ "$count" = 1 ] || { echo "update-cask: $cask has $count lines of the form '  sha256 \"...\"', not one" >&2; exit 1; }
 had=$(sed -n 's/^  sha256 "\(.*\)"$/\1/p' "$cask")
 # The cask already on this release is left as it is, provided the pkg is still the one
 # it names: a sha256 that moved under a published version is a pkg replaced after
@@ -38,11 +36,9 @@ if [ "$version" = "$was" ]; then
 fi
 # The cask only moves forward: a backport released after a newer version, or a re-run of
 # an older release's job, would otherwise take every Homebrew install back.
-awk -v new="$version" -v old="$was" 'BEGIN {
-  n = split(new, a, "."); m = split(old, b, "."); if (m > n) n = m
-  for (i = 1; i <= n; i++) { if (a[i] + 0 > b[i] + 0) exit 0; if (a[i] + 0 < b[i] + 0) exit 1 }
-  exit 1
-}' || { echo "update-cask: the cask names $was, which $version does not follow" >&2; exit 1; }
+# sort -V is the order cask.yml finds the newest release by, so the two cannot disagree.
+[ "$(printf '%s\n' "$was" "$version" | sort -V | tail -n 1)" = "$version" ] \
+  || { echo "update-cask: the cask names $was, which $version does not follow" >&2; exit 1; }
 
 sed -e "s/^  version \".*\"\$/  version \"$version\"/" \
   -e "s/^  sha256 \".*\"\$/  sha256 \"$sha256\"/" "$cask" >"$cask.new"

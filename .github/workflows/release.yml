@@ -144,20 +144,35 @@ jobs:
     needs: release
     if: ${{ needs.release.outputs.prerelease == 'false' }}
     runs-on: ubuntu-latest
-    permissions: {}
+    permissions:
+      contents: read
     timeout-minutes: 100
     env:
       VERSION_NUMBER: ${{ needs.release.outputs.version }}
     steps:
-      - name: The tap's cask is this release's
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: scripts
+
+      # The tap moves the cask straight to the newest release, so a release it passed over
+      # is served by a cask at a later one, in the order update-cask moves it by. A fetch
+      # that fails is reported and tried again the next minute; a cask that cannot be read
+      # fails here at once.
+      - name: The tap's cask is at this release or past it
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          cask=$RUNNER_TEMP/vhid.rb
+          was=unread
           for attempt in $(seq 90); do
-            was=$(gh api repos/promptctl/homebrew-tap/contents/Casks/vhid.rb --jq .content \
-              | base64 -d | sed -n 's/^  version "\(.*\)"$/\1/p')
-            [ "$was" = "$VERSION_NUMBER" ] && { echo "the tap's cask is vhid $was" | tee -a "$GITHUB_STEP_SUMMARY"; exit 0; }
+            if gh api -H 'Accept: application/vnd.github.raw' repos/promptctl/homebrew-tap/contents/Casks/vhid.rb >"$cask"; then
+              was=$(scripts/cask-version "$cask")
+              if [ "$(printf '%s\n' "$VERSION_NUMBER" "$was" | sort -V | tail -n 1)" = "$was" ]; then
+                echo "the tap's cask is vhid $was, at $VERSION_NUMBER or past it" | tee -a "$GITHUB_STEP_SUMMARY"
+                exit 0
+              fi
+            fi
             sleep 60
           done
-          echo "::error::after 90 minutes the tap's cask names $was, not $VERSION_NUMBER; see the vhid workflow's runs in promptctl/homebrew-tap (docs/releasing.md)"
+          echo "::error::after 90 minutes the tap's cask is not at $VERSION_NUMBER or past it (last read: $was); see the vhid workflow's runs in promptctl/homebrew-tap (docs/releasing.md)"
           exit 1
