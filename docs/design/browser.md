@@ -8,7 +8,7 @@ Measured on studious on 2026-10-03: macOS 15.0.1, Safari 18.0.1, Chrome 154.0.80
 
 - **No browser-side piece.** Every element the page offered was found at the right point by one reader or the other, once it was on screen. Nothing measured needs a DevTools connection or an extension, so neither clears [the scope bar](../development.md#scope).
 - **The gaps are in what `eyes` reports, not in what it sees.** It reports a Chrome element that is off screen as on screen. It does not say a row's role, so a page button and a browser button with the same name look the same. And it cannot tell apart three buttons that share one label.
-- **Reaching an element below the fold is vhid's job, and its wheel is broken.** One `vhid scroll` call barely moves the page (vhid-scroll-1m8), and in Firefox the wheel stopped partway for a reason not yet known (vhid-browser-j5d.dap). The End key works today.
+- **Reaching an element below the fold is vhid's job, and its wheel is broken.** In Safari one `vhid scroll` call barely moves the page (vhid-scroll-1m8). Firefox takes every call, and its wheel works. The End key works in all three.
 
 ## What eyes does about it
 
@@ -49,7 +49,7 @@ The tree reads `aria-label` (the button's accessibility description), iframe con
 
 **Repeated labels have only their position.** The three "Remove" buttons come back as three points in reading order. "The Remove in Beta's row" means matching each point's y to the row text's y, which an agent can do but `eyes` does not.
 
-**Below the fold needs scrolling, and the wheel does not deliver it.** In Safari, `vhid scroll 800 600 --vertical 100` moved the page 13 points, while twenty `--vertical 1` calls moved it more than 500 (vhid-scroll-1m8). In Firefox, the wheel moved the page part of the way and then nothing, across separate calls the packing bug does not explain (vhid-browser-j5d.dap), but `vhid press end` reached the bottom at once. Once the element was on screen, all three browsers found it at the right point.
+**Below the fold needs scrolling, and the wheel does not deliver it.** In Safari, `vhid scroll 800 600 --vertical 100` moved the page 13 points, while twenty `--vertical 1` calls moved it more than 500 (vhid-scroll-1m8). Firefox scrolls much further per call. A first run seemed to stall partway. A rerun with the page showing its own scroll position found no stall: each of 180 `--vertical 5` calls reached the page as one wheel event, and the page hit bottom before call 80. The wheel goes to whatever window is on top at the point, so a stall means checking what covers the point first (vhid-browser-j5d.dap). Once the element was on screen, all three browsers found it at the right point.
 
 ## Repeating it
 
