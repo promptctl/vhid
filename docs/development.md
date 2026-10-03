@@ -105,7 +105,7 @@ The README's table of where input reaches over SSH is measured, and [design/remo
 
 ## The site
 
-[promptctl.github.io/vhid](https://promptctl.github.io/vhid/) is `site/` as committed, published by [pages.yml](../.github/workflows/pages.yml) on every push to `master`. The page repeats the README's install commands, and `scripts/check-site`, run by `make test`, fails when a line the page shows is not a line of README.md; change the README first and copy from it.
+[promptctl.github.io/vhid](https://promptctl.github.io/vhid/) is `site/` as committed, published by [pages.yml](../.github/workflows/pages.yml) on every push to `master`. The page repeats the README's install commands, and `scripts/check-site`, run by `make test`, fails when a block the page copies, a `<pre>` or an `<ol>`, is not a run of README.md's lines, whole and in order; change the README first and copy from it.
 
 ## Filming the demo
 

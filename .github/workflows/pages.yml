@@ -12,11 +12,11 @@ permissions:
   pages: write
   id-token: write
 
-# Each push supersedes the one before it, so a deploy still going is worth nothing once a
-# newer commit is on master; the newest site is the one that lands.
+# One deploy at a time, and a deploy already running finishes: cancelled partway, it leaves
+# a failed deployment on github-pages. Runs queued behind it collapse to the newest.
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:

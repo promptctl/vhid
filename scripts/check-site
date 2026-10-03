@@ -1,6 +1,7 @@
 #!/bin/bash
-# Fails when a command the site shows is not in README.md: each line of every <pre>
-# block in site/index.html has to be a line of the README, as written there.
+# Fails when a block the site copies from README.md is not in it: every <pre> and <ol> in
+# site/index.html, put back into the README's markdown, has to be a run of the README's
+# lines, whole and in order.
 #
 #   scripts/check-site
 #
@@ -11,15 +12,28 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-# The lines between <pre> and </pre>, tags dropped and the three entities the page
-# escapes turned back into what the README has.
-shown=$(awk '/<pre>/ { inside = 1 } inside { print } /<\/pre>/ { inside = 0 }' site/index.html |
-  sed -e 's/<\/*pre>//g' -e 's/&lt;/</g' -e 's/&gt;/>/g' -e 's/&amp;/\&/g')
-[ -n "$shown" ] || { echo "check-site: site/index.html shows no <pre> block" >&2; exit 1; }
-
-missing=0
-while IFS= read -r line; do
-  grep -qxF -- "$line" README.md || { echo "check-site: not a line of README.md: $line" >&2; missing=1; }
-done <<<"$shown"
-[ "$missing" = 0 ] && echo "check-site: $(printf '%s\n' "$shown" | wc -l | tr -d ' ') lines shown on the site are in README.md"
-exit "$missing"
+# A <pre> is the README's code block line for line; an <ol> is its numbered list, each
+# <li> the "N. " line it was, with <b> and <code> back to ** and backticks. Both have
+# the three entities the page escapes turned back into what the README has.
+awk '
+  FNR == NR { readme = readme "\n" $0; next }
+  !kind && match($0, /<(pre|ol)[ >]/) { kind = substr($0, RSTART + 1, RLENGTH - 2); block = ""; n = 0; item = 0 }
+  kind == "pre" || (kind == "ol" && /<li[ >]/) {
+    line = $0
+    if (kind == "ol") { sub(/^[ \t]*/, "", line); line = (++item) ". " line }
+    gsub(/<\/?b>/, "**", line); gsub(/<\/?code>/, "`", line)
+    gsub(/<\/?(pre|ol|li)[^>]*>/, "", line)
+    gsub(/&lt;/, "<", line); gsub(/&gt;/, ">", line); gsub(/&amp;/, "\\&", line)
+    block = (n++ ? block "\n" : "") line
+  }
+  kind && $0 ~ "</" kind ">" {
+    blocks++; lines += n
+    if (!index(readme "\n", "\n" block "\n")) { print "check-site: not lines of README.md, in order:\n" block > "/dev/stderr"; bad = 1 }
+    kind = ""
+  }
+  END {
+    if (!blocks) { print "check-site: site/index.html has no <pre> or <ol> block" > "/dev/stderr"; exit 1 }
+    if (!bad) print "check-site: the " blocks " blocks (" lines " lines) the site copies are in README.md"
+    exit bad
+  }
+' README.md site/index.html
