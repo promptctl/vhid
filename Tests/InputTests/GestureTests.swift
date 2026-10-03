@@ -75,6 +75,8 @@ import Input
         // Caps Lock, 1 << 16, is no modifier the device holds.
         entry(true, [113, 12, 1 << 16]),
         ["enabled": "yes", "value": ["parameters": [113, 12, 0]]],
+        // Mouse button 3, which no key presses.
+        ["enabled": true, "value": ["parameters": [3, 4, 0], "type": "button"]],
     ] }
 
     /// An entry that is there but unreadable is refused rather than read as the default,

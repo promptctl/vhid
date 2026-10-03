@@ -143,7 +143,9 @@ public struct SystemShortcut: Sendable, Equatable {
         let refused = UnreadableShortcut(shortcut: self, entry: "\(entry)")
         guard let fields = entry as? [String: Any], let enabled = fields["enabled"] as? Bool else { throw refused }
         guard enabled else { return InForce(binding: .off, source: .set) }
-        guard let parameters = (fields["value"] as? [String: Any])?["parameters"] as? [Int], parameters.count == 3 else { throw refused }
+        // A "button" entry binds a mouse button, its parameters no key code at all.
+        guard let value = fields["value"] as? [String: Any], value["type"] as? String == "standard",
+              let parameters = value["parameters"] as? [Int], parameters.count == 3 else { throw refused }
         // [character, virtual key code, modifier flags]. The character is the layout's
         // reading of the key, which the key code already fixes; 0xFFFF is no key at all.
         let (code, flags) = (parameters[1], parameters[2])
