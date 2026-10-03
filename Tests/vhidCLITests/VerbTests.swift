@@ -203,11 +203,11 @@ import Testing
 /// preferences are handed in, so each test says which entry the user's Mac holds.
 @Suite struct GestureVerbTests {
     static let us = VerbTests.us
-    static func none() -> Any? { nil }
+    static func none() -> [String: Any]? { nil }
 
-    static func performed(_ gesture: Gesture, hotKeys: () -> Any? = none) async throws -> (said: String, down: [Usage]) {
+    static func performed(_ gesture: Gesture, on layout: KeyboardLayout = us, hotKeys: () -> [String: Any]? = none) async throws -> (said: String, down: [Usage]) {
         let keyboard = RecordingKeyboard()
-        let chord = try GestureCommand.chord(for: gesture, on: us, hotKeys: hotKeys)
+        let chord = try GestureCommand.chord(for: gesture, on: layout, hotKeys: hotKeys)
         let said = try await GestureCommand.perform(chord, with: Typist(keyboard: keyboard))
         return (said, keyboard.down)
     }
@@ -217,6 +217,21 @@ import Testing
         let (said, down) = try await Self.performed(.back)
         #expect(down == [.leftCommand, Usage(rawValue: 0x2F)])
         #expect(said == "back: pressed leftCommand+key 0x21, on \(Self.us.name)")
+    }
+
+    /// Look Up is a system shortcut, matched by key code, so ⌃⌘D is the key US calls D on
+    /// every layout - on Dvorak the one that types E.
+    @Test func lookUpPressesItsKeyCodeWhateverTheLayout() async throws {
+        let (said, down) = try await Self.performed(.lookUp, on: try KeyboardLayout.named("com.apple.keylayout.Dvorak"))
+        #expect(Set(down) == [.leftControl, .leftCommand, Usage(rawValue: 0x07)])
+        #expect(said.hasSuffix("its shortcut by default at entry 70 of AppleSymbolicHotKeys in com.apple.symbolichotkeys, which System Settings does not list"))
+    }
+
+    /// A command the layout has no keys for is refused as the gesture's, not as a spelling.
+    @Test func aCommandTheLayoutCannotPressIsRefusedAsTheGestures() throws {
+        let german = try KeyboardLayout.named("com.apple.keylayout.German")
+        let refused = #expect(throws: GestureRefused.self) { try GestureCommand.chord(for: .back, on: german, hotKeys: Self.none) }
+        #expect(refused?.description.hasPrefix("back is leftCommand+[, which \(german.name) has no keys for: ") == true)
     }
 
     /// The user's own binding wins, and the report says it was theirs.

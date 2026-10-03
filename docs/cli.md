@@ -23,17 +23,18 @@ under a point is the caller's to know.
 
 Which keys make which characters is the calling user's keyboard layout, read in the CLI
 rather than in the daemon: macOS answers that question per process, and a root daemon
-asking it is told the US layout whatever the user is typing on. `type` and `press` take
-`--layout <input source id>` (the MCP tools, `layout`) to name another, as at the login
-window over SSH, where the caller's layout need not be the one on screen. `type` refuses
-text the layout has no keys for.
+asking it is told the US layout whatever the user is typing on. `type`, `press` and
+`gesture` take `--layout <input source id>` (the MCP tools, `layout`) to name another, as
+at the login window over SSH, where the caller's layout need not be the one on screen.
+`type` refuses text the layout has no keys for.
 
 `gesture` does what a trackpad gesture does, by pressing the key that does the same
 thing: `back` is ⌘[, `mission-control` is Mission Control's shortcut. A system shortcut
 is the calling user's, as System Settings > Keyboard > Keyboard Shortcuts has it at the
-moment of the call; one that is off there is refused, naming the setting, and so is a
-gesture no key does, such as `smart-zoom`. `vhid help gesture` lists every gesture and
-its key, and [design/gestures.md](design/gestures.md) has the measurements behind them.
+moment of the call, and so is look-up's ⌃⌘D, which System Settings does not list; one
+that is off is refused, naming the setting, and so is a gesture no key does, such as
+`smart-zoom`. `vhid help gesture` lists every gesture and its key, and
+[design/gestures.md](design/gestures.md) has the measurements behind them.
 
 `--service` says which installation to talk to. It defaults to the one the binary was
 built for: the installed copy for the installed CLI, and the development copy for a

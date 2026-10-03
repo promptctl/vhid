@@ -34,7 +34,7 @@ import Input
     /// No entry is the default, and says so: the user never changed it. Preferences with
     /// no shortcuts at all are the same.
     @Test func noEntryIsMacOSsDefault() throws {
-        let byDefault = InForce(binding: .on(KeyChord(key: Key(rawValue: UInt16(kVK_UpArrow)), modifiers: [.leftControl])), source: .byDefault)
+        let byDefault = SystemShortcut.InForce(binding: .on(KeyChord(key: Key(rawValue: UInt16(kVK_UpArrow)), modifiers: [.leftControl])), source: .byDefault)
         #expect(try Self.missionControl.inForce(in: nil) == byDefault)
         #expect(try Self.missionControl.inForce(in: ["79": Self.entry(false, [])]) == byDefault)
     }
@@ -42,7 +42,7 @@ import Input
     /// studious's Mission Control, measured: q, key code 12, Option.
     @Test func anEntryIsTheKeyAndModifiersItNames() throws {
         let inForce = try Self.missionControl.inForce(in: Self.holding(Self.entry(true, [113, 12, 524288])))
-        #expect(inForce == InForce(binding: .on(KeyChord(key: Key(rawValue: 12), modifiers: [.leftOption])), source: .set))
+        #expect(inForce == SystemShortcut.InForce(binding: .on(KeyChord(key: Key(rawValue: 12), modifiers: [.leftOption])), source: .set))
     }
 
     /// ⌃↑ as macOS stores it carries the numeric pad and function flags, which are part of
@@ -53,8 +53,8 @@ import Input
     }
 
     @Test func aDisabledEntryIsOffWhateverItsKey() throws {
-        #expect(try Self.missionControl.inForce(in: Self.holding(Self.entry(false, [113, 12, 524288]))) == InForce(binding: .off, source: .set))
-        #expect(try Self.missionControl.inForce(in: Self.holding(["enabled": false])) == InForce(binding: .off, source: .set))
+        #expect(try Self.missionControl.inForce(in: Self.holding(Self.entry(false, [113, 12, 524288]))) == SystemShortcut.InForce(binding: .off, source: .set))
+        #expect(try Self.missionControl.inForce(in: Self.holding(["enabled": false])) == SystemShortcut.InForce(binding: .off, source: .set))
     }
 
     /// Enabled with no key, as studious's 175 is.
@@ -64,7 +64,7 @@ import Input
 
     /// Launchpad has no shortcut until the user gives it one.
     @Test func launchpadIsOffByDefault() throws {
-        #expect(try #require(Self.shortcut(.launchpad)).inForce(in: nil) == InForce(binding: .off, source: .byDefault))
+        #expect(try #require(Self.shortcut(.launchpad)).inForce(in: nil) == SystemShortcut.InForce(binding: .off, source: .byDefault))
     }
 
     /// Entries macOS would not write, passed to the test below by index, since an entry is
@@ -85,8 +85,16 @@ import Input
         #expect(refused?.description.contains("entry 32 of AppleSymbolicHotKeys") == true)
     }
 
-    /// Preferences that are not a dictionary of entries are refused too.
+    /// Preferences that are not a dictionary of entries are refused as a whole, not blamed
+    /// on one entry.
     @Test func hotKeysThatAreNoDictionaryAreRefused() {
-        #expect(throws: UnreadableShortcut.self) { try Self.missionControl.inForce(in: [1, 2]) }
+        let refused = #expect(throws: UnreadableHotKeys.self) { try SystemShortcut.entries([1, 2]) }
+        #expect(refused?.description.hasPrefix("AppleSymbolicHotKeys in com.apple.symbolichotkeys is not a dictionary") == true)
+    }
+
+    /// Fn held with a key that does not carry the function flag is no modifier the device
+    /// can hold, so 🌐M is refused rather than pressed as M.
+    @Test func fnHeldWithALetterIsRefused() {
+        #expect(throws: UnreadableShortcut.self) { try Self.missionControl.inForce(in: Self.holding(Self.entry(true, [109, 46, 1 << 23]))) }
     }
 }

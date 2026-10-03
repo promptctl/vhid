@@ -178,13 +178,13 @@ enum Help {
         key does:
         \(Gesture.allCases.map { "  \($0): \($0.onTrackpad); \(route($0.route))" }.joined(separator: "\n"))
 
-        A shortcut is the calling user's, read from System Settings as it is now, and refused \
-        when it is off there. A chord an app matches by character is read off the keyboard \
+        A shortcut is the calling user's, read from the preferences System Settings writes as \
+        they are now, and refused when it is off. A chord an app matches by character is read off the keyboard \
         layout, as press reads one. What is in front decides what the key does, and nothing \
         here checks it.
         """)
 
-    private static func route(_ route: Route) -> String {
+    private static func route(_ route: Gesture.Route) -> String {
         switch route {
         case .command(let chord): "presses \(chord)"
         case .shortcut(let shortcut): "presses its shortcut at \(shortcut.setting)"

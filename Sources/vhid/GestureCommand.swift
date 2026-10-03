@@ -20,13 +20,16 @@ struct GestureCommand: AsyncParsableCommand {
 
     /// The chord that does what `gesture` does on this Mac, and how it was chosen.
     ///
-    /// Decided before the devices are reached, so a gesture that is refused never connects.
+    /// Chosen before the devices are reached, so a gesture with no route, a shortcut that is
+    /// off, or a chord the layout has no keys for never connects.
     /// [LAW:effects-at-boundaries] The preferences are read by `hotKeys`, which a test hands
     /// in, so every route is decided here with nothing read.
-    static func chord(for gesture: Gesture, on layout: KeyboardLayout, hotKeys: () -> Any?) throws -> GestureChord {
+    static func chord(for gesture: Gesture, on layout: KeyboardLayout, hotKeys: () throws -> [String: Any]?) throws -> GestureChord {
         switch gesture.route {
         case .command(let spelling):
-            return GestureChord(gesture: gesture, chord: try KeyChord(spelled: spelling, on: layout), chosen: "on \(layout.name)")
+            let chord: KeyChord
+            do { chord = try KeyChord(spelled: spelling, on: layout) } catch { throw GestureRefused.notOnLayout(gesture, spelling, layout.name, error) }
+            return GestureChord(gesture: gesture, chord: chord, chosen: "on \(layout.name)")
         case .shortcut(let shortcut):
             let inForce = try shortcut.inForce(in: hotKeys())
             guard case .on(let chord) = inForce.binding else { throw GestureRefused.off(gesture, shortcut) }
@@ -37,7 +40,7 @@ struct GestureCommand: AsyncParsableCommand {
             case .set: "as set"
             case .byDefault: "by default"
             }
-            return GestureChord(gesture: gesture, chord: chord, chosen: "its shortcut \(source) at \(shortcut.settingPath)")
+            return GestureChord(gesture: gesture, chord: chord, chosen: "its shortcut \(source) at \(shortcut.setting)")
         case .none(let why):
             throw GestureRefused.noRoute(gesture, why)
         }
@@ -49,13 +52,17 @@ struct GestureCommand: AsyncParsableCommand {
         return "\(chosen.gesture): pressed \(chosen.chord), \(chosen.chosen)"
     }
 
-    /// The calling user's system shortcuts, as cfprefsd holds them, or nil when they have
-    /// never changed one.
+    /// The calling user's system shortcuts, as cfprefsd holds them at the call, or nil when
+    /// they have never changed one.
     ///
     /// The caller's, as the keyboard layout is: a gesture asked for while another user is
-    /// in front presses the caller's binding.
-    static func hotKeys() -> Any? {
-        CFPreferencesCopyAppValue("AppleSymbolicHotKeys" as CFString, "com.apple.symbolichotkeys" as CFString)
+    /// in front presses the caller's binding. Synchronized first, so `vhid mcp`, which
+    /// lives across calls, reads a binding changed since its last read rather than the one
+    /// its process cached.
+    static func hotKeys() throws -> [String: Any]? {
+        let domain = "com.apple.symbolichotkeys" as CFString
+        CFPreferencesAppSynchronize(domain)
+        return try SystemShortcut.entries(CFPreferencesCopyAppValue("AppleSymbolicHotKeys" as CFString, domain))
     }
 }
 
@@ -70,13 +77,16 @@ struct GestureChord: Sendable {
 enum GestureRefused: Error, CustomStringConvertible, Equatable {
     case noRoute(Gesture, String)
     case off(Gesture, SystemShortcut)
+    case notOnLayout(Gesture, String, String, ChordSpellingError)
 
     var description: String {
         switch self {
         case .noRoute(let gesture, let why):
             "\(gesture) has no key or button that does it: \(why)"
         case .off(let gesture, let shortcut):
-            "\(gesture) is the shortcut at \(shortcut.settingPath), and it is off"
+            "\(gesture) is the shortcut at \(shortcut.setting), and it is off"
+        case .notOnLayout(let gesture, let spelling, let layout, let why):
+            "\(gesture) is \(spelling), which \(layout) has no keys for: \(why)"
         }
     }
 }
