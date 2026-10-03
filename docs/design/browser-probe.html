@@ -12,7 +12,7 @@ button { font-size: 18px; }
 iframe { width: 420px; height: 90px; border: 1px solid #888; }
 </style></head>
 <body>
-<div id="status">Last click: none</div>
+<div id="status">Last click #0: none · focus: none</div>
 <section><button id="textbutton">Send report</button></section>
 <section><a href="#" id="link">Read the changelog</a></section>
 <section>Release notes <a href="#" id="more1">More</a> · Pricing <a href="#" id="more2">More</a></section>
@@ -27,10 +27,13 @@ iframe { width: 420px; height: 90px; border: 1px solid #888; }
 <section><canvas id="canvas" width="320" height="70" style="border:1px solid #888"></canvas></section>
 <section><button id="far">Far below</button></section>
 <script>
-const say = id => { document.getElementById('status').textContent = 'Last click: ' + id; document.title = 'Probe ' + id; };
-document.addEventListener('click', e => { const t = e.target.closest('[id]'); if (t && t.id !== 'status') { e.preventDefault(); say(t.id); } });
-document.getElementById('email').addEventListener('focus', () => say('email'));
-window.addEventListener('message', e => say(e.data));
+let clicks = 0, last = 'none';
+const show = () => { document.getElementById('status').textContent = 'Last click #' + clicks + ': ' + last + ' · focus: ' + (document.activeElement.id || 'none'); };
+const hit = id => { clicks += 1; last = id; show(); };
+document.addEventListener('click', e => { const t = e.target.closest('[id]'); if (t) e.preventDefault(); hit(t ? t.id : 'none'); });
+document.addEventListener('focusin', show);
+document.addEventListener('focusout', () => setTimeout(show));
+window.addEventListener('message', e => { if (e.source === document.getElementById('frame').contentWindow && e.data === 'inner') hit('inner'); });
 const c = document.getElementById('canvas').getContext('2d');
 c.font = '28px -apple-system, sans-serif'; c.fillText('Canvas word', 20, 45);
 </script>
