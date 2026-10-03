@@ -5,6 +5,7 @@ The verbs that type, click and replay, and the rules they share: keyboard layout
 ```sh
 vhid type "hello"
 vhid press leftCommand+s
+vhid gesture mission-control
 vhid click 800 500 --button left --times 2
 vhid click 800 500 --modifiers leftCommand+leftShift
 vhid move 800 500
@@ -26,6 +27,13 @@ asking it is told the US layout whatever the user is typing on. `type` and `pres
 `--layout <input source id>` (the MCP tools, `layout`) to name another, as at the login
 window over SSH, where the caller's layout need not be the one on screen. `type` refuses
 text the layout has no keys for.
+
+`gesture` does what a trackpad gesture does, by pressing the key that does the same
+thing: `back` is ⌘[, `mission-control` is Mission Control's shortcut. A system shortcut
+is the calling user's, as System Settings > Keyboard > Keyboard Shortcuts has it at the
+moment of the call; one that is off there is refused, naming the setting, and so is a
+gesture no key does, such as `smart-zoom`. `vhid help gesture` lists every gesture and
+its key, and [design/gestures.md](design/gestures.md) has the measurements behind them.
 
 `--service` says which installation to talk to. It defaults to the one the binary was
 built for: the installed copy for the installed CLI, and the development copy for a

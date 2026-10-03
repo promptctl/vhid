@@ -37,6 +37,12 @@ Measured on studious on 2026-10-03: macOS 15.0.1, Safari 18.0.1, Chrome 154, Map
 
 **The hidden Dock did not appear under vhid's pointer.** studious hides its Dock on the left edge. Moving the pointer to x 0, and then pushing it left with 21 more move reports, did not reveal the Dock, so Launchpad's Dock icon was out of reach. Spotlight reached Launchpad instead. Why the Dock stayed hidden was not looked into.
 
+## In vhid
+
+`vhid gesture` presses the shortcut and command routes in the table; `vhid help gesture` lists them. Launchpad and Notification Center are pressed as their own shortcuts, 160 and 163, which are off by default and refused while they are. On studious on 2026-10-03, Show Notification Center bound to ⌃⌥N opened Notification Center through vhid.
+
+Read the shortcuts through cfprefsd (`CFPreferencesCopyAppValue`), not from the plist file: after Show Notification Center was switched off in System Settings, the file still said `enabled` while cfprefsd already answered off.
+
 ## What the driver offers
 
 The pointing device (`org_pqrs_Karabiner_DriverKit_VirtualHIDPointing`, driver 1.8.0) reports 32 buttons, X and Y motion, a vertical wheel and a horizontal wheel (AC Pan). The keyboard device reports four input collections: the keyboard page (report 1), the consumer page (report 2), Apple's top case page (report 3) and Apple's vendor keyboard page (report 4). Neither device has a digitizer page or any touch report, so a trackpad gesture cannot be described to macOS through them. Whether a virtual trackpad could is [trackpad.md](trackpad.md)'s question; making one needs an entitlement from Apple that vhid does not hold.
