@@ -27,7 +27,7 @@ Measured on studious on 2026-10-03: macOS 15.0.1, Safari 18.0.1, Chrome 154, Map
 
 ## What the measurements found
 
-**The shortcuts belong to the user.** On studious, Mission Control is ⌥Q, not the default ⌃↑. A route that presses the default would do nothing there, or would do whatever the user bound that key to. The same holds for every shortcut in the table marked "by default". The bindings are under System Settings > Keyboard > Keyboard Shortcuts, and are stored as numbered entries in `~/Library/Preferences/com.apple.symbolichotkeys.plist`: 32 Mission Control, 33 App Exposé, 36 Show Desktop, 64 Spotlight, 79 and 81 one Space left and right, 160 Launchpad. Each entry has `enabled` and its `parameters`: the character, the virtual key code and the modifier flags. On studious, 32 read `[113, 12, 524288]`, which is q, key code 12 and Option. Launchpad's entry 160 was disabled and had no key.
+**The shortcuts belong to the user.** On studious, Mission Control is ⌥Q, not the default ⌃↑. A route that presses the default would do nothing there, or would do whatever the user bound that key to. The same holds for every shortcut in the table marked "by default". The bindings are under System Settings > Keyboard > Keyboard Shortcuts, and are stored as numbered entries in `~/Library/Preferences/com.apple.symbolichotkeys.plist`: 32 Mission Control, 33 App Exposé, 36 Show Desktop, 64 Spotlight, 79 and 81 one Space left and right, 160 Launchpad, and 70 Look Up, which System Settings on macOS 15.0.1 does not list (its `KeyboardSettings.appex` shortcut table has no Look Up). Each entry has `enabled` and its `parameters`: the character, the virtual key code and the modifier flags. On studious, 32 read `[113, 12, 524288]`, which is q, key code 12 and Option. Launchpad's entry 160 was disabled and had no key.
 
 **The horizontal wheel does not swipe between pages.** Ten ticks sent as one act, and 41 single-tick reports 16 ms apart, in both directions, left Safari and Chrome on the page they were on. The single ticks rule out vhid packing its ticks into one report (vhid-scroll-1m8). Back and forward are ⌘[ and ⌘], which both browsers took. Chrome also took buttons 4 and 5, and Safari ignored them.
 
@@ -36,6 +36,12 @@ Measured on studious on 2026-10-03: macOS 15.0.1, Safari 18.0.1, Chrome 154, Map
 **App Exposé takes a while to appear.** A capture 1.2 s after ⌃↓ showed the desktop unchanged, and one 2.5 s after showed App Exposé. Mission Control had shown at 1.2 s. Wait for the screen to change before acting on it.
 
 **The hidden Dock did not appear under vhid's pointer.** studious hides its Dock on the left edge. Moving the pointer to x 0, and then pushing it left with 21 more move reports, did not reveal the Dock, so Launchpad's Dock icon was out of reach. Spotlight reached Launchpad instead. Why the Dock stayed hidden was not looked into.
+
+## In vhid
+
+`vhid gesture` presses the shortcut and command routes in the table; `vhid help gesture` lists them. Launchpad and Notification Center are pressed as their own shortcuts, 160 and 163, which are off by default and refused while they are. On studious on 2026-10-03, Show Notification Center bound to ⌃⌥N opened Notification Center through vhid.
+
+Read the shortcuts through cfprefsd (`CFPreferencesCopyAppValue`), not from the plist file: after Show Notification Center was switched off in System Settings, the file still said `enabled` while cfprefsd already answered off.
 
 ## What the driver offers
 

@@ -82,6 +82,16 @@ extension Parameter where Taken == [String] {
     }
 }
 
+extension Parameter where Taken == Gesture {
+    /// Read by `Gesture.init?(rawValue:)`, as the command line reads it. [LAW:single-enforcer]
+    static func gesture(_ name: String) -> Self {
+        Self(name: name, expected: Help.gestureName,
+             schema: ["type": "string", "enum": .array(Gesture.allCases.map { .string($0.rawValue) })], absent: nil) {
+            $0.stringValue.flatMap(Gesture.init(rawValue:))
+        }
+    }
+}
+
 extension Parameter where Taken == ScreenPoint {
     /// A place as an object of its own, `{"x": …, "y": …}`, for a tool that takes two.
     static func place(_ name: String, _ expected: String) -> Self {

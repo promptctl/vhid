@@ -7,7 +7,7 @@ description: Operate apps on this Mac through its real screen, keyboard and mous
 
 Two MCP servers, one coordinate space. `eyes` reads the screen: `displays`, `windows`,
 `find`, `read`, `grants`. `vhid` drives a virtual keyboard and mouse that macOS takes
-for hardware: `click`, `type`, `press`, `move`, `scroll`, `drag`, `play`, `cursor`,
+for hardware: `click`, `type`, `press`, `gesture`, `move`, `scroll`, `drag`, `play`, `cursor`,
 `doctor`. Every point either one prints or takes is the same screen point, so the
 point `find` gives you is the point `click` takes, as printed - no scaling, no offset,
 negative on a display left of or above the main one.

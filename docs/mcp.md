@@ -2,8 +2,8 @@
 
 Two MCP servers over stdio, one for input and one for reading the screen. This page covers what each serves, how to add them to a client, and which app has to hold the grants.
 
-`vhid mcp` serves the same verbs as MCP tools over stdio: `type`, `press`, `click`,
-`move`, `scroll`, `drag`, `play`, `cursor` and `doctor`, run as `vhid mcp`. `play` takes
+`vhid mcp` serves the same verbs as MCP tools over stdio: `type`, `press`, `gesture`,
+`click`, `move`, `scroll`, `drag`, `play`, `cursor` and `doctor`, run as `vhid mcp`. `play` takes
 the script as its `script` argument where the command line reads it from stdin.
 
 Each tool call connects to the daemon and leaves when it returns, so a session holds

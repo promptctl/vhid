@@ -116,6 +116,7 @@ removing the driver too.
 ```sh
 vhid type "hello"                            # type text wherever the keyboard is focused
 vhid press leftCommand+s                     # press a key combination
+vhid gesture mission-control                 # do what a trackpad gesture does, with the key that does it
 vhid click 800 500                           # click at a screen point
 vhid click 800 500 --button right --times 2
 vhid move 800 500                            # move the pointer, pressing nothing

@@ -4,6 +4,7 @@ Each release's section is its GitHub Release notes, which keep line breaks, so e
 
 ## [Unreleased]
 
+- `vhid gesture <name>` does what a trackpad gesture does, by pressing the key that does it: back and forward, zoom in and out, Look Up, the next or previous Space, Mission Control, App Exposé, Show Desktop, Launchpad and Notification Center. A system shortcut is the one the user has set, and one that is off is refused, naming the setting. `vhid mcp` serves it as the `gesture` tool.
 - The Claude Code plugin has a second skill, `menu-item`, which invokes any app's menu item by its name: it searches for the item from the app's Help menu and checks the result before choosing it, and clicks down the menu path for an item in the Help menu itself.
 - `eyes find` and `eyes read` print each row's role, such as `AXButton`, or `pixels` for text only the pixels reader saw, as a third column before a near miss's edit count.
 - `eyes find --page <window id>` and `eyes read --page <window id>` read only the web page a browser window shows, not its toolbar and bookmarks. The MCP tools take `page`.
