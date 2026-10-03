@@ -3,6 +3,7 @@ import CoreGraphics
 import Darwin
 import Eyes
 import Foundation
+import Responsibility
 import Telemetry
 
 /// The two privacy grants eyes' readers need.
@@ -271,34 +272,19 @@ public struct Holder: Sendable, Equatable {
     /// responsible pid's current image is not it - over ssh, sshd-keygen-wrapper is spawned
     /// and then execs sshd-session, and the grant is held under the wrapper.
     ///
-    /// These calls are not in the SDK's headers, so they are looked up by name; their absence
-    /// is said, never guessed past. [LAW:no-silent-failure]
+    /// A path is all the pane can list, so an attribution naming none is said, never printed
+    /// as a blank app. [LAW:no-silent-failure]
     private static func attributed() throws(GrantReadingFailure) -> String {
-        typealias Attribution = @convention(c) (UnsafePointer<audit_token_t>, Int32) -> OpaquePointer?
-        typealias BinaryPath = @convention(c) (OpaquePointer) -> UnsafePointer<CChar>?
-        typealias Release = @convention(c) (OpaquePointer) -> Void
-        func symbol<T>(_ name: String, as: T.Type) throws(GrantReadingFailure) -> T {
-            guard let found = dlsym(UnsafeMutableRawPointer(bitPattern: -2), name) else {
-                throw GrantReadingFailure("this macOS has no \(name), so the app holding the grants cannot be named")
-            }
-            return unsafeBitCast(found, to: T.self)
-        }
-        let attribution = try symbol("responsibility_get_attribution_for_audittoken", as: Attribution.self)
-        let binaryPath = try symbol("responsibility_identity_get_binary_path", as: BinaryPath.self)
-        let release = try symbol("responsibility_identity_release", as: Release.self)
         var token = audit_token_t()
-        var size = mach_msg_type_number_t(MemoryLayout<audit_token_t>.size / MemoryLayout<natural_t>.size)
-        let read = withUnsafeMutablePointer(to: &token) {
-            $0.withMemoryRebound(to: integer_t.self, capacity: Int(size)) { task_info(mach_task_self_, task_flavor_t(TASK_AUDIT_TOKEN), $0, &size) }
-        }
+        let read = responsibility_self_audit_token(&token)
         guard read == KERN_SUCCESS else {
             throw GrantReadingFailure("this process cannot read its own audit token: \(String(cString: mach_error_string(read)))")
         }
-        guard let identity = attribution(&token, 0) else {
-            throw GrantReadingFailure("macOS gave no attribution for this process: \(String(cString: strerror(errno)))")
+        guard let identity = responsibility_get_attribution_for_audittoken(&token, 0) else {
+            throw GrantReadingFailure("macOS gave no attribution for this process")
         }
-        defer { release(identity) }
-        guard let path = binaryPath(identity) else {
+        defer { responsibility_identity_release(identity) }
+        guard let path = responsibility_identity_get_binary_path(identity), path.pointee != 0 else {
             throw GrantReadingFailure("macOS's attribution for this process names no executable")
         }
         return String(cString: path)
