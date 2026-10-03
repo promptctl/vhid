@@ -1,0 +1,125 @@
+#!/bin/bash
+# Films one demo on the Mac this runs on, with a caption band under the screen:
+#
+#   scripts/film-demo site/demo/look-click-look.sh
+#
+# writes site/demo/look-click-look.mp4, and look-click-look.steps.tsv beside it: each line
+# the band gained, as its second in the clip, who produced it (narration, typed or
+# printed) and its text. A demo is a shell file defining stage (run before filming, not
+# shown) and film, whose steps are `say '<comment>'`, `run '<command>'`,
+# `start '<command>'` and `stop`. The band shows the exact string that ran and the last
+# line it printed [LAW:one-source-of-truth], so the demo file is the one copy of what the
+# clip shows.
+#
+# Needs ffmpeg with libx264, and the grants docs/development.md lists under Filming the
+# demo.
+set -Eeuo pipefail
+trap 'echo "film-demo: line $LINENO failed: $BASH_COMMAND" >&2' ERR
+
+demo=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
+here=$(cd "$(dirname "$0")" && pwd)
+work=$(mktemp -d)
+# A failed step must not leave the screen capture or a started command (vhid record)
+# running on after the script is gone.
+trap 'running=$(jobs -p); [ -z "$running" ] || kill $running; rm -rf "$work"' EXIT
+
+# Seconds each step stays newest on the band before the next one runs: long enough to read.
+beat=1.6
+# The clip is the 960x540 points around the front window, scaled to 1280x720 so an app
+# window is legible at phone width, over a band 132 high that holds the last three lines.
+view=(960 540)
+clip_width=1280
+clip_height=720
+band=132
+out=''
+started=''
+: > "$work/lines.tsv"
+: > "$work/progress"
+mkfifo "$work/keys"
+
+# Each band line is stamped with the wall clock; the stamps become clip seconds once the
+# first frame's stamp is known. Its kind is decided here, where it is known, and carried
+# to the band rather than guessed back from the text. A tab in what a command printed is
+# the file's separator, so the band shows it as two spaces.
+line() { printf '%s\t%s\t%s\n' "$(perl -MTime::HiRes=time -e 'printf "%.3f", time')" "$1" "${2//$'\t'/  }" >> "$work/lines.tsv"; }
+say() { line narration "# $1"; sleep "$beat"; }
+run() {
+    line typed "\$ $1"
+    out=$(cd "$work" && eval "$1")
+    [ -n "$out" ] && line printed "${out##*$'\n'}"
+    sleep "$beat"
+}
+start() { line typed "\$ $1"; (cd "$work" && eval "exec $1") & started=$!; sleep "$beat"; }
+stop() { kill -INT "$started"; wait "$started"; line typed '^C'; sleep "$beat"; }
+
+# stage_alone App: App in front with every other app hidden, so the clip shows only it.
+stage_alone() {
+    osascript -e "tell application \"$1\" to activate" \
+        -e "tell application \"System Events\" to set visible of every process whose name is not \"$1\" and visible is true to false"
+}
+
+source "$demo"
+stage
+
+# The view is centred on the front window, on the main display; eyes gives both in the
+# points vhid clicks, and the display's scale in pixels per point.
+read -r screen_width screen_height scale < <(eyes displays | awk -F'\t' '$2 == "main" { split($3, b, " "); split(b[2], s, "x"); print s[1], s[2], $4 + 0 }')
+read -r wx wy ww wh < <(eyes windows | awk -F'\t' '$3 == "L0" && $5 == "front" { split($4, b, " "); split(b[1], p, ","); split(b[2], s, "x"); print p[1], p[2], s[1], s[2]; exit }')
+(( wx >= 0 && wy >= 0 && wx + ww <= screen_width && wy + wh <= screen_height && screen_width >= view[0] && screen_height >= view[1] )) || {
+    echo "film-demo: the front window ($wx,$wy ${ww}x$wh) must lie on the main display (${screen_width}x$screen_height), and the display must hold the ${view[0]}x${view[1]} view" >&2
+    exit 1
+}
+clamp() { echo $(( $1 < 0 ? 0 : ($1 > $2 ? $2 : $1) )); }
+view_x=$(clamp $((wx + ww / 2 - view[0] / 2)) $((screen_width - view[0])))
+view_y=$(clamp $((wy + wh / 2 - view[1] / 2)) $((screen_height - view[1])))
+
+# Each frame is stamped with the wall clock, so the first frame's stamp is the clip's
+# zero and the band converts exactly, however long the capture took to start.
+# [LAW:no-ambient-temporal-coupling]
+ffmpeg -hide_banner -loglevel error -f avfoundation -capture_cursor 1 -capture_mouse_clicks 1 \
+    -framerate 30 -pixel_format nv12 -use_wallclock_as_timestamps 1 -i 'Capture screen 0:none' \
+    -c:v libx264 -preset ultrafast -crf 14 -copyts -progress "$work/progress" "$work/screen.mkv" < "$work/keys" &
+capture=$!
+# q on its stdin is what ends an ffmpeg capture cleanly; SIGINT ends it with 255.
+exec 3> "$work/keys"
+# A capture that ended early printed why; filming on would only bury that under the demo.
+capturing() { kill -0 "$capture" || { echo "film-demo: the screen capture ended early" >&2; exit 1; }; }
+# Filming starts once the capture holds a frame, so no step comes before the clip's zero
+# however slowly avfoundation starts; the beat after it is only a lead-in.
+# [LAW:no-ambient-temporal-coupling]
+until grep -q '^frame=[1-9]' "$work/progress"; do capturing; sleep 0.1; done
+sleep "$beat"
+capturing
+film
+sleep "$beat"
+capturing
+echo q >&3
+wait "$capture"
+
+zero=$(ffprobe -v error -show_entries format=start_time -of csv=p=0 "$work/screen.mkv")
+pixel_width=$(ffprobe -v error -select_streams v -show_entries stream=width -of csv=p=0 "$work/screen.mkv")
+(( pixel_width == screen_width * scale )) || {
+    echo "film-demo: the capture is $pixel_width pixels wide, not the main display's $screen_width points at ${scale}x: avfoundation's screen 0 is another display" >&2
+    exit 1
+}
+awk -F'\t' -v OFS='\t' -v zero="$zero" '{ $1 = sprintf("%.3f", $1 - zero); print }' "$work/lines.tsv" > "$work/steps.tsv"
+swift "$here/caption-band.swift" "$clip_width" "$band" "$work" < "$work/steps.tsv"
+
+# Band n shows from line n's second until line n+1's; the last, to the end.
+count=0
+inputs=()
+chain="[0:v]setpts=PTS-STARTPTS,crop=$((view[0] * scale)):$((view[1] * scale)):$((view_x * scale)):$((view_y * scale)),scale=$clip_width:$clip_height:flags=lanczos,pad=$clip_width:$((clip_height + band)):0:0[v0]"
+while read -r from until; do
+    inputs+=(-i "$work/band-$count.png")
+    chain+=";[v$count][$((count + 1)):v]overlay=0:$clip_height:enable='between(t,$from,$until)'[v$((count + 1))]"
+    count=$((count + 1))
+done < <(awk -F'\t' '{ t[NR] = $1 } END { for (n = 1; n <= NR; n++) print t[n], (n < NR ? t[n + 1] : 1e9) }' "$work/steps.tsv")
+ffmpeg -hide_banner -loglevel error -i "$work/screen.mkv" ${inputs[@]+"${inputs[@]}"} -filter_complex "$chain" \
+    -map "[v$count]" -an -c:v libx264 -preset slow -crf 30 -pix_fmt yuv420p -movflags +faststart "$work/clip.mp4"
+
+# The clip and its steps land together, so a failed run leaves the committed pair as it was.
+clip=${demo%.sh}.mp4
+mv "$work/clip.mp4" "$clip"
+mv "$work/steps.tsv" "${demo%.sh}.steps.tsv"
+seconds=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$clip")
+echo "film-demo: $(basename "$clip"): $count band lines, ${seconds}s, $(wc -c < "$clip" | tr -d ' ') bytes" >&2
