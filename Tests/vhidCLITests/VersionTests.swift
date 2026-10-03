@@ -49,7 +49,7 @@ import Version
         #expect(Vhid.configuration.version == Version.current)
     }
 
-    @Test func mcpInitializeReportsIt() async throws {
+    @Test func mcpInitializeReportsItAndThePairingWithEyes() async throws {
         let (clientSide, serverSide) = await InMemoryTransport.createConnectedPair()
         let transport = AnsweringTransport(serverSide)
         let server = await McpCommand.server(on: Installation(service: "ai.promptctl.vhid.tests.nobody")!, over: transport)
@@ -64,6 +64,9 @@ import Version
         await server.stop()
         #expect(result.serverInfo.name == "vhid")
         #expect(result.serverInfo.version == Version.current)
+        // The pairing with eyes, as docs/mcp-instructions.txt words it for both servers.
+        let pairing = try String(contentsOf: Self.root.appending(path: "docs/mcp-instructions.txt"), encoding: .utf8)
+        #expect(result.instructions == pairing.trimmingCharacters(in: .newlines))
     }
 
     /// A scratch repo holding VERSION and one commit.

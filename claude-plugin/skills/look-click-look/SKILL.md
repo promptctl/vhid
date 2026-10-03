@@ -5,17 +5,10 @@ description: Operate apps on this Mac through its real screen, keyboard and mous
 
 # Look, act, look again
 
-Two MCP servers, one coordinate space. `eyes` reads the screen: `displays`, `windows`,
-`find`, `read`, `grants`. `vhid` drives a virtual keyboard and mouse that macOS takes
-for hardware: `click`, `type`, `press`, `gesture`, `move`, `scroll`, `drag`, `play`, `cursor`,
-`doctor`. Every point either one prints or takes is the same screen point, so the
-point `find` gives you is the point `click` takes, as printed - no scaling, no offset,
-negative on a display left of or above the main one.
-
-Neither server decides anything. `click` presses the point it is given whatever is
-there, `type` types into whatever has keyboard focus, and `find` reports what is on
-screen, not whether your last act did what you meant. Deciding is your job, and
-looking is how you do it.
+The `vhid` and `eyes` MCP servers state the contract this skill works in the
+instructions each gave your client when it connected: every point either one prints or
+takes is the same screen point, neither decides anything, and done means a look after
+the act showed the change. This is how to work it.
 
 ## The loop
 
@@ -36,7 +29,7 @@ looking is how you do it.
    title, the new text, the button gone. To wait for it, pass `until` (`present` or
    `absent`) and a `timeout`, which re-reads until it happens; do not sleep and retry.
 
-**Done means step 3 showed the change.** A `click` that answered "clicked left once
+A `click` that answered "clicked left once
 at (812, 604) after 1 motion report" is an act that happened, not an outcome: the press landed on that point,
 and what sat there may have been something else. When the user asked for an outcome,
 such as a file saved, a field filled or a sheet dismissed, you have it only once a look
