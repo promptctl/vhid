@@ -79,8 +79,8 @@ build: signing-identity
 # The driver-script checks and the NOTICE check come after the signing, because none
 # links anything and so none can undo it: the pins against the CLI just built, NOTICE
 # against what that CLI links, then the driver script's own contracts, the uninstaller
-# against stubs, the cask update against a scratch tap, and the
-# Claude Code plugin's hook against stub installs.
+# against stubs, the cask update against a scratch tap, the
+# Claude Code plugin's hook against stub installs, and the site's commands against README.md.
 test: signing-identity
 	swift build
 	LIBDISPATCH_COOPERATIVE_POOL_STRICT=1 swift test; status=$$?; $(SIGN) || exit $$?; $(RECORD_APP) || exit $$?; exit $$status
@@ -90,6 +90,7 @@ test: signing-identity
 	scripts/uninstall-test
 	scripts/update-cask-test
 	scripts/plugin-hook-test
+	scripts/check-site
 
 # The driver pins scripts/virtual-hid-driver acts on, held to the ones the CLI was built
 # with. `test` runs this too; this is the fast way to it after editing a pin.

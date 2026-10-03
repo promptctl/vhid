@@ -1,0 +1,40 @@
+#!/bin/bash
+# Fails when a block the site copies from README.md is not in it: every <pre> and <ol> in
+# site/index.html, put back into the README's markdown, has to be a run of the README's
+# lines, whole and in order.
+#
+#   scripts/check-site
+#
+# [LAW:one-source-of-truth] The README is where vhid's install steps live; the page
+# repeats the few a visitor needs to install from it, and this is what keeps those a
+# copy of the README's rather than a second version of them.
+# Held to bash 3.2, like every script here.
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+# A <pre> is the README's code block line for line; an <ol> is its numbered list, each
+# <li> the "N. " line it was, with <b> and <code> back to ** and backticks. Both have
+# the three entities the page escapes turned back into what the README has.
+awk '
+  FNR == NR { readme = readme "\n" $0; next }
+  !kind && match($0, /<(pre|ol)[ >]/) { kind = substr($0, RSTART + 1, RLENGTH - 2); block = ""; n = 0; item = 0 }
+  kind == "pre" || (kind == "ol" && /<li[ >]/) {
+    line = $0
+    if (kind == "ol") { sub(/^[ \t]*/, "", line); line = (++item) ". " line }
+    gsub(/<\/?b>/, "**", line); gsub(/<\/?code>/, "`", line)
+    gsub(/<\/?(pre|ol|li)[^>]*>/, "", line)
+    gsub(/&lt;/, "<", line); gsub(/&gt;/, ">", line); gsub(/&amp;/, "\\&", line)
+    block = (n++ ? block "\n" : "") line
+  }
+  kind && $0 ~ "</" kind ">" {
+    blocks++; lines += n
+    if (!index(readme "\n", "\n" block "\n")) { print "check-site: not lines of README.md, in order:\n" block > "/dev/stderr"; bad = 1 }
+    kind = ""
+  }
+  END {
+    if (kind) { print "check-site: site/index.html has a <" kind "> with no </" kind ">" > "/dev/stderr"; exit 1 }
+    if (!blocks) { print "check-site: site/index.html has no <pre> or <ol> block" > "/dev/stderr"; exit 1 }
+    if (!bad) print "check-site: the " blocks " blocks (" lines " lines) the site copies are in README.md"
+    exit bad
+  }
+' README.md site/index.html
