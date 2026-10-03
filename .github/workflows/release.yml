@@ -39,9 +39,6 @@ jobs:
     runs-on: macos-26
     environment: release
     timeout-minutes: 60
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      prerelease: ${{ steps.version.outputs.prerelease }}
     env:
       TAG: ${{ github.ref_name }}
       NOTARY_PROFILE: vhid-release
@@ -56,9 +53,8 @@ jobs:
       # nothing is built: a tag that disagrees would publish a pkg under a name its
       # binaries contradict. make-pkg asks again, of the tree and of the packed CLI. A
       # version with a -tag is a pre-release, decided here alone: the steps below read
-      # PRERELEASE and the cask job this step's output.
+      # PRERELEASE.
       - name: The tag is VERSION's
-        id: version
         run: |
           version=$(scripts/version --base)
           [ "$TAG" = "v$version" ] || { echo "::error::tag $TAG is not v$version, the version in VERSION"; exit 1; }
@@ -66,8 +62,6 @@ jobs:
           prerelease=false
           [[ $version == *-* ]] && prerelease=true
           echo "PRERELEASE=$prerelease" >>"$GITHUB_ENV"
-          echo "version=$version" >>"$GITHUB_OUTPUT"
-          echo "prerelease=$prerelease" >>"$GITHUB_OUTPUT"
 
       # What is published is what master holds: a tag on a branch is refused before
       # minutes of building. A pre-release may come from any branch, so a release
@@ -77,6 +71,25 @@ jobs:
         run: |
           git merge-base --is-ancestor "$GITHUB_SHA" origin/master \
             || { echo "::error::$TAG is not on master"; exit 1; }
+
+      # The tap's cask names one version and its sha256, so each release moves it, or `brew
+      # upgrade` never sees the release. A pre-release is left out: the cask is what
+      # `brew install` gives everyone. The tap's token is minted before anything is built,
+      # so a missing or wrong App fails the release while nothing is published yet. It can
+      # start the tap's workflows and nothing else: it is the promptctl tap App's,
+      # installed on the tap alone with Actions: write (docs/releasing.md).
+      # [LAW:no-ambient-temporal-coupling] It lasts an hour, past this job's 60-minute
+      # timeout, so it outlives every step that reads it.
+      - name: The tap's token
+        id: tap
+        if: env.PRERELEASE == 'false'
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.TAP_APP_CLIENT_ID }}
+          private-key: ${{ secrets.TAP_APP_PRIVATE_KEY }}
+          owner: promptctl
+          repositories: homebrew-tap
+          permission-actions: write
 
       # The notes, read before minutes of building, so a version with no changelog
       # section fails here. A section is everything from its "## [<version>]" heading
@@ -141,45 +154,45 @@ jobs:
         if: always()
         run: scripts/release-keychain delete "$NOTARY_KEYCHAIN"
 
-  # The tap's cask names one version and its sha256, so each release moves it, or `brew
-  # upgrade` never sees the release. A pre-release is left out: the cask is what
-  # `brew install` gives everyone. The tap moves it, through cask.yml on the tap's own
-  # schedule, every half hour; this job waits for that and fails loudly when it does not
-  # come, as it would not if GitHub had disabled the tap's schedule for a quiet spell.
-  # It holds no secret, so it is no environment's.
-  cask:
-    needs: release
-    if: ${{ needs.release.outputs.prerelease == 'false' }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    timeout-minutes: 100
-    env:
-      VERSION_NUMBER: ${{ needs.release.outputs.version }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          sparse-checkout: scripts
-
-      # The tap moves the cask straight to the newest release, so a release it passed over
-      # is served by a cask at a later one, in the order update-cask moves it by. A fetch
-      # that fails is reported and tried again the next minute; a cask that cannot be read
-      # fails here at once.
-      - name: The tap's cask is at this release or past it
+      # The tap's vhid workflow (cask.yml here) is the one writer of the cask, with the
+      # tap's own token; this starts it and waits until the cask is at this release, so
+      # the release fails when the move does not land. [LAW:one-source-of-truth] The cask
+      # is the verdict, not the run: a run the tap's concurrency group cancelled leaves the
+      # cask to the run that replaced it, and a run that succeeded without moving it fails
+      # here at once. A workflow GitHub disabled for 60 days of a quiet tap is enabled
+      # again; one a person disabled is left so and fails here. The ten minutes are the
+      # release's whole budget. [LAW:single-enforcer] However the step fails, the Release
+      # is published by then, so the trap names what moves the cask without re-running
+      # this job.
+      - name: The tap's cask is at this release
+        if: env.PRERELEASE == 'false'
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.tap.outputs.token }}
+          READ_TOKEN: ${{ github.token }}
         run: |
+          trap '[ $? -eq 0 ] || echo "::error::vhid $VERSION_NUMBER is published; move the cask with \`gh workflow run vhid.yml --repo promptctl/homebrew-tap\` rather than re-running this job (docs/releasing.md)"' EXIT
+          workflow=repos/promptctl/homebrew-tap/actions/workflows/vhid.yml
+          state=$(gh api "$workflow" --jq .state)
+          case $state in
+            active) ;;
+            disabled_inactivity) gh api --method PUT "$workflow/enable" && echo "enabled the tap's vhid workflow, which GitHub had disabled for inactivity" ;;
+            *) echo "::error::the tap's vhid workflow is $state"; exit 1 ;;
+          esac
+          run=$(gh api --method POST "$workflow/dispatches" -f ref=main -F return_run_details=true \
+            --jq '.workflow_run_id // error("the dispatch named no run")')
+          url=https://github.com/promptctl/homebrew-tap/actions/runs/$run
+          echo "moving the cask in $url"
           cask=$RUNNER_TEMP/vhid.rb
-          was=unread
-          for attempt in $(seq 90); do
-            if gh api -H 'Accept: application/vnd.github.raw' repos/promptctl/homebrew-tap/contents/Casks/vhid.rb >"$cask"; then
-              was=$(scripts/cask-version "$cask")
-              if [ "$(printf '%s\n' "$VERSION_NUMBER" "$was" | sort -V | tail -n 1)" = "$was" ]; then
-                echo "the tap's cask is vhid $was, at $VERSION_NUMBER or past it" | tee -a "$GITHUB_STEP_SUMMARY"
-                exit 0
-              fi
-            fi
-            sleep 60
+          while :; do
+            fields=$(gh run view "$run" --repo promptctl/homebrew-tap --json status,conclusion --jq '"\(.status) \(.conclusion)"')
+            read -r status conclusion <<<"$fields"
+            GH_TOKEN=$READ_TOKEN gh api -H 'Accept: application/vnd.github.raw' repos/promptctl/homebrew-tap/contents/Casks/vhid.rb >"$cask"
+            was=$(scripts/cask-stanza "$cask" version)
+            [ "$(printf '%s\n' "$VERSION_NUMBER" "$was" | sort -V | tail -n 1)" = "$was" ] && break
+            [ "$status" != completed ] || [ "$conclusion" = cancelled ] \
+              || { echo "::error::the tap's run ended $conclusion and left the cask at vhid $was: $url"; exit 1; }
+            [ "$SECONDS" -lt 600 ] \
+              || { echo "::error::after ${SECONDS}s the cask is at vhid $was and the tap's run is $status $conclusion: $url"; exit 1; }
+            sleep 10
           done
-          echo "::error::after 90 minutes the tap's cask is not at $VERSION_NUMBER or past it (last read: $was); see the vhid workflow's runs in promptctl/homebrew-tap (docs/releasing.md)"
-          exit 1
+          echo "the tap's cask is vhid $was, at $VERSION_NUMBER or past it, after ${SECONDS}s; the tap's run $run is $status $conclusion" | tee -a "$GITHUB_STEP_SUMMARY"

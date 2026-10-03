@@ -19,13 +19,10 @@ echo "$version" | grep -Eqx '[0-9]+(\.[0-9]+)*' || {
   exit 2
 }
 sha256=$(shasum -a 256 "$pkg" | cut -d ' ' -f 1)
-was=$("$(dirname "$0")/cask-version" "$cask")
-# [LAW:no-silent-failure] The sha256 line is rewritten where it is, so a cask whose shape
-# has moved on from `  sha256 "..."` is refused rather than left stale. grep -c exits 1 on
-# no match, which the count reports; any other failure stops here.
-count=$(grep -c '^  sha256 "[^"]*"$' "$cask") || [ $? -eq 1 ]
-[ "$count" = 1 ] || { echo "update-cask: $cask has $count lines of the form '  sha256 \"...\"', not one" >&2; exit 1; }
-had=$(sed -n 's/^  sha256 "\(.*\)"$/\1/p' "$cask")
+# The version and sha256 lines are rewritten where they are, so a cask whose shape has
+# moved on is refused by cask-stanza rather than read as naming nothing or left stale.
+was=$("$(dirname "$0")/cask-stanza" "$cask" version)
+had=$("$(dirname "$0")/cask-stanza" "$cask" sha256)
 # The cask already on this release is left as it is, provided the pkg is still the one
 # it names: a sha256 that moved under a published version is a pkg replaced after
 # release, and every Homebrew install of it would fail its checksum.
