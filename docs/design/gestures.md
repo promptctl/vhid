@@ -1,6 +1,6 @@
 # Trackpad gestures: which ones vhid's devices reach
 
-No trackpad gesture reaches macOS as a gesture through vhid's devices. The driver presents a keyboard and a mouse, and nothing a gesture is built from: no touches, no digitizer. What vhid can reach is what each gesture *does*. Almost every gesture's action has a keyboard shortcut, a mouse button or a click that gets the same result, and on studious each one tried worked. The exception is smart zoom, which has no route of its own. Rotate has one only where an app offers a rotate command.
+No trackpad gesture reaches macOS as a gesture through vhid's devices. The driver presents a keyboard and a mouse, and nothing a gesture is built from: no touches, no digitizer. What vhid can reach is what each gesture *does*. Almost every gesture's action has a keyboard shortcut, a mouse button or a click that gets the same result, and on studious at least one route for each worked. The exception is smart zoom, which has no route of its own. Rotate has one only where an app offers a rotate command.
 
 Measured on studious on 2026-10-03: macOS 15.0.1, Safari 18.0.1, Chrome 154, Maps 3.0, TextEdit, Preview; vhid 0.2.0, eyes 0.3.0-dev+a5e9794. Every act went through vhid's devices. Each result was checked by what changed on screen: the URL eyes read in the address bar, or a `screencapture` taken over ssh.
 
