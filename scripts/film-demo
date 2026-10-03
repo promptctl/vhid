@@ -1,0 +1,103 @@
+#!/bin/bash
+# Films one demo on the Mac this runs on, with a caption band under the screen:
+#
+#   scripts/film-demo site/demo/look-click-look.sh
+#
+# writes site/demo/look-click-look.mp4, and look-click-look.steps.tsv beside it: each line
+# the band gained, at its second in the clip. A demo is a shell file defining stage (run
+# before filming, not shown) and film, whose steps are `say '<comment>'`,
+# `run '<command>'`, `start '<command>'` and `stop`. The band shows the exact string that
+# ran and the last line it printed [LAW:one-source-of-truth], so the demo file is the one
+# copy of what the clip shows.
+#
+# Needs Screen Recording for whatever runs this (over SSH, sshd-keygen-wrapper), and
+# ffmpeg with libx264.
+set -Eeuo pipefail
+trap 'echo "film-demo: line $LINENO failed: $BASH_COMMAND" >&2' ERR
+
+demo=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
+clip=${demo%.sh}.mp4
+steps=${demo%.sh}.steps.tsv
+here=$(cd "$(dirname "$0")" && pwd)
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+
+# Seconds each step stays newest on the band before the next one runs: long enough to read.
+beat=1.6
+# The clip is the 960x540 points around the front window, scaled to 1280x720 so an app
+# window is legible at phone width, over a band 132 high that holds the last three lines.
+view=(960 540)
+clip_width=1280
+clip_height=720
+band=132
+out=''
+started=''
+: > "$work/lines.tsv"
+mkfifo "$work/keys"
+
+# Each band line is stamped with the wall clock; the stamps become clip seconds once the
+# first frame's stamp is known. A tab in what a command printed is the file's separator,
+# so the band shows it as two spaces.
+line() { printf '%s\t%s\n' "$(perl -MTime::HiRes=time -e 'printf "%.3f", time')" "${1//$'\t'/  }" >> "$work/lines.tsv"; }
+say() { line "# $1"; sleep "$beat"; }
+run() {
+    line "\$ $1"
+    out=$(cd "$work" && eval "$1")
+    [ -n "$out" ] && line "${out##*$'\n'}"
+    sleep "$beat"
+}
+start() { line "\$ $1"; (cd "$work" && eval "exec $1") & started=$!; sleep "$beat"; }
+stop() { kill -INT "$started"; wait "$started"; line '^C'; sleep "$beat"; }
+
+# stage_alone App: App in front with every other app hidden, so the clip shows only it.
+stage_alone() {
+    osascript -e "tell application \"$1\" to activate" \
+        -e "tell application \"System Events\" to set visible of every process whose name is not \"$1\" and visible is true to false"
+}
+
+source "$demo"
+stage
+
+# The view is centred on the front window and kept on the main display.
+read -r wx wy ww wh < <(osascript -e 'tell application "System Events" to tell (first process whose frontmost is true) to get {position, size} of window 1' | tr -d ,)
+read -r screen_width screen_height < <(eyes displays | awk -F'\t' '$2 == "main" { split($3, b, " "); split(b[2], s, "x"); print s[1], s[2] }')
+clamp() { echo $(( $1 < 0 ? 0 : ($1 > $2 ? $2 : $1) )); }
+view_x=$(clamp $((wx + ww / 2 - view[0] / 2)) $((screen_width - view[0])))
+view_y=$(clamp $((wy + wh / 2 - view[1] / 2)) $((screen_height - view[1])))
+
+# Each frame is stamped with the wall clock, so the first frame's stamp is the clip's
+# zero and the band converts exactly, however long the capture took to start.
+# [LAW:no-ambient-temporal-coupling]
+ffmpeg -hide_banner -loglevel error -f avfoundation -capture_cursor 1 -capture_mouse_clicks 1 \
+    -framerate 30 -pixel_format nv12 -use_wallclock_as_timestamps 1 -i 'Capture screen 0:none' \
+    -c:v libx264 -preset ultrafast -crf 14 -copyts "$work/screen.mkv" < "$work/keys" &
+capture=$!
+# q on its stdin is what ends an ffmpeg capture cleanly; SIGINT ends it with 255.
+exec 3> "$work/keys"
+sleep "$beat"
+film
+sleep "$beat"
+echo q >&3
+wait "$capture"
+
+zero=$(ffprobe -v error -show_entries format=start_time -of csv=p=0 "$work/screen.mkv")
+# Pixels per point: the capture is in pixels, the view in points.
+pixel_width=$(ffprobe -v error -select_streams v -show_entries stream=width -of csv=p=0 "$work/screen.mkv")
+scale=$((pixel_width / screen_width))
+awk -F'\t' -v zero="$zero" '{ printf "%.3f\t%s\n", $1 - zero, $2 }' "$work/lines.tsv" > "$steps"
+swift "$here/caption-band.swift" "$clip_width" "$band" "$work" < "$steps"
+
+# Band n shows from line n's second until line n+1's.
+count=$(wc -l < "$steps" | tr -d ' ')
+inputs=()
+chain="[0:v]setpts=PTS-STARTPTS,crop=$((view[0] * scale)):$((view[1] * scale)):$((view_x * scale)):$((view_y * scale)),scale=$clip_width:$clip_height:flags=lanczos,pad=$clip_width:$((clip_height + band)):0:0[v0]"
+for ((i = 0; i < count; i++)); do
+    read -r from until < <(awk -F'\t' -v n=$((i + 1)) 'NR == n { a = $1 } NR == n + 1 { b = $1 } END { print a, (b == "" ? 1e9 : b) }' "$steps")
+    inputs+=(-i "$work/band-$i.png")
+    chain+=";[v$i][$((i + 1)):v]overlay=0:$clip_height:enable='between(t,$from,$until)'[v$((i + 1))]"
+done
+ffmpeg -hide_banner -loglevel error -y -i "$work/screen.mkv" "${inputs[@]}" -filter_complex "$chain" \
+    -map "[v$count]" -an -c:v libx264 -preset slow -crf 30 -pix_fmt yuv420p -movflags +faststart "$clip"
+
+seconds=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$clip")
+echo "film-demo: $(basename "$clip"): $count band lines, ${seconds}s, $(wc -c < "$clip" | tr -d ' ') bytes" >&2

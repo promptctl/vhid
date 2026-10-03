@@ -1,0 +1,10 @@
+1.209	# where is the 7?
+2.833	$ eyes find 7 --exact
+3.784	380,632  7
+5.405	$ vhid click 380 632
+5.479	clicked left once at (379.5, 632.25) after 9 motion reports
+7.101	$ vhid type '*6='
+7.203	typed 3 characters on com.apple.keylayout.US
+8.834	# did it work?
+10.459	$ eyes find 42 --exact
+11.447	518,542  42
