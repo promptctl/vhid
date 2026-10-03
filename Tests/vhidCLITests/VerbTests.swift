@@ -1,5 +1,6 @@
 import Input
 import KeyboardLayouts
+import Keystrokes
 import Pointing
 import Testing
 @testable import vhid
@@ -195,5 +196,60 @@ import Testing
 
     @Test func cursorSaysWhereTheCursorIs() async throws {
         #expect(try await CursorCommand.cursor { ScreenPoint(x: -12.5, y: 40)! } == "the cursor is at \(ScreenPoint(x: -12.5, y: 40)!)")
+    }
+}
+
+/// `gesture`: the chord a gesture comes to on this Mac, and the press of it. The
+/// preferences are handed in, so each test says which entry the user's Mac holds.
+@Suite struct GestureVerbTests {
+    static let us = VerbTests.us
+    static func none() -> Any? { nil }
+
+    static func performed(_ gesture: Gesture, hotKeys: () -> Any? = none) async throws -> (said: String, down: [Usage]) {
+        let keyboard = RecordingKeyboard()
+        let chord = try GestureCommand.chord(for: gesture, on: us, hotKeys: hotKeys)
+        let said = try await GestureCommand.perform(chord, with: Typist(keyboard: keyboard))
+        return (said, keyboard.down)
+    }
+
+    /// An app's command is the chord read off the layout, and the report says which.
+    @Test func backPressesCommandAndLeftBracket() async throws {
+        let (said, down) = try await Self.performed(.back)
+        #expect(down == [.leftCommand, Usage(rawValue: 0x2F)])
+        #expect(said == "back: pressed leftCommand+key 0x21, on \(Self.us.name)")
+    }
+
+    /// The user's own binding wins, and the report says it was theirs.
+    @Test func aShortcutTheUserSetIsPressedAndSaidToBeTheirs() async throws {
+        let (said, down) = try await Self.performed(.missionControl) {
+            ["32": ["enabled": true, "value": ["parameters": [113, 12, 524288], "type": "standard"]]]
+        }
+        #expect(down == [.leftOption, Usage(rawValue: 0x14)])
+        #expect(said == "mission-control: pressed leftOption+key 0xc, its shortcut as set at System Settings > Keyboard > Keyboard Shortcuts > Mission Control > Mission Control")
+    }
+
+    @Test func aShortcutNeverChangedIsMacOSsDefaultAndSaidToBe() async throws {
+        let (said, down) = try await Self.performed(.appExpose)
+        #expect(down == [.leftControl, Usage(rawValue: 0x51)])
+        #expect(said.contains("its shortcut by default at "))
+    }
+
+    /// Off is refused by name, naming the setting, before anything is pressed.
+    @Test func aShortcutThatIsOffIsRefusedNamingTheSetting() throws {
+        let refused = #expect(throws: GestureRefused.self) { try GestureCommand.chord(for: .launchpad, on: Self.us, hotKeys: Self.none) }
+        #expect(refused?.description == "launchpad is the shortcut at System Settings > Keyboard > Keyboard Shortcuts > Launchpad & Dock > Show Launchpad, and it is off")
+    }
+
+    /// A gesture with no route is refused, never approximated by a neighbour's.
+    @Test(arguments: [Gesture.smartZoom, .rotate])
+    func aGestureWithNoRouteIsRefused(_ gesture: Gesture) throws {
+        let refused = #expect(throws: GestureRefused.self) { try GestureCommand.chord(for: gesture, on: Self.us, hotKeys: Self.none) }
+        #expect(refused?.description.hasPrefix("\(gesture) has no key or button that does it: ") == true)
+    }
+
+    @Test func theCommandLineReadsAGestureByName() throws {
+        let parsed = try #require(try Vhid.parseAsRoot(["gesture", "mission-control"]) as? GestureCommand)
+        #expect(parsed.gesture == .missionControl)
+        #expect(throws: (any Error).self) { try Vhid.parseAsRoot(["gesture", "swipe"]) }
     }
 }

@@ -12,7 +12,7 @@ import Testing
 /// daemon: every refusal here is one that comes back before a connection is made.
 @Suite struct McpTests {
     @Test func theToolsAreListedInOrder() {
-        #expect(Tools.all.map(\.tool.name) == ["type", "press", "click", "move", "scroll", "drag", "play", "cursor", "doctor"])
+        #expect(Tools.all.map(\.tool.name) == ["type", "press", "gesture", "click", "move", "scroll", "drag", "play", "cursor", "doctor"])
     }
 
     /// Only cursor and doctor promise to change nothing: cursor reaches no device, and

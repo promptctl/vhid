@@ -52,7 +52,7 @@ struct VerbTool: Sendable {
 /// Each is a CLI verb's core called with arguments read from JSON rather than from argv,
 /// so a tool and its verb cannot come to do different things. [LAW:one-source-of-truth]
 enum Tools {
-    static let all: [VerbTool] = [type, press, click, move, scroll, drag, play, cursor, doctor]
+    static let all: [VerbTool] = [type, press, gesture, click, move, scroll, drag, play, cursor, doctor]
 
     private static let x = Parameter.number("x", Help.x)
     private static let y = Parameter.number("y", Help.y)
@@ -80,6 +80,15 @@ enum Tools {
         return VerbTool(Help.press, [chords, layoutName]) { arguments, installation in
             let (chords, layout) = (try arguments[chords], try KeyboardLayout.chosen(try arguments[layoutName]))
             return try await Devices.using(installation) { try await PressCommand.press(chords, on: layout, with: $0.typist) }
+        }
+    }()
+
+    static let gesture: VerbTool = {
+        let gesture = Parameter.gesture("gesture")
+        return VerbTool(Help.gesture, [gesture, layoutName]) { arguments, installation in
+            let chord = try GestureCommand.chord(for: try arguments[gesture], on: try KeyboardLayout.chosen(try arguments[layoutName]),
+                                                 hotKeys: GestureCommand.hotKeys)
+            return try await Devices.using(installation) { try await GestureCommand.perform(chord, with: $0.typist) }
         }
     }()
 

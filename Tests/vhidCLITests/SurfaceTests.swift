@@ -23,7 +23,7 @@ import Testing
     /// line alone. Read from `Help` because the dump cannot tell a note from the discussion;
     /// what is compared is still both renderings.
     static let commandLineNotes = Dictionary(uniqueKeysWithValues: [
-        Help.type, Help.press, Help.click, Help.move, Help.scroll, Help.drag, Help.play, Help.cursor, Help.doctor,
+        Help.type, Help.press, Help.gesture, Help.click, Help.move, Help.scroll, Help.drag, Help.play, Help.cursor, Help.doctor,
     ].map { ($0.name, $0.commandLine) })
 
     /// A tool argument the command line reads from stdin rather than from argv, by verb: a

@@ -170,6 +170,28 @@ enum Help {
         could not be told from vhid's.
         """, commandLine: ["Notes, such as key presses with no HID usage left out, go to stderr."])
 
+    static let gestureName = "the gesture, by what it does"
+
+    static let gesture = VerbHelp(name: "gesture", abstract: "Do what a trackpad gesture does, by pressing the key that does it.", discussion: """
+        No gesture reaches macOS as a gesture: the devices are a keyboard and a mouse. Each \
+        gesture is pressed as the key that does the same thing, or refused by name when no \
+        key does:
+        \(Gesture.allCases.map { "  \($0): \($0.onTrackpad); \(route($0.route))" }.joined(separator: "\n"))
+
+        A shortcut is the calling user's, read from System Settings as it is now, and refused \
+        when it is off there. A chord an app matches by character is read off the keyboard \
+        layout, as press reads one. What is in front decides what the key does, and nothing \
+        here checks it.
+        """)
+
+    private static func route(_ route: Route) -> String {
+        switch route {
+        case .command(let chord): "presses \(chord)"
+        case .shortcut(let shortcut): "presses its shortcut at \(shortcut.setting)"
+        case .none(let why): "refused: \(why)"
+        }
+    }
+
     static let doctor = VerbHelp(name: "doctor", abstract: "Name every requirement a verb needs, and the step left for any that is not met.", discussion: """
         First ready or not ready, then one row per requirement - the driver extension, the \
         daemon's launchd job, the daemon, its admitting this vhid, who holds the devices, the \
