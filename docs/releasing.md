@@ -7,11 +7,13 @@ git tag v$(scripts/version --base) && git push origin v$(scripts/version --base)
 ```
 
 `.github/workflows/release.yml` checks that the tag is `VERSION`'s, that the tagged
-commit is on master (a `-tag` pre-release may come from any branch) with its `vhid`,
-`eyes` and `pkg` checks green, and that `CHANGELOG.md` has a `## [<version>]` section.
-It then runs `scripts/release` in a keychain `scripts/release-keychain` makes for the
-job and deletes at its end, and attaches the notarized pkg to a GitHub Release whose
-notes are that section, marked a pre-release when the version has a `-tag`. The job
+commit is on master (a `-tag` pre-release may come from any branch), and that
+`CHANGELOG.md` has a `## [<version>]` section. It then runs `scripts/release` in a
+keychain `scripts/release-keychain` makes for the job and deletes at its end. Once the
+pkg is notarized it requires the tagged commit's `vhid`, `eyes` and `pkg` checks to be
+green, waiting for any still running, so a tag pushed right after its merge builds while
+CI tests it. Then it attaches the pkg to a GitHub Release whose notes are that section,
+marked a pre-release when the version has a `-tag`. The job
 reads secrets of the `release` environment, which admits only `v*` tags and waits for a
 maintainer to approve it in the Actions tab before handing them over:
 
