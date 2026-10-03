@@ -1,9 +1,9 @@
-1.221	$ vhid record > fifty-less-eight.jsonl
-2.844	# a person clicks 5 and types 0-8= (here, posted events stand in for one)
-8.343	^C
-9.973	$ vhid press escape
-10.062	pressed key 0x35 on com.apple.keylayout.US
-11.692	$ vhid play < fifty-less-eight.jsonl
-19.141	{"done":{"late_us":{"max":5659,"p50":829,"p90":2632,"p99":5659},"reports":50,"start_reports":12}}
-20.770	$ eyes find 42 --exact
-21.781	520,541  42
+1.243	typed	$ vhid record > fifty-less-eight.jsonl
+2.865	narration	# a person clicks 5 and types 0-8= (here, posted events stand in for one)
+8.366	typed	^C
+9.984	typed	$ vhid press escape
+10.049	printed	pressed key 0x35 on com.apple.keylayout.US
+11.675	typed	$ vhid play < fifty-less-eight.jsonl
+19.104	printed	{"done":{"late_us":{"max":5798,"p50":893,"p90":2641,"p99":5798},"reports":50,"start_reports":17}}
+20.729	typed	$ eyes find 42 --exact
+21.766	printed	520,541  42

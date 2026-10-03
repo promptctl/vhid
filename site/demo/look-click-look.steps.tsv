@@ -1,10 +1,10 @@
-1.209	# where is the 7?
-2.833	$ eyes find 7 --exact
-3.784	380,632  7
-5.405	$ vhid click 380 632
-5.479	clicked left once at (379.5, 632.25) after 9 motion reports
-7.101	$ vhid type '*6='
-7.203	typed 3 characters on com.apple.keylayout.US
-8.834	# did it work?
-10.459	$ eyes find 42 --exact
-11.447	518,542  42
+1.195	narration	# where is the 7?
+2.814	typed	$ eyes find 7 --exact
+3.829	printed	380,632  7
+5.448	typed	$ vhid click 380 632
+5.536	printed	clicked left once at (379.723, 632.492) after 10 motion reports
+7.157	typed	$ vhid type '*6='
+7.237	printed	typed 3 characters on com.apple.keylayout.US
+8.873	narration	# did it work?
+10.505	typed	$ eyes find 42 --exact
+11.507	printed	518,542  42
