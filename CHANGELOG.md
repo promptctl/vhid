@@ -6,7 +6,7 @@ Each release's section is its GitHub Release notes, which keep line breaks, so e
 
 ## [0.4.0]
 
-- `vhid type` and `vhid press` take `--into <app>`, and the MCP tools `into`: with another app in front just before the first key, nothing is sent and the refusal names the app that was. The app is named as `eyes windows` prints the frontmost application.
+- `vhid type` and `vhid press` take `--into <app>`, and the MCP tools `into`: with another app in front just before the first key, nothing is sent and the refusal names the app that was. The app is named as `eyes windows` prints the frontmost application. They refuse the same way at the login window or with another user's session in front.
 - `vhid gesture <name>` does what a trackpad gesture does, by pressing the key that does it: back and forward, zoom in and out, Look Up, the next or previous Space, Mission Control, App Exposé, Show Desktop, Launchpad and Notification Center. A system shortcut is the one the user has set, and one that is off is refused, naming the setting. `vhid mcp` serves it as the `gesture` tool.
 - `vhid mcp` and `eyes mcp` answer a client's initialize with instructions: each names the other server, says the point `find` prints is the point `click` takes, and teaches the look, act, look again loop, so a client without the Claude Code plugin learns the pairing too.
 - The Claude Code plugin has a second skill, `menu-item`, which invokes any app's menu item by its name: it searches for the item from the app's Help menu and checks the result before choosing it, and clicks down the menu path for an item in the Help menu itself.
@@ -15,6 +15,7 @@ Each release's section is its GitHub Release notes, which keep line breaks, so e
 - `eyes find --near <text>` orders matches by how close each sits to that text, so `eyes find Remove --near Beta --limit 1` gives the Remove button in Beta's row. The MCP tool takes `near`.
 - Over ssh, `eyes grants` names `sshd-keygen-wrapper`, the program macOS holds the grants under, where it named `sshd-session`, whose switch does nothing.
 - In Chrome, `eyes find` no longer answers an element scrolled out of view as a match on the viewport's edge, where a click misses it.
+- Removing the driver, by `vhid-uninstall --driver` or `brew uninstall --zap --cask vhid`, no longer fails in the moment after a deactivation while macOS tears the driver down; `vhid driver` and `vhid doctor` name that moment `withdrawing`.
 - The Homebrew cask reaches this release, and with it the `brew uninstall --zap` and `brew uninstall` behavior 0.3.0's notes describe: 0.3.0 itself never reached the cask, which stayed at 0.2.0.
 
 ## [0.3.0]
