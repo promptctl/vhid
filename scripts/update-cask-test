@@ -121,6 +121,11 @@ run "$TAP" 0.1.11.0 "$PKG" "$BODY"
 [ "$status" -eq 0 ] || fail "update-cask to 0.1.11.0 exited $status: $out"
 echo "$out" | grep -qF "vhid 0.1.11 -> 0.1.11.0" || fail "update-cask to 0.1.11.0 said: $out"
 
+# A cask naming a pre-release has left what update-cask writes, and is refused rather
+# than moved past: no release is ordered against it.
+sed -i '' 's/^  version ".*"$/  version "0.2.0-rc.1"/' "$TAP/Casks/vhid.rb" && git -C "$TAP" commit --quiet -am "pre-release by hand"
+refused "the cask names '0.2.0-rc.1', which is not a release version" "$TAP" 0.1.12 "$PKG" "$BODY"
+
 # A cask whose shape has moved on is refused, as is a tap with no cask at all.
 sed -i '' 's/^  sha256 /  sha256 :no_check # /' "$TAP/Casks/vhid.rb" && git -C "$TAP" commit --quiet -am reshaped
 refused "has 0 lines of the form '  sha256 \"...\"', not one" "$TAP" 0.2.0 "$PKG" "$BODY"

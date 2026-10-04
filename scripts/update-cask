@@ -13,11 +13,12 @@ set -euo pipefail
 tap=$1 version=$2 pkg=$3 body=$4
 cask=$tap/Casks/vhid.rb
 stanza=$(dirname "$0")/cask-stanza
+newest=$(dirname "$0")/newest-release
 
 # [LAW:parse-dont-validate] The cask is what `brew install` gives everyone, so it takes a
-# release, never a pre-release: dotted numbers alone.
-echo "$version" | grep -Eqx '[0-9]+(\.[0-9]+)*' || {
-  echo "update-cask: '$version' is not a release version, dotted numbers such as 0.2.0" >&2
+# release, never a pre-release.
+"$newest" "$version" >/dev/null || {
+  echo "update-cask: '$version' is not a release version, as scripts/newest-release decides" >&2
   exit 2
 }
 # [LAW:one-source-of-truth] The body says nothing of any one release: its version and
@@ -31,6 +32,9 @@ done
 sha256=$(shasum -a 256 "$pkg" | cut -d ' ' -f 1)
 was=$("$stanza" "$cask" version)
 had=$("$stanza" "$cask" sha256)
+# A cask naming a version that is not a release has left what update-cask writes, so no
+# order against it holds: it is refused rather than moved past.
+"$newest" "$was" >/dev/null || { echo "update-cask: the cask names '$was', which is not a release version" >&2; exit 1; }
 # The release the cask names already is left as it is, so long as its pkg is unchanged: a
 # sha256 that moved under a published version is a pkg replaced after release, and every
 # Homebrew install of it would fail its checksum. Its body is left too, hand edits and
@@ -43,8 +47,7 @@ if [ "$version" = "$was" ]; then
 fi
 # The cask only moves forward: a backport released after a newer version, or a re-run of
 # an older release's job, would otherwise take every Homebrew install back.
-# sort -V is the order cask.yaml finds the newest release by, so the two cannot disagree.
-[ "$(printf '%s\n' "$was" "$version" | sort -V | tail -n 1)" = "$version" ] \
+[ "$("$newest" "$was" "$version")" = "$version" ] \
   || { echo "update-cask: the cask names $was, which $version does not follow" >&2; exit 1; }
 
 sed -e "s/^  version \"@VERSION@\"\$/  version \"$version\"/" \
