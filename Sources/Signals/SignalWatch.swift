@@ -59,9 +59,19 @@ public final class FirstSignal: Sendable {
 /// Ends the process by `number` under its default disposition, as if the signal had never
 /// been watched, so the parent sees the process killed by it - which a shell reads as
 /// Control-C, and stops a loop for - rather than an exit status that only resembles it.
+///
+/// What the run printed on its way out is still in stdio's buffers, which a death by
+/// signal does not flush, so they are flushed first. The signal is raised on this thread
+/// with it unblocked here - a dispatch worker blocks it - so it is delivered before
+/// `raise` returns, rather than to some other thread while this one runs on.
 public func die(by number: Int32) -> Never {
+    fflush(nil)
     signal(number, SIG_DFL)
-    kill(getpid(), number)
-    // The default disposition of a watched signal ends the process; this is never reached.
+    var only = sigset_t()
+    sigemptyset(&only)
+    sigaddset(&only, number)
+    pthread_sigmask(SIG_UNBLOCK, &only, nil)
+    raise(number)
+    // The default disposition of an unblocked signal ends the process; this is never reached.
     exit(128 + number)
 }

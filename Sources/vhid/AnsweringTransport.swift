@@ -90,8 +90,15 @@ actor AnsweringTransport: Transport, HTTPContextProviding {
 
     private static let idHeader = "json-rpc-id"
 
+    /// Whether the session is being stopped from outside, so that every call read from
+    /// now on is withdrawn as it is owed: one read in the moment between the stop and the
+    /// SDK's loop ending would otherwise run as if nobody had asked it to stop.
+    private var stopping = false
+
     private func owe(_ line: Data) {
-        for id in Exchange.requested(in: line) { owed[id, default: 0] += 1 }
+        let ids = Exchange.requested(in: line)
+        for id in ids { owed[id, default: 0] += 1 }
+        if stopping { withdraw(ids) }
     }
 
     /// A withdrawn call is stopped now if its handler is running, and when it starts if not.
@@ -104,9 +111,10 @@ actor AnsweringTransport: Transport, HTTPContextProviding {
         }
     }
 
-    /// Withdraws every call owed, running or not yet started: the session is being stopped
-    /// from outside, and its calls stop with it.
+    /// Withdraws every call owed, running or not yet started, and every call read after
+    /// it: the session is being stopped from outside, and its calls stop with it.
     func withdrawEverything() {
+        stopping = true
         withdraw(owed.flatMap { id, count in Array(repeating: id, count: count) })
     }
 

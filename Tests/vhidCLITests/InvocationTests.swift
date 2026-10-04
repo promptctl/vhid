@@ -427,6 +427,7 @@ import Testing
         #expect(written[0]?["event"] as? String == "mcp")
         #expect(written[0]?["outcome"] as? String == "cancelled")
         #expect(written[0]?["error"] as? String == "the run was cancelled")
+        #expect((written[0]?["attributes"] as? [String: Any])?["signal"] as? String == (number == SIGINT ? "SIGINT" : "SIGTERM"))
     }
 
     /// `doctor` prints its own report and exits 1 with nothing more to say.

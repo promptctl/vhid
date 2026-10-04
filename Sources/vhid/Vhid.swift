@@ -1,6 +1,7 @@
 import ArgumentParser
 import Foundation
 import Input
+import os
 import Signals
 import Version
 
@@ -39,31 +40,55 @@ struct Vhid: AsyncParsableCommand {
     ///
     /// Control-C and SIGTERM stop the invocation, not the process under it. The first
     /// cancels the verb, which unwinds as a withdrawn MCP call does, letting go of what it
-    /// holds, and its record says it was cancelled and what it had sent; then the process
-    /// dies by that signal, as it would have unwatched. A verb that does not hear the
-    /// cancel - `record` answers the signal itself, `doctor` reads on to its end - ends and
-    /// exits as it would have anyway. A second signal is someone the first did not reach,
-    /// and ends the process at once, unrecorded.
+    /// holds, and its record says which signal landed and what the verb had sent; then the
+    /// process dies by that signal, as it would have unwatched - which a shell reads as
+    /// Control-C, and stops a loop for. A verb that ends well despite it - `record` answers
+    /// it by finishing, `doctor` reads on to its end - exits as it would have anyway. A
+    /// second signal is someone the first did not reach, and ends the process at once,
+    /// unrecorded.
+    ///
+    /// [LAW:single-enforcer] The one watch on these signals in a command-line run: a verb
+    /// that answers them, as `record` does, hears the cancel, and reads which signal it
+    /// was from the invocation.
     static func main() async {
-        let invocation = Task {
-            try await Invocation.record(_commandName, via: .commandLine, to: EventExport.configured().export) { try await run(nil, in: $0) }
-        }
         let first = FirstSignal()
+        let running = OSAllocatedUnfairLock<Task<Void, any Error>?>(initialState: nil)
+        // Watched before the verb starts, so that no signal finds it under the default
+        // disposition; one that lands before the verb exists cancels it as it is made.
         let watch = SignalWatch { number in
             guard first.take(number) else { die(by: number) }
-            invocation.cancel()
+            running.withLock { $0?.cancel() }
+        }
+        let invocation = Task {
+            try await Invocation.record(_commandName, via: .commandLine, stoppedBy: first, to: EventExport.configured().export) {
+                try await run(nil, in: $0)
+            }
+        }
+        running.withLock { running in
+            running = invocation
+            if first.taken != nil { invocation.cancel() }
         }
         let ending = await invocation.result
         withExtendedLifetime(watch) {}
         switch (ending, first.taken) {
         case (.success, _): return
-        case (.failure(let error), let number?) where error.isCancellation:
+        case (.failure(let error), nil) where !error.isCancellation: exit(withError: error)
+        case (.failure(let error), let number):
             // Said, because it can be the one report of what the verb had done when the
-            // signal landed. [LAW:no-silent-failure]
-            FileHandle.standardError.write(Data("vhid: \(error.reported)\n".utf8))
+            // signal landed, in the words its record has. [LAW:no-silent-failure]
+            let words = said(for: error)
+            if !words.isEmpty { FileHandle.standardError.write(Data("vhid: \(words)\n".utf8)) }
+            guard let number else { exit(withError: exitCode(for: error)) }
             die(by: number)
-        case (.failure(let error), _): exit(withError: error)
         }
+    }
+
+    /// What the command line says of a verb that ended in `error`, which is what its
+    /// record carries; nothing for a verb that said everything itself on its way out, as
+    /// `doctor` does. A cancellation is said in the words an MCP caller is given, since
+    /// ArgumentParser has none of its own for it. [LAW:one-source-of-truth]
+    static func said(for error: any Error) -> String {
+        error.isCancellation ? error.reported : message(for: error)
     }
 
     /// Parses `arguments` (argv when `nil`), names `invocation` after the command they

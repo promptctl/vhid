@@ -129,6 +129,28 @@ import Testing
         #expect(stdio.sent.count == 1, "the reused id's answer was dropped as withdrawn")
     }
 
+    /// A session being stopped from outside withdraws a call read after the stop, as well
+    /// as those owed when it came: one that slipped in before the SDK's loop ended would
+    /// otherwise run on after the stop.
+    @Test func aCallReadAfterTheSessionIsStoppedIsWithdrawn() async throws {
+        let stdio = Stdio(), transport = AnsweringTransport(stdio)
+        let (read, next) = AsyncStream<Void>.makeStream()
+        let session = Task {
+            for try await _ in await transport.receive() { next.yield() }
+        }
+        stdio.call(1, then: [])
+        for await _ in read.prefix(1) {}
+        await transport.withdrawEverything()
+        #expect(await transport.withdrawing(1) == 1)
+        stdio.call(2, then: [.end])
+        for await _ in read.prefix(1) {}
+        #expect(await transport.withdrawing(2) == 1, "a call read after the stop was not withdrawn")
+        try await transport.send(Data(#"{"jsonrpc":"2.0","id":1,"result":{}}"#.utf8))
+        try await transport.send(Data(#"{"jsonrpc":"2.0","id":2,"result":{}}"#.utf8))
+        try await session.value
+        #expect(stdio.sent.isEmpty, "a withdrawn call's answer was written: \(stdio.sent)")
+    }
+
     /// A call withdrawn in the same breath as it was asked, before its handler could have
     /// started, still ends the session once it is over, and answers nothing. The SDK, had it
     /// read the cancel, would have answered nothing and left the session waiting for good,

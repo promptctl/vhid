@@ -59,8 +59,9 @@ Every `vhid` run, and every MCP tool call, leaves one record: a line of JSON app
 look different there, because a run that opened the devices counts its reports from
 zero; whether the daemon answered is in its `outcome` and `error`. Control-C or
 `SIGTERM` stops a verb as a withdrawn MCP call is stopped: it is recorded as `cancelled`
-with what it had sent, says so on stderr, and then dies by the signal. `vhid record`
-answers the first one by finishing, and a second signal ends any verb at once, unrecorded.
+with what it had sent and `attributes.signal` naming the signal, says so on stderr, and
+then dies by the signal. `vhid record` answers the first one by finishing, and a second
+signal ends any verb at once, unrecorded.
 
 ```json
 {"attributes":{"notch_rest_ms":200},"counts":{"keyboard_reports":0,"mouse_reports":13,"scroll_notches_horizontal":0,"scroll_notches_vertical":10},"duration_ms":2071.4,"entry":"cli","event":"scroll","outcome":"ok","service":"vhid","sink":"file","started_at":"2026-10-04T13:20:00.512Z","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736"}

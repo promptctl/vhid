@@ -3,25 +3,26 @@ import DriverExtension
 import Foundation
 import Helper
 import RecordingTie
-import Signals
 
 /// Records the physical keyboard and mouse as a script `vhid play` replays.
 ///
 /// The tap runs in a signed app bundle of its own, because Input Monitoring is granted to
 /// the responsible process and a bundle is one a person can grant it to once, whatever
 /// launched `vhid` (`docs/design/replay.md`, "The grant recording needs"). This command
-/// refuses what would make a recording wrong, launches the app, turns its own signals into
-/// messages to it, and prints what it sends back.
-struct RecordCommand: ParsableCommand {
+/// refuses what would make a recording wrong, launches the app, turns the signal that stops
+/// it into a message to the app, and prints what it sends back.
+struct RecordCommand: AsyncParsableCommand {
     static let configuration = Help.record.configuration
 
     @OptionGroup var service: ServiceOption
 
-    func run() throws {
+    func run() async throws {
         // [LAW:parse-dont-validate] Every refusal the command can make is made before the
         // app is launched, so a refused recording leaves nothing running.
         try Self.refusal(holder: HelperConnection(installation: try service.installation()).status(),
                          system: Self.services(in: "system"), session: Self.services(in: "gui/\(getuid())")).map { throw $0 }
+        // A stop that came before the app did launches none.
+        try Task.checkCancellation()
         let listener = try TieListener()
         try Self.launch(app: try Self.app(), socket: listener.path)
         let app = try listener.accept(within: .seconds(10))
@@ -33,24 +34,23 @@ struct RecordCommand: ParsableCommand {
         case let other:
             throw TieFailure("the tap app's first word was \(other.map { "\($0)" } ?? "nothing"), not that it was recording")
         }
-        // SIGINT is the stop, whose own keys come out of the recording; SIGTERM ends it and
-        // drops nothing. A failed send is the app gone, which the read below reports. A
-        // second signal is someone the first did not reach - an app that stopped answering -
-        // and ends the command, whose exit the app's pid watch sees.
-        let first = FirstSignal()
-        let watch = SignalWatch { number in
-            guard first.take(number) else { Darwin.exit(128 + number) }
-            try? app.send(number == SIGINT ? ToApp.stop : ToApp.end)
-        }
-        defer { withExtendedLifetime(watch) {} }
-        while let message = try app.receive(FromApp.self) {
-            switch message {
-            case .note(let note): FileHandle.standardError.write(Data("vhid record: \(note)\n".utf8))
-            case .script(let script): print(script, terminator: ""); return
-            case .recording, .refused: throw TieFailure("the tap app said \(message) while recording")
+        // The stop is the command line's cancel. SIGINT is Control-C, whose own keys come
+        // out of the recording; SIGTERM, or a cancel no signal made, ends it and drops
+        // nothing. A failed send is the app gone, which the read below reports. A second
+        // signal ends the process, whose exit the app's pid watch sees.
+        let signals = Invocation.current?.signals
+        try await withTaskCancellationHandler {
+            while let message = try app.receive(FromApp.self) {
+                switch message {
+                case .note(let note): FileHandle.standardError.write(Data("vhid record: \(note)\n".utf8))
+                case .script(let script): print(script, terminator: ""); return
+                case .recording, .refused: throw TieFailure("the tap app said \(message) while recording")
+                }
             }
+            throw TieFailure("the tap app ended without sending the recording")
+        } onCancel: {
+            try? app.send(signals?.taken == SIGINT ? ToApp.stop : ToApp.end)
         }
-        throw TieFailure("the tap app ended without sending the recording")
     }
 
     /// Why a recording cannot start, from what was read: who holds the devices, and the
