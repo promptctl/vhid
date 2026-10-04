@@ -8,20 +8,26 @@ public struct MergedReader: Reader {
     public let source = SourceKind.merged
     let first: any Reader
     let second: any Reader
+    let locate: Locate
 
-    public init(_ first: any Reader, _ second: any Reader) {
+    /// `locate` is how the region is resolved before either reader is asked: `Region.bounds`
+    /// in the binary, a fixed answer in a test, which then reads no display of the host's.
+    /// [LAW:effects-at-boundaries]
+    public init(_ first: any Reader, _ second: any Reader, locate: @escaping Locate) {
         self.first = first
         self.second = second
+        self.locate = locate
     }
 
     /// Asks both as child tasks: both readers are main-actor, so they overlap only where
     /// one leaves it - Vision's recognition does, the tree's walk does not - and the screen
     /// has less time to change between the two looks than asking one after the other.
     /// Throws when the region names nowhere, once, before either reader is asked; when
-    /// neither could look; or when the task was cancelled. One reader that could not look
-    /// is part of the answer, carried in the scope, and never proof of absence.
+    /// neither could look; or when the task was cancelled. One reader that could not look -
+    /// a window gone between the merge's look and its own included - is part of the
+    /// answer, carried in the scope, and never proof of absence.
     public func look(_ query: Query) async throws -> Candidates {
-        _ = try query.region.bounds()
+        _ = try locate(query.region)
         async let a = Self.attempt(first, query)
         async let b = Self.attempt(second, query)
         return try Candidates.merging(try await a, try await b)
