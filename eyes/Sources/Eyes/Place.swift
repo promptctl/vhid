@@ -34,6 +34,9 @@ public extension Region {
     }
 }
 
+/// The rectangle a region names, or a refusal: `Region.bounds` wherever the screen is real.
+public typealias Locate = @MainActor @Sendable (Region) throws -> ScreenRect
+
 /// One attached display, as a caller needs it to aim: the id `Region.display` names, and
 /// where it sits in the one screen space.
 public struct Display: Sendable, Hashable {

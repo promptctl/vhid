@@ -48,7 +48,7 @@ extension SourceKind: ExpressibleByArgument {
         switch self {
         case .tree: TreeReader(granted: Self.granted)
         case .pixels: PixelReader(granted: Self.granted)
-        case .merged: MergedReader(TreeReader(granted: Self.granted), PixelReader(granted: Self.granted))
+        case .merged: MergedReader(TreeReader(granted: Self.granted), PixelReader(granted: Self.granted), locate: { try $0.bounds() })
         }
     }
 

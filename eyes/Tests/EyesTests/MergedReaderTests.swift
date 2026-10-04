@@ -27,8 +27,11 @@ import Testing
         Found(text: Text(text)!, frame: ScreenRect(x: x, y: y, width: width, height: 20), source: source)
     }
 
+    /// The region resolved without asking the host which displays it has. [LAW:effects-at-boundaries]
+    static let here: Locate = { _ in region }
+
     private func read(_ a: any Reader, _ b: any Reader, _ match: Match? = nil) async throws -> Reading {
-        try await MergedReader(a, b).read(Query(match: match, region: .rect(Self.region)))
+        try await MergedReader(a, b, locate: Self.here).read(Query(match: match, region: .rect(Self.region)))
     }
 
     private func all(_ reading: Reading) -> [Found] {
@@ -124,7 +127,8 @@ import Testing
     @Test func theMergedUnionIsCutToTheQueryLimit() async throws {
         let r = try await MergedReader(
             Fake(source: .tree, found: [at("a", 10, 10, Self.role)]),
-            Fake(source: .pixels, found: [at("b", 10, 200, Self.seen)])
+            Fake(source: .pixels, found: [at("b", 10, 200, Self.seen)]),
+            locate: Self.here
         ).read(Query(match: nil, region: .rect(Self.region), limit: Limit(1)!))
         #expect(all(r).map(\.text.value) == ["a"])
         #expect(r.scope.reach == .stopped(.resultLimit(Limit(1)!)))
@@ -201,22 +205,40 @@ import Testing
     }
 
     @Test func aBlindReadersMissingGrantIsCarriedInItsPart() async throws {
-        let r = try await MergedReader(Refusing(), Fake(source: .pixels, found: [])).read(Query(match: nil, region: .rect(Self.region)))
+        let r = try await MergedReader(Refusing(), Fake(source: .pixels, found: []), locate: Self.here).read(Query(match: nil, region: .rect(Self.region)))
         guard case .stopped(.merged(.blind(.tree, _, let grant), _)) = r.scope.reach else { Issue.record("\(r)"); return }
         #expect(grant)
     }
 
-    struct Nowhere: Reader {
+    /// A reader whose place went away after the merge resolved it: a window closed between
+    /// the two looks.
+    struct Gone: Reader {
         let source = SourceKind.pixels
-        func look(_ query: Query) async throws -> Candidates { throw NoSuchPlace.display(4_000_000_000) }
+        func look(_ query: Query) async throws -> Candidates { throw NoSuchPlace.window(7) }
     }
 
-    @Test func aRegionThatNamesNowhereIsTheMergesAnswerNotABlindReader() async {
-        await #expect(throws: NoSuchPlace.self) {
-            try await read(Fake(source: .tree, found: [at("Allow", 10, 10, Self.role)]), Nowhere())
+    @Test func aPlaceGoneBeforeOneReaderLookedIsThatReadersBlindness() async throws {
+        let r = try await read(Fake(source: .tree, found: [at("Allow", 10, 10, Self.role)]), Gone())
+        #expect(all(r).map(\.text.value) == ["Allow"])
+        guard case .stopped(.merged(.read(.tree, .whole), .blind(.pixels, _, false))) = r.scope.reach else { Issue.record("\(r)"); return }
+    }
+
+    struct Unasked: Reader {
+        let source: SourceKind
+        func look(_ query: Query) async throws -> Candidates {
+            Issue.record("the \(source) reader was asked about a region that names nowhere")
+            return Candidates(found: [], region: MergedReaderTests.region, examined: 0, excluded: [], reach: .whole)
         }
-        await #expect(throws: NoSuchPlace.self) {
-            try await read(Nowhere(), Fake(source: .tree, found: []))
+    }
+
+    /// Refused as the merge's answer even with both readers blind, so a bad id is never
+    /// hidden behind a missing grant.
+    @Test func aRegionThatNamesNowhereIsRefusedOnceBeforeEitherReader() async {
+        let nowhere = NoSuchPlace.display(4_000_000_000)
+        for (a, b) in [(Unasked(source: .tree), Unasked(source: .pixels)) as (any Reader, any Reader), (Refusing(), Refusing())] {
+            await #expect {
+                _ = try await MergedReader(a, b, locate: { _ in throw nowhere }).read(Query(match: nil, region: .display(4_000_000_000)))
+            } throws: { "\($0)" == nowhere.description }
         }
     }
 }
