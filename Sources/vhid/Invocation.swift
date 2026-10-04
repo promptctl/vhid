@@ -22,13 +22,15 @@ final class Invocation: Sendable {
         case mcp
 
         /// The words this dispatcher gives its caller for `error`, which is what the
-        /// record carries: what the operator was told, and nothing they were not.
-        /// [LAW:one-source-of-truth]
-        func told(_ error: any Error) -> String {
-            switch self {
+        /// record carries: what the operator was told, and nothing they were not. None, for
+        /// a verb that said everything on its way out and then exited nonzero, as `doctor`
+        /// does. [LAW:one-source-of-truth]
+        func told(_ error: any Error) -> String? {
+            let words = switch self {
             case .commandLine: Vhid.message(for: error)
             case .mcp: error.reported
             }
+            return words.isEmpty ? nil : words
         }
     }
 
@@ -54,7 +56,11 @@ final class Invocation: Sendable {
         } catch {
             ending = .failure(error)
         }
-        await export.export(invocation.record(startedAt: startedAt, duration: .now - started, ending: ending.map { _ in () }))
+        let record = invocation.record(startedAt: startedAt, duration: .now - started, ending: ending.map { _ in () })
+        // In a task of its own, which the cancellation that may have ended `body` does not
+        // reach: a cancelled invocation's record is the one most worth delivering, and
+        // URLSession would give it up at once.
+        await Task { await export.export(record) }.value
         return try ending.get()
     }
 
@@ -99,8 +105,9 @@ final class Invocation: Sendable {
 
 /// What an invocation sent the devices, counted as each report is acknowledged.
 /// `Devices.using` writes every one of these as zero when it opens the devices, so a verb
-/// that reached them and sent nothing reads zero, and a verb that never reached them
-/// carries none.
+/// that opened them and sent nothing reads zero, and a verb that never opened them carries
+/// none. Opening is not reaching: the connection is lazy, and a daemon that never answered
+/// shows in the outcome and the error, not here.
 enum Tally: String, CaseIterable, Sendable {
     case keyboardReports = "keyboard_reports"
     case mouseReports = "mouse_reports"
@@ -114,6 +121,9 @@ enum Tally: String, CaseIterable, Sendable {
 enum Attribute: String, Sendable {
     /// How long the wheel rested after each notch.
     case notchRestMilliseconds = "notch_rest_ms"
+    /// How long an MCP tool call waited behind the calls before it, which its
+    /// `duration_ms` includes.
+    case queuedMilliseconds = "queued_ms"
 }
 
 /// How an invocation ended.
@@ -152,7 +162,7 @@ struct InvocationRecord: Sendable, Equatable {
             "trace_id": .string(traceID),
             "service": .string(Self.service),
             "started_at": .string(startedAt.formatted(Date.ISO8601FormatStyle(includingFractionalSeconds: true))),
-            "duration_ms": .double(Double(duration.components.seconds) * 1e3 + Double(duration.components.attoseconds) / 1e15),
+            "duration_ms": .double(duration / .milliseconds(1)),
             "outcome": .string(outcome.rawValue),
             "counts": .object(Dictionary(uniqueKeysWithValues: counts.map { ($0.key.rawValue, .int($0.value)) })),
             "attributes": .object(Dictionary(uniqueKeysWithValues: attributes.map { ($0.key.rawValue, $0.value) })),

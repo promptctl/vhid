@@ -1,3 +1,4 @@
+import ArgumentParser
 import Foundation
 @testable import Helper
 import Input
@@ -112,6 +113,21 @@ import Testing
         #expect(record["event"] as? String == "click")
         #expect(record["entry"] as? String == "mcp")
         #expect(record["outcome"] as? String == "ok")
+        #expect((record["attributes"] as? [String: Double])?["queued_ms"] != nil)
+    }
+
+    /// A call naming no tool is refused as a protocol error, and recorded like any call.
+    @Test func anMcpCallNamingNoToolIsRecordedAsFailed() async throws {
+        let export = EventExport.scratch()
+        let stdio = Stdio(), transport = AnsweringTransport(stdio)
+        stdio.call(1, then: [.end])
+        let server = await McpCommand.server([], on: .nobody, over: transport, recordingTo: export)
+        try await server.start(transport: transport)
+        await server.waitUntilCompleted()
+        let record = try Self.only(export)
+        #expect(record["event"] as? String == "click")
+        #expect(record["outcome"] as? String == "failed")
+        #expect((record["error"] as? String)?.contains("there is no tool called") == true)
     }
 
     /// The command line and MCP name a verb the same way, so one verb's records are found
@@ -148,7 +164,7 @@ import Testing
     /// Nothing listens on port 1, so the collector's failure is the machine's own refusal.
     @Test func aCollectorThatCannotBeReachedLeavesTheRecordInTheFileSayingWhy() async throws {
         let scratch = EventExport.scratch()
-        let export = EventExport(collector: "http://127.0.0.1:1", file: scratch.file, deliver: EventExport.post)
+        let export = EventExport(collector: .init(endpoint: .base("http://127.0.0.1:1")), file: scratch.file, deliver: EventExport.post)
         await export.export(Self.record())
         let written = try Self.only(export)
         #expect(written["sink"] as? String == "file")
@@ -157,7 +173,7 @@ import Testing
 
     @Test func aCollectorThatIsNotAUrlLeavesTheRecordInTheFileSayingWhy() async throws {
         let scratch = EventExport.scratch()
-        let export = EventExport(collector: "collector:4318", file: scratch.file, deliver: EventExport.post)
+        let export = EventExport(collector: .init(endpoint: .base("collector:4318")), file: scratch.file, deliver: EventExport.post)
         await export.export(Self.record())
         #expect(try Self.only(export)["sink_error"] as? String == #"OTEL_EXPORTER_OTLP_ENDPOINT "collector:4318" is not an http or https URL"#)
     }
@@ -167,12 +183,15 @@ import Testing
     @Test func aCollectorThatTakesTheRecordIsSentItAsOtlpLogs() async throws {
         let sent = Mutex<[URLRequest]>([])
         let scratch = EventExport.scratch()
-        let export = EventExport(collector: "http://collector:4318/", file: scratch.file, deliver: { request in sent.withLock { $0.append(request) } })
+        let export = EventExport(collector: .init(endpoint: .base("http://collector:4318/"), headers: "authorization=Bearer%20x, tenant = vhid"),
+                                 file: scratch.file, deliver: { request in sent.withLock { $0.append(request) } })
         await export.export(Self.record())
         #expect(try export.written.isEmpty)
         let request = try #require(sent.withLock { $0.first })
         #expect(request.url?.absoluteString == "http://collector:4318/v1/logs")
         #expect(request.httpMethod == "POST")
+        #expect(request.value(forHTTPHeaderField: "authorization") == "Bearer x")
+        #expect(request.value(forHTTPHeaderField: "tenant") == "vhid")
         let payload = try #require(request.httpBody)
         let body = try #require(try JSONSerialization.jsonObject(with: payload) as? [String: Any])
         let resource = try #require((body["resourceLogs"] as? [[String: Any]])?.first)
@@ -188,8 +207,77 @@ import Testing
         #expect((counts.first?["value"] as? [String: Any])?["intValue"] as? String == "3")
     }
 
-    @Test func anEmptyEndpointIsNoCollector() {
+    @Test func theLogsVariablesWinOverTheGeneralOnesAndAnEmptyOneIsUnset() throws {
         #expect(EventExport.configured(["OTEL_EXPORTER_OTLP_ENDPOINT": ""]).collector == nil)
-        #expect(EventExport.configured(["OTEL_EXPORTER_OTLP_ENDPOINT": "http://c:4318"]).collector == "http://c:4318")
+        #expect(EventExport.configured(["OTEL_EXPORTER_OTLP_ENDPOINT": "http://c:4318", "OTEL_EXPORTER_OTLP_HEADERS": "a=1"]).collector
+            == .init(endpoint: .base("http://c:4318"), headers: "a=1"))
+        let logs = try #require(EventExport.configured([
+            "OTEL_EXPORTER_OTLP_ENDPOINT": "http://c:4318", "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT": "http://l:4318/logs",
+            "OTEL_EXPORTER_OTLP_HEADERS": "a=1", "OTEL_EXPORTER_OTLP_LOGS_HEADERS": "b=2",
+        ]).collector)
+        #expect(logs == .init(endpoint: .logs("http://l:4318/logs"), headers: "b=2"))
+        #expect(try logs.url.absoluteString == "http://l:4318/logs")
+    }
+
+    @Test func headersThatAreNotKeyValuePairsLeaveTheRecordInTheFileSayingWhy() async throws {
+        let scratch = EventExport.scratch()
+        let export = EventExport(collector: .init(endpoint: .base("http://c:4318"), headers: "a=1,oops"), file: scratch.file,
+                                 deliver: { _ in Issue.record("a request with unreadable headers was sent") })
+        await export.export(Self.record())
+        #expect(try Self.only(export)["sink_error"] as? String == #"OTLP headers "oops" is not a key=value pair"#)
+    }
+
+    /// The cancellation that ended the verb does not reach the delivery of its record.
+    @Test func aCancelledInvocationsRecordIsStillDeliveredToTheCollector() async throws {
+        let delivered = Mutex<[Bool]>([])
+        let scratch = EventExport.scratch()
+        let export = EventExport(collector: .init(endpoint: .base("http://c:4318")), file: scratch.file,
+                                 deliver: { _ in delivered.withLock { $0.append(Task.isCancelled) } })
+        let run = Task {
+            try await Invocation.record("scroll", via: .mcp, to: export) { _ in
+                withUnsafeCurrentTask { $0?.cancel() }
+                try Task.checkCancellation()
+            }
+        }
+        _ = await run.result
+        #expect(delivered.withLock { $0 } == [false])
+        #expect(try export.written.isEmpty)
+    }
+
+    // MARK: the command line's dispatcher
+
+    /// `arguments` run as `Vhid.main` runs argv. Whatever the run threw is the record's to say.
+    private static func commandLine(_ arguments: [String], to export: EventExport) async {
+        _ = try? await Invocation.record(Vhid._commandName, via: .commandLine, to: export) { try await Vhid.run(arguments, in: $0) }
+    }
+
+    /// ArgumentParser answers `--help` with a `help` command it never declares among
+    /// `vhid`'s subcommands.
+    @Test func askingForHelpIsRecordedAsHelp() async throws {
+        for arguments in [["--help"], ["scroll", "--help"], ["help", "click"]] {
+            let export = EventExport.scratch()
+            await Self.commandLine(arguments, to: export)
+            let record = try Self.only(export)
+            #expect(record["event"] as? String == "help", "\(arguments)")
+            #expect(record["outcome"] as? String == "ok", "\(arguments)")
+        }
+    }
+
+    @Test func anArgumentThatCannotBeParsedIsRecordedUnderTheRoot() async throws {
+        let export = EventExport.scratch()
+        await Self.commandLine(["clik"], to: export)
+        let record = try Self.only(export)
+        #expect(record["event"] as? String == "vhid")
+        #expect(record["outcome"] as? String == "failed")
+        #expect((record["error"] as? String)?.isEmpty == false)
+    }
+
+    /// `doctor` prints its own report and exits 1 with nothing more to say.
+    @Test func aVerbThatExitsNonzeroSayingNothingMoreIsRecordedWithNoError() async throws {
+        let export = EventExport.scratch()
+        _ = try? await Invocation.record("doctor", via: .commandLine, to: export) { _ in throw ExitCode.failure }
+        let record = try Self.only(export)
+        #expect(record["outcome"] as? String == "failed")
+        #expect(record["error"] == nil)
     }
 }

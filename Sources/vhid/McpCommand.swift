@@ -61,8 +61,10 @@ struct McpCommand: AsyncParsableCommand {
         let turns = Turns()
         await server.withMethodHandler(ListTools.self) { _ in .init(tools: tools.map(\.tool)) }
         await server.withMethodHandler(CallTool.self) { request in
+            let arrived = ContinuousClock.now
             guard let verb = tools.first(where: { $0.tool.name == request.name }) else {
-                throw MCPError.invalidParams("there is no tool called \(request.name.debugDescription)")
+                let refusal = MCPError.invalidParams("there is no tool called \(request.name.debugDescription)")
+                return try await Invocation.record(request.name, via: .mcp, to: export) { _ in throw refusal }
             }
             // A verb that could not do what it was asked is a tool error, whose words the
             // model reads; a protocol error is for a request that named no tool at all. A
@@ -73,7 +75,10 @@ struct McpCommand: AsyncParsableCommand {
             return try await transport.underway {
                 do {
                     let said = try await Invocation.record(request.name, via: .mcp, to: export) { _ in
-                        try await turns.take { try await verb.call(request.arguments ?? [:], on: installation) }
+                        try await turns.take {
+                            Invocation.set(.queuedMilliseconds, .double((ContinuousClock.now - arrived) / .milliseconds(1)))
+                            return try await verb.call(request.arguments ?? [:], on: installation)
+                        }
                     }
                     return .init(content: [.text(text: said, annotations: nil, _meta: nil)], isError: false)
                 } catch where Task.isCancelled {

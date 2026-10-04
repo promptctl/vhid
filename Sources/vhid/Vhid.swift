@@ -35,17 +35,21 @@ struct Vhid: AsyncParsableCommand {
     /// a refused argument leaves a record too. [LAW:nothing-unseen]
     static func main() async {
         do {
-            try await Invocation.record(_commandName, via: .commandLine, to: .configured()) { invocation in
-                var command = try parseAsRoot()
-                invocation.named(name(of: type(of: command)))
-                if var command = command as? AsyncParsableCommand {
-                    try await command.run()
-                } else {
-                    try command.run()
-                }
-            }
+            try await Invocation.record(_commandName, via: .commandLine, to: .configured()) { try await run(nil, in: $0) }
         } catch {
             exit(withError: error)
+        }
+    }
+
+    /// Parses `arguments` (argv when `nil`), names `invocation` after the command they
+    /// chose, and runs it.
+    static func run(_ arguments: [String]?, in invocation: Invocation) async throws {
+        var command = try parseAsRoot(arguments)
+        invocation.named(name(of: type(of: command)))
+        if var command = command as? AsyncParsableCommand {
+            try await command.run()
+        } else {
+            try command.run()
         }
     }
 
@@ -56,8 +60,9 @@ struct Vhid: AsyncParsableCommand {
             if ObjectIdentifier(node) == ObjectIdentifier(command) { return [] }
             return node.configuration.subcommands.lazy.compactMap { sub in path(from: sub).map { [sub._commandName] + $0 } }.first
         }
-        // `parseAsRoot` hands back only commands under this root.
-        let names = path(from: Self.self)!
-        return names.isEmpty ? _commandName : names.joined(separator: " ")
+        // `parseAsRoot` hands back a command declared under this root, or ArgumentParser's
+        // own `help`, which it puts in every root's tree without declaring it - for
+        // `vhid help`, and for `--help` after any verb.
+        return path(from: Self.self).map { $0.isEmpty ? _commandName : $0.joined(separator: " ") } ?? command._commandName
     }
 }

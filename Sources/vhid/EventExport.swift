@@ -11,18 +11,68 @@ import System
 /// and exits, so there is no later moment to report what was not delivered.
 /// [LAW:nothing-unseen]
 struct EventExport: Sendable {
-    /// The OTLP base URL, from `OTEL_EXPORTER_OTLP_ENDPOINT`.
-    let collector: String?
+    let collector: Collector?
     let file: URL
     let deliver: @Sendable (URLRequest) async throws -> Void
 
-    /// The environment's collector, and `~/Library/Logs/vhid/events.jsonl`. An empty
-    /// `OTEL_EXPORTER_OTLP_ENDPOINT` is unset, as the OpenTelemetry specification reads
-    /// every one of its variables.
+    /// The environment's collector, and `~/Library/Logs/vhid/events.jsonl`.
     static func configured(_ environment: [String: String] = ProcessInfo.processInfo.environment) -> EventExport {
-        EventExport(collector: environment["OTEL_EXPORTER_OTLP_ENDPOINT"].flatMap { $0.isEmpty ? nil : $0 },
+        EventExport(collector: Collector(environment),
                     file: FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library/Logs/vhid/events.jsonl"),
                     deliver: post)
+    }
+
+    /// An OpenTelemetry collector's logs endpoint and the headers it is sent, as the OTLP
+    /// exporter environment variables name them: the logs-only variable over the general
+    /// one, and an empty variable as unset, as the specification reads every one of them.
+    /// Kept as written, and read when a record is sent, so that a variable that cannot be
+    /// read is said on that record's `sink_error`.
+    struct Collector: Sendable, Equatable {
+        enum Endpoint: Sendable, Equatable {
+            /// `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`: the logs URL itself.
+            case logs(String)
+            /// `OTEL_EXPORTER_OTLP_ENDPOINT`: the base URL the logs path `v1/logs` goes under.
+            case base(String)
+        }
+
+        let endpoint: Endpoint
+        /// `key=value` pairs, comma separated, each value percent-encoded.
+        let headers: String?
+
+        init(endpoint: Endpoint, headers: String? = nil) {
+            (self.endpoint, self.headers) = (endpoint, headers)
+        }
+
+        init?(_ environment: [String: String]) {
+            func set(_ name: String) -> String? { environment["OTEL_EXPORTER_OTLP_\(name)"].flatMap { $0.isEmpty ? nil : $0 } }
+            guard let endpoint = set("LOGS_ENDPOINT").map(Endpoint.logs) ?? set("ENDPOINT").map(Endpoint.base) else { return nil }
+            self.init(endpoint: endpoint, headers: set("LOGS_HEADERS") ?? set("HEADERS"))
+        }
+
+        var url: URL {
+            get throws {
+                let (variable, written) = switch endpoint {
+                case .logs(let url): ("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", url)
+                case .base(let url): ("OTEL_EXPORTER_OTLP_ENDPOINT", url)
+                }
+                guard let url = URL(string: written), ["http", "https"].contains(url.scheme) else {
+                    throw Refused(description: "\(variable) \(written.debugDescription) is not an http or https URL")
+                }
+                return if case .base = endpoint { url.appending(path: "v1/logs") } else { url }
+            }
+        }
+
+        var fields: [(name: String, value: String)] {
+            get throws {
+                try (headers ?? "").split(separator: ",").map { pair in
+                    let parts = pair.split(separator: "=", maxSplits: 1)
+                    guard parts.count == 2, let value = String(parts[1]).trimmingCharacters(in: .whitespaces).removingPercentEncoding else {
+                        throw Refused(description: "OTLP headers \(String(pair).debugDescription) is not a key=value pair")
+                    }
+                    return (String(parts[0]).trimmingCharacters(in: .whitespaces), value)
+                }
+            }
+        }
     }
 
     func export(_ record: InvocationRecord) async {
@@ -63,12 +113,10 @@ struct EventExport: Sendable {
     ///
     /// The command line waits on this before it exits, so it is given two seconds: a
     /// collector that has not answered by then has not taken this record, and the file has.
-    static func request(_ record: InvocationRecord, to collector: String) throws -> URLRequest {
-        guard let base = URL(string: collector), ["http", "https"].contains(base.scheme) else {
-            throw Refused(description: "OTEL_EXPORTER_OTLP_ENDPOINT \(collector.debugDescription) is not an http or https URL")
-        }
-        var request = URLRequest(url: base.appending(path: "v1/logs"), timeoutInterval: 2)
+    static func request(_ record: InvocationRecord, to collector: Collector) throws -> URLRequest {
+        var request = URLRequest(url: try collector.url, timeoutInterval: 2)
         request.httpMethod = "POST"
+        for (name, value) in try collector.fields { request.setValue(value, forHTTPHeaderField: name) }
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try logs(record).line
         return request

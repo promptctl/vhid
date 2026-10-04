@@ -45,7 +45,7 @@ struct Devices {
     static func using<T>(_ helper: HelperConnection, _ body: (Devices) async throws -> T) async throws -> T {
         let queue = DeviceQueue()
         // [LAW:nothing-unseen] Every report a verb sends passes here, so here is where they
-        // are counted, from zero: a verb that reached the devices and sent nothing says so.
+        // are counted, from zero: a verb that opened the devices and sent nothing says so.
         for tally in Tally.allCases { Invocation.count(tally, by: 0) }
         let devices = Devices(keyboard: TalliedKeyboard(keyboard: QueuedKeyboard(keyboard: helper.keyboard, queue: queue)),
                               mouse: TalliedMouse(mouse: QueuedMouse(pointing: helper.mouse, queue: queue)),
