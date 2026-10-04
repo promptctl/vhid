@@ -12,7 +12,7 @@ import Foundation
 ///
 /// [LAW:single-enforcer] The one place a cancel becomes a pulled `Command.Stop`, which
 /// ends the command running - stopped and collected, as one given up on at its limit is -
-/// and every one after it as it starts. Throws only the cancellation: a reading that
+/// and starts none after it. Throws only the cancellation: a reading that
 /// could fail says so in what `read` returns, so a verb's own handling of that failure
 /// can never take a cancel for one. [LAW:types-are-the-program] A reading the cancel cut
 /// short is not an answer, and is not returned as one.

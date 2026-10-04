@@ -74,8 +74,8 @@ public struct Command {
     /// What ends a reading before its deadline, pulled from whichever thread hears the
     /// cancel while the reading blocks another.
     ///
-    /// A stop pulled stays pulled: a command the reading starts afterwards is stopped as it
-    /// starts, so a reading of several commands ends at the one running and runs no more.
+    /// A stop pulled stays pulled: a command the reading runs afterwards is not started, so
+    /// a reading of several commands ends at the one running and runs no more.
     public final class Stop: Sendable {
         /// Whether it has been pulled, the kqueues of the commands waiting on it now and
         /// what each runs, and the commands it has ended. Changed under one lock, so a
@@ -99,10 +99,17 @@ public struct Command {
         }
 
         /// The commands this stop ended, each as it was run: the one running when it was
-        /// pulled, and every one started after. Empty for a stop pulled while no command
-        /// ran, which is what says the reading was waiting on something else.
+        /// pulled. Empty for a stop pulled while no command ran, which is what says the
+        /// reading was waiting on something else.
         public var ended: [String] {
             state.withLock { $0.ended }
+        }
+
+        /// Throws the cancel where the stop has been pulled, so a stopped reading starts no
+        /// command: one like `open` acts as it starts, before any kill could reach it. A
+        /// pull that lands after this is heard by `wake`.
+        fileprivate func admit() throws(CancellationError) {
+            if state.withLock({ $0.pulled }) { throw CancellationError() }
         }
 
         /// Wakes `queue`, which is running `command`, when the stop is pulled, which can be
@@ -169,6 +176,7 @@ public struct Command {
     /// The child is this call's from `spawn` to `collect`: nothing of it is left once this
     /// returns or throws, not a descriptor and not a pid to collect.
     public func run(by deadline: Deadline) throws -> Output {
+        try deadline.stop.admit()
         let started = SuspendingClock.now
         let out = try pipe()
         let err: (read: Int32, write: Int32)

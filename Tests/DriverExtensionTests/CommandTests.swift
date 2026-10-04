@@ -177,16 +177,18 @@ import Testing
         #expect(kill(child, 0) == -1 && errno == ESRCH)
     }
 
-    /// A stop stays pulled: every command a stopped reading starts after it is stopped as
-    /// it starts, so a reading of several commands runs none past the one it stopped.
-    @Test(.timeLimit(.minutes(1))) func aCommandStartedByAStoppedReadingIsStoppedAsItStarts() throws {
+    /// A stop stays pulled: no command a stopped reading runs after it is started, so a
+    /// reading of several commands runs none past the one it stopped.
+    @Test(.timeLimit(.minutes(1))) func aCommandRunByAStoppedReadingIsNeverStarted() throws {
+        let marker = FileManager.default.temporaryDirectory.appending(path: "vhid-started-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: marker) }
         let stop = Command.Stop()
         stop.pull()
         let deadline = Command.Deadline.within(.seconds(30), or: stop)
-        let began = ContinuousClock.now
         for _ in 0..<2 {
-            #expect(throws: CancellationError.self) { try Command("/bin/sleep", "600").run(by: deadline) }
+            #expect(throws: CancellationError.self) { try Command("/usr/bin/touch", marker.path).run(by: deadline) }
         }
-        #expect(ContinuousClock.now - began < .seconds(10))
+        #expect(!FileManager.default.fileExists(atPath: marker.path))
+        #expect(stop.ended.isEmpty)
     }
 }
