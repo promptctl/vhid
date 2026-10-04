@@ -3,6 +3,7 @@ import Foundation
 @testable import Helper
 import Input
 import Installations
+import Signals
 import Synchronization
 import TestClock
 import Testing
@@ -361,6 +362,92 @@ import Testing
         #expect(record["event"] as? String == "vhid")
         #expect(record["outcome"] as? String == "failed")
         #expect((record["error"] as? String)?.isEmpty == false)
+    }
+
+    /// A session stopped from outside - Control-C or SIGTERM, which cancel the task serving
+    /// it - withdraws the call it is running, whose record says it was cancelled and what
+    /// it had sent, and ends once that record is out.
+    @Test func aSessionStoppedFromOutsideRecordsItsRunningCallAsCancelled() async throws {
+        let (began, begin) = AsyncStream<Void>.makeStream()
+        let waiting = VerbTool(Help.click, []) { _, _ in
+            Invocation.count(.mouseReports)
+            begin.yield()
+            try await Task.sleep(for: .seconds(3600))
+            return "clicked"
+        }
+        let export = EventExport.scratch(), stdio = Stdio(), signals = FirstSignal()
+        let session = Task {
+            try await McpCommand.serve([waiting], on: Installation(service: "ai.promptctl.vhid.tests.nobody")!,
+                                       over: AnsweringTransport(stdio), recordingTo: export, stoppedBy: signals)
+        }
+        stdio.call(4, then: [])
+        for await _ in began { break }
+        // As the command line's watch does: the signal is taken, then the session cancelled.
+        _ = signals.take(SIGTERM)
+        session.cancel()
+        let ended = await withTaskGroup(of: Result<Void, any Error>?.self) { race in
+            race.addTask { await session.result }
+            race.addTask { try? await Task.sleep(for: .seconds(10)); return nil }
+            defer { race.cancelAll() }
+            return await race.next() ?? nil
+        }
+        let ending = try #require(ended, "the session is still serving after its task was cancelled")
+        #expect(throws: CancellationError.self) { try ending.get() }
+        let record = try Self.only(export)
+        #expect(record["event"] as? String == "click")
+        #expect(record["outcome"] as? String == "cancelled")
+        #expect((record["counts"] as? [String: Int])?["mouse_reports"] == 1)
+        #expect((record["attributes"] as? [String: Any])?["signal"] as? String == "SIGTERM")
+    }
+
+    /// The command line's dispatcher, as a shell meets it: `vhid mcp` serving, then a
+    /// signal. Its record is written as cancelled, it says so, and it then dies by that
+    /// signal, which is what tells a shell it was stopped.
+    @Test(arguments: [SIGINT, SIGTERM])
+    func aVerbStoppedByASignalIsRecordedAsCancelledAndDiesByIt(_ number: Int32) async throws {
+        let home = FileManager.default.temporaryDirectory.appending(path: "vhid-tests-\(UUID().uuidString)")
+        let process = Process(), stdin = Pipe(), stdout = Pipe()
+        process.executableURL = Bundle(for: Kept.self).bundleURL.deletingLastPathComponent().appending(path: "vhid")
+        process.arguments = ["mcp"]
+        // The record goes to this home's Library/Logs/vhid, and to no collector.
+        process.environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("OTEL_") }
+            .merging(["CFFIXED_USER_HOME": home.path]) { $1 }
+        let stderr = Pipe()
+        (process.standardInput, process.standardOutput, process.standardError) = (stdin, stdout, stderr)
+        try process.run()
+        defer {
+            if process.isRunning { process.terminate() }
+            try? FileManager.default.removeItem(at: home)
+        }
+        // A server that never answers is ended, which ends the read below at end of file.
+        let watchdog = Task {
+            try await Task.sleep(for: .seconds(10))
+            process.terminate()
+        }
+        defer { watchdog.cancel() }
+        // Answered, so the dispatcher is past setting up its watch.
+        stdin.fileHandleForWriting.write(Data((#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"tests","version":"1"}}}"# + "\n").utf8))
+        var answered = ""
+        while !answered.contains("\n") {
+            let chunk = stdout.fileHandleForReading.availableData
+            if chunk.isEmpty { break }
+            answered += String(decoding: chunk, as: UTF8.self)
+        }
+        try #require(answered.contains(#""id":1"#), "vhid mcp never answered initialize: \(answered)")
+        watchdog.cancel()
+        kill(process.processIdentifier, number)
+        process.waitUntilExit()
+        #expect(process.terminationReason == .uncaughtSignal)
+        #expect(process.terminationStatus == number)
+        let said = String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        #expect(said.hasSuffix("vhid: the run was cancelled\n"), "\(said)")
+        let written = try String(contentsOf: home.appending(path: "Library/Logs/vhid/events.jsonl"), encoding: .utf8)
+            .split(separator: "\n").map { try JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] }
+        try #require(written.count == 1, "\(written)")
+        #expect(written[0]?["event"] as? String == "mcp")
+        #expect(written[0]?["outcome"] as? String == "cancelled")
+        #expect(written[0]?["error"] as? String == "the run was cancelled")
+        #expect((written[0]?["attributes"] as? [String: Any])?["signal"] as? String == (number == SIGINT ? "SIGINT" : "SIGTERM"))
     }
 
     /// `doctor` prints its own report and exits 1 with nothing more to say.

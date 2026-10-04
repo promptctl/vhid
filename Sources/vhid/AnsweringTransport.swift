@@ -90,8 +90,15 @@ actor AnsweringTransport: Transport, HTTPContextProviding {
 
     private static let idHeader = "json-rpc-id"
 
+    /// Whether the session is being stopped from outside, so that every call read from
+    /// now on is withdrawn as it is owed: one read in the moment between the stop and the
+    /// SDK's loop ending would otherwise run as if nobody had asked it to stop.
+    private var stopping = false
+
     private func owe(_ line: Data) {
-        for id in Exchange.requested(in: line) { owed[id, default: 0] += 1 }
+        let ids = Exchange.requested(in: line)
+        for id in ids { owed[id, default: 0] += 1 }
+        if stopping { withdraw(ids) }
     }
 
     /// A withdrawn call is stopped now if its handler is running, and when it starts if not.
@@ -102,6 +109,13 @@ actor AnsweringTransport: Transport, HTTPContextProviding {
             withdrawn[id, default: 0] += 1
             running[id]?.values.forEach { $0() }
         }
+    }
+
+    /// Withdraws every call owed, running or not yet started, and every call read after
+    /// it: the session is being stopped from outside, and its calls stop with it.
+    func withdrawEverything() {
+        stopping = true
+        withdraw(owed.flatMap { id, count in Array(repeating: id, count: count) })
     }
 
     private func takeWithdrawn(_ id: ID) -> Bool {
@@ -126,9 +140,16 @@ actor AnsweringTransport: Transport, HTTPContextProviding {
               let id = try? JSONDecoder().decode(ID.self, from: Data(header.utf8)) else {
             throw MCPError.internalError("a handler ran without the id of the request it answers")
         }
-        let job = Task { try await work() }
+        // Enrolled before `work` may start, so a call withdrawn already starts cancelled
+        // and sends nothing, rather than running until its withdrawal catches up with it.
+        let (enrolled, open) = AsyncStream<Void>.makeStream()
+        let job = Task {
+            for await _ in enrolled {}
+            return try await work()
+        }
         let key = UUID()
         await enroll(id, key) { job.cancel() }
+        open.finish()
         let outcome: Result<T, any Error>
         do { outcome = .success(try await withTaskCancellationHandler { try await job.value } onCancel: { job.cancel() }) } catch { outcome = .failure(error) }
         await leave(id, key)

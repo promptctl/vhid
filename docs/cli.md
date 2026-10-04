@@ -57,9 +57,14 @@ left of or above it has negative ones, which follow `--` after every option:
 Every `vhid` run, and every MCP tool call, leaves one record: a line of JSON appended to
 `~/Library/Logs/vhid/events.jsonl`. A run that sent nothing and a run that never happened
 look different there, because a run that opened the devices counts its reports from
-zero; whether the daemon answered is in its `outcome` and `error`. A verb killed by
-Control-C or `SIGTERM` leaves no record, save `vhid record`, which answers the first one
-by finishing.
+zero; whether the daemon answered is in its `outcome` and `error`. Control-C or
+`SIGTERM` stops a verb as a withdrawn MCP call is stopped: it is recorded as `cancelled`
+with what it had sent and `attributes.signal` naming the signal, says so on stderr, and
+then dies by the signal. `doctor`, `driver` and `service` read on to their end instead,
+are recorded as they ended, with the signal, and then die by it. `vhid record` answers
+the first one by finishing, and exits as the recording ended. A second signal ends any
+verb at once, unrecorded, and an MCP call `vhid mcp` was running when it was stopped
+names the signal too.
 
 ```json
 {"attributes":{"notch_rest_ms":200},"counts":{"keyboard_reports":0,"mouse_reports":13,"scroll_notches_horizontal":0,"scroll_notches_vertical":10},"duration_ms":2071.4,"entry":"cli","event":"scroll","outcome":"ok","service":"vhid","sink":"file","started_at":"2026-10-04T13:20:00.512Z","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736"}

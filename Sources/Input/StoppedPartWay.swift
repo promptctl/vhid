@@ -28,6 +28,12 @@ public extension Error {
         Array(sequence(first: self as any Error) { ($0 as? any StoppedPartWay)?.cause })
     }
 
+    /// Whether the run ended because it was cancelled: a cancellation among its causes,
+    /// however many layers wrapped it on the way out.
+    var isCancellation: Bool {
+        causes.contains { $0 is CancellationError }
+    }
+
     /// What a report calls this failure.
     ///
     /// Every failure here says what it is, except the one the language supplies:

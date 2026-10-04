@@ -1,6 +1,7 @@
 import ArgumentParser
 import Foundation
 import Input
+import Signals
 import Synchronization
 
 /// One verb, run once, and the record it leaves: which verb, how it ended, how long it
@@ -33,7 +34,7 @@ final class Invocation: Sendable {
         func told(_ error: any Error) -> String? {
             let words = switch self {
             case .commandLine where Vhid.exitCode(for: error) == .validationFailure: Self.refusedArguments
-            case .commandLine: Vhid.message(for: error)
+            case .commandLine: Vhid.said(for: error)
             case .mcp where error is ArgumentRefused: Self.refusedArguments
             case .mcp: error.reported
             }
@@ -44,20 +45,25 @@ final class Invocation: Sendable {
     }
 
     let entry: Entry
+    /// The signals that stop it, for a verb run from the command line: the one taken, if
+    /// one was, is on its record, and is what `record` answers.
+    let signals: FirstSignal?
     /// W3C trace ID: 16 random bytes as 32 lowercase hex digits.
     let traceID = (0..<16).map { _ in String(format: "%02x", UInt8.random(in: .min ... .max)) }.joined()
     private let state: Mutex<(event: String, counts: [Tally: Int], attributes: [Attribute: JSON], typesText: Bool)>
 
-    private init(_ event: String, via entry: Entry) {
+    private init(_ event: String, via entry: Entry, stoppedBy signals: FirstSignal?) {
         self.entry = entry
+        self.signals = signals
         state = Mutex((event, [:], [:], false))
     }
 
     /// Runs `body` as one invocation of `event`, and hands its record to `hand` however
     /// `body` ends - returned, thrown or cancelled - before passing that ending on.
-    static func record<T>(_ event: String, via entry: Entry, to hand: @escaping @Sendable (InvocationRecord) async -> Void,
+    static func record<T>(_ event: String, via entry: Entry, stoppedBy signals: FirstSignal? = nil,
+                          to hand: @escaping @Sendable (InvocationRecord) async -> Void,
                           _ body: (Invocation) async throws -> T) async throws -> T {
-        let invocation = Invocation(event, via: entry)
+        let invocation = Invocation(event, via: entry, stoppedBy: signals)
         let startedAt = Date(), started = ContinuousClock.now
         let ending: Result<T, any Error>
         do {
@@ -101,7 +107,9 @@ final class Invocation: Sendable {
     }
 
     private func record(startedAt: Date, duration: Duration, ending: Result<Void, any Error>) -> InvocationRecord {
-        let (event, counts, attributes, typesText) = state.withLock { ($0.event, $0.counts, $0.attributes, $0.typesText) }
+        let (event, counts, decided, typesText) = state.withLock { ($0.event, $0.counts, $0.attributes, $0.typesText) }
+        var attributes = decided
+        attributes[.signal] = signals?.taken.map { .string(Attribute.name(ofSignal: $0)) }
         func told(_ failure: any Error) -> String? {
             typesText ? failure.causes.map { "\(type(of: $0))" }.joined(separator: ": ") : entry.told(failure)
         }
@@ -111,7 +119,7 @@ final class Invocation: Sendable {
             (outcome, error) = (.ok, nil)
         // What the verb threw says how it ended, not whether a cancel arrived meanwhile: a
         // verb the daemon refused as the cancel landed failed.
-        case .failure(let failure) where failure.causes.contains(where: { $0 is CancellationError }):
+        case .failure(let failure) where failure.isCancellation:
             (outcome, error) = (.cancelled, told(failure))
         // `--help` and `--version` arrive as errors that exit 0: the invocation did what
         // it was asked.
@@ -146,6 +154,17 @@ enum Attribute: String, Sendable {
     /// How long an MCP tool call waited behind the calls before it, which its
     /// `duration_ms` includes.
     case queuedMilliseconds = "queued_ms"
+    /// The signal that landed while a command-line verb ran: `SIGINT`, which Control-C
+    /// sends, or `SIGTERM`, a supervisor's. Absent when none did.
+    case signal
+
+    static func name(ofSignal number: Int32) -> String {
+        switch number {
+        case SIGINT: "SIGINT"
+        case SIGTERM: "SIGTERM"
+        default: "signal \(number)"
+        }
+    }
 }
 
 /// How an invocation ended.
