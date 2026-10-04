@@ -4,6 +4,7 @@ import Foundation
 import Input
 import Installations
 import MCP
+import Signals
 import System
 import Version
 
@@ -56,7 +57,7 @@ struct McpCommand: AsyncParsableCommand {
     /// carried by `flights` until it and its record are done, and recorded as one
     /// invocation to `export` - after its answer, which does not wait on a collector.
     static func server(_ tools: [VerbTool] = Tools.all, on installation: Installation, over transport: AnsweringTransport,
-                       recordingTo export: EventExport, carriedBy flights: Flights) async -> Server {
+                       recordingTo export: EventExport, stoppedBy signals: FirstSignal? = nil, carriedBy flights: Flights) async -> Server {
         let server = Server(name: "vhid", version: Version.current, instructions: instructions,
                             capabilities: .init(tools: .init(listChanged: false)))
         let turns = Turns()
@@ -68,7 +69,7 @@ struct McpCommand: AsyncParsableCommand {
             // verb, and would make one event per made-up name. The error says which.
             guard let verb = tools.first(where: { $0.tool.name == request.name }) else {
                 let refusal = MCPError.invalidParams("there is no tool called \(request.name.debugDescription)")
-                return try await Invocation.record(CallTool.name, via: .mcp, to: hand) { _ in throw refusal }
+                return try await Invocation.record(CallTool.name, via: .mcp, stoppedBy: signals, to: hand) { _ in throw refusal }
             }
             // A verb that could not do what it was asked is a tool error, whose words the
             // model reads; a protocol error is for a request that named no tool at all. A
@@ -78,7 +79,7 @@ struct McpCommand: AsyncParsableCommand {
             // verb had already done when it was withdrawn. [LAW:no-silent-failure]
             return try await transport.underway {
                 do {
-                    let said = try await Invocation.record(request.name, via: .mcp, to: hand) { _ in
+                    let said = try await Invocation.record(request.name, via: .mcp, stoppedBy: signals, to: hand) { _ in
                         try await turns.take {
                             Invocation.set(.queuedMilliseconds, .double((ContinuousClock.now - arrived) / .milliseconds(1)))
                             return try await verb.call(request.arguments ?? [:], on: installation)
@@ -108,20 +109,22 @@ struct McpCommand: AsyncParsableCommand {
             throw Errno(rawValue: errno)
         }
 
-        try await Self.serve(on: installation, over: AnsweringTransport(StdioTransport(output: protocolOut)), recordingTo: .configured())
+        try await Self.serve(on: installation, over: AnsweringTransport(StdioTransport(output: protocolOut)), recordingTo: .configured(),
+                             stoppedBy: Invocation.current?.signals)
     }
 
     /// Serves `tools` over `transport` until the client hangs up or the serving task is
     /// cancelled, as Control-C and SIGTERM cancel it. A cancel withdraws every call owed,
     /// so each one stops as a client's cancel would stop it, and ends the session. Returns
     /// once every call has ended and every record is sent, throwing if it was cancelled.
+    /// Each call's record names the signal in `signals` that stopped the session, if one did.
     ///
     /// The cancel has to be carried in by hand: the SDK serves from a task of its own,
     /// which no cancel of this one reaches.
     static func serve(_ tools: [VerbTool] = Tools.all, on installation: Installation, over transport: AnsweringTransport,
-                      recordingTo export: EventExport) async throws {
+                      recordingTo export: EventExport, stoppedBy signals: FirstSignal? = nil) async throws {
         let flights = Flights()
-        let server = await server(tools, on: installation, over: transport, recordingTo: export, carriedBy: flights)
+        let server = await server(tools, on: installation, over: transport, recordingTo: export, stoppedBy: signals, carriedBy: flights)
         try await server.start(transport: transport)
         await withTaskCancellationHandler {
             await server.waitUntilCompleted()

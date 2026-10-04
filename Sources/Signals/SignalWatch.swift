@@ -19,8 +19,9 @@ import Synchronization
 public struct SignalWatch {
     private let sources: [any DispatchSourceSignal]
 
-    /// `answer` is handed the number on `queue`. The source coalesces, so one call can
-    /// stand for any number of deliveries of that signal, and an answer must be idempotent.
+    /// `answer` is handed the number on `queue`, once for each delivery: the source
+    /// coalesces deliveries that land before it runs, and two signals sent together are
+    /// still two, the second of which can mean something the first did not.
     public init(
         on numbers: [Int32] = [SIGINT, SIGTERM],
         answeringOn queue: DispatchQueue = .global(),
@@ -29,7 +30,9 @@ public struct SignalWatch {
         sources = numbers.map { number in
             signal(number, SIG_IGN)
             let source = DispatchSource.makeSignalSource(signal: number, queue: queue)
-            source.setEventHandler { answer(number) }
+            source.setEventHandler { [weak source] in
+                for _ in 0..<(source?.data ?? 0) { answer(number) }
+            }
             return source
         }
         sources.forEach { $0.resume() }

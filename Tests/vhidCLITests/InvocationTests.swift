@@ -3,6 +3,7 @@ import Foundation
 @testable import Helper
 import Input
 import Installations
+import Signals
 import Synchronization
 import TestClock
 import Testing
@@ -374,13 +375,15 @@ import Testing
             try await Task.sleep(for: .seconds(3600))
             return "clicked"
         }
-        let export = EventExport.scratch(), stdio = Stdio()
+        let export = EventExport.scratch(), stdio = Stdio(), signals = FirstSignal()
         let session = Task {
             try await McpCommand.serve([waiting], on: Installation(service: "ai.promptctl.vhid.tests.nobody")!,
-                                       over: AnsweringTransport(stdio), recordingTo: export)
+                                       over: AnsweringTransport(stdio), recordingTo: export, stoppedBy: signals)
         }
         stdio.call(4, then: [])
         for await _ in began { break }
+        // As the command line's watch does: the signal is taken, then the session cancelled.
+        _ = signals.take(SIGTERM)
         session.cancel()
         let ended = await withTaskGroup(of: Result<Void, any Error>?.self) { race in
             race.addTask { await session.result }
@@ -394,6 +397,7 @@ import Testing
         #expect(record["event"] as? String == "click")
         #expect(record["outcome"] as? String == "cancelled")
         #expect((record["counts"] as? [String: Int])?["mouse_reports"] == 1)
+        #expect((record["attributes"] as? [String: Any])?["signal"] as? String == "SIGTERM")
     }
 
     /// The command line's dispatcher, as a shell meets it: `vhid mcp` serving, then a
@@ -411,10 +415,26 @@ import Testing
         let stderr = Pipe()
         (process.standardInput, process.standardOutput, process.standardError) = (stdin, stdout, stderr)
         try process.run()
-        defer { if process.isRunning { process.terminate() } }
+        defer {
+            if process.isRunning { process.terminate() }
+            try? FileManager.default.removeItem(at: home)
+        }
+        // A server that never answers is ended, which ends the read below at end of file.
+        let watchdog = Task {
+            try await Task.sleep(for: .seconds(10))
+            process.terminate()
+        }
+        defer { watchdog.cancel() }
         // Answered, so the dispatcher is past setting up its watch.
         stdin.fileHandleForWriting.write(Data((#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"tests","version":"1"}}}"# + "\n").utf8))
-        #expect(String(decoding: stdout.fileHandleForReading.availableData, as: UTF8.self).contains(#""id":1"#))
+        var answered = ""
+        while !answered.contains("\n") {
+            let chunk = stdout.fileHandleForReading.availableData
+            if chunk.isEmpty { break }
+            answered += String(decoding: chunk, as: UTF8.self)
+        }
+        try #require(answered.contains(#""id":1"#), "vhid mcp never answered initialize: \(answered)")
+        watchdog.cancel()
         kill(process.processIdentifier, number)
         process.waitUntilExit()
         #expect(process.terminationReason == .uncaughtSignal)

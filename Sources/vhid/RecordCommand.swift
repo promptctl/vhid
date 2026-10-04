@@ -21,13 +21,16 @@ struct RecordCommand: AsyncParsableCommand {
         // app is launched, so a refused recording leaves nothing running.
         try Self.refusal(holder: HelperConnection(installation: try service.installation()).status(),
                          system: Self.services(in: "system"), session: Self.services(in: "gui/\(getuid())")).map { throw $0 }
-        // A stop that came before the app did launches none.
+        // A stop that came before the app did launches none, and one that came while it
+        // started is not a finished recording: the run is cancelled, and the app's pid
+        // watch ends it.
         try Task.checkCancellation()
         let listener = try TieListener()
         try Self.launch(app: try Self.app(), socket: listener.path)
         let app = try listener.accept(within: .seconds(10))
         switch try app.receive(FromApp.self) {
         case .recording?:
+            try Task.checkCancellation()
             FileHandle.standardError.write(Data("vhid record: recording; Control-C stops\n".utf8))
         case .refused(let reason)?:
             throw RecordRefusal.app(reason)

@@ -55,9 +55,12 @@ struct Vhid: AsyncParsableCommand {
         let running = OSAllocatedUnfairLock<Task<Void, any Error>?>(initialState: nil)
         // Watched before the verb starts, so that no signal finds it under the default
         // disposition; one that lands before the verb exists cancels it as it is made.
+        // The cancel is handed to a thread of its own: a verb's cancel handler runs where
+        // the cancel is made, and one that blocked here would hold up the second signal.
         let watch = SignalWatch { number in
             guard first.take(number) else { die(by: number) }
-            running.withLock { $0?.cancel() }
+            let task = running.withLock { $0 }
+            DispatchQueue.global().async { task?.cancel() }
         }
         let invocation = Task {
             try await Invocation.record(_commandName, via: .commandLine, stoppedBy: first, to: EventExport.configured().export) {
@@ -86,10 +89,12 @@ struct Vhid: AsyncParsableCommand {
 
     /// What the command line says of a verb that ended in `error`, which is what its
     /// record carries; nothing for a verb that said everything itself on its way out, as
-    /// `doctor` does. A cancellation is said in the words an MCP caller is given, since
-    /// ArgumentParser has none of its own for it. [LAW:one-source-of-truth]
+    /// `doctor` does, or for `--help` and `--version`, which end well. A cancellation is
+    /// said in the words an MCP caller is given, since ArgumentParser has none of its own
+    /// for it. [LAW:one-source-of-truth]
     static func said(for error: any Error) -> String {
-        error.isCancellation ? error.reported : message(for: error)
+        if error.isCancellation { return error.reported }
+        return exitCode(for: error) == .success ? "" : message(for: error)
     }
 
     /// Parses `arguments` (argv when `nil`), names `invocation` after the command they
