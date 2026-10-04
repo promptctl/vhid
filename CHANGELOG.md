@@ -4,6 +4,8 @@ Each release's section is its GitHub Release notes, which keep line breaks, so e
 
 ## [Unreleased]
 
+## [0.4.0]
+
 - `vhid type` and `vhid press` take `--into <app>`, and the MCP tools `into`: with another app in front just before the first key, nothing is sent and the refusal names the app that was. The app is named as `eyes windows` prints the frontmost application.
 - `vhid gesture <name>` does what a trackpad gesture does, by pressing the key that does it: back and forward, zoom in and out, Look Up, the next or previous Space, Mission Control, App Exposé, Show Desktop, Launchpad and Notification Center. A system shortcut is the one the user has set, and one that is off is refused, naming the setting. `vhid mcp` serves it as the `gesture` tool.
 - `vhid mcp` and `eyes mcp` answer a client's initialize with instructions: each names the other server, says the point `find` prints is the point `click` takes, and teaches the look, act, look again loop, so a client without the Claude Code plugin learns the pairing too.
@@ -52,7 +54,8 @@ The first release: a virtual keyboard and mouse that macOS sees as hardware, dri
 - One signed, notarized pkg installs both CLIs, the root daemon that owns the devices, the menu bar item, the `vhid record` tap, an uninstaller, and the pinned Karabiner-DriverKit-VirtualHIDDevice package.
 - After installing, turn on `org.pqrs.Karabiner-DriverKit-VirtualHIDDevice` under System Settings > General > Login Items & Extensions > Driver Extensions; no installer can do this for you. `vhid doctor` prints `ready` once everything vhid needs is met.
 
-[Unreleased]: https://github.com/promptctl/vhid/compare/v0.3.0...master
+[Unreleased]: https://github.com/promptctl/vhid/compare/v0.4.0...master
+[0.4.0]: https://github.com/promptctl/vhid/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/promptctl/vhid/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/promptctl/vhid/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/promptctl/vhid/releases/tag/v0.1.0
