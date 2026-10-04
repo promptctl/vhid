@@ -57,8 +57,9 @@ left of or above it has negative ones, which follow `--` after every option:
 Every `vhid` run, and every MCP tool call, leaves one record: a line of JSON appended to
 `~/Library/Logs/vhid/events.jsonl`. A run that sent nothing and a run that never happened
 look different there, because a run that opened the devices counts its reports from
-zero; whether the daemon answered is in its `outcome` and `error`. The one run that
-leaves no record is one killed by Control-C or `SIGTERM`.
+zero; whether the daemon answered is in its `outcome` and `error`. A verb killed by
+Control-C or `SIGTERM` leaves no record, save `vhid record`, which answers the first one
+by finishing.
 
 ```json
 {"attributes":{"notch_rest_ms":200},"counts":{"keyboard_reports":0,"mouse_reports":13,"scroll_notches_horizontal":0,"scroll_notches_vertical":10},"duration_ms":2071.4,"entry":"cli","event":"scroll","outcome":"ok","service":"vhid","sink":"file","started_at":"2026-10-04T13:20:00.512Z","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736"}
@@ -67,7 +68,8 @@ leaves no record is one killed by Control-C or `SIGTERM`.
 `event` is the verb as it is typed (`scroll`, `driver state`), and an MCP call's is its
 tool's name, which is the same word; `entry` says which it came through. `outcome` is
 `ok`, `failed` or `cancelled`, and `error` is what the caller was told, absent when a verb
-said its piece and exited nonzero, as `doctor` does. An argument that could not be parsed
+said its piece and exited nonzero, as `doctor` does. Refused arguments are recorded as
+refused but not quoted, since they can hold text meant for a password field. An argument that could not be parsed
 is recorded as `vhid`, before the verb was known, and `--help` as `help`. An MCP call's
 `attributes.queued_ms` is how long it waited behind the calls before it, which its
 `duration_ms` includes.

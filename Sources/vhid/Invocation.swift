@@ -25,13 +25,21 @@ final class Invocation: Sendable {
         /// record carries: what the operator was told, and nothing they were not. None, for
         /// a verb that said everything on its way out and then exited nonzero, as `doctor`
         /// does. [LAW:one-source-of-truth]
+        ///
+        /// Except a refused command line, whose words quote it back - and a command line can
+        /// hold text meant for a password field, missing the `--` that would have let a
+        /// leading dash through. The operator saw them; the record, which outlives the
+        /// terminal, says only that the arguments were refused.
         func told(_ error: any Error) -> String? {
             let words = switch self {
+            case .commandLine where Vhid.exitCode(for: error) == .validationFailure: Self.refusedArguments
             case .commandLine: Vhid.message(for: error)
             case .mcp: error.reported
             }
             return words.isEmpty ? nil : words
         }
+
+        static let refusedArguments = "the arguments were refused; what they said is not recorded"
     }
 
     let entry: Entry

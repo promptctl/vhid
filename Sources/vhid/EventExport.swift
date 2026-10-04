@@ -97,11 +97,12 @@ struct EventExport: Sendable {
     }
 
     /// One `write` with `O_APPEND`, so lines from processes appending at once do not
-    /// interleave.
+    /// interleave. Readable by its owner alone: it is a record of what this person had
+    /// their keyboard and mouse do.
     private func append(_ line: Data) throws {
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         let descriptor = try FileDescriptor.open(FilePath(file.path), .writeOnly, options: [.append, .create],
-                                                 permissions: [.ownerReadWrite, .groupRead, .otherRead])
+                                                 permissions: .ownerReadWrite)
         try descriptor.closeAfter { _ = try descriptor.writeAll(line) }
     }
 
@@ -155,12 +156,20 @@ struct EventExport: Sendable {
         }
     }
 
+    /// A request's `timeoutInterval` bounds only the silence between packets; this bounds
+    /// the whole exchange, which is what the two seconds a command line waits on are.
+    private static let session = URLSession(configuration: {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForResource = 2
+        return configuration
+    }())
+
     /// Sends `request`, and throws unless the collector answered 2xx.
     static let post: @Sendable (URLRequest) async throws -> Void = { request in
         let at = request.url?.absoluteString ?? ""
         let response: URLResponse
         do {
-            (_, response) = try await URLSession.shared.data(for: request)
+            (_, response) = try await session.data(for: request)
         } catch {
             throw Refused(description: "\(at): \(error.localizedDescription)")
         }

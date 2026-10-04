@@ -152,6 +152,7 @@ import Testing
     @Test func withNoCollectorTheRecordGoesToTheFile() async throws {
         let export = EventExport.scratch()
         await export.export(Self.record())
+        #expect(try FileManager.default.attributesOfItem(atPath: export.file.path)[.posixPermissions] as? Int == 0o600)
         let written = try Self.only(export)
         #expect(written["sink"] as? String == "file")
         #expect(written["sink_error"] == nil)
@@ -261,6 +262,16 @@ import Testing
             #expect(record["event"] as? String == "help", "\(arguments)")
             #expect(record["outcome"] as? String == "ok", "\(arguments)")
         }
+    }
+
+    /// The refusal quotes the argument back to the operator, and the record does not:
+    /// this one was meant for a password field.
+    @Test func refusedArgumentsAreRecordedUnderTheRootWithoutBeingQuoted() async throws {
+        let export = EventExport.scratch()
+        await Self.commandLine(["type", "a", "hunter2"], to: export)
+        #expect(try String(contentsOf: export.file, encoding: .utf8).contains("hunter2") == false)
+        let refused = try Self.only(export)
+        #expect(refused["error"] as? String == Invocation.Entry.refusedArguments)
     }
 
     @Test func anArgumentThatCannotBeParsedIsRecordedUnderTheRoot() async throws {
