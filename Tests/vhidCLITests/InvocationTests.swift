@@ -454,7 +454,7 @@ import Testing
     /// A verb that reads the machine - `doctor`, `driver`, `service standing` - is stopped
     /// as every verb is: the cancel a signal makes ends the command its reading is
     /// running, the child with it, and the record says cancelled, at once rather than at
-    /// the command's limit.
+    /// the command's limit, and names the command it ended.
     @Test(.timeLimit(.minutes(1))) func aReadingCancelledMidCommandIsRecordedAsCancelledAndLeavesNoChild() async throws {
         let pidFile = FileManager.default.temporaryDirectory.appending(path: "vhid-reading-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: pidFile) }
@@ -474,6 +474,8 @@ import Testing
         #expect(record["event"] as? String == "driver state")
         #expect(record["outcome"] as? String == "cancelled")
         #expect(try #require(record["duration_ms"] as? Double) < 10_000)
+        let stopped = try #require((record["attributes"] as? [String: Any])?["stopped"] as? [String])
+        #expect(stopped == ["sh -c echo $$ > \(pidFile.path); exec sleep 600"])
         let child = try #require(pid())
         #expect(kill(child, 0) == -1 && errno == ESRCH)
     }

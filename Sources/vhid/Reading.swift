@@ -1,9 +1,10 @@
 import DriverExtension
 import Foundation
 
-/// Takes a reading of this Mac that blocks on the commands it runs and on the daemon's
-/// status reply, and ends it when the task is cancelled: Control-C or SIGTERM on the
-/// command line, a withdrawn call over MCP.
+/// Takes a reading of this Mac that blocks on the commands it runs, and ends the command
+/// running when the task is cancelled: Control-C or SIGTERM on the command line, a
+/// withdrawn call over MCP. What the reading waits on besides commands, as doctor waits on
+/// the daemon's status reply, is not ended: its own timeout bounds it.
 ///
 /// On a dispatch thread and not on the cooperative pool, whose few threads the MCP
 /// server's transport runs on too - the same move `DeviceQueue` makes for the device
@@ -15,6 +16,9 @@ import Foundation
 /// could fail says so in what `read` returns, so a verb's own handling of that failure
 /// can never take a cancel for one. [LAW:types-are-the-program] A reading the cancel cut
 /// short is not an answer, and is not returned as one.
+///
+/// [LAW:nothing-unseen] A cancelled reading's record names the commands the cancel
+/// ended: what a person who pressed Control-C was waiting on.
 func reading<T: Sendable>(_ read: @escaping @Sendable (Command.Stop) -> T) async throws(CancellationError) -> T {
     let stop = Command.Stop()
     let taken = await withTaskCancellationHandler {
@@ -24,6 +28,9 @@ func reading<T: Sendable>(_ read: @escaping @Sendable (Command.Stop) -> T) async
     } onCancel: {
         stop.pull()
     }
-    if Task.isCancelled { throw CancellationError() }
+    if Task.isCancelled {
+        Invocation.set(.stopped, .array(stop.ended.map(JSON.string)))
+        throw CancellationError()
+    }
     return taken
 }

@@ -104,8 +104,8 @@ import Testing
     /// own two installations and for a label nothing registers.
     @Test func thisMacsLaunchdIsReadWithoutRoot() throws {
         for installation in Installation.vhids {
-            _ = try LaunchdProbe.standing(of: installation, by: .within(Command.limit))
+            _ = try LaunchdProbe.standing(of: installation, by: .within(Command.limit, or: .never))
         }
-        #expect(try LaunchdProbe.standing(of: Installation(service: "ai.promptctl.vhid.tests.nobody")!, by: .within(Command.limit)) == .noJob)
+        #expect(try LaunchdProbe.standing(of: Installation(service: "ai.promptctl.vhid.tests.nobody")!, by: .within(Command.limit, or: .never)) == .noJob)
     }
 }

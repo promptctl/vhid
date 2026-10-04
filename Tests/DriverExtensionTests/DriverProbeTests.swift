@@ -154,27 +154,33 @@ import Testing
 
     // MARK: - Karabiner-Elements' receipt
 
-    @Test func karabinerElementsHeldOrNotReadsAsThatAnswer() {
+    @Test func karabinerElementsHeldOrNotReadsAsThatAnswer() throws {
         let held = Command.Output(status: 0, stdout: "package-id: x\nversion: 15.5.0\n", stderr: "")
         let none = Command.Output(status: 1, stdout: "", stderr: "No receipt for 'org.pqrs.Karabiner-Elements' found at '/'.")
-        #expect(DriverProbe.elementsReceipt { held } == .installed(version: "15.5.0"))
-        #expect(DriverProbe.elementsReceipt { none } == .absent)
+        #expect(try DriverProbe.elementsReceipt { held } == .installed(version: "15.5.0"))
+        #expect(try DriverProbe.elementsReceipt { none } == .absent)
     }
 
     /// A reading that feeds no verdict must not cost one. Every way the read fails - an
     /// answer pkgutil gave that this build cannot read, and a pkgutil that never ran -
     /// comes back as `.unreadable`, a value the table shows, rather than a throw.
-    @Test func anUnreadableKarabinerElementsReceiptIsAValueNotAThrow() {
+    @Test func anUnreadableKarabinerElementsReceiptIsAValueNotAThrow() throws {
         struct NeverRan: Error {}
         let failed = Command.Output(status: 70, stdout: "", stderr: "unable to open receipt database")
         let unrecognised = Command.Output(status: 0, stdout: "package-id: x\n", stderr: "")
-        for reading in [DriverProbe.elementsReceipt { failed },
-                        DriverProbe.elementsReceipt { unrecognised },
-                        DriverProbe.elementsReceipt { throw NeverRan() }] {
+        for reading in [try DriverProbe.elementsReceipt { failed },
+                        try DriverProbe.elementsReceipt { unrecognised },
+                        try DriverProbe.elementsReceipt { throw NeverRan() }] {
             guard case .unreadable = reading else {
                 Issue.record("expected unreadable, got \(reading)")
                 continue
             }
         }
+    }
+
+    /// A reading stopped while pkgutil runs is not a receipt that could not be read: the
+    /// cancel goes on up, so the facts end with it rather than as a reading it cut short.
+    @Test func aStoppedKarabinerElementsReadIsThrownNotUnreadable() {
+        #expect(throws: CancellationError.self) { try DriverProbe.elementsReceipt { throw CancellationError() } }
     }
 }

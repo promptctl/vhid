@@ -63,8 +63,10 @@ public struct Command {
 
         /// Over `limit` from now, or at `stop`, whichever comes first.
         /// [LAW:dataflow-not-control-flow] Every reading has a stop, and one nobody pulls
-        /// is the reading that runs to its end.
-        public static func within(_ limit: Duration, or stop: Stop = Stop()) -> Deadline {
+        /// is the reading that runs to its end. [LAW:types-are-the-program] Not defaulted,
+        /// so a caller says which: a reading nobody can stop is never one that forgot to
+        /// take its stop.
+        public static func within(_ limit: Duration, or stop: Stop) -> Deadline {
             Deadline(limit: limit, at: .now + limit, stop: stop)
         }
     }
@@ -75,32 +77,49 @@ public struct Command {
     /// A stop pulled stays pulled: a command the reading starts afterwards is stopped as it
     /// starts, so a reading of several commands ends at the one running and runs no more.
     public final class Stop: Sendable {
-        /// Whether it has been pulled, and the kqueues of the commands waiting on it now.
-        /// Changed under one lock, so a command that starts as the stop is pulled is woken
-        /// either way: by the pull, or as it starts, by finding it pulled.
-        private let state = Mutex<(pulled: Bool, waiting: Set<Int32>)>((false, []))
+        /// Whether it has been pulled, the kqueues of the commands waiting on it now and
+        /// what each runs, and the commands it has ended. Changed under one lock, so a
+        /// command that starts as the stop is pulled is woken either way: by the pull, or
+        /// as it starts, by finding it pulled.
+        private let state = Mutex<(pulled: Bool, waiting: [Int32: String], ended: [String])>((false, [:], []))
 
         public init() {}
+
+        /// A stop nobody holds, for a reading that runs to its end: a fresh one each time,
+        /// so no pull of one reaches another.
+        public static var never: Stop { Stop() }
 
         /// Ends the reading.
         public func pull() {
             state.withLock { state in
                 state.pulled = true
-                state.waiting.forEach(Self.trigger)
+                state.ended += state.waiting.values.sorted()
+                state.waiting.keys.forEach(Self.trigger)
             }
         }
 
-        /// Wakes `queue` when the stop is pulled, which can be now. `queue` is watched for
-        /// the wake already, and is not closed before `forget` takes it back.
-        fileprivate func wake(_ queue: Int32) {
+        /// The commands this stop ended, each as it was run: the one running when it was
+        /// pulled, and every one started after. Empty for a stop pulled while no command
+        /// ran, which is what says the reading was waiting on something else.
+        public var ended: [String] {
+            state.withLock { $0.ended }
+        }
+
+        /// Wakes `queue`, which is running `command`, when the stop is pulled, which can be
+        /// now. `queue` is watched for the wake already, and is not closed before `forget`
+        /// takes it back.
+        fileprivate func wake(_ queue: Int32, running command: String) {
             state.withLock { state in
-                state.waiting.insert(queue)
-                if state.pulled { Self.trigger(queue) }
+                state.waiting[queue] = command
+                if state.pulled {
+                    state.ended.append(command)
+                    Self.trigger(queue)
+                }
             }
         }
 
         fileprivate func forget(_ queue: Int32) {
-            _ = state.withLock { $0.waiting.remove(queue) }
+            _ = state.withLock { $0.waiting.removeValue(forKey: queue) }
         }
 
         /// The event `hear` watches for, set off. Nothing is lost when this fails: the
@@ -242,7 +261,7 @@ public struct Command {
         guard gone == 0 || gone == ESRCH else { throw unheard("could not be watched", gone) }
         let stoppable = watch(0, EVFILT_USER, EV_ADD | EV_CLEAR)
         guard stoppable == 0 else { throw unheard("could not be watched", stoppable) }
-        deadline.stop.wake(queue)
+        deadline.stop.wake(queue, running: said)
         defer { deadline.stop.forget(queue) }
         var exited = gone == ESRCH
         var open = Set(streams)

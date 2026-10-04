@@ -157,6 +157,10 @@ enum Attribute: String, Sendable {
     /// The signal that landed while a command-line verb ran: `SIGINT`, which Control-C
     /// sends, or `SIGTERM`, a supervisor's. Absent when none did.
     case signal
+    /// The commands a cancelled reading's stop ended, each as it was run: empty when the
+    /// cancel landed while the reading waited on no command. Absent when no reading was
+    /// cancelled.
+    case stopped
 
     static func name(ofSignal number: Int32) -> String {
         switch number {
