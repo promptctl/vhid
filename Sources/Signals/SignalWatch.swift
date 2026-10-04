@@ -38,22 +38,32 @@ public struct SignalWatch {
 
 /// The first signal a watch answered, kept so that a later one can be told from it: the
 /// first asks a run to wind down, and one after it is someone the first did not reach.
-/// Answered from whichever thread the watch runs its answer on.
+/// Kept with whether the run answered it itself, as `vhid record` does by finishing, so
+/// the process can end as the run did rather than by the signal. Answered from whichever
+/// thread the watch runs its answer on.
 public final class FirstSignal: Sendable {
-    private let kept = Mutex<Int32?>(nil)
+    private let kept = Mutex<(number: Int32, answered: Bool)?>(nil)
 
     public init() {}
 
     /// Whether `number` is the first signal taken, which is kept; any after it is not.
     public func take(_ number: Int32) -> Bool {
         kept.withLock { kept in
-            defer { kept = kept ?? number }
+            defer { kept = kept ?? (number, false) }
             return kept == nil
         }
     }
 
+    /// Says the run answered the first signal itself.
+    public func answer() {
+        kept.withLock { $0?.answered = true }
+    }
+
     /// The first signal taken, if one has been.
-    public var taken: Int32? { kept.withLock { $0 } }
+    public var taken: Int32? { kept.withLock { $0?.number } }
+
+    /// The first signal taken, if one has been and the run did not answer it.
+    public var unanswered: Int32? { kept.withLock { $0.flatMap { $0.answered ? nil : $0.number } } }
 }
 
 /// Ends the process by `number` under its default disposition, as if the signal had never

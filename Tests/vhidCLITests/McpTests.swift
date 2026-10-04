@@ -258,4 +258,16 @@ import Testing
         await #expect(throws: CancellationError.self) { try await cancelled.value }
         #expect(try await turns.take { "after" } == "after")
     }
+
+    /// A caller cancelled before it takes its turn never starts its call, even with no
+    /// turn ahead of it, when the call would otherwise begin at once.
+    @Test func aCallCancelledBeforeItsTurnNeverStarts() async throws {
+        let turns = Turns(), started = Kept()
+        let cancelled = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await turns.take { started.append("ran"); return "ran" }
+        }
+        await #expect(throws: CancellationError.self) { try await cancelled.value }
+        #expect(started.lines.isEmpty, "the call started though its caller was cancelled")
+    }
 }

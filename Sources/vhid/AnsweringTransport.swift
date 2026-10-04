@@ -140,9 +140,16 @@ actor AnsweringTransport: Transport, HTTPContextProviding {
               let id = try? JSONDecoder().decode(ID.self, from: Data(header.utf8)) else {
             throw MCPError.internalError("a handler ran without the id of the request it answers")
         }
-        let job = Task { try await work() }
+        // Enrolled before `work` may start, so a call withdrawn already starts cancelled
+        // and sends nothing, rather than running until its withdrawal catches up with it.
+        let (enrolled, open) = AsyncStream<Void>.makeStream()
+        let job = Task {
+            for await _ in enrolled {}
+            return try await work()
+        }
         let key = UUID()
         await enroll(id, key) { job.cancel() }
+        open.finish()
         let outcome: Result<T, any Error>
         do { outcome = .success(try await withTaskCancellationHandler { try await job.value } onCancel: { job.cancel() }) } catch { outcome = .failure(error) }
         await leave(id, key)

@@ -42,10 +42,10 @@ struct Vhid: AsyncParsableCommand {
     /// cancels the verb, which unwinds as a withdrawn MCP call does, letting go of what it
     /// holds, and its record says which signal landed and what the verb had sent; then the
     /// process dies by that signal, as it would have unwatched - which a shell reads as
-    /// Control-C, and stops a loop for. A verb that ends well despite it - `record` answers
-    /// it by finishing, `doctor` reads on to its end - exits as it would have anyway. A
-    /// second signal is someone the first did not reach, and ends the process at once,
-    /// unrecorded.
+    /// Control-C, and stops a loop for - however the verb ended, even well, as `doctor`
+    /// does by reading on to its end. Only a verb that answers the signal itself, as
+    /// `record` does by finishing, exits as it would have anyway. A second signal is
+    /// someone the first did not reach, and ends the process at once, unrecorded.
     ///
     /// [LAW:single-enforcer] The one watch on these signals in a command-line run: a verb
     /// that answers them, as `record` does, hears the cancel, and reads which signal it
@@ -70,8 +70,9 @@ struct Vhid: AsyncParsableCommand {
         }
         let ending = await invocation.result
         withExtendedLifetime(watch) {}
-        switch (ending, first.taken) {
-        case (.success, _): return
+        switch (ending, first.unanswered) {
+        case (.success, nil): return
+        case (.success, let number?): die(by: number)
         case (.failure(let error), nil) where !error.isCancellation: exit(withError: error)
         case (.failure(let error), let number):
             // Said, because it can be the one report of what the verb had done when the

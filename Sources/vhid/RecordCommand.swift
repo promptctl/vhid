@@ -36,7 +36,8 @@ struct RecordCommand: AsyncParsableCommand {
         }
         // The stop is the command line's cancel. SIGINT is Control-C, whose own keys come
         // out of the recording; SIGTERM, or a cancel no signal made, ends it and drops
-        // nothing. A failed send is the app gone, which the read below reports. A second
+        // nothing. Either is answered by finishing, so the process exits as the recording
+        // ended. A failed send is the app gone, which the read below reports. A second
         // signal ends the process, whose exit the app's pid watch sees.
         let signals = Invocation.current?.signals
         try await withTaskCancellationHandler {
@@ -49,6 +50,7 @@ struct RecordCommand: AsyncParsableCommand {
             }
             throw TieFailure("the tap app ended without sending the recording")
         } onCancel: {
+            signals?.answer()
             try? app.send(signals?.taken == SIGINT ? ToApp.stop : ToApp.end)
         }
     }

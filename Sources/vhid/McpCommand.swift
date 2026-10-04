@@ -200,6 +200,9 @@ actor Turns {
     /// cancelled caller cancels its call, waiting or running.
     func take<T: Sendable>(_ call: @escaping @Sendable () async throws -> T) async throws -> T {
         let before = last
+        // A caller cancelled before its turn is taken never starts its call: the turn's task
+        // is its own, and the cancel would reach it only after it had begun.
+        try Task.checkCancellation()
         let turn = Task {
             await before?.value
             try Task.checkCancellation()
