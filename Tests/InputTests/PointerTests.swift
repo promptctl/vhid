@@ -1,5 +1,6 @@
 import Foundation
 import Pointing
+import TestClock
 import Testing
 @testable import Input
 
@@ -96,6 +97,20 @@ import Testing
         #expect(mouse.log == Array(repeating: "scroll 1 -1", count: 5) + Array(repeating: "scroll 1 0", count: 295))
         #expect(clock.sleeps == 300)
         #expect(clock.now.offset == Pointer.notchRest * 300)
+    }
+
+    /// A roll is mostly rests, so a cancel lands in one and stops the roll at the next
+    /// notch, with the buttons released on the way out. `Int.min` because it has no `abs`
+    /// and only a cancel ends it. The task is made on this actor and cannot begin until
+    /// the test suspends, so the aim is taken before the first rest.
+    @Test func aScrollCancelledInARestStopsBeforeTheNextNotch() async throws {
+        let mouse = FakeMouse(at: Self.origin)
+        let clock = ManualClock()
+        let roll = Task { try await mouse.pointer.scroll(at: Self.origin, vertical: Int.min, horizontal: 0, clock: clock) }
+        clock.cancel(afterSleeps: 3) { roll.cancel() }
+        let stopped = try await #require(throws: PointingStopped.self) { try await roll.value }
+        #expect(stopped.cause is CancellationError)
+        #expect(mouse.log == Array(repeating: "scroll -1 0", count: 3) + ["up"])
     }
 
 }

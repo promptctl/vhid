@@ -1,4 +1,5 @@
 import Pointing
+import TestClock
 import Testing
 @testable import Input
 

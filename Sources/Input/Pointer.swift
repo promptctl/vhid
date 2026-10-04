@@ -259,7 +259,7 @@ public struct Pointer: Sendable {
     public func scroll<C: Clock>(at point: ScreenPoint, vertical: Int, horizontal: Int, clock: C) async throws where C.Duration == Duration {
         do {
             try await move(to: point)
-            for notch in 0..<max(abs(vertical), abs(horizontal)) {
+            for notch in 0..<max(vertical.magnitude, horizontal.magnitude) {
                 try Task.checkCancellation()
                 try await mouse.scroll(by: Scroll(vertical: Self.count(vertical, at: notch), horizontal: Self.count(horizontal, at: notch)))
                 try await clock.sleep(for: Self.notchRest)
@@ -270,9 +270,9 @@ public struct Pointer: Sendable {
     }
 
     /// One count toward `total`'s sign while notch `notch` is still inside it, and none
-    /// after.
-    private static func count(_ total: Int, at notch: Int) -> Count {
-        Count(clamping: notch < abs(total) ? total.signum() : 0)
+    /// after. `magnitude` and not `abs`, which traps on `Int.min`.
+    private static func count(_ total: Int, at notch: UInt) -> Count {
+        Count(clamping: notch < total.magnitude ? total.signum() : 0)
     }
 
     /// A drag that finished: where the button went down, where it came up, and how many

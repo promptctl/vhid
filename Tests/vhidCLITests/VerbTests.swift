@@ -2,6 +2,7 @@ import Input
 import KeyboardLayouts
 import Keystrokes
 import Pointing
+import TestClock
 import Testing
 @testable import vhid
 
@@ -150,7 +151,7 @@ import Testing
         let mouse = FakeMouse(at: 0, 0)
         let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor })
         let command = try HeldModifiers(spelled: "leftCommand")
-        let scrolled = try await ScrollCommand.scroll(at: ScreenPoint(x: 5, y: 5)!, vertical: 1, horizontal: 0, holding: command, with: pointer, RecordingKeyboard(), clock: ContinuousClock())
+        let scrolled = try await ScrollCommand.scroll(at: ScreenPoint(x: 5, y: 5)!, vertical: 1, horizontal: 0, holding: command, with: pointer, RecordingKeyboard(), clock: ManualClock())
         #expect(scrolled.hasPrefix("scrolled 1 tick vertically and 0 ticks horizontally holding leftCommand at "))
         let option = try HeldModifiers(spelled: "leftOption")
         let dragged = try await DragCommand.drag(from: ScreenPoint(x: 5, y: 5)!, to: ScreenPoint(x: 9, y: 9)!, button: .left, holding: option, with: pointer, RecordingKeyboard())
@@ -173,7 +174,7 @@ import Testing
     @Test func scrollSendsEveryTickAtThePlaceAsked() async throws {
         let mouse = FakeMouse(at: 0, 0)
         let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor })
-        let said = try await ScrollCommand.scroll(at: ScreenPoint(x: 40, y: 30)!, vertical: -2, horizontal: 1, holding: .none, with: pointer, RecordingKeyboard(), clock: ContinuousClock())
+        let said = try await ScrollCommand.scroll(at: ScreenPoint(x: 40, y: 30)!, vertical: -2, horizontal: 1, holding: .none, with: pointer, RecordingKeyboard(), clock: ManualClock())
         #expect(mouse.scrolls == [Scroll(vertical: Count(clamping: -1), horizontal: Count(clamping: 1)), Scroll(vertical: Count(clamping: -1), horizontal: .zero)])
         #expect(mouse.cursor == ScreenPoint(x: 40, y: 30)!)
         #expect(said == "scrolled -2 ticks vertically and 1 tick horizontally at \(mouse.cursor)")
