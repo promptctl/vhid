@@ -8,7 +8,7 @@ Measured on studious on 2026-10-03: macOS 15.0.1, Safari 18.0.1, Chrome 154.0.80
 
 - **No browser-side piece.** Every element the page offered was found at the right point by one reader or the other, once it was on screen. Nothing measured needs a DevTools connection or an extension, so neither clears [the scope bar](../development.md#scope).
 - **The gaps are in what `eyes` reports, not in what it sees.** It reports a Chrome element that is off screen as on screen. It does not say a row's role, so a page button and a browser button with the same name look the same. And it cannot tell apart three buttons that share one label.
-- **Reaching an element below the fold is vhid's job, and vhid's wheel is broken.** `vhid scroll` packs up to 127 ticks into one wheel event, so in Safari a call barely moves the page (vhid-scroll-1m8). Firefox moves much further per event, so many calls get there. In Firefox the End key reached the bottom at once.
+- **Reaching an element below the fold is vhid's job.** `vhid scroll` used to pack up to 127 ticks into one wheel event, so in Safari a call barely moved the page. It now rolls one notch a report, and `--vertical N` goes N times as far as `--vertical 1` (vhid-scroll-1m8). In Firefox the End key reached the bottom at once.
 
 ## What eyes does about it
 
@@ -50,6 +50,8 @@ The tree reads `aria-label` (the button's accessibility description), iframe con
 **Repeated labels have only their position.** The three "Remove" buttons come back as three points in reading order. "The Remove in Beta's row" means matching each point's y to the row text's y, which an agent can do but `eyes` does not.
 
 **Below the fold needs scrolling, and vhid's wheel falls short in Safari.** In Safari, `vhid scroll 800 600 --vertical 100` moved the page 13 points, while twenty `--vertical 1` calls moved it more than 500 (vhid-scroll-1m8). Firefox moves 230 to 300 points per `--vertical 5` call. A first run on the probe page seemed to stall partway. A rerun on a separate page that shows its scroll position and counts wheel events found no stall: each of 180 `--vertical 5` calls reached the page as one wheel event, and the page hit bottom before call 80 (vhid-browser-j5d.dap). Once the element was on screen, all three browsers found it at the right point.
+
+Since vhid-scroll-1m8 a notch is its own report, 200 ms after the last. On this page, on 2026-10-04, `--vertical 1` moved Safari 4 points and Firefox 16, and `--vertical 300` moved them 1200 and 4800.
 
 ## Repeating it
 

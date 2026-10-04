@@ -105,6 +105,11 @@ enum Help {
     static let scroll = VerbHelp(name: "scroll", abstract: "Roll the mouse wheel at a point on the screen.", discussion: """
         The pointer is moved to the point first, because a wheel scrolls whatever is under the \
         pointer. The ticks are the device's own, and macOS decides how far each one scrolls.
+
+        Each tick goes out as a report of its own, \(Pointer.notchRest.formatted(.units(allowed: [.milliseconds]))) \
+        after the last, because macOS takes a report as one notch whatever count it carries \
+        and speeds up notches that come faster. So N ticks scroll N times as far as one, and \
+        take N times as long.
         """, commandLine: [negative(NegativeExample.scroll)])
 
     static let drag = VerbHelp(name: "drag", abstract: "Drag from one point on the screen to another.", discussion: """
