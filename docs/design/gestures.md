@@ -8,7 +8,7 @@ Measured on studious on 2026-10-03: macOS 15.0.1, Safari 18.0.1, Chrome 154, Map
 
 | Gesture | What it does | Route through the devices | On studious |
 | --- | --- | --- | --- |
-| Two-finger scroll | scrolls | the wheel: `vhid scroll` | vhid's existing verb; how far it goes is vhid-scroll-1m8 |
+| Two-finger scroll | scrolls | the wheel: `vhid scroll` | vhid's existing verb; `--vertical N` goes N times as far as `--vertical 1` |
 | Two-finger click | secondary click | the right button: `vhid click --button right` | vhid's existing verb |
 | Tap to click, three-finger drag | click, drag | the left button: `vhid click`, `vhid drag` | vhid's existing verbs |
 | Two-finger swipe right or left | back or forward a page | ⌘[ and ⌘] | worked in Safari and Chrome |

@@ -105,6 +105,11 @@ enum Help {
     static let scroll = VerbHelp(name: "scroll", abstract: "Roll the mouse wheel at a point on the screen.", discussion: """
         The pointer is moved to the point first, because a wheel scrolls whatever is under the \
         pointer. The ticks are the device's own, and macOS decides how far each one scrolls.
+
+        Each tick goes out as a report of its own, \(Int(Pointer.notchRest / .milliseconds(1))) ms \
+        after the last, because macOS takes a report as one notch whatever count it carries \
+        and speeds up notches that come faster. So N ticks scroll N times as far as one, and \
+        take N times as long.
         """, commandLine: [negative(NegativeExample.scroll)])
 
     static let drag = VerbHelp(name: "drag", abstract: "Drag from one point on the screen to another.", discussion: """
@@ -124,7 +129,7 @@ enum Help {
           {"t_ms":0,"buttons":["left"]}           exactly these buttons held from now: left, right, middle, or 1 to 32
           {"t_ms":8.3,"move":{"dx":4,"dy":-2}}    relative motion in counts, -127 to 127, uncorrected
           {"t_ms":8.3,"at":{"x":812.5,"y":400}}   the cursor should be here now, in the start's coordinates
-          {"t_ms":16.7,"wheel":{"v":-1,"h":0}}    wheel ticks, -127 to 127; v positive rolls away from the hand
+          {"t_ms":16.7,"wheel":{"v":-1,"h":0}}    a wheel report, -127 to 127 a side, which macOS takes as one notch whatever the count; v positive rolls away from the hand
           {"t_ms":1000,"keys":[]}                 every key up; {"buttons":[]} every button
         A script is refused whole, before anything is connected, if a line is malformed, t_ms goes \
         backwards or past an hour, a keys line holds more than 32 keys besides the modifiers, or it \
