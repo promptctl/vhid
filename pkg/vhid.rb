@@ -25,9 +25,9 @@ cask "vhid" do
   # where they outlive that and brew purges them with the rest of the cask. vhid-uninstall
   # finds vhid and the driver removal from where it runs, so the copy keeps /usr/local's layout.
   postflight_steps do
-    %w[bin/vhid libexec/vhid-uninstall libexec/vhid-virtual-hid-driver].each do |path|
-      copy "/usr/local/#{path}", "kit/#{path}"
-    end
+    copy "/usr/local/bin/vhid", "kit/bin/vhid"
+    copy "/usr/local/libexec/vhid-uninstall", "kit/libexec/vhid-uninstall"
+    copy "/usr/local/libexec/vhid-virtual-hid-driver", "kit/libexec/vhid-virtual-hid-driver"
   end
 
   # Leaves the pqrs driver, which Karabiner-Elements may share.
