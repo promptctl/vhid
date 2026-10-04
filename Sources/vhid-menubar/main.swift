@@ -1,5 +1,6 @@
 import AppKit
 import Doctor
+import DriverExtension
 import Foundation
 import Helper
 import Installations
@@ -105,7 +106,8 @@ final class Item: NSObject {
 /// The failure's deadline is short: a daemon that just answered doctor answers at once,
 /// and one that did not has already cost doctor's full deadline. [LAW:effects-at-boundaries]
 func read(_ installation: Installation) -> (Glance, Readiness) {
-    let readiness = Readiness.read(for: installation)
+    // Nobody stops a menu's reading: it is read to its end, and the next one waits for it.
+    let readiness = Readiness.read(for: installation, stoppedBy: Command.Stop())
     let lastFailure = Result { try HelperConnection(installation: installation, replyTimeout: .seconds(1)).lastFailure() }
     return (Glance(installation: installation, readiness: readiness, lastFailure: lastFailure, readAt: Date()), readiness)
 }

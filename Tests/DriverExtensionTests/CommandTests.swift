@@ -149,4 +149,44 @@ import Testing
         #expect(overran == runs)
         #expect(grew < runs)
     }
+
+    /// A reading stopped while a command runs ends at once, the command with it: thrown as
+    /// a cancel, not as a command that failed or overran, and the child stopped and
+    /// collected by the time it is thrown, as one given up on at its limit is.
+    @Test(.timeLimit(.minutes(1))) func aCommandWhoseReadingIsStoppedEndsAtOnceAndLeavesNoChild() async throws {
+        let pidFile = FileManager.default.temporaryDirectory.appending(path: "vhid-command-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: pidFile) }
+        let stop = Command.Stop()
+        let began = ContinuousClock.now
+        // On a thread of its own, as a reading is taken: the command blocks the thread it
+        // runs on, and the cooperative pool may have only the one.
+        let (ending, end) = AsyncStream<Result<Command.Output, any Error>>.makeStream()
+        Thread.detachNewThread {
+            end.yield(Result { try Command("/bin/sh", "-c", "echo $$ > \(pidFile.path); exec sleep 600").run(by: .within(.seconds(30), or: stop)) })
+            end.finish()
+        }
+        func pid() -> pid_t? { (try? String(contentsOf: pidFile, encoding: .utf8)).flatMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) } }
+        while pid() == nil { try await Task.sleep(for: .milliseconds(10)) }
+        stop.pull()
+        var ended: Result<Command.Output, any Error>?
+        for await result in ending { ended = result }
+        let endedResult = try #require(ended)
+        #expect(ContinuousClock.now - began < .seconds(10))
+        #expect(throws: CancellationError.self) { try endedResult.get() }
+        let child = try #require(pid())
+        #expect(kill(child, 0) == -1 && errno == ESRCH)
+    }
+
+    /// A stop stays pulled: every command a stopped reading starts after it is stopped as
+    /// it starts, so a reading of several commands runs none past the one it stopped.
+    @Test(.timeLimit(.minutes(1))) func aCommandStartedByAStoppedReadingIsStoppedAsItStarts() throws {
+        let stop = Command.Stop()
+        stop.pull()
+        let deadline = Command.Deadline.within(.seconds(30), or: stop)
+        let began = ContinuousClock.now
+        for _ in 0..<2 {
+            #expect(throws: CancellationError.self) { try Command("/bin/sleep", "600").run(by: deadline) }
+        }
+        #expect(ContinuousClock.now - began < .seconds(10))
+    }
 }

@@ -177,7 +177,7 @@ let package = Package(
         .testTarget(
             name: "vhidCLITests",
             dependencies: [
-                "vhid", "Input", "Helper", "Installations", "Keystrokes", "Pointing", "Doctor", "Version", "OwnThread", "TestClock", "Signals",
+                "vhid", "Input", "Helper", "Installations", "Keystrokes", "Pointing", "Doctor", "DriverExtension", "Version", "OwnThread", "TestClock", "Signals",
                 .product(name: "MCP", package: "swift-sdk"),
             ]
         ),

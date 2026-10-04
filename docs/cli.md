@@ -60,8 +60,8 @@ look different there, because a run that opened the devices counts its reports f
 zero; whether the daemon answered is in its `outcome` and `error`. Control-C or
 `SIGTERM` stops a verb as a withdrawn MCP call is stopped: it is recorded as `cancelled`
 with what it had sent and `attributes.signal` naming the signal, says so on stderr, and
-then dies by the signal. `doctor`, `driver` and `service` read on to their end instead,
-are recorded as they ended, with the signal, and then die by it. `vhid record` answers
+then dies by the signal; `doctor`, `driver` and `service` end the command they are
+running to read this Mac, and run no more. `vhid record` answers
 the first one by finishing, and exits as the recording ended. A second signal ends any
 verb at once, unrecorded, and an MCP call `vhid mcp` was running when it was stopped
 names the signal too.

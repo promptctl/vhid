@@ -150,15 +150,7 @@ enum Tools {
 
     /// `vhid doctor` as a tool. A Mac that is not ready is an answer and not a failure of
     /// the call, so it comes back as what the verb prints, whose first line says it.
-    ///
-    /// The reading waits on subprocesses and on a status reply of up to five seconds, so it
-    /// is taken on a dispatch thread and not on the cooperative pool, whose few threads the
-    /// server's transport runs on too - the same move `DeviceQueue` makes for the device
-    /// calls. [LAW:no-ambient-temporal-coupling]
     static let doctor: VerbTool = VerbTool(Help.doctor, readOnly: true, []) { _, installation in
-        let readiness = await withCheckedContinuation { reading in
-            DispatchQueue.global().async { reading.resume(returning: Readiness.read(for: installation)) }
-        }
-        return DoctorCommand.doctor(readiness)
+        DoctorCommand.doctor(try await reading { Readiness.read(for: installation, stoppedBy: $0) })
     }
 }

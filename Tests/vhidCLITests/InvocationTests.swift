@@ -1,4 +1,5 @@
 import ArgumentParser
+import DriverExtension
 import Foundation
 @testable import Helper
 import Input
@@ -448,6 +449,33 @@ import Testing
         #expect(written[0]?["outcome"] as? String == "cancelled")
         #expect(written[0]?["error"] as? String == "the run was cancelled")
         #expect((written[0]?["attributes"] as? [String: Any])?["signal"] as? String == (number == SIGINT ? "SIGINT" : "SIGTERM"))
+    }
+
+    /// A verb that reads the machine - `doctor`, `driver`, `service standing` - is stopped
+    /// as every verb is: the cancel a signal makes ends the command its reading is
+    /// running, the child with it, and the record says cancelled, at once rather than at
+    /// the command's limit.
+    @Test(.timeLimit(.minutes(1))) func aReadingCancelledMidCommandIsRecordedAsCancelledAndLeavesNoChild() async throws {
+        let pidFile = FileManager.default.temporaryDirectory.appending(path: "vhid-reading-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: pidFile) }
+        let export = EventExport.scratch()
+        let verb = Task {
+            try await Invocation.record("driver state", via: .commandLine, to: export.export) { _ in
+                try await reading { stop in
+                    Result { try Command("/bin/sh", "-c", "echo $$ > \(pidFile.path); exec sleep 600").run(by: .within(.seconds(30), or: stop)) }
+                }
+            }
+        }
+        func pid() -> pid_t? { (try? String(contentsOf: pidFile, encoding: .utf8)).flatMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) } }
+        while pid() == nil { try await Task.sleep(for: .milliseconds(10)) }
+        verb.cancel()
+        await #expect(throws: CancellationError.self) { try await verb.value }
+        let record = try Self.only(export)
+        #expect(record["event"] as? String == "driver state")
+        #expect(record["outcome"] as? String == "cancelled")
+        #expect(try #require(record["duration_ms"] as? Double) < 10_000)
+        let child = try #require(pid())
+        #expect(kill(child, 0) == -1 && errno == ESRCH)
     }
 
     /// `doctor` prints its own report and exits 1 with nothing more to say.
