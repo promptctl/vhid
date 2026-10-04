@@ -95,9 +95,17 @@ $drift"
 fi
 
 # The cask's postflight_steps copy these out of the install, so each is a file the pkg
-# installs; one that moves fails `brew install` at its postflight_steps.
-kit=$(sed -n 's/^ *%w\[\(.*\)\]\.each do |path|$/\1/p' pkg/vhid.rb)
-[ -n "$kit" ] || fail "pkg/vhid.rb has no postflight_steps %w[...] list of what it copies"
+# installs; one that moves fails `brew install` at its postflight_steps. Each lands at
+# its own path under kit/, because vhid-uninstall finds the others from where it runs.
+copies=$(sed -n 's/^ *copy "\(.*\)", "\(.*\)"$/\1 \2/p' pkg/vhid.rb)
+[ -n "$copies" ] || fail "pkg/vhid.rb's postflight_steps copy nothing"
+kit=
+while read -r from to; do
+  path=${from#/usr/local/}
+  [ "$from" = "/usr/local/$path" ] && [ "$to" = "kit/$path" ] \
+    || fail "pkg/vhid.rb copies $from to $to, not a /usr/local/<path> to kit/<path>"
+  kit="$kit $path"
+done <<<"$copies"
 installed=$(lsbom -f -p f "$x/vhid.pkg/Bom")
 for path in $kit; do
   grep -qx "\./usr/local/$path" <<<"$installed" \
