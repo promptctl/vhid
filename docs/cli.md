@@ -51,3 +51,24 @@ built for: the installed copy for the installed CLI, and the development copy fo
 build from this tree. `vhid service` prints which. Coordinates are screen points from the top left of the main display; a display
 left of or above it has negative ones, which follow `--` after every option:
 `vhid click --button left -- -100 -40`.
+
+## What each run leaves behind
+
+Every `vhid` run, and every MCP tool call, leaves one record: a line of JSON appended to
+`~/Library/Logs/vhid/events.jsonl`. A run that sent nothing and a run that never happened
+look different there, because a run that reached the devices counts its reports from
+zero.
+
+```json
+{"attributes":{"notch_rest_ms":200},"counts":{"keyboard_reports":0,"mouse_reports":13,"scroll_notches_horizontal":0,"scroll_notches_vertical":10},"duration_ms":2071.4,"entry":"cli","event":"scroll","outcome":"ok","service":"vhid","sink":"file","started_at":"2026-10-04T13:20:00.512Z","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736"}
+```
+
+`event` is the verb as it is typed (`scroll`, `driver state`), and an MCP call's is its
+tool's name, which is the same word; `entry` says which it came through. `outcome` is
+`ok`, `failed` or `cancelled`, and `error` is what the caller was told. An argument that
+could not be parsed is recorded as `vhid`, before the verb was known.
+
+With `OTEL_EXPORTER_OTLP_ENDPOINT` set, the record goes to that OpenTelemetry collector
+instead, as an OTLP/HTTP JSON log on `/v1/logs`, and the file is not written. A collector
+that refuses it, or has not answered in two seconds, leaves it in the file with
+`sink_error` saying why.

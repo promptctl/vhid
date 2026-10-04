@@ -52,7 +52,7 @@ import Version
     @Test func mcpInitializeReportsItAndThePairingWithEyes() async throws {
         let (clientSide, serverSide) = await InMemoryTransport.createConnectedPair()
         let transport = AnsweringTransport(serverSide)
-        let server = await McpCommand.server(on: Installation(service: "ai.promptctl.vhid.tests.nobody")!, over: transport)
+        let server = await McpCommand.server(on: Installation(service: "ai.promptctl.vhid.tests.nobody")!, over: transport, recordingTo: .scratch())
         try await server.start(transport: transport)
         let result: Initialize.Result
         do {

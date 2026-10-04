@@ -24,7 +24,7 @@ import Testing
         case unadmitting
     }
 
-    private final class Service: NSObject, HelperService, NSXPCListenerDelegate, @unchecked Sendable {
+    final class Service: NSObject, HelperService, NSXPCListenerDelegate, @unchecked Sendable {
         let answer: FarEnd
         private let lock = NSLock()
         private var acknowledged = 0

@@ -30,4 +30,34 @@ struct Vhid: AsyncParsableCommand {
             DragCommand.self, CursorCommand.self, PlayCommand.self, RecordCommand.self, McpCommand.self, DriverCommand.self,
             ServiceCommand.self, DoctorCommand.self,
         ])
+
+    /// ArgumentParser's own `main`, run as one invocation: parsing argv is part of it, so
+    /// a refused argument leaves a record too. [LAW:nothing-unseen]
+    static func main() async {
+        do {
+            try await Invocation.record(_commandName, via: .commandLine, to: .configured()) { invocation in
+                var command = try parseAsRoot()
+                invocation.named(name(of: type(of: command)))
+                if var command = command as? AsyncParsableCommand {
+                    try await command.run()
+                } else {
+                    try command.run()
+                }
+            }
+        } catch {
+            exit(withError: error)
+        }
+    }
+
+    /// A command's name as it is typed after `vhid`, `scroll` or `driver state`, which is
+    /// also its MCP tool's name; `vhid` for the root.
+    static func name(of command: any ParsableCommand.Type) -> String {
+        func path(from node: any ParsableCommand.Type) -> [String]? {
+            if ObjectIdentifier(node) == ObjectIdentifier(command) { return [] }
+            return node.configuration.subcommands.lazy.compactMap { sub in path(from: sub).map { [sub._commandName] + $0 } }.first
+        }
+        // `parseAsRoot` hands back only commands under this root.
+        let names = path(from: Self.self)!
+        return names.isEmpty ? _commandName : names.joined(separator: " ")
+    }
 }

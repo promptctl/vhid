@@ -52,8 +52,10 @@ struct McpCommand: AsyncParsableCommand {
         """
 
     /// The server as a client's initialize finds it, with `tools` attached to run against
-    /// `installation`, each call held `underway` on the transport it will be started on.
-    static func server(_ tools: [VerbTool] = Tools.all, on installation: Installation, over transport: AnsweringTransport) async -> Server {
+    /// `installation`, each call held `underway` on the transport it will be started on and
+    /// recorded as one invocation to `export`.
+    static func server(_ tools: [VerbTool] = Tools.all, on installation: Installation, over transport: AnsweringTransport,
+                       recordingTo export: EventExport) async -> Server {
         let server = Server(name: "vhid", version: Version.current, instructions: instructions,
                             capabilities: .init(tools: .init(listChanged: false)))
         let turns = Turns()
@@ -70,7 +72,9 @@ struct McpCommand: AsyncParsableCommand {
             // verb had already done when it was withdrawn. [LAW:no-silent-failure]
             return try await transport.underway {
                 do {
-                    let said = try await turns.take { try await verb.call(request.arguments ?? [:], on: installation) }
+                    let said = try await Invocation.record(request.name, via: .mcp, to: export) { _ in
+                        try await turns.take { try await verb.call(request.arguments ?? [:], on: installation) }
+                    }
                     return .init(content: [.text(text: said, annotations: nil, _meta: nil)], isError: false)
                 } catch where Task.isCancelled {
                     FileHandle.standardError.write(Data("vhid: \(request.name) withdrawn: \(error.reported)\n".utf8))
@@ -96,7 +100,7 @@ struct McpCommand: AsyncParsableCommand {
         }
 
         let transport = AnsweringTransport(StdioTransport(output: protocolOut))
-        let server = await Self.server(on: installation, over: transport)
+        let server = await Self.server(on: installation, over: transport, recordingTo: .configured())
         try await server.start(transport: transport)
         await server.waitUntilCompleted()
     }

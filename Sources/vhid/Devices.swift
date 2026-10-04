@@ -2,6 +2,8 @@ import Foundation
 import Helper
 import Input
 import Installations
+import Keystrokes
+import Pointing
 
 /// The two devices an installation's daemon owns, as a client reaches them.
 ///
@@ -42,8 +44,11 @@ struct Devices {
     /// the far end. [LAW:decomposition]
     static func using<T>(_ helper: HelperConnection, _ body: (Devices) async throws -> T) async throws -> T {
         let queue = DeviceQueue()
-        let devices = Devices(keyboard: QueuedKeyboard(keyboard: helper.keyboard, queue: queue),
-                              mouse: QueuedMouse(pointing: helper.mouse, queue: queue),
+        // [LAW:nothing-unseen] Every report a verb sends passes here, so here is where they
+        // are counted, from zero: a verb that reached the devices and sent nothing says so.
+        for tally in Tally.allCases { Invocation.count(tally, by: 0) }
+        let devices = Devices(keyboard: TalliedKeyboard(keyboard: QueuedKeyboard(keyboard: helper.keyboard, queue: queue)),
+                              mouse: TalliedMouse(mouse: QueuedMouse(pointing: helper.mouse, queue: queue)),
                               cursor: cursor(helper, on: queue),
                               front: front(helper, on: queue))
         let done: T
@@ -104,5 +109,31 @@ struct Devices {
             guard let point = ScreenPoint(x: at.x, y: at.y) else { throw CursorUnreadable() }
             return point
         }
+    }
+}
+
+/// A keyboard that counts each report on the running invocation once it is acknowledged.
+struct TalliedKeyboard: Keyboard {
+    let keyboard: any Keyboard
+
+    func down(_ usage: Usage) async throws { try await keyboard.down(usage); Invocation.count(.keyboardReports) }
+    func releaseAll() async throws { try await keyboard.releaseAll(); Invocation.count(.keyboardReports) }
+    func hold(_ keys: HeldKeys) async throws { try await keyboard.hold(keys); Invocation.count(.keyboardReports) }
+}
+
+/// A mouse that counts each report on the running invocation once it is acknowledged, and
+/// each wheel report as a notch on every axis it carries a count on.
+struct TalliedMouse: Mouse {
+    let mouse: any Mouse
+
+    func down(_ button: Button) async throws { try await mouse.down(button); Invocation.count(.mouseReports) }
+    func releaseAll() async throws { try await mouse.releaseAll(); Invocation.count(.mouseReports) }
+    func hold(_ buttons: Set<Button>) async throws { try await mouse.hold(buttons); Invocation.count(.mouseReports) }
+    func move(by delta: Move) async throws { try await mouse.move(by: delta); Invocation.count(.mouseReports) }
+    func scroll(by delta: Scroll) async throws {
+        try await mouse.scroll(by: delta)
+        Invocation.count(.mouseReports)
+        Invocation.count(.verticalNotches, by: delta.vertical == .zero ? 0 : 1)
+        Invocation.count(.horizontalNotches, by: delta.horizontal == .zero ? 0 : 1)
     }
 }

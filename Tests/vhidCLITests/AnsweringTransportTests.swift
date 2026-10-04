@@ -90,7 +90,7 @@ import Testing
         let stdio = Stdio(), said = Said()
         let transport = AnsweringTransport(stdio, logger: Logger(label: "test") { _ in said })
         let session = Task {
-            let server = await McpCommand.server([stubborn], on: Installation(service: "ai.promptctl.vhid.tests.nobody")!, over: transport)
+            let server = await McpCommand.server([stubborn], on: Installation(service: "ai.promptctl.vhid.tests.nobody")!, over: transport, recordingTo: .scratch())
             try await server.start(transport: transport)
             await server.waitUntilCompleted()
         }
@@ -140,7 +140,7 @@ import Testing
         }
         let stdio = Stdio(), transport = AnsweringTransport(stdio)
         let session = Task {
-            let server = await McpCommand.server([waiting], on: Installation(service: "ai.promptctl.vhid.tests.nobody")!, over: transport)
+            let server = await McpCommand.server([waiting], on: Installation(service: "ai.promptctl.vhid.tests.nobody")!, over: transport, recordingTo: .scratch())
             try await server.start(transport: transport)
             await server.waitUntilCompleted()
         }
@@ -173,7 +173,7 @@ private final class Said: LogHandler, @unchecked Sendable {
 }
 
 /// Stdio as a test drives it: lines are fed in by hand, and what is sent is kept.
-private actor Stdio: Transport {
+actor Stdio: Transport {
     nonisolated let logger = Logger(label: "test")
     nonisolated let (stream, lines) = AsyncThrowingStream<Data, any Error>.makeStream()
     private nonisolated let kept = Kept()
@@ -201,7 +201,7 @@ private actor Stdio: Transport {
     }
 }
 
-private final class Kept: @unchecked Sendable {
+final class Kept: @unchecked Sendable {
     private let lock = NSLock()
     private var kept: [String] = []
     var lines: [String] { lock.withLock { kept } }
