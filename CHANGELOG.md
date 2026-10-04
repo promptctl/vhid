@@ -4,6 +4,8 @@ Each release's section is its GitHub Release notes, which keep line breaks, so e
 
 ## [Unreleased]
 
+## [0.4.1]
+
 - Homebrew 7 no longer warns that the cask calls the deprecated `postflight` on every brew command that reads it: the cask copies what uninstall needs at install, with `postflight_steps`.
 
 ## [0.4.0]
@@ -57,7 +59,8 @@ The first release: a virtual keyboard and mouse that macOS sees as hardware, dri
 - One signed, notarized pkg installs both CLIs, the root daemon that owns the devices, the menu bar item, the `vhid record` tap, an uninstaller, and the pinned Karabiner-DriverKit-VirtualHIDDevice package.
 - After installing, turn on `org.pqrs.Karabiner-DriverKit-VirtualHIDDevice` under System Settings > General > Login Items & Extensions > Driver Extensions; no installer can do this for you. `vhid doctor` prints `ready` once everything vhid needs is met.
 
-[Unreleased]: https://github.com/promptctl/vhid/compare/v0.4.0...master
+[Unreleased]: https://github.com/promptctl/vhid/compare/v0.4.1...master
+[0.4.1]: https://github.com/promptctl/vhid/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/promptctl/vhid/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/promptctl/vhid/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/promptctl/vhid/compare/v0.1.0...v0.2.0
