@@ -27,7 +27,7 @@ import Testing
         Found(text: Text(text)!, frame: ScreenRect(x: x, y: y, width: width, height: 20), source: source)
     }
 
-    private func read(_ a: Fake, _ b: Fake, _ match: Match? = nil) async throws -> Reading {
+    private func read(_ a: any Reader, _ b: any Reader, _ match: Match? = nil) async throws -> Reading {
         try await MergedReader(a, b).read(Query(match: match, region: .rect(Self.region)))
     }
 
@@ -206,10 +206,17 @@ import Testing
         #expect(grant)
     }
 
-    @Test func aRegionThatNamesNowhereIsRefusedOnceBeforeEitherReader() async {
+    struct Nowhere: Reader {
+        let source = SourceKind.pixels
+        func look(_ query: Query) async throws -> Candidates { throw NoSuchPlace.display(4_000_000_000) }
+    }
+
+    @Test func aRegionThatNamesNowhereIsTheMergesAnswerNotABlindReader() async {
         await #expect(throws: NoSuchPlace.self) {
-            try await MergedReader(Fake(source: .tree, found: []), Fake(source: .pixels, found: []))
-                .read(Query(match: nil, region: .display(4_000_000_000)))
+            try await read(Fake(source: .tree, found: [at("Allow", 10, 10, Self.role)]), Nowhere())
+        }
+        await #expect(throws: NoSuchPlace.self) {
+            try await read(Nowhere(), Fake(source: .tree, found: []))
         }
     }
 }
