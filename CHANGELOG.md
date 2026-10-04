@@ -4,7 +4,7 @@ Each release's section is its GitHub Release notes, which keep line breaks, so e
 
 ## [Unreleased]
 
-- Homebrew 7 no longer warns that the cask calls the deprecated `postflight` on every brew command that reads it: the cask copies what it needs at uninstall with `postflight_steps`.
+- Homebrew 7 no longer warns that the cask calls the deprecated `postflight` on every brew command that reads it: the cask copies what uninstall needs at install, with `postflight_steps`.
 
 ## [0.4.0]
 
