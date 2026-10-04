@@ -36,9 +36,9 @@ import Testing
     @Test func noModifiersIsTheSameRunWithNothingHeld() async throws {
         let mouse = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
         try await mouse.pointer.holding(.none, on: mouse.keyboard) {
-            try await $0.scroll(at: Self.target, vertical: 3, horizontal: 0)
+            try await $0.scroll(at: Self.target, vertical: 3, horizontal: 0, clock: ManualClock())
         }
-        #expect(mouse.log == ["move 5 0", "scroll 3 0"])
+        #expect(mouse.log == ["move 5 0", "scroll 1 0", "scroll 1 0", "scroll 1 0"])
     }
 
     /// A drag carries the modifiers from the press to the release.

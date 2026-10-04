@@ -87,11 +87,15 @@ import Testing
         #expect(mouse.log == ["down 1", "up", "up"])
     }
 
-    /// The wheel goes out in reports of at most 127 on an axis, the remainder last.
-    @Test func aScrollIsChunkedToTheReportsRange() async throws {
+    /// The wheel goes out a notch a report, both axes together until the shorter is done,
+    /// with the rest after every notch, the last included.
+    @Test func aScrollIsOneNotchAReportWithARestAfterEach() async throws {
         let mouse = FakeMouse(at: Self.origin)
-        try await mouse.pointer.scroll(at: Self.origin, vertical: 300, horizontal: -5)
-        #expect(mouse.log == ["scroll 127 -5", "scroll 127 0", "scroll 46 0"])
+        let clock = ManualClock()
+        try await mouse.pointer.scroll(at: Self.origin, vertical: 300, horizontal: -5, clock: clock)
+        #expect(mouse.log == Array(repeating: "scroll 1 -1", count: 5) + Array(repeating: "scroll 1 0", count: 295))
+        #expect(clock.sleeps == 300)
+        #expect(clock.now.offset == Pointer.notchRest * 300)
     }
 
 }

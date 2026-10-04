@@ -229,29 +229,50 @@ public struct Pointer: Sendable {
         }
     }
 
-    /// Moves to `point` and rolls the wheel there, in as many reports as the counts take:
-    /// a report carries at most 127 on an axis, so 300 is 127, 127 and 46. Vertical
-    /// positive away from the hand, horizontal positive to the right.
+    /// How long the wheel rests after each notch.
+    ///
+    /// **A report is one notch to macOS, whatever count it carries, and notches closer
+    /// together than this are accelerated.** Measured on studious (macOS 15) in Safari,
+    /// TextEdit and Firefox, 2026-10-04: a report of 1, 10 or 30 scrolled as far as a report
+    /// of 1, and so did 5 in Firefox. Ten one-count reports scrolled Safari 40 points at
+    /// 150ms apart or slower - ten times one notch's 4 - and 239 points at 120ms, 560 at
+    /// 100ms, 2572 back to back. TextEdit was accelerated at 140ms and not at 150ms;
+    /// Firefox was at 100ms and not at 150ms. This is a third clear of that edge, so
+    /// `--vertical N` scrolls N times as far as `--vertical 1`.
+    public static let notchRest: Duration = .milliseconds(200)
+
+    /// Moves to `point` and rolls the wheel there one notch at a time, a report each,
+    /// resting `notchRest` on `clock` after every one. Vertical positive away from the hand,
+    /// horizontal positive to the right; a notch carries one count on each axis that has
+    /// any left, so both axes roll together until the shorter is done.
+    ///
+    /// The rest follows the last notch too, so a roll started straight after this one is
+    /// not taken by macOS as its continuation and accelerated.
+    /// [LAW:dataflow-not-control-flow]
     ///
     /// **The counts are unbounded, and they used to be capped at a thousand.** The cap was
     /// there to stop a huge number posting reports until the process was killed, which is
     /// a real thing to want to stop and the wrong place to stop it: a document is as long
     /// as it is, and the device has no opinion about how far a wheel rolls. A roll that is
     /// longer than its caller wanted is stopped by cancelling it, which this loop asks
-    /// about once per report.
-    public func scroll(at point: ScreenPoint, vertical: Int, horizontal: Int) async throws {
+    /// about once per notch.
+    public func scroll<C: Clock>(at point: ScreenPoint, vertical: Int, horizontal: Int, clock: C) async throws where C.Duration == Duration {
         do {
             try await move(to: point)
-            var remaining = (vertical: vertical, horizontal: horizontal)
-            while remaining != (0, 0) {
+            for notch in 0..<max(abs(vertical), abs(horizontal)) {
                 try Task.checkCancellation()
-                let chunk = Scroll(vertical: Count(clamping: remaining.vertical), horizontal: Count(clamping: remaining.horizontal))
-                try await mouse.scroll(by: chunk)
-                remaining = (remaining.vertical - Int(chunk.vertical.value), remaining.horizontal - Int(chunk.horizontal.value))
+                try await mouse.scroll(by: Scroll(vertical: Self.count(vertical, at: notch), horizontal: Self.count(horizontal, at: notch)))
+                try await clock.sleep(for: Self.notchRest)
             }
         } catch {
             throw PointingStopped(cause: error, unreleased: await release())
         }
+    }
+
+    /// One count toward `total`'s sign while notch `notch` is still inside it, and none
+    /// after.
+    private static func count(_ total: Int, at notch: Int) -> Count {
+        Count(clamping: notch < abs(total) ? total.signum() : 0)
     }
 
     /// A drag that finished: where the button went down, where it came up, and how many
