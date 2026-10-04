@@ -33,6 +33,8 @@ final class Invocation: Sendable {
         func told(_ error: any Error) -> String? {
             let words = switch self {
             case .commandLine where Vhid.exitCode(for: error) == .validationFailure: Self.refusedArguments
+            // What `Vhid.main` says of a verb a signal stopped, before the process dies by it.
+            case .commandLine where error.isCancellation: error.reported
             case .commandLine: Vhid.message(for: error)
             case .mcp where error is ArgumentRefused: Self.refusedArguments
             case .mcp: error.reported
@@ -111,7 +113,7 @@ final class Invocation: Sendable {
             (outcome, error) = (.ok, nil)
         // What the verb threw says how it ended, not whether a cancel arrived meanwhile: a
         // verb the daemon refused as the cancel landed failed.
-        case .failure(let failure) where failure.causes.contains(where: { $0 is CancellationError }):
+        case .failure(let failure) where failure.isCancellation:
             (outcome, error) = (.cancelled, told(failure))
         // `--help` and `--version` arrive as errors that exit 0: the invocation did what
         // it was asked.

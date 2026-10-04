@@ -104,6 +104,12 @@ actor AnsweringTransport: Transport, HTTPContextProviding {
         }
     }
 
+    /// Withdraws every call owed, running or not yet started: the session is being stopped
+    /// from outside, and its calls stop with it.
+    func withdrawEverything() {
+        withdraw(owed.flatMap { id, count in Array(repeating: id, count: count) })
+    }
+
     private func takeWithdrawn(_ id: ID) -> Bool {
         guard let count = withdrawn[id] else { return false }
         withdrawn[id] = count > 1 ? count - 1 : nil

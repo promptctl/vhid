@@ -1,4 +1,7 @@
 import ArgumentParser
+import Foundation
+import Input
+import Signals
 import Version
 
 /// The verbs, against a daemon that owns the two virtual devices.
@@ -33,11 +36,33 @@ struct Vhid: AsyncParsableCommand {
 
     /// ArgumentParser's own `main`, run as one invocation: parsing argv is part of it, so
     /// a refused argument leaves a record too. [LAW:nothing-unseen]
+    ///
+    /// Control-C and SIGTERM stop the invocation, not the process under it. The first
+    /// cancels the verb, which unwinds as a withdrawn MCP call does, letting go of what it
+    /// holds, and its record says it was cancelled and what it had sent; then the process
+    /// dies by that signal, as it would have unwatched. A verb that does not hear the
+    /// cancel - `record` answers the signal itself, `doctor` reads on to its end - ends and
+    /// exits as it would have anyway. A second signal is someone the first did not reach,
+    /// and ends the process at once, unrecorded.
     static func main() async {
-        do {
+        let invocation = Task {
             try await Invocation.record(_commandName, via: .commandLine, to: EventExport.configured().export) { try await run(nil, in: $0) }
-        } catch {
-            exit(withError: error)
+        }
+        let first = FirstSignal()
+        let watch = SignalWatch { number in
+            guard first.take(number) else { die(by: number) }
+            invocation.cancel()
+        }
+        let ending = await invocation.result
+        withExtendedLifetime(watch) {}
+        switch (ending, first.taken) {
+        case (.success, _): return
+        case (.failure(let error), let number?) where error.isCancellation:
+            // Said, because it can be the one report of what the verb had done when the
+            // signal landed. [LAW:no-silent-failure]
+            FileHandle.standardError.write(Data("vhid: \(error.reported)\n".utf8))
+            die(by: number)
+        case (.failure(let error), _): exit(withError: error)
         }
     }
 

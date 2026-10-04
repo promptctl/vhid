@@ -108,12 +108,31 @@ struct McpCommand: AsyncParsableCommand {
             throw Errno(rawValue: errno)
         }
 
-        let transport = AnsweringTransport(StdioTransport(output: protocolOut))
+        try await Self.serve(on: installation, over: AnsweringTransport(StdioTransport(output: protocolOut)), recordingTo: .configured())
+    }
+
+    /// Serves `tools` over `transport` until the client hangs up or the serving task is
+    /// cancelled, as Control-C and SIGTERM cancel it. A cancel withdraws every call owed,
+    /// so each one stops as a client's cancel would stop it, and ends the session. Returns
+    /// once every call has ended and every record is sent, throwing if it was cancelled.
+    ///
+    /// The cancel has to be carried in by hand: the SDK serves from a task of its own,
+    /// which no cancel of this one reaches.
+    static func serve(_ tools: [VerbTool] = Tools.all, on installation: Installation, over transport: AnsweringTransport,
+                      recordingTo export: EventExport) async throws {
         let flights = Flights()
-        let server = await Self.server(on: installation, over: transport, recordingTo: .configured(), carriedBy: flights)
+        let server = await server(tools, on: installation, over: transport, recordingTo: export, carriedBy: flights)
         try await server.start(transport: transport)
-        await server.waitUntilCompleted()
+        await withTaskCancellationHandler {
+            await server.waitUntilCompleted()
+        } onCancel: {
+            Task {
+                await transport.withdrawEverything()
+                await server.stop()
+            }
+        }
         await flights.landed()
+        try Task.checkCancellation()
     }
 }
 

@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// Signals the process is told to ignore, so that it can answer them rather than obey
 /// them. Their default disposition ends the process where it stands - mid-burst, with a
@@ -33,4 +34,34 @@ public struct SignalWatch {
         }
         sources.forEach { $0.resume() }
     }
+}
+
+/// The first signal a watch answered, kept so that a later one can be told from it: the
+/// first asks a run to wind down, and one after it is someone the first did not reach.
+/// Answered from whichever thread the watch runs its answer on.
+public final class FirstSignal: Sendable {
+    private let kept = Mutex<Int32?>(nil)
+
+    public init() {}
+
+    /// Whether `number` is the first signal taken, which is kept; any after it is not.
+    public func take(_ number: Int32) -> Bool {
+        kept.withLock { kept in
+            defer { kept = kept ?? number }
+            return kept == nil
+        }
+    }
+
+    /// The first signal taken, if one has been.
+    public var taken: Int32? { kept.withLock { $0 } }
+}
+
+/// Ends the process by `number` under its default disposition, as if the signal had never
+/// been watched, so the parent sees the process killed by it - which a shell reads as
+/// Control-C, and stops a loop for - rather than an exit status that only resembles it.
+public func die(by number: Int32) -> Never {
+    signal(number, SIG_DFL)
+    kill(getpid(), number)
+    // The default disposition of a watched signal ends the process; this is never reached.
+    exit(128 + number)
 }

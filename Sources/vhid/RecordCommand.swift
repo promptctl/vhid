@@ -37,9 +37,9 @@ struct RecordCommand: ParsableCommand {
         // drops nothing. A failed send is the app gone, which the read below reports. A
         // second signal is someone the first did not reach - an app that stopped answering -
         // and ends the command, whose exit the app's pid watch sees.
-        let signals = Signals()
+        let first = FirstSignal()
         let watch = SignalWatch { number in
-            guard signals.first() else { Darwin.exit(128 + number) }
+            guard first.take(number) else { Darwin.exit(128 + number) }
             try? app.send(number == SIGINT ? ToApp.stop : ToApp.end)
         }
         defer { withExtendedLifetime(watch) {} }
@@ -106,18 +106,6 @@ struct RecordCommand: ParsableCommand {
     static func launch(app: URL, socket: String) throws {
         let opened = try Command("/usr/bin/open", "-n", "-g", app.path, "--args", socket, String(getpid())).run(by: .within(Command.limit))
         guard opened.status == 0 else { throw TieFailure("open could not launch \(app.path): \(opened.merged)") }
-    }
-}
-
-/// Whether a signal is the first, from whichever thread answers it.
-private final class Signals: @unchecked Sendable {
-    private let lock = NSLock()
-    private var seen = false
-
-    func first() -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        defer { seen = true }
-        return !seen
     }
 }
 
