@@ -41,7 +41,7 @@ import Testing
     @Test func aVerbThatDidNothingIsRecordedAsZerosAndNoInvocationIsNotRecorded() async throws {
         let export = EventExport.scratch()
         #expect(try export.written.isEmpty)
-        _ = try await Invocation.record("scroll", via: .commandLine, to: export) { _ in
+        _ = try await Invocation.record("scroll", via: .commandLine, to: export.export) { _ in
             try await Self.against { try await Self.scroll(vertical: 0, horizontal: 0, on: $0) }
         }
         let record = try Self.only(export)
@@ -56,7 +56,7 @@ import Testing
 
     @Test func aScrollRecordsItsNotchesOnEachAxisAndTheRestBetweenThem() async throws {
         let export = EventExport.scratch()
-        _ = try await Invocation.record("scroll", via: .mcp, to: export) { _ in
+        _ = try await Invocation.record("scroll", via: .mcp, to: export.export) { _ in
             try await Self.against { try await Self.scroll(vertical: -3, horizontal: 2, on: $0) }
         }
         let record = try Self.only(export)
@@ -73,7 +73,7 @@ import Testing
         let export = EventExport.scratch(), clock = ManualClock()
         clock.cancel(afterSleeps: 2) { withUnsafeCurrentTask { $0?.cancel() } }
         let roll = Task {
-            try await Invocation.record("scroll", via: .mcp, to: export) { _ in
+            try await Invocation.record("scroll", via: .mcp, to: export.export) { _ in
                 try await Self.against { try await Self.scroll(vertical: 10, horizontal: 0, clock: clock, on: $0) }
             }
         }
@@ -89,7 +89,7 @@ import Testing
     @Test func aFailedVerbIsRecordedWithWhatItsCallerWasTold() async throws {
         let export = EventExport.scratch()
         let thrown = await #expect(throws: (any Error).self) {
-            try await Invocation.record("scroll", via: .mcp, to: export) { _ in
+            try await Invocation.record("scroll", via: .mcp, to: export.export) { _ in
                 try await Self.against(acknowledging: 1) { try await Self.scroll(vertical: 5, horizontal: 0, on: $0) }
             }
         }
@@ -104,11 +104,7 @@ import Testing
     @Test func anMcpToolCallIsRecordedUnderItsToolsName() async throws {
         let export = EventExport.scratch()
         let click = VerbTool(Help.click, []) { _, _ in "clicked" }
-        let stdio = Stdio(), transport = AnsweringTransport(stdio)
-        stdio.call(1, then: [.end])
-        let server = await McpCommand.server([click], on: Installation(service: "ai.promptctl.vhid.tests.nobody")!, over: transport, recordingTo: export)
-        try await server.start(transport: transport)
-        await server.waitUntilCompleted()
+        try await Self.serve([click], to: export)
         let record = try Self.only(export)
         #expect(record["event"] as? String == "click")
         #expect(record["entry"] as? String == "mcp")
@@ -116,18 +112,83 @@ import Testing
         #expect((record["attributes"] as? [String: Double])?["queued_ms"] != nil)
     }
 
-    /// A call naming no tool is refused as a protocol error, and recorded like any call.
-    @Test func anMcpCallNamingNoToolIsRecordedAsFailed() async throws {
-        let export = EventExport.scratch()
-        let stdio = Stdio(), transport = AnsweringTransport(stdio)
+    /// One call to `click` against `tools`, served the way `vhid mcp` serves it: the
+    /// session ends when stdin does, and the process when everything under way has landed.
+    private static func serve(_ tools: [VerbTool], to export: EventExport) async throws {
+        let stdio = Stdio(), transport = AnsweringTransport(stdio), flights = Flights()
         stdio.call(1, then: [.end])
-        let server = await McpCommand.server([], on: .nobody, over: transport, recordingTo: export)
+        let server = await McpCommand.server(tools, on: .nobody, over: transport, recordingTo: export, carriedBy: flights)
         try await server.start(transport: transport)
         await server.waitUntilCompleted()
+        await flights.landed()
+    }
+
+    /// A call naming no tool is refused as a protocol error, and recorded like any call -
+    /// under the method, since a made-up name is not a verb.
+    @Test func anMcpCallNamingNoToolIsRecordedAsFailed() async throws {
+        let export = EventExport.scratch()
+        try await Self.serve([], to: export)
         let record = try Self.only(export)
-        #expect(record["event"] as? String == "click")
+        #expect(record["event"] as? String == "tools/call")
         #expect(record["outcome"] as? String == "failed")
         #expect((record["error"] as? String)?.contains("there is no tool called") == true)
+    }
+
+    /// The answer goes out before the record does, and the record still lands before the
+    /// server's process would exit.
+    @Test func anMcpCallIsAnsweredWithoutWaitingOnItsRecord() async throws {
+        let answered = Mutex(false), sawAnswer = Mutex<Bool?>(nil)
+        let scratch = EventExport.scratch()
+        let slow = EventExport(collector: .init(endpoint: .base("http://c:4318")), file: scratch.file, deliver: { _ in
+            while !answered.withLock({ $0 }) { try await Task.sleep(for: .milliseconds(5)) }
+            sawAnswer.withLock { $0 = true }
+        })
+        let click = VerbTool(Help.click, []) { _, _ in "clicked" }
+        let stdio = Stdio(), transport = AnsweringTransport(stdio), flights = Flights()
+        stdio.call(1, then: [])
+        let server = await McpCommand.server([click], on: .nobody, over: transport, recordingTo: slow, carriedBy: flights)
+        try await server.start(transport: transport)
+        while stdio.sent.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
+        answered.withLock { $0 = true }
+        stdio.feed([.end])
+        await server.waitUntilCompleted()
+        await flights.landed()
+        #expect(sawAnswer.withLock { $0 } == true)
+    }
+
+    /// Says what `UntypeableCharacters` says, with a character of a password in it.
+    private struct QuotesTheText: Error, CustomStringConvertible {
+        var description: String { "U.S. has no keys for €" }
+    }
+
+    /// `type`'s errors can quote the text it was given, so its record names their kinds.
+    @Test func aVerbThatTypesTextIsRecordedWithItsErrorsKindsNotTheirWords() async throws {
+        let export = EventExport.scratch()
+        _ = try? await Invocation.record("type", via: .mcp, to: export.export) { _ in
+            Invocation.typesText()
+            throw QuotesTheText()
+        }
+        #expect(try String(contentsOf: export.file, encoding: .utf8).contains("€") == false)
+        #expect(try Self.only(export)["error"] as? String == "QuotesTheText")
+    }
+
+    @Test func refusedToolArgumentsAreRecordedWithoutBeingQuoted() async throws {
+        let export = EventExport.scratch()
+        _ = try? await Invocation.record("type", via: .mcp, to: export.export) { _ in throw ArgumentRefused("text 123456 is not a string") }
+        #expect(try Self.only(export)["error"] as? String == Invocation.Entry.refusedArguments)
+    }
+
+    /// A cancel that lands while a verb fails for its own reason does not hide the reason.
+    @Test func aVerbThatFailedAsACancelLandedIsRecordedAsFailed() async throws {
+        let export = EventExport.scratch()
+        let run = Task {
+            try await Invocation.record("click", via: .mcp, to: export.export) { _ in
+                withUnsafeCurrentTask { $0?.cancel() }
+                throw UnreachableTests.devicesDown
+            }
+        }
+        _ = await run.result
+        #expect(try Self.only(export)["outcome"] as? String == "failed")
     }
 
     /// The command line and MCP name a verb the same way, so one verb's records are found
@@ -176,7 +237,7 @@ import Testing
         let scratch = EventExport.scratch()
         let export = EventExport(collector: .init(endpoint: .base("collector:4318")), file: scratch.file, deliver: EventExport.post)
         await export.export(Self.record())
-        #expect(try Self.only(export)["sink_error"] as? String == #"OTEL_EXPORTER_OTLP_ENDPOINT "collector:4318" is not an http or https URL"#)
+        #expect(try Self.only(export)["sink_error"] as? String == "OTEL_EXPORTER_OTLP_ENDPOINT is not an http or https URL")
     }
 
     /// A delivered record is an OTLP logs export whose attributes are the record's fields,
@@ -212,6 +273,8 @@ import Testing
         #expect(EventExport.configured(["OTEL_EXPORTER_OTLP_ENDPOINT": ""]).collector == nil)
         #expect(EventExport.configured(["OTEL_EXPORTER_OTLP_ENDPOINT": "http://c:4318", "OTEL_EXPORTER_OTLP_HEADERS": "a=1"]).collector
             == .init(endpoint: .base("http://c:4318"), headers: "a=1"))
+        #expect(EventExport.configured(["OTEL_EXPORTER_OTLP_ENDPOINT": "http://c:4318", "OTEL_SDK_DISABLED": "TRUE"]).collector == nil)
+        #expect(EventExport.configured(["OTEL_EXPORTER_OTLP_ENDPOINT": "http://c:4318", "OTEL_LOGS_EXPORTER": "none"]).collector == nil)
         let logs = try #require(EventExport.configured([
             "OTEL_EXPORTER_OTLP_ENDPOINT": "http://c:4318", "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT": "http://l:4318/logs",
             "OTEL_EXPORTER_OTLP_HEADERS": "a=1", "OTEL_EXPORTER_OTLP_LOGS_HEADERS": "b=2",
@@ -225,7 +288,24 @@ import Testing
         let export = EventExport(collector: .init(endpoint: .base("http://c:4318"), headers: "a=1,oops"), file: scratch.file,
                                  deliver: { _ in Issue.record("a request with unreadable headers was sent") })
         await export.export(Self.record())
-        #expect(try Self.only(export)["sink_error"] as? String == #"OTLP headers "oops" is not a key=value pair"#)
+        #expect(try Self.only(export)["sink_error"] as? String == "OTLP header 2 is not a key=value pair with its value percent-encoded")
+    }
+
+    @Test func aGrpcCollectorIsRefusedOnTheRecordBeforeAnythingIsSent() async throws {
+        let scratch = EventExport.scratch()
+        let collector = try #require(EventExport.Collector(["OTEL_EXPORTER_OTLP_ENDPOINT": "http://c:4317", "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc"]))
+        let export = EventExport(collector: collector, file: scratch.file, deliver: { _ in Issue.record("JSON was sent to a gRPC collector") })
+        await export.export(Self.record())
+        #expect(try Self.only(export)["sink_error"] as? String == "OTEL_EXPORTER_OTLP_PROTOCOL is grpc, and vhid sends OTLP/HTTP JSON")
+    }
+
+    /// Nothing listens on port 1; the refusal names the collector without its password.
+    @Test func aCollectorsPasswordIsNotWrittenWithItsRefusal() async throws {
+        let scratch = EventExport.scratch()
+        let export = EventExport(collector: .init(endpoint: .base("http://user:apikey@127.0.0.1:1")), file: scratch.file, deliver: EventExport.post)
+        await export.export(Self.record())
+        #expect(try String(contentsOf: export.file, encoding: .utf8).contains("apikey") == false)
+        #expect((try Self.only(export)["sink_error"] as? String)?.hasPrefix("http://127.0.0.1:1/v1/logs: ") == true)
     }
 
     /// The cancellation that ended the verb does not reach the delivery of its record.
@@ -235,7 +315,7 @@ import Testing
         let export = EventExport(collector: .init(endpoint: .base("http://c:4318")), file: scratch.file,
                                  deliver: { _ in delivered.withLock { $0.append(Task.isCancelled) } })
         let run = Task {
-            try await Invocation.record("scroll", via: .mcp, to: export) { _ in
+            try await Invocation.record("scroll", via: .mcp, to: export.export) { _ in
                 withUnsafeCurrentTask { $0?.cancel() }
                 try Task.checkCancellation()
             }
@@ -249,7 +329,7 @@ import Testing
 
     /// `arguments` run as `Vhid.main` runs argv. Whatever the run threw is the record's to say.
     private static func commandLine(_ arguments: [String], to export: EventExport) async {
-        _ = try? await Invocation.record(Vhid._commandName, via: .commandLine, to: export) { try await Vhid.run(arguments, in: $0) }
+        _ = try? await Invocation.record(Vhid._commandName, via: .commandLine, to: export.export) { try await Vhid.run(arguments, in: $0) }
     }
 
     /// ArgumentParser answers `--help` with a `help` command it never declares among
@@ -286,7 +366,7 @@ import Testing
     /// `doctor` prints its own report and exits 1 with nothing more to say.
     @Test func aVerbThatExitsNonzeroSayingNothingMoreIsRecordedWithNoError() async throws {
         let export = EventExport.scratch()
-        _ = try? await Invocation.record("doctor", via: .commandLine, to: export) { _ in throw ExitCode.failure }
+        _ = try? await Invocation.record("doctor", via: .commandLine, to: export.export) { _ in throw ExitCode.failure }
         let record = try Self.only(export)
         #expect(record["outcome"] as? String == "failed")
         #expect(record["error"] == nil)

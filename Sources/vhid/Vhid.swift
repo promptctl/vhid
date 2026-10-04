@@ -35,7 +35,7 @@ struct Vhid: AsyncParsableCommand {
     /// a refused argument leaves a record too. [LAW:nothing-unseen]
     static func main() async {
         do {
-            try await Invocation.record(_commandName, via: .commandLine, to: .configured()) { try await run(nil, in: $0) }
+            try await Invocation.record(_commandName, via: .commandLine, to: EventExport.configured().export) { try await run(nil, in: $0) }
         } catch {
             exit(withError: error)
         }

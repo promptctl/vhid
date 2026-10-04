@@ -69,8 +69,11 @@ by finishing.
 tool's name, which is the same word; `entry` says which it came through. `outcome` is
 `ok`, `failed` or `cancelled`, and `error` is what the caller was told, absent when a verb
 said its piece and exited nonzero, as `doctor` does. Refused arguments are recorded as
-refused but not quoted, since they can hold text meant for a password field. An argument that could not be parsed
-is recorded as `vhid`, before the verb was known, and `--help` as `help`. An MCP call's
+refused but not quoted, since they can hold text meant for a password field, and for the
+same reason a `type` run's error names its kinds (`TypingStopped: UntypeableCharacters`)
+rather than quoting its words. An argument that could not be parsed
+is recorded as `vhid`, before the verb was known, and `--help` as `help`; an MCP call
+naming no tool is recorded as `tools/call`. An MCP call's
 `attributes.queued_ms` is how long it waited behind the calls before it, which its
 `duration_ms` includes.
 
@@ -78,6 +81,10 @@ With `OTEL_EXPORTER_OTLP_ENDPOINT` set, the record goes to that OpenTelemetry co
 instead, as an OTLP/HTTP JSON log on `/v1/logs`, and the file is not written.
 `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` names the logs URL itself and wins over it, and
 `OTEL_EXPORTER_OTLP_HEADERS` (or `_LOGS_HEADERS`) are sent with every record, as the
-OpenTelemetry specification defines them. A collector
+OpenTelemetry specification defines them. `OTEL_SDK_DISABLED=true` or
+`OTEL_LOGS_EXPORTER=none` keeps records in the file, and a `grpc`
+`OTEL_EXPORTER_OTLP_PROTOCOL` is refused on each record, since vhid sends OTLP/HTTP JSON.
+An MCP call is answered before its record is sent, and `vhid mcp` waits for every record
+before it exits. A collector
 that refuses it, or has not answered in two seconds, leaves it in the file with
 `sink_error` saying why.

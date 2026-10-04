@@ -90,7 +90,7 @@ import Testing
         let stdio = Stdio(), said = Said()
         let transport = AnsweringTransport(stdio, logger: Logger(label: "test") { _ in said })
         let session = Task {
-            let server = await McpCommand.server([stubborn], on: Installation(service: "ai.promptctl.vhid.tests.nobody")!, over: transport, recordingTo: .scratch())
+            let server = await McpCommand.server([stubborn], on: Installation(service: "ai.promptctl.vhid.tests.nobody")!, over: transport, recordingTo: .scratch(), carriedBy: Flights())
             try await server.start(transport: transport)
             await server.waitUntilCompleted()
         }
@@ -140,7 +140,7 @@ import Testing
         }
         let stdio = Stdio(), transport = AnsweringTransport(stdio)
         let session = Task {
-            let server = await McpCommand.server([waiting], on: Installation(service: "ai.promptctl.vhid.tests.nobody")!, over: transport, recordingTo: .scratch())
+            let server = await McpCommand.server([waiting], on: Installation(service: "ai.promptctl.vhid.tests.nobody")!, over: transport, recordingTo: .scratch(), carriedBy: Flights())
             try await server.start(transport: transport)
             await server.waitUntilCompleted()
         }

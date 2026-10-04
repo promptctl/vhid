@@ -38,25 +38,37 @@ struct EventExport: Sendable {
         let endpoint: Endpoint
         /// `key=value` pairs, comma separated, each value percent-encoded.
         let headers: String?
+        let `protocol`: String?
 
-        init(endpoint: Endpoint, headers: String? = nil) {
-            (self.endpoint, self.headers) = (endpoint, headers)
+        init(endpoint: Endpoint, headers: String? = nil, protocol: String? = nil) {
+            (self.endpoint, self.headers, self.protocol) = (endpoint, headers, `protocol`)
         }
 
+        /// Also read: `OTEL_SDK_DISABLED=true` and `OTEL_LOGS_EXPORTER=none` turn the
+        /// collector off, and a `grpc` protocol, which this does not speak, is refused on the
+        /// record rather than sent JSON it cannot read.
         init?(_ environment: [String: String]) {
-            func set(_ name: String) -> String? { environment["OTEL_EXPORTER_OTLP_\(name)"].flatMap { $0.isEmpty ? nil : $0 } }
-            guard let endpoint = set("LOGS_ENDPOINT").map(Endpoint.logs) ?? set("ENDPOINT").map(Endpoint.base) else { return nil }
-            self.init(endpoint: endpoint, headers: set("LOGS_HEADERS") ?? set("HEADERS"))
+            func set(_ name: String) -> String? { environment[name].flatMap { $0.isEmpty ? nil : $0 } }
+            func otlp(_ name: String) -> String? { set("OTEL_EXPORTER_OTLP_LOGS_\(name)") ?? set("OTEL_EXPORTER_OTLP_\(name)") }
+            guard set("OTEL_SDK_DISABLED")?.lowercased() != "true", set("OTEL_LOGS_EXPORTER") != "none",
+                  let endpoint = set("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT").map(Endpoint.logs) ?? set("OTEL_EXPORTER_OTLP_ENDPOINT").map(Endpoint.base)
+            else { return nil }
+            self.init(endpoint: endpoint, headers: otlp("HEADERS"), protocol: otlp("PROTOCOL"))
         }
 
+        /// Refusals never quote what was written: an endpoint can carry a password, and a
+        /// refusal is written to the file.
         var url: URL {
             get throws {
+                guard `protocol` != "grpc" else {
+                    throw Refused(description: "OTEL_EXPORTER_OTLP_PROTOCOL is grpc, and vhid sends OTLP/HTTP JSON")
+                }
                 let (variable, written) = switch endpoint {
                 case .logs(let url): ("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", url)
                 case .base(let url): ("OTEL_EXPORTER_OTLP_ENDPOINT", url)
                 }
                 guard let url = URL(string: written), ["http", "https"].contains(url.scheme) else {
-                    throw Refused(description: "\(variable) \(written.debugDescription) is not an http or https URL")
+                    throw Refused(description: "\(variable) is not an http or https URL")
                 }
                 return if case .base = endpoint { url.appending(path: "v1/logs") } else { url }
             }
@@ -64,10 +76,11 @@ struct EventExport: Sendable {
 
         var fields: [(name: String, value: String)] {
             get throws {
-                try (headers ?? "").split(separator: ",").map { pair in
+                try (headers ?? "").split(separator: ",").enumerated().map { index, pair in
                     let parts = pair.split(separator: "=", maxSplits: 1)
+                    // By position: a header is where a collector's token goes.
                     guard parts.count == 2, let value = String(parts[1]).trimmingCharacters(in: .whitespaces).removingPercentEncoding else {
-                        throw Refused(description: "OTLP headers \(String(pair).debugDescription) is not a key=value pair")
+                        throw Refused(description: "OTLP header \(index + 1) is not a key=value pair with its value percent-encoded")
                     }
                     return (String(parts[0]).trimmingCharacters(in: .whitespaces), value)
                 }
@@ -166,7 +179,9 @@ struct EventExport: Sendable {
 
     /// Sends `request`, and throws unless the collector answered 2xx.
     static let post: @Sendable (URLRequest) async throws -> Void = { request in
-        let at = request.url?.absoluteString ?? ""
+        // Without the URL's user and password, which a refusal must not carry into the file.
+        let at = request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }
+            .map { var bare = $0; (bare.user, bare.password) = (nil, nil); return bare.string ?? "" } ?? ""
         let response: URLResponse
         do {
             (_, response) = try await session.data(for: request)

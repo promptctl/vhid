@@ -26,14 +26,15 @@ final class Invocation: Sendable {
         /// a verb that said everything on its way out and then exited nonzero, as `doctor`
         /// does. [LAW:one-source-of-truth]
         ///
-        /// Except a refused command line, whose words quote it back - and a command line can
-        /// hold text meant for a password field, missing the `--` that would have let a
-        /// leading dash through. The operator saw them; the record, which outlives the
-        /// terminal, says only that the arguments were refused.
+        /// Except refused arguments, whose words quote them back - and an argument can hold
+        /// text meant for a password field, on the command line missing the `--` that would
+        /// have let a leading dash through. The caller saw them; the record, which outlives
+        /// the terminal and the conversation, says only that the arguments were refused.
         func told(_ error: any Error) -> String? {
             let words = switch self {
             case .commandLine where Vhid.exitCode(for: error) == .validationFailure: Self.refusedArguments
             case .commandLine: Vhid.message(for: error)
+            case .mcp where error is ArgumentRefused: Self.refusedArguments
             case .mcp: error.reported
             }
             return words.isEmpty ? nil : words
@@ -45,16 +46,16 @@ final class Invocation: Sendable {
     let entry: Entry
     /// W3C trace ID: 16 random bytes as 32 lowercase hex digits.
     let traceID = (0..<16).map { _ in String(format: "%02x", UInt8.random(in: .min ... .max)) }.joined()
-    private let state: Mutex<(event: String, counts: [Tally: Int], attributes: [Attribute: JSON])>
+    private let state: Mutex<(event: String, counts: [Tally: Int], attributes: [Attribute: JSON], typesText: Bool)>
 
     private init(_ event: String, via entry: Entry) {
         self.entry = entry
-        state = Mutex((event, [:], [:]))
+        state = Mutex((event, [:], [:], false))
     }
 
-    /// Runs `body` as one invocation of `event`, and hands its record to `export` however
+    /// Runs `body` as one invocation of `event`, and hands its record to `hand` however
     /// `body` ends - returned, thrown or cancelled - before passing that ending on.
-    static func record<T>(_ event: String, via entry: Entry, to export: EventExport,
+    static func record<T>(_ event: String, via entry: Entry, to hand: @escaping @Sendable (InvocationRecord) async -> Void,
                           _ body: (Invocation) async throws -> T) async throws -> T {
         let invocation = Invocation(event, via: entry)
         let startedAt = Date(), started = ContinuousClock.now
@@ -68,7 +69,7 @@ final class Invocation: Sendable {
         // In a task of its own, which the cancellation that may have ended `body` does not
         // reach: a cancelled invocation's record is the one most worth delivering, and
         // URLSession would give it up at once.
-        await Task { await export.export(record) }.value
+        await Task { await hand(record) }.value
         return try ending.get()
     }
 
@@ -91,20 +92,33 @@ final class Invocation: Sendable {
         current?.state.withLock { $0.attributes[attribute] = value }
     }
 
+    /// Says the running invocation types text it was given, which can be meant for a
+    /// password field. Its record then names the error's kinds rather than quoting its
+    /// words, which can quote the text: the characters the layout has no keys for, a dead
+    /// key left half typed.
+    static func typesText() {
+        current?.state.withLock { $0.typesText = true }
+    }
+
     private func record(startedAt: Date, duration: Duration, ending: Result<Void, any Error>) -> InvocationRecord {
-        let (event, counts, attributes) = state.withLock { ($0.event, $0.counts, $0.attributes) }
+        let (event, counts, attributes, typesText) = state.withLock { ($0.event, $0.counts, $0.attributes, $0.typesText) }
+        func told(_ failure: any Error) -> String? {
+            typesText ? failure.causes.map { "\(type(of: $0))" }.joined(separator: ": ") : entry.told(failure)
+        }
         let outcome: Outcome, error: String?
         switch ending {
         case .success:
             (outcome, error) = (.ok, nil)
-        case .failure(let failure) where Task.isCancelled:
-            (outcome, error) = (.cancelled, entry.told(failure))
+        // What the verb threw says how it ended, not whether a cancel arrived meanwhile: a
+        // verb the daemon refused as the cancel landed failed.
+        case .failure(let failure) where failure.causes.contains(where: { $0 is CancellationError }):
+            (outcome, error) = (.cancelled, told(failure))
         // `--help` and `--version` arrive as errors that exit 0: the invocation did what
         // it was asked.
         case .failure(let failure) where Vhid.exitCode(for: failure) == .success:
             (outcome, error) = (.ok, nil)
         case .failure(let failure):
-            (outcome, error) = (.failed, entry.told(failure))
+            (outcome, error) = (.failed, told(failure))
         }
         return InvocationRecord(event: event, entry: entry, traceID: traceID, startedAt: startedAt, duration: duration,
                                 outcome: outcome, error: error, counts: counts, attributes: attributes)

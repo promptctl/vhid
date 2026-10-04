@@ -25,6 +25,7 @@ struct TypeCommand: AsyncParsableCommand {
     /// against a keyboard that records instead of typing.
     static func type(_ text: String, on layout: KeyboardLayout, into aim: Aim, with typist: Typist,
                      front: () async throws -> FrontApp?) async throws -> String {
+        Invocation.typesText()
         // [LAW:parse-dont-validate] Lowered whole before a key goes down, so text the
         // layout cannot type moves nothing: half a sentence in a document is worse than
         // none, because only one of the two is obviously wrong.
