@@ -1,0 +1,17 @@
+#!/bin/bash
+# Prints the newest release among the versions given, and nothing when none is a release.
+# A release is dotted numbers alone, such as 0.2.0: scripts/version admits a -tag after
+# them, which makes a pre-release, and the cask is what `brew install` gives everyone, so it
+# takes releases only. Newest is sort -V's order.
+#
+#   scripts/newest-release <version>...
+#
+# [LAW:one-source-of-truth] The one statement of what a release is and which of two is
+# newer: release.yaml decides a pre-release, and waits for the cask, by it; cask.yaml finds
+# vhid's newest release by it; update-cask refuses a pre-release, and a version the cask's
+# does not lead to, by it.
+#
+# Held to bash 3.2, like every script here.
+set -euo pipefail
+# grep exits 1 on no match, which is the answer "none"; any other failure stops here.
+printf '%s\n' "$@" | { grep -Ex '[0-9]+(\.[0-9]+)*' || [ $? -eq 1 ]; } | sort -V | tail -n 1

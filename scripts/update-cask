@@ -13,10 +13,11 @@ set -euo pipefail
 tap=$1 version=$2 pkg=$3 body=$4
 cask=$tap/Casks/vhid.rb
 stanza=$(dirname "$0")/cask-stanza
+newest=$(dirname "$0")/newest-release
 
 # [LAW:parse-dont-validate] The cask is what `brew install` gives everyone, so it takes a
-# release, never a pre-release: dotted numbers alone.
-echo "$version" | grep -Eqx '[0-9]+(\.[0-9]+)*' || {
+# release, never a pre-release.
+[ -n "$version" ] && [ "$("$newest" "$version")" = "$version" ] || {
   echo "update-cask: '$version' is not a release version, dotted numbers such as 0.2.0" >&2
   exit 2
 }
@@ -43,8 +44,7 @@ if [ "$version" = "$was" ]; then
 fi
 # The cask only moves forward: a backport released after a newer version, or a re-run of
 # an older release's job, would otherwise take every Homebrew install back.
-# sort -V is the order cask.yaml finds the newest release by, so the two cannot disagree.
-[ "$(printf '%s\n' "$was" "$version" | sort -V | tail -n 1)" = "$version" ] \
+[ "$("$newest" "$was" "$version")" = "$version" ] \
   || { echo "update-cask: the cask names $was, which $version does not follow" >&2; exit 1; }
 
 sed -e "s/^  version \"@VERSION@\"\$/  version \"$version\"/" \

@@ -31,8 +31,8 @@ jobs:
 
       # [LAW:one-source-of-truth] The newest release is the highest version vhid has
       # published, not as a draft, read off its Releases each run; the cask holds no other
-      # record of it. A version with a -tag is a pre-release by its shape, as release.yaml
-      # and update-cask hold, whatever GitHub's flag on it says. The sha256 is of the pkg as
+      # record of it. scripts/newest-release says which version that is: a pre-release is
+      # one by its shape, whatever GitHub's flag on it says. The sha256 is of the pkg as
       # published, fetched through the URL the cask builds from its version, so the hash is
       # of what brew will fetch. The cask's body is pkg/vhid.rb at the release's tag, so a
       # release that changes the body ships it with its own version, and a tag without one
@@ -45,8 +45,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          version=$(gh release list --repo promptctl/vhid --exclude-drafts --limit 1000 --json tagName \
-            --jq '.[].tagName | ltrimstr("v")' | grep -Ex '[0-9]+(\.[0-9]+)*' | sort -V | tail -n 1)
+          versions=$(gh release list --repo promptctl/vhid --exclude-drafts --limit 1000 --json tagName \
+            --jq '.[].tagName | ltrimstr("v")')
+          version=$(vhid/scripts/newest-release $versions)
+          [ -n "$version" ] || { echo "::error::promptctl/vhid has published no release"; exit 1; }
           body="$RUNNER_TEMP/vhid.rb"
           gh api -H 'Accept: application/vnd.github.raw' "repos/promptctl/vhid/contents/pkg/vhid.rb?ref=v$version" >"$body"
           pkg="$RUNNER_TEMP/vhid-$version.pkg"

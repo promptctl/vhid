@@ -128,5 +128,18 @@ sed -i '' 's/^  version "/  version :latest # "/' "$TAP/Casks/vhid.rb" && git -C
 refused "has 0 lines of the form '  version \"...\"', not one" "$TAP" 0.2.0 "$PKG" "$BODY"
 refused "No such file" "$SCRATCH/nowhere" 0.2.0 "$PKG" "$BODY"
 
+# scripts/newest-release, which update-cask, cask.yaml and release.yaml all read: releases
+# alone, in sort -V's order, and nothing when none is one.
+newest() {
+  local want=$1; shift
+  local got; got=$(scripts/newest-release "$@") || fail "newest-release $* exited $?"
+  [ "$got" = "$want" ] || fail "newest-release $* printed '$got', not '$want'"
+}
+newest 0.10.0 0.9 0.10.0 0.4.0
+newest 0.4.0 0.5.0-rc.1 0.4.0
+newest "" 0.2.0-rc.1
+newest "" 0.2/0 ""
+newest ""
+
 [ "$failed" -eq 0 ] && echo "update-cask-test: ok"
 exit "$failed"

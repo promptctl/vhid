@@ -52,15 +52,16 @@ jobs:
       # [LAW:one-source-of-truth] The tag names the version VERSION already holds, or
       # nothing is built: a tag that disagrees would publish a pkg under a name its
       # binaries contradict. make-pkg asks again, of the tree and of the packed CLI. A
-      # version with a -tag is a pre-release, decided here alone: the steps below read
-      # PRERELEASE.
+      # version scripts/newest-release does not call a release is a pre-release, decided
+      # here alone: the steps below read PRERELEASE.
       - name: The tag is VERSION's
         run: |
           version=$(scripts/version --base)
           [ "$TAG" = "v$version" ] || { echo "::error::tag $TAG is not v$version, the version in VERSION"; exit 1; }
           echo "VERSION_NUMBER=$version" >>"$GITHUB_ENV"
-          prerelease=false
-          [[ $version == *-* ]] && prerelease=true
+          release=$(scripts/newest-release "$version")
+          prerelease=true
+          [ "$release" = "$version" ] && prerelease=false
           echo "PRERELEASE=$prerelease" >>"$GITHUB_ENV"
 
       # What is published is what master holds: a tag on a branch is refused before
@@ -159,11 +160,10 @@ jobs:
       # the release fails when the move does not land. [LAW:one-source-of-truth] The cask
       # is the verdict, not the run: a run the tap's concurrency group cancelled leaves the
       # cask to the run that replaced it, and a run that succeeded without moving it fails
-      # here at once. A workflow GitHub disabled for 60 days of a quiet tap is enabled
-      # again; one a person disabled is left so and fails here. The ten minutes are the
-      # release's whole budget. [LAW:single-enforcer] However the step fails, the Release
-      # is published by then, so the trap names what moves the cask without re-running
-      # this job.
+      # here at once. A workflow that is not active refuses the dispatch, and the step fails
+      # with GitHub's reason. The ten minutes are the release's whole budget.
+      # [LAW:single-enforcer] However the step fails, the Release is published by then, so
+      # the trap names what moves the cask without re-running this job.
       - name: The tap's cask is at this release
         if: env.PRERELEASE == 'false'
         env:
@@ -172,12 +172,6 @@ jobs:
         run: |
           trap '[ $? -eq 0 ] || echo "::error::vhid $VERSION_NUMBER is published; move the cask with \`gh workflow run vhid.yaml --repo promptctl/homebrew-tap\` rather than re-running this job (docs/releasing.md)"' EXIT
           workflow=repos/promptctl/homebrew-tap/actions/workflows/vhid.yaml
-          state=$(gh api "$workflow" --jq .state)
-          case $state in
-            active) ;;
-            disabled_inactivity) gh api --method PUT "$workflow/enable" && echo "enabled the tap's vhid workflow, which GitHub had disabled for inactivity" ;;
-            *) echo "::error::the tap's vhid workflow is $state"; exit 1 ;;
-          esac
           run=$(gh api --method POST "$workflow/dispatches" -f ref=main -F return_run_details=true \
             --jq '.workflow_run_id // error("the dispatch named no run")')
           url=https://github.com/promptctl/homebrew-tap/actions/runs/$run
@@ -188,7 +182,7 @@ jobs:
             read -r status conclusion <<<"$fields"
             GH_TOKEN=$READ_TOKEN gh api -H 'Accept: application/vnd.github.raw' repos/promptctl/homebrew-tap/contents/Casks/vhid.rb >"$cask"
             was=$(scripts/cask-stanza "$cask" version)
-            [ "$(printf '%s\n' "$VERSION_NUMBER" "$was" | sort -V | tail -n 1)" = "$was" ] && break
+            [ "$(scripts/newest-release "$VERSION_NUMBER" "$was")" = "$was" ] && break
             [ "$status" != completed ] || [ "$conclusion" = cancelled ] \
               || { echo "::error::the tap's run ended $conclusion and left the cask at vhid $was: $url"; exit 1; }
             [ "$SECONDS" -lt 600 ] \
