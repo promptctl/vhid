@@ -4,6 +4,8 @@ Each release's section is its GitHub Release notes, which keep line breaks, so e
 
 ## [Unreleased]
 
+- Homebrew 7 no longer warns that the cask calls the deprecated `postflight` on every brew command that reads it: the cask copies what it needs at uninstall with `postflight_steps`.
+
 ## [0.4.0]
 
 - `vhid type` and `vhid press` take `--into <app>`, and the MCP tools `into`: with another app in front just before the first key, nothing is sent and the refusal names the app that was. The app is named as `eyes windows` prints the frontmost application. They refuse the same way at the login window or with another user's session in front.

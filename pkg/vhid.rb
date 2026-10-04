@@ -24,10 +24,9 @@ cask "vhid" do
   # and the driver removal, and brew runs zap after uninstall, so the three are copied here,
   # where they outlive that and brew purges them with the rest of the cask. vhid-uninstall
   # finds vhid and the driver removal from where it runs, so the copy keeps /usr/local's layout.
-  postflight do
+  postflight_steps do
     %w[bin/vhid libexec/vhid-uninstall libexec/vhid-virtual-hid-driver].each do |path|
-      (staged_path/"kit"/path).dirname.mkpath
-      FileUtils.cp "/usr/local/#{path}", staged_path/"kit"/path, preserve: true
+      copy "/usr/local/#{path}", "kit/#{path}"
     end
   end
 
