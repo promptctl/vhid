@@ -1,5 +1,6 @@
 import ArgumentParser
 import Doctor
+import DriverExtension
 import Foundation
 
 /// The Mach service this vhid dials when no `--service` is given.
@@ -34,7 +35,7 @@ extension ServiceCommand {
     /// [CLI] The word on stdout, and exit 1 with nothing on stdout for a launchd that could
     /// not be read: no word stands for "unread", so none is printed for it. A caller that
     /// took an empty answer for a standing would unload a healthy job. [LAW:no-silent-failure]
-    struct Standing: ParsableCommand {
+    struct Standing: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "standing",
             abstract: "Print where launchd stands on the job for the service, as one word.",
@@ -45,9 +46,11 @@ extension ServiceCommand {
 
         @OptionGroup var service: ServiceOption
 
-        func run() throws {
+        func run() async throws {
+            let installation = try service.installation()
+            let standing = try await reading { stop in Result { try LaunchdProbe.standing(of: installation, by: .within(Command.limit, or: stop)) } }
             do {
-                print(try LaunchdProbe.standing(of: service.installation()).rawValue)
+                print(try standing.get().rawValue)
             } catch {
                 FileHandle.standardError.write(Data("vhid service standing: \(error)\n".utf8))
                 throw ExitCode(1)

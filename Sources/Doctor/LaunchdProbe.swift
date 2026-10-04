@@ -10,9 +10,10 @@ import Installations
 ///
 /// Read without root: `launchctl print` answers any user about a system-domain job.
 public enum LaunchdProbe {
-    /// Where launchd stands on the job under this installation's label, asked now.
-    public static func standing(of installation: Installation) throws -> JobStanding {
-        try standing(from: Command("/bin/launchctl", "print", "system/\(installation.launchdLabel)").run(by: .within(Command.limit)), installation: installation)
+    /// Where launchd stands on the job under this installation's label, asked now and
+    /// read by `deadline`.
+    public static func standing(of installation: Installation, by deadline: Command.Deadline) throws -> JobStanding {
+        try standing(from: Command("/bin/launchctl", "print", "system/\(installation.launchdLabel)").run(by: deadline), installation: installation)
     }
 
     /// What launchd said, read.

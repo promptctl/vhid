@@ -14,11 +14,14 @@ public extension Readiness {
     /// In this order, and in series, because of that start: the daemon files the Keyboard
     /// Setup Assistant answer before it listens, so a cache read after its reply sees what
     /// a daemon started by the call filed. [LAW:no-ambient-temporal-coupling]
-    static func read(for installation: Installation) -> Readiness {
+    ///
+    /// The driver and launchd are read by a limit apiece, so one stuck tool leaves the
+    /// other its whole limit, and both by `stop`, which ends whichever is reading.
+    static func read(for installation: Installation, stoppedBy stop: Command.Stop) -> Readiness {
         Readiness(
             installation: installation,
-            driver: Result { DriverState(try DriverProbe.facts(by: .within(Command.limit))) },
-            job: Result { try LaunchdProbe.standing(of: installation) },
+            driver: Result { DriverState(try DriverProbe.facts(by: .within(Command.limit, or: stop))) },
+            job: Result { try LaunchdProbe.standing(of: installation, by: .within(Command.limit, or: stop)) },
             daemon: DaemonProbe.reading(of: installation),
             keyboardSetupAssistantAnswered: Result { try KeyboardTypeCache.read().answersThisKeyboard })
     }

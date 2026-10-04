@@ -10,13 +10,14 @@ import Doctor
 /// [CLI] On stdout a verdict, `ready` or `not ready`, then the rows, every one every time.
 /// Exit 0 when every row is met and 1 when any is not, so `vhid doctor && vhid type ...`
 /// types only on a Mac that can.
-struct DoctorCommand: ParsableCommand {
+struct DoctorCommand: AsyncParsableCommand {
     static let configuration = Help.doctor.configuration
 
     @OptionGroup var service: ServiceOption
 
-    func run() throws {
-        let readiness = Readiness.read(for: try service.installation())
+    func run() async throws {
+        let installation = try service.installation()
+        let readiness = try await reading { Readiness.read(for: installation, stoppedBy: $0) }
         print(Self.doctor(readiness))
         guard readiness.ready else { throw ExitCode(1) }
     }

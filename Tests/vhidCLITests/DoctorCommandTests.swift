@@ -7,9 +7,9 @@ import Testing
 /// The verb's contract with a shell: the rows on stdout, and exit 1 when any is unmet.
 @Suite(.ownThread) struct DoctorCommandTests {
     /// A service nothing registers is never ready, on any Mac, so this exit is fixed.
-    @Test func aMacThatIsNotReadyExitsOne() throws {
+    @Test func aMacThatIsNotReadyExitsOne() async throws {
         let doctor = try DoctorCommand.parse(["--service", Installation.nobody.service])
-        let exit = #expect(throws: ExitCode.self) { try doctor.run() }
+        let exit = await #expect(throws: ExitCode.self) { try await doctor.run() }
         #expect(exit == ExitCode(1))
     }
 

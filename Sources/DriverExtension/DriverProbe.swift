@@ -54,7 +54,7 @@ public enum DriverProbe {
             receipt: try receiptVersion(of: bundleID, by: deadline),
             registration: try registration(by: deadline),
             ioNode: try ioNodePresent(by: deadline),
-            elementsReceipt: elementsReceipt { try Command("/usr/sbin/pkgutil", "--pkg-info", elementsReceiptID).run(by: deadline) }
+            elementsReceipt: try elementsReceipt { try Command("/usr/sbin/pkgutil", "--pkg-info", elementsReceiptID).run(by: deadline) }
         )
     }
 
@@ -62,9 +62,15 @@ public enum DriverProbe {
     /// caught into `.unreadable` rather than thrown past the verdict it does not feed.
     /// Takes the pkgutil run as a closure so a test can fail it either way it fails in
     /// life: the run itself, or an answer this build cannot read.
-    static func elementsReceipt(_ read: () throws -> Command.Output) -> ElementsReceipt {
+    ///
+    /// A stopped reading is not a receipt that could not be read: the cancel is thrown on,
+    /// so `facts` ends with it rather than returning a reading the stop cut short.
+    /// [LAW:no-silent-failure]
+    static func elementsReceipt(_ read: () throws -> Command.Output) throws(CancellationError) -> ElementsReceipt {
         do {
             return try receiptVersion(of: elementsReceiptID, from: read()).map { .installed(version: $0) } ?? .absent
+        } catch let cancel as CancellationError {
+            throw cancel
         } catch {
             return .unreadable(reason: "\(error)")
         }
