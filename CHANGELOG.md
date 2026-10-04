@@ -4,10 +4,9 @@ Each release's section is its GitHub Release notes, which keep line breaks, so e
 
 ## [Unreleased]
 
-- `vhid scroll --vertical N` and `--horizontal N` scroll N times as far as 1: each notch is its own report, 200 ms after the last, so a roll of N takes N × 200 ms. In 0.4.1 the ticks went out packed into one report, which macOS reads as a single notch, so in Safari a roll of any size barely moved the page.
-- Every `vhid` run and every MCP tool call leaves one JSON record, with its outcome, its duration and the reports and notches it sent, in `~/Library/Logs/vhid/events.jsonl`, or sent to the OpenTelemetry collector `OTEL_EXPORTER_OTLP_ENDPOINT` names. `docs/cli.md` in the repository describes its fields.
-- Control-C or `SIGTERM` stops a `vhid` verb, which is recorded `cancelled` with what it had sent and `attributes.signal` naming the signal, says so on stderr, and dies by the signal. `doctor`, `driver` and `service` run on to their end first. `vhid record` finishes on the first signal and prints the script it recorded. A second signal ends any verb at once.
-- An `eyes` read with neither grant held says both grants are missing even when its region is on no display, as each reader alone does. In 0.4.1 it said the region was not there.
+- `vhid scroll --vertical N` and `--horizontal N`, and the MCP tool `scroll`'s `vertical` and `horizontal`, scroll N times as far as 1: each notch is its own report, 200 ms after the last, so a roll of N takes N × 200 ms. In 0.4.1 the ticks went out up to 127 to a report, and macOS reads each report as a single notch, so in Safari a roll of any size barely moved the page.
+- Every `vhid` run and every MCP tool call leaves one JSON record, with its outcome, its duration and the reports and notches it sent, in `~/Library/Logs/vhid/events.jsonl`, or sent to the OpenTelemetry collector `OTEL_EXPORTER_OTLP_ENDPOINT` names. Only a run ended by a second signal leaves none. `docs/cli.md` in the repository describes the record's fields.
+- Control-C or `SIGTERM` stops a `vhid` verb, which is recorded `cancelled` with what it had sent and `attributes.signal` naming the signal, says so on stderr, and dies by the signal. `doctor`, `driver` and `service` run on to their end first and are recorded as they ended, with the signal. `vhid mcp` withdraws the tool calls it is running or has queued, as a client's cancel would, and each call's record names the signal. A `vhid record` signalled before the tap app is recording is cancelled and prints no script.
 
 ## [0.4.1]
 
