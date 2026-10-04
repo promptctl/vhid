@@ -1,5 +1,6 @@
 #!/bin/bash
-# Prints the newest release among the versions given, and nothing when none is a release.
+# Prints the newest release among the versions given; when none is a release it prints
+# nothing and exits 1, as grep does, so one version is a release exactly when it exits 0.
 # A release is dotted numbers alone, such as 0.2.0: scripts/version admits a -tag after
 # them, which makes a pre-release, and the cask is what `brew install` gives everyone, so it
 # takes releases only. Newest is sort -V's order.
@@ -14,4 +15,6 @@
 # Held to bash 3.2, like every script here.
 set -euo pipefail
 # grep exits 1 on no match, which is the answer "none"; any other failure stops here.
-printf '%s\n' "$@" | { grep -Ex '[0-9]+(\.[0-9]+)*' || [ $? -eq 1 ]; } | sort -V | tail -n 1
+newest=$(printf '%s\n' "$@" | { grep -Ex '[0-9]+(\.[0-9]+)*' || [ $? -eq 1 ]; } | sort -V | tail -n 1)
+[ -n "$newest" ] || exit 1
+echo "$newest"

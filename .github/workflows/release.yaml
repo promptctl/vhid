@@ -59,7 +59,7 @@ jobs:
           version=$(scripts/version --base)
           [ "$TAG" = "v$version" ] || { echo "::error::tag $TAG is not v$version, the version in VERSION"; exit 1; }
           echo "VERSION_NUMBER=$version" >>"$GITHUB_ENV"
-          release=$(scripts/newest-release "$version")
+          release=$(scripts/newest-release "$version") || [ $? -eq 1 ]
           prerelease=true
           [ "$release" = "$version" ] && prerelease=false
           echo "PRERELEASE=$prerelease" >>"$GITHUB_ENV"

@@ -47,8 +47,8 @@ jobs:
         run: |
           versions=$(gh release list --repo promptctl/vhid --exclude-drafts --limit 1000 --json tagName \
             --jq '.[].tagName | ltrimstr("v")')
-          version=$(vhid/scripts/newest-release $versions)
-          [ -n "$version" ] || { echo "::error::promptctl/vhid has published no release"; exit 1; }
+          version=$(vhid/scripts/newest-release $versions) \
+            || { echo "::error::promptctl/vhid has published no release"; exit 1; }
           body="$RUNNER_TEMP/vhid.rb"
           gh api -H 'Accept: application/vnd.github.raw' "repos/promptctl/vhid/contents/pkg/vhid.rb?ref=v$version" >"$body"
           pkg="$RUNNER_TEMP/vhid-$version.pkg"
