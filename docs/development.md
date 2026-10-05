@@ -1,6 +1,21 @@
 # Developing vhid
 
-How the repository is laid out, what belongs in it, and how to build and test it. For publishing a release, see [releasing.md](releasing.md).
+How the repository is laid out, what belongs in it, and how to build and test it. For how the pieces fit together, see [architecture.md](architecture.md); for publishing a release, see [releasing.md](releasing.md).
+
+## From a fresh clone
+
+You need Xcode 26. CI builds with the version [test.yaml](../.github/workflows/test.yaml)
+names, so that one is known to work.
+
+```sh
+git clone https://github.com/promptctl/vhid.git
+cd vhid
+make test                              # build, sign, and test vhid
+(cd eyes && swift build && swift test) # eyes is a separate package with its own tests
+make dev-daemon                        # optional: run the daemon this tree builds (asks for sudo)
+```
+
+Pull requests go to `master` and must pass the `vhid`, `eyes` and `pkg` checks.
 
 ## Two packages
 
@@ -101,7 +116,7 @@ fails on a wider pool, so a run that has lost the narrow one says so.
 
 ## Checking the reach matrix
 
-The README's table of where input reaches over SSH is measured, and [design/remote-hands.md](design/remote-hands.md) has the evidence for each cell. `scripts/reach <host> <place>` checks one row again on a real Mac; with no place, it lists what to put on screen for each.
+The user guide's table of where input reaches over SSH ([guide.md](guide.md#where-the-input-reaches)) is measured, and [design/remote-hands.md](design/remote-hands.md) has the evidence for each cell. `scripts/reach <host> <place>` checks one row again on a real Mac; with no place, it lists what to put on screen for each.
 
 ## The site
 
