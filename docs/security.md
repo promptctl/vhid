@@ -44,8 +44,9 @@ the screen.
 What `vhid` can't do is just as useful to know:
 
 - **It can't see the screen.** It types and clicks blind. Reading the screen is `eyes`'
-  job, and `eyes` gets nothing without the Accessibility and Screen Recording permissions
-  you grant to the app that runs it.
+  job. Without permissions, `eyes` still lists every window on screen, its app and its
+  bounds, as any program can. Reading text needs the Accessibility or Screen Recording
+  permission you grant to the app that runs it.
 - **It can't read your typing.** The virtual devices only send input. `vhid record` is the
   exception, and it works only after you grant Input Monitoring to `vhid-record.app`.
 - **It can't reach the FileVault unlock screen.** Nothing of vhid runs before the disk is

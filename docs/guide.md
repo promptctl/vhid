@@ -45,7 +45,8 @@ and double-click it.
 
 Then switch on the driver in **System Settings > General > Login Items & Extensions >
 Driver Extensions (i)**. macOS won't let an installer take that step. Until it is
-on, every `vhid` command is refused with `devices not up:` and the step to take. Once
+on, every command that types or clicks is refused with `devices not up:` and the step
+to take; `vhid doctor` still works and says what is left. Once
 it is, the devices come up within a few seconds, with no restart.
 
 If you'd rather be walked through it, click the menu bar item and choose **Set Up vhid…**.
@@ -60,7 +61,8 @@ sudo /usr/local/libexec/vhid-uninstall      # if you installed the pkg yourself
 ```
 
 Both leave the pqrs driver in place, since other software can share it.
-`brew uninstall --zap --cask vhid` or `vhid-uninstall --driver` removes the driver too.
+`brew uninstall --zap --cask vhid` or `sudo /usr/local/libexec/vhid-uninstall --driver`
+removes the driver too.
 
 [installing.md](installing.md) lists every file the package installs and covers the
 uninstall cases in full.
