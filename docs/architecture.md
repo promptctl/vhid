@@ -67,10 +67,14 @@ both omissions are deliberate:
   ([`Input/Steering.swift`](../Sources/Input/Steering.swift),
   [design/replay.md](design/replay.md)).
 
-**One report per call, acknowledged.** The driver drops reports sent back to back.
-Measured: 500-character runs landed as few as 469. So every call waits for `vhidd`'s
-acknowledgement before the next one goes, and that wait is the pacing. Device calls run on
-a serial queue of their own
+**One report per call, and the client paces.** An acknowledgement from `vhidd` means the
+report reached the driver, not that it landed: in twelve 500-character runs with every
+report awaited, six landed fewer keys than were acknowledged, as few as 469. `vhidd`
+can't see that loss, since the only receipt is an event tap in the user's session. So
+the daemon takes one report per call and the client decides when the next one goes; a
+count `vhid` reports is what was posted and acknowledged, an upper bound on what
+landed ([`Helper/HelperService.swift`](../Sources/Helper/HelperService.swift)). Each call
+still waits for its acknowledgement, on a serial queue of its own
 ([`Input/DeviceQueue.swift`](../Sources/Input/DeviceQueue.swift)), so the wait blocks
 neither the caller's actor nor Swift's shared thread pool.
 
@@ -181,7 +185,7 @@ The rest of the tree:
 | Path | What it is |
 |---|---|
 | `eyes/` | the screen-reading package, built and tested on its own |
-| `Tests/` | one test target per module; `OwnThread` and `TestClock` are helpers for tests |
+| `Tests/` | test targets, each named for what it tests (`Signals`, `Version` and the two apps have none); `OwnThread` and `TestClock` are helpers for tests |
 | `claude-plugin/`, `.claude-plugin/` | the Claude Code plugin: skills, the session-start check, the marketplace entry |
 | `pkg/`, `scripts/make-pkg`, `scripts/notarize` | building, signing and notarizing the package |
 | `scripts/` | every other build, check and release script; each says what it does in its header |

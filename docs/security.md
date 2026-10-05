@@ -14,8 +14,9 @@ privileges, who can make it type, what it records, and how to take it all out.
 | `Karabiner-VirtualHIDDevice-Daemon`, from pqrs.org | the one process macOS allows to open the driver; `vhidd` starts it if nothing else has |
 
 The driver itself is a DriverKit extension. It runs outside the kernel, and macOS loads it
-only after a person at the Mac switches it on in System Settings. No installer or script
-can do that step for you.
+only after it is switched on in System Settings, with an administrator's approval. The
+installer can't switch it on. What clicks that switch is a person, or a program you have
+already given Accessibility.
 
 None of these listen on the network. `vhid` reaches `vhidd` over XPC, which is local to
 the Mac.
@@ -25,10 +26,13 @@ the Mac.
 `vhidd` accepts a caller only if the caller is signed with the same certificate `vhidd`
 is signed with. For the released package, that is promptctl's Developer ID. It checks the
 calling process through the kernel's audit token, so a different program can't pass by
-borrowing a process id. In practice, the installed `/usr/local/bin/vhid` is the only
-caller it accepts. Every other program is refused.
+borrowing a process id. It checks nothing else: not the program's name, not its path, not
+its version. So it accepts every program signed with that certificate: `vhid`, the other
+tools in the package (`eyes`, the menu bar item, `vhid-record.app`), the copy Homebrew
+keeps in its Caskroom, and every earlier release of each, including releases older than a
+fix you are relying on. Every other program is refused.
 
-**What it does not check is who is running that `vhid`.** Any account that can run
+**What it does not check is who is running the program.** Any account that can run
 programs on the Mac can run `/usr/local/bin/vhid`, whether it's an administrator or not
 and whether it's at the keyboard or connected over SSH. So can any program running as
 that account. Each of them can type and click into whatever is on screen: another user's
@@ -52,7 +56,7 @@ go. A caller that holds a key down past a time limit has the key released for it
 
 ## What it writes down
 
-Every `vhid` run appends one line to `~/Library/Logs/vhid/events.jsonl`, in the home
+In vhid releases after 0.4.1, every `vhid` run appends one line to `~/Library/Logs/vhid/events.jsonl`, in the home
 folder of the account that ran it. The line holds the command's name, whether it
 worked, how long it took and how many reports it sent. It never holds the text typed. It
 doesn't quote arguments it refused, either, because those could hold a password. `eyes`
@@ -71,8 +75,11 @@ sudo /usr/local/libexec/vhid-uninstall --driver   # installed from the pkg
 ```
 
 Either one stops the service, removes every file vhid installed, and withdraws the
-driver. To keep the driver, because Karabiner-Elements also uses it, leave off `--zap` or
-`--driver`. [installing.md](installing.md) lists every file.
+driver. To keep the driver, leave off `--zap` or `--driver`. While Karabiner-Elements is
+installed, removing the driver is refused: `--driver` then removes nothing at all, and
+`--zap` removes vhid but leaves the driver. Your logs in `~/Library/Logs/vhid` and
+`~/Library/Logs/eyes` stay; delete them yourself.
+[installing.md](installing.md#uninstalling) lists every file and every refusal.
 
 ## Where the code is
 

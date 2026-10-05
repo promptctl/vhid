@@ -37,7 +37,7 @@ brew install --cask promptctl/tap/vhid
 
 No Homebrew? Download the `.pkg` from the [Releases page](https://github.com/promptctl/vhid/releases/latest) and open it.
 
-**2. Switch on the driver.** One step is left to you, because macOS lets only the person at the Mac approve a driver:
+**2. Switch on the driver.** One step is left to you, because macOS won't let an installer approve a driver:
 
 1. Open **System Settings > General > Login Items & Extensions**.
 2. Click the **(i)** beside **Driver Extensions**.
@@ -60,7 +60,7 @@ If it says `not ready`, the lines below it say what is left to do.
 touch hello.txt && open -e hello.txt && sleep 2
 vhid type --into TextEdit "Hello from vhid"
 vhid press --into TextEdit leftCommand+s
-cat hello.txt
+sleep 1 && cat hello.txt
 ```
 
 `--into TextEdit` is a safety catch: if some other app has come to the front, vhid types

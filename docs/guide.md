@@ -44,7 +44,7 @@ Or download the `.pkg` from the [Releases page](https://github.com/promptctl/vhi
 and double-click it.
 
 Then switch on the driver in **System Settings > General > Login Items & Extensions >
-Driver Extensions (i)**. macOS reserves that step for the person at the Mac. Until it is
+Driver Extensions (i)**. macOS won't let an installer take that step. Until it is
 on, every `vhid` command is refused with `devices not up:` and the step to take. Once
 it is, the devices come up within a few seconds, with no restart.
 
@@ -205,7 +205,7 @@ whether another program is holding the devices, and the keyboard type macOS aske
 when the virtual keyboard first appeared. Any line with a problem names the step that
 fixes it. The menu bar item shows the same lines, and clicking one copies it.
 
-Every `vhid` command, and every tool call an agent makes, appends one line to
+In releases after 0.4.1, every `vhid` command, and every tool call an agent makes, appends one line to
 `~/Library/Logs/vhid/events.jsonl`: which command it was, whether it worked, how long it
 took and how many key and pointer reports it sent. `eyes` keeps its own in
 `~/Library/Logs/eyes/events.jsonl`. Neither records the text you typed. If you run an

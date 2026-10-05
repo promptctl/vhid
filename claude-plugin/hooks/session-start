@@ -32,7 +32,7 @@ missing= cannot=
 [ -x "$vhid" ] || { missing=$vhid; cannot="type or click"; }
 [ -x "$eyes" ] || { missing="${missing:+$missing or }$eyes"; cannot="${cannot:+$cannot, or }read the screen"; }
 [ -z "$missing" ] || cat <<EOF
-vhid is not installed on this Mac, or not all of it: there is no $missing, so what this plugin's MCP servers run is missing and this session cannot $cannot. If the user asks for that, tell them so and give them the steps: \`brew install --cask promptctl/tap/vhid\` (or the pkg from https://github.com/promptctl/vhid/releases/latest), then turn on the driver extension as https://github.com/promptctl/vhid#install describes, then start a new Claude Code session.
+vhid is not installed on this Mac, or not all of it: there is no $missing, so what this plugin's MCP servers run is missing and this session cannot $cannot. If the user asks for that, tell them so and give them the steps: \`brew install --cask promptctl/tap/vhid\` (or the pkg from https://github.com/promptctl/vhid/releases/latest), then turn on the driver extension as https://github.com/promptctl/vhid/blob/master/docs/guide.md#installing describes, then start a new Claude Code session.
 
 EOF
 # Without vhid there is no doctor to ask. With it, the doctor is asked even when eyes is
