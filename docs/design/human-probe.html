@@ -1,0 +1,38 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Human probe</title>
+<style>
+body { font: 18px -apple-system, sans-serif; margin: 0; padding: 70px 30px 30px; height: 100vh; box-sizing: border-box; }
+#status { position: fixed; top: 0; left: 0; right: 0; background: #ffd; padding: 12px 30px; font-size: 20px; border-bottom: 1px solid #aa8; }
+#a { position: absolute; left: 80px; top: 160px; }
+#b { position: absolute; left: 820px; top: 520px; }
+#text { position: absolute; left: 80px; top: 300px; width: 600px; height: 120px; font-size: 18px; }
+button { font-size: 18px; }
+</style></head>
+<body>
+<div id="status">events: 0</div>
+<button id="a">Target A</button>
+<button id="b">Target B</button>
+<textarea id="text"></textarea>
+<script>
+// Logs every pointer and key event a page can see, with its own timestamp, and posts
+// the log to the server that served the page every half second. Coalesced pointer
+// events are logged where the browser offers them, so the log holds every position the
+// browser was told about and not only the ones it dispatched.
+const log = [];
+const t = e => Math.round(e.timeStamp * 1000) / 1000;
+const pointer = e => {
+  const all = e.type === 'pointermove' && e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+  for (const c of all.length ? all : [e]) log.push({ type: e.type, t: t(c), x: c.clientX, y: c.clientY, buttons: e.buttons, target: e.target.id || e.target.tagName });
+};
+for (const type of ['pointermove', 'pointerdown', 'pointerup', 'click', 'dblclick']) document.addEventListener(type, pointer, true);
+for (const type of ['keydown', 'keyup']) document.addEventListener(type, e => log.push({ type, t: t(e), code: e.code, key: e.key, repeat: e.repeat }), true);
+let sent = 0;
+setInterval(() => {
+  document.getElementById('status').textContent = 'events: ' + log.length;
+  if (log.length === sent) return;
+  const batch = log.slice(sent);
+  sent = log.length;
+  fetch('/log', { method: 'POST', body: JSON.stringify(batch) });
+}, 500);
+</script>
+</body></html>
