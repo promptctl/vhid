@@ -118,7 +118,7 @@ escape until its window is gone - until one lists the item's menu or the item.
 ```
 eyes windows      -> ... Frontmost: TextEdit (pid N), its rows marked front.
 eyes find {"text": "Help", "rect": "0,0,800,30"}
-                  -> (a scope line, then) 422,14	Help	pixels
+                  -> (a scope line, then) 422,14	406,7,32,15	Help	pixels
 vhid click {"x": 422, "y": 14}
 eyes windows      -> no layer-101 window yet: look again
 eyes windows      -> 180	TextEdit	L101	395,25 360x59	front    a menu is open

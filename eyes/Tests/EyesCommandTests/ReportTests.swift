@@ -25,7 +25,7 @@ import Testing
         )
         #expect(Report.lines(reading, query: query, source: .pixels) == [
             "\"Settings\" not found in display 12 -2400,-300 2400x1600 by pixels; 47 runs read; 3 duplicate;"
-                + " whole region read; nearest follow. Each row's point is the centre of its box, x,y,width,height, in vhid click coordinates.",
+                + " whole region read; nearest follow. Each row's point is its centre and its box holds it, x,y,width,height, in vhid click coordinates.",
             "-1880,-50\t-1900,-60,40,20\tSetlings\tpixels\t1 off",
         ])
     }
@@ -45,11 +45,14 @@ import Testing
 
     /// A row's box covers its frame in whole points, takes the form `rect` takes, and holds
     /// the centre printed beside it - fractional frames and negative coordinates included,
-    /// where rounding each number its own way would cut the frame or miss the centre.
+    /// where rounding each number its own way would cut the frame or miss the centre, and
+    /// a frame narrower than a point, whose rounded centre falls on its right edge.
     @Test(arguments: [
         (ScreenRect(x: 10.4, y: 20.6, width: 80.3, height: 23.9), "10,20,81,25"),
         (ScreenRect(x: -1900.7, y: -60.2, width: 40.5, height: 19.4), "-1901,-61,41,21"),
         (ScreenRect(x: 0, y: 0, width: 40, height: 20), "0,0,40,20"),
+        (ScreenRect(x: 10.9, y: 20, width: 10, height: 10), "10,20,11,10"),
+        (ScreenRect(x: 10.5, y: 20, width: 0.4, height: 10), "10,20,2,10"),
     ])
     func aRowsBoxHoldsItsFrameAndItsCentre(frame: ScreenRect, box: String) throws {
         let found = Found(text: Text("Save")!, frame: frame, source: .tree(role: Role(rawValue: "AXButton")))

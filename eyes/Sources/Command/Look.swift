@@ -187,12 +187,12 @@ enum Report {
             reach(s.reach, grantNote),
             reading.outcome.misses.isEmpty ? nil : "nearest follow",
         ]
-        return clauses.compactMap { $0 }.joined(separator: "; ") + ". Each row's point is the centre of its box, x,y,width,height, in vhid click coordinates."
+        return clauses.compactMap { $0 }.joined(separator: "; ") + ". Each row's point is its centre and its box holds it, x,y,width,height, in vhid click coordinates."
     }
 
-    /// One run per row: the centre a click lands on, the box it is the centre of, the
-    /// text, and what it is - the role the tree gave it, or `pixels` for text only the
-    /// pixels reader saw, which has none. The nearest rows add how many edits off they were.
+    /// One run per row: the centre a click lands on, the box around the run, the text,
+    /// and what it is - the role the tree gave it, or `pixels` for text only the pixels
+    /// reader saw, which has none. The nearest rows add how many edits off they were.
     static func rows(_ outcome: Outcome) -> [String] {
         switch outcome {
         case .matched(let m): m.all.map(row)
@@ -201,16 +201,21 @@ enum Report {
     }
 
     private static func row(_ found: Found) -> String {
-        "\(point(found.frame.centre))\t\(box(found.frame))\t\(found.text)\t\(found.source.role?.rawValue ?? "pixels")"
+        let at = clickPoint(found.frame.centre)
+        return "\(Int(at.x)),\(Int(at.y))\t\(box(found.frame, holding: at))\t\(found.text)\t\(found.source.role?.rawValue ?? "pixels")"
     }
 
-    /// A frame as `rect` takes it, so a box is copied into a narrower look as printed.
-    /// Whole points rounded outward, the smallest such box covering the frame, which is
-    /// what keeps the rounded centre beside it inside it. [LAW:one-source-of-truth]
-    static func box(_ r: ScreenRect) -> String {
-        let (x, y) = (r.x.rounded(.down), r.y.rounded(.down))
-        let (right, bottom) = ((r.x + r.width).rounded(.up), (r.y + r.height).rounded(.up))
-        return "\(Int(x)),\(Int(y)),\(Int(right - x)),\(Int(bottom - y))"
+    /// The whole point a click is sent to: the frame's centre, rounded.
+    private static func clickPoint(_ p: ScreenPoint) -> CGPoint { CGPoint(x: p.x.rounded(), y: p.y.rounded()) }
+
+    /// A frame in the form `rect` takes: the smallest whole-point box covering both the
+    /// frame and the cell of the point printed beside it. The rounded point can fall past
+    /// the frame's right or bottom edge, which half-open containment counts as outside,
+    /// so the point is covered by construction rather than by luck of the rounding.
+    /// [LAW:one-source-of-truth] outward rounding is CGRect.integral, as the pixel reader's.
+    private static func box(_ frame: ScreenRect, holding at: CGPoint) -> String {
+        let b = frame.cgRect.union(CGRect(origin: at, size: CGSize(width: 1, height: 1))).integral
+        return "\(Int(b.minX)),\(Int(b.minY)),\(Int(b.width)),\(Int(b.height))"
     }
 
     private static func wanted(_ match: Match) -> String {
@@ -258,7 +263,6 @@ enum Report {
         }
     }
 
-    private static func point(_ p: ScreenPoint) -> String { "\(Int(p.x.rounded())),\(Int(p.y.rounded()))" }
 }
 
 private extension Paged.Stop {

@@ -25,12 +25,13 @@ reader could not look. Each prints a scope line first — where it looked, which
 looked, how many runs it read, what it set aside, whether it read the whole region. A `find` that matches nothing prints the nearest runs
 and how many edits off each is, so a misread one edit away is not taken for an absence.
 
-Each row is a point, the box it is the centre of, the text, and what it is: the role
-the accessibility tree gives the element (`AXButton`, `AXLink`, `AXTextField`, ...), or `pixels` for text only the pixels
-reader saw, such as words drawn on a canvas. The role is what tells a page's Settings
-button from a browser bookmark of the same name, or a field from its label. The box is
-`x,y,width,height` in the same points, the form `--rect` takes, rounded outward to whole
-points so it covers the run and holds the point printed beside it.
+Each row is a point, the box around the run, the text, and what it is: the role the
+accessibility tree gives the element (`AXButton`, `AXLink`, `AXTextField`, ...), or
+`pixels` for text only the pixels reader saw, such as words drawn on a canvas. The role
+is what tells a page's Settings button from a browser bookmark of the same name, or a
+field from its label. The box is `x,y,width,height` in the same points, the form `--rect`
+takes, rounded outward to whole points so it covers the run and holds the point printed
+beside it.
 
 `--page <window id>` reads the web page a browser window shows, without the browser's
 toolbar and bookmarks. The accessibility tree finds the page, so it needs Accessibility
