@@ -123,13 +123,15 @@ public struct Pointer: Sendable {
         public let moved: Moved
     }
 
-    /// A move: how long its trajectory was drawn to take, how much of its drawn bow the
-    /// displays let it keep, the motion reports that steered it along that and then homed
-    /// it onto the target, and how many steered reports the cursor never showed.
-    /// [LAW:nothing-unseen] How well the steering landed is the closing count; how well it
-    /// was tracked is `lost`; how near an edge it ran is `kept` below one.
+    /// A move: how long its trajectory was drawn to take, the displays it was kept on and
+    /// how much of its drawn bow they let it keep, the motion reports that steered it along
+    /// that and then homed it onto the target, and how many steered reports the cursor
+    /// never showed. [LAW:nothing-unseen] How well the steering landed is the closing
+    /// count; how well it was tracked is `lost`; how near an edge it ran is `kept` below
+    /// one; the seed and `displays` together draw the path again.
     public struct Moved: Equatable, Sendable {
         public let planned: Duration
+        public let displays: Displays
         public let kept: Double
         public let steered: Int
         public let closing: Int
@@ -227,7 +229,7 @@ public struct Pointer: Sendable {
         var tracking = Tracking(at: trajectory.start)
         let ticks = Int((trajectory.duration / Self.tick).rounded(.up))
         var steered = 0, closing = 0
-        var moved: Moved { Moved(planned: trajectory.duration, kept: trajectory.kept, steered: steered, closing: closing, lost: tracking.lost) }
+        var moved: Moved { Moved(planned: trajectory.duration, displays: displays, kept: trajectory.kept, steered: steered, closing: closing, lost: tracking.lost) }
         defer { traced(moved) }
         for tick in stride(from: 1, through: ticks, by: 1) {
             try Task.checkCancellation()

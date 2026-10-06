@@ -15,6 +15,10 @@ enum ScreenQuestion: String {
     case displays
 }
 
+/// The answer to either question when the window server would not give one: the reader
+/// is well, and asked again it may yet answer.
+let refusedAnswer = "refused"
+
 /// The child `FrontScreen` starts: joins `session` and says so, then answers each question
 /// on stdin on a line of stdout, until stdin closes.
 ///
@@ -32,7 +36,7 @@ func readScreen(in session: au_asid_t) -> Never {
     print(joinedAnswer)
     while let line = readLine() {
         switch ScreenQuestion(rawValue: line) {
-        case .cursor: print(CGEvent(source: nil).map { "\($0.location.x) \($0.location.y)" } ?? "unreadable")
+        case .cursor: print(CGEvent(source: nil).map { "\($0.location.x) \($0.location.y)" } ?? refusedAnswer)
         case .displays: print(onlineDisplays())
         case nil: print("asked '\(line)', which is no question")
         }
@@ -41,7 +45,7 @@ func readScreen(in session: au_asid_t) -> Never {
 }
 
 /// The online displays' bounds, in the global space the cursor is read in, as `displays` is
-/// answered; what went wrong instead when the window server would not list them.
+/// answered; `refusedAnswer` when the window server would not list them.
 ///
 /// **Online, not active.** A display that has gone to sleep is not active, and the cursor
 /// still moves on it and its Dock still rises: on studious, its one display asleep, the
@@ -49,8 +53,8 @@ func readScreen(in session: au_asid_t) -> Never {
 /// mirror set are all online with one frame, which only says that frame twice.
 private func onlineDisplays() -> String {
     var count: UInt32 = 0
-    guard CGGetOnlineDisplayList(0, nil, &count) == .success else { return "unlistable" }
+    guard CGGetOnlineDisplayList(0, nil, &count) == .success else { return refusedAnswer }
     var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
-    guard CGGetOnlineDisplayList(count, &ids, &count) == .success else { return "unlistable" }
+    guard CGGetOnlineDisplayList(count, &ids, &count) == .success else { return refusedAnswer }
     return ids.prefix(Int(count)).map(CGDisplayBounds).map { "\($0.minX) \($0.minY) \($0.width) \($0.height)" }.joined(separator: ";")
 }

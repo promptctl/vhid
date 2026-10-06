@@ -11,10 +11,12 @@ import Testing
         let session: FrontScreen.Session
         let log: Log
         var fails = false
+        var refuses = false
         init(_ session: FrontScreen.Session, _ log: Log) { self.session = session; self.log = log }
         func cursor() throws -> (x: Double, y: Double) {
             log.add("read in \(session.audit)")
             if fails { throw FrontScreen.NobodyInFront() }
+            if refuses { throw WindowServerRefused(session: session, question: .cursor) }
             return (Double(session.audit), 1)
         }
         func displays() throws -> [CGRect] {
@@ -66,6 +68,21 @@ import Testing
         #expect(log.all == ["read in 100003", "read in 100003", "stop 100003", "read in 100003"])
     }
 
+    /// A window server that would not answer is not the reader failing: the same reader is
+    /// asked next time.
+    @Test func aRefusalKeepsTheReader() throws {
+        let log = Log()
+        var readers: [Reader] = []
+        let cursor = FrontScreen(front: { bmf }, start: { let reader = Reader($0, log); readers.append(reader); return reader })
+        _ = try cursor.cursor()
+        readers[0].refuses = true
+        #expect(throws: WindowServerRefused.self) { try cursor.cursor() }
+        readers[0].refuses = false
+        #expect(try cursor.cursor() == (100003, 1))
+        #expect(readers.count == 1)
+        #expect(log.all == ["read in 100003", "read in 100003", "read in 100003"])
+    }
+
     @Test func nobodyInFrontIsSaidAndStartsNothing() {
         let cursor = FrontScreen(front: { throw FrontScreen.NobodyInFront() }, start: { _ in Issue.record("started a reader"); throw FrontScreen.NobodyInFront() })
         #expect(throws: FrontScreen.NobodyInFront.self) { try cursor.cursor() }
@@ -115,6 +132,14 @@ import Testing
         let garbled = try child("echo joined; while read _; do echo '0 0 1920'; done")
         defer { garbled.stop() }
         #expect { try garbled.displays() } throws: { "\($0)".contains("answered '0 0 1920'") }
+    }
+
+    /// `refused` is the window server declining, whichever question it answers.
+    @Test func aChildSaysTheWindowServerRefused() throws {
+        let reader = try child("echo joined; while read _; do echo refused; done")
+        defer { reader.stop() }
+        #expect { try reader.displays() } throws: { ($0 as? WindowServerRefused)?.question == .displays }
+        #expect { try reader.cursor() } throws: { ($0 as? WindowServerRefused)?.question == .cursor }
     }
 
     @Test func aChildThatCouldNotJoinSaysWhy() {

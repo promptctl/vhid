@@ -137,13 +137,17 @@ import Testing
     /// A path the drawn bow would carry into a corner keeps less of it and is still on the
     /// screen: a target ten points from both edges, approached along the diagonal.
     @Test func aPathIntoACornerStaysOffIt() {
+        var kept: [Double] = []
         for seed in UInt64(0) ..< 500 {
             let path = Self.trajectory(seed: seed, from: ScreenPoint(x: 900, y: 500)!, to: ScreenPoint(x: 1910, y: 1070)!)
             for ms in 0 ... Int(path.duration / .milliseconds(1)) {
                 let point = path.point(after: .milliseconds(ms))
                 #expect(point.x <= 1910.05 && point.y <= 1070.05, "seed \(seed) at \(ms) ms: \(point)")
+                #expect(Self.screen.covers(point, by: 0), "seed \(seed) at \(ms) ms: \(point)")
             }
+            kept.append(path.kept)
         }
+        #expect(kept.contains { $0 < 1 })
     }
 
     /// Far from every edge, and across the seam between two displays side by side, the whole

@@ -68,6 +68,11 @@ final class FrontScreen: ScreenSource, @unchecked Sendable {
         let reader = try reader(for: session)
         do {
             return try question(reader)
+        } catch let refused as WindowServerRefused {
+            // The reader answered; it was the window server that would not. Kept for the
+            // next read, which may be answered. [LAW:no-silent-failure] Said all the same.
+            logFailure("\(refused)")
+            throw refused
         } catch {
             // A reader that failed once is not asked again: the next read starts another.
             reader.stop()
@@ -115,6 +120,14 @@ final class FrontScreen: ScreenSource, @unchecked Sendable {
         let users = IORegistryEntryCreateCFProperty(root, "IOConsoleUsers" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue()
         return users as? [[String: Any]] ?? []
     }
+}
+
+/// A reader that is well, asked a question the window server in its session would not
+/// answer: not a reason to start another.
+struct WindowServerRefused: Error, CustomStringConvertible {
+    let session: FrontScreen.Session
+    let question: ScreenQuestion
+    var description: String { "the window server in \(session) would not answer '\(question.rawValue)'" }
 }
 
 /// Where the cursor is and where the displays are, as the daemon answers them.
@@ -200,11 +213,14 @@ final class ChildReader: FrontScreen.Reader {
         }
     }
 
-    /// `question` sent as its line, and the line answering it.
+    /// `question` sent as its line, and the line answering it: `WindowServerRefused` when
+    /// the child says the window server would not answer.
     private func ask(_ question: ScreenQuestion) throws -> String {
         let line = question.rawValue + "\n"
         guard Darwin.write(requests, line, line.utf8.count) == line.utf8.count else { throw Failed(session: session, what: "could not be asked: errno \(errno)") }
-        return try answerLine(within: patience, to: "answer")
+        let answer = try answerLine(within: patience, to: "answer")
+        guard answer != refusedAnswer else { throw WindowServerRefused(session: session, question: question) }
+        return answer
     }
 
     /// The space-separated numbers in `text`, or nil when any of it is not one.
