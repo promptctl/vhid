@@ -79,7 +79,7 @@ verb at once, unrecorded, and an MCP call `vhid mcp` was running when it was sto
 names the signal too.
 
 ```json
-{"attributes":{"double_click_ms":500,"paths":[{"aimed":[812.4,503.1],"bow_kept":1,"box":[772,491,80,24],"closing_reports":1,"displays":[[0,0,1512,982]],"fitts_width":24,"landed":[812.4,503.1],"lost_reports":0,"planned_ms":612.4,"steered_reports":71}],"pauses":{"notch":{"count":3,"ms":691.4},"rest":{"count":1,"ms":262.7}},"seed":"9e3779b97f4a7c15"},"counts":{"keyboard_reports":0,"mouse_reports":75,"scroll_notches_horizontal":0,"scroll_notches_vertical":3},"duration_ms":1601.3,"entry":"cli","event":"scroll","outcome":"ok","service":"vhid","sink":"file","started_at":"2026-10-04T13:20:00.512Z","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736"}
+{"attributes":{"double_click_ms":500,"paths":[{"aimed":[812.4,503.1],"bow_kept":1,"box":[772,491,80,24],"closing_reports":1,"displays":[[0,0,1512,982]],"ends_kept":1,"fitts_width":24,"landed":[812.4,503.1],"lost_reports":0,"planned_ms":612.4,"steered_reports":71,"structure":"undershoot"}],"pauses":{"notch":{"count":3,"ms":691.4},"rest":{"count":1,"ms":262.7}},"seed":"9e3779b97f4a7c15"},"counts":{"keyboard_reports":0,"mouse_reports":75,"scroll_notches_horizontal":0,"scroll_notches_vertical":3},"duration_ms":1601.3,"entry":"cli","event":"scroll","outcome":"ok","service":"vhid","sink":"file","started_at":"2026-10-04T13:20:00.512Z","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736"}
 ```
 
 `event` is the verb as it is typed (`scroll`, `driver state`), and an MCP call's is its
@@ -101,9 +101,11 @@ drawn inside the box when it was given one, `box` that box as `x,y,width,height`
 for a point), `fitts_width` the target width its time was
 read from (the box's smaller side, or 20 for a point), `landed` where the cursor was read
 when it landed, absent for a move that stopped first, `planned_ms` is how long its trajectory was
-drawn to take, `displays` the display layout it was kept on, each display as its left,
-top, width and height, `bow_kept` how much of its drawn curve it kept to stay clear of the
-displays' edges (1 for all of it, 0 for a straight line), `steered_reports` how many
+drawn to take, `structure` how it was built (`direct`, `undershoot`, `overshoot` or
+`two_corrections`), `displays` the display layout it was kept on, each display as its left,
+top, width and height, `ends_kept` and `bow_kept` how much of where its movements end off
+the straight line and of its drawn curve it kept to stay clear of the displays' edges (1
+for all of it, 0 for none; both 0 is the straight line), `steered_reports` how many
 reports carried the cursor along it,
 `lost_reports` how many of those the cursor never showed, and `closing_reports` how many
 the closed loop took to land it after. `click`, `move` and `scroll` make one move and
