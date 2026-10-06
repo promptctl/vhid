@@ -50,12 +50,12 @@ final class Invocation: Sendable {
     let signals: FirstSignal?
     /// W3C trace ID: 16 random bytes as 32 lowercase hex digits.
     let traceID = (0..<16).map { _ in String(format: "%02x", UInt8.random(in: .min ... .max)) }.joined()
-    private let state: Mutex<(event: String, counts: [Tally: Int], attributes: [Attribute: JSON], typesText: Bool)>
+    private let state: Mutex<(event: String, counts: [Tally: Int], attributes: [Attribute: JSON], lists: [Attribute: [JSON]], typesText: Bool)>
 
     private init(_ event: String, via entry: Entry, stoppedBy signals: FirstSignal?) {
         self.entry = entry
         self.signals = signals
-        state = Mutex((event, [:], [:], false))
+        state = Mutex((event, [:], [:], [:], false))
     }
 
     /// Runs `body` as one invocation of `event`, and hands its record to `hand` however
@@ -98,6 +98,12 @@ final class Invocation: Sendable {
         current?.state.withLock { $0.attributes[attribute] = value }
     }
 
+    /// Adds `value` to the end of `attribute`'s list on the running invocation; the list is
+    /// absent from the record until something is added to it.
+    static func append(_ value: JSON, to attribute: Attribute) {
+        current?.state.withLock { $0.lists[attribute, default: []].append(value) }
+    }
+
     /// Says the running invocation types text it was given, which can be meant for a
     /// password field. Its record then names the error's kinds rather than quoting its
     /// words, which can quote the text: the characters the layout has no keys for, a dead
@@ -107,8 +113,8 @@ final class Invocation: Sendable {
     }
 
     private func record(startedAt: Date, duration: Duration, ending: Result<Void, any Error>) -> InvocationRecord {
-        let (event, counts, decided, typesText) = state.withLock { ($0.event, $0.counts, $0.attributes, $0.typesText) }
-        var attributes = decided
+        let (event, counts, decided, lists, typesText) = state.withLock { ($0.event, $0.counts, $0.attributes, $0.lists, $0.typesText) }
+        var attributes = decided.merging(lists.mapValues(JSON.array)) { $1 }
         attributes[.signal] = signals?.taken.map { .string(Attribute.name(ofSignal: $0)) }
         func told(_ failure: any Error) -> String? {
             typesText ? failure.causes.map { "\(type(of: $0))" }.joined(separator: ": ") : entry.told(failure)
@@ -151,6 +157,14 @@ enum Tally: String, CaseIterable, Sendable {
 enum Attribute: String, Sendable {
     /// How long the wheel rested after each notch.
     case notchRestMilliseconds = "notch_rest_ms"
+    /// What the pointer's random source was seeded with, as hex: what draws its moves
+    /// again. Absent when the devices were never opened.
+    case seed
+    /// Each pointer move the verb made, in order, the one it stopped in too: how long its
+    /// trajectory was drawn to take, how many reports steered it and then closed onto the
+    /// target, and how many steered reports the cursor never showed. Absent for a verb that
+    /// made none.
+    case paths
     /// How long an MCP tool call waited behind the calls before it, which its
     /// `duration_ms` includes.
     case queuedMilliseconds = "queued_ms"
@@ -248,5 +262,16 @@ enum JSON: Sendable, Equatable, Encodable {
             encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
             return try encoder.encode(self) + Data("\n".utf8)
         }
+    }
+}
+
+extension Invocation {
+    /// Adds `move` to the running invocation's `paths`. `Devices` hands every pointer it
+    /// opens this, so no verb records its own moves. [LAW:single-enforcer]
+    @Sendable static func moved(_ move: Pointer.Moved) {
+        append(.object(["planned_ms": .double(move.planned / .milliseconds(1)),
+                        "steered_reports": .int(move.steered),
+                        "closing_reports": .int(move.closing),
+                        "lost_reports": .int(move.lost)]), to: .paths)
     }
 }

@@ -131,7 +131,7 @@ import Testing
             {"t_ms":1,"move":{"dx":5,"dy":0}}
             {"t_ms":10,"buttons":[]}
             """)
-        let played = try await Player(pointer: Pointer(mouse: mouse, cursor: fake.cursor), keyboard: fake.keyboard, clock: clock, wall: { Self.epoch }, lead: .zero).play(Schedule(play))
+        let played = try await Player(pointer: Pointer(mouse: mouse, cursor: fake.cursor, clock: clock, randomness: RandomSource(seed: 1), traced: { _ in }), keyboard: fake.keyboard, wall: { Self.epoch }, lead: .zero).play(Schedule(play))
         #expect(played.startReports == 0)
         #expect(played.reports == [
             Played.Report(line: 2, scheduled: Self.epoch, sent: Self.epoch, acked: Self.epoch + 3000),
@@ -163,13 +163,13 @@ import Testing
             {"t_ms":60000,"buttons":[]}
             """)
         let run = Task { @MainActor in
-            try await Player(pointer: fake.pointer, keyboard: fake.keyboard, clock: clock, wall: { Self.epoch }, lead: .zero).play(Schedule(play))
+            try await Player(pointer: fake.pointer(on: clock), keyboard: fake.keyboard, wall: { Self.epoch }, lead: .zero).play(Schedule(play))
         }
         clock.cancel(afterSleeps: 1) { run.cancel() }
         let stopped = try await #require(throws: PlayStopped.self) { try await run.value }
         #expect(stopped.played.count == 1)
         #expect(stopped.causes.contains { $0 is CancellationError })
-        #expect(clock.now.offset == Player<ManualClock>.slice)
+        #expect(clock.now.offset == Player.slice)
         #expect(fake.log == ["hold [1]", "up"])
     }
 
@@ -189,7 +189,7 @@ import Testing
             {"t_ms":0,"buttons":["left"]}
             {"t_ms":10,"buttons":[]}
             """)
-        let played = try await Player(pointer: fake.pointer, keyboard: fake.keyboard, clock: clock, wall: { Self.epoch }, lead: .milliseconds(2)).play(Schedule(play))
+        let played = try await Player(pointer: fake.pointer(on: clock), keyboard: fake.keyboard, wall: { Self.epoch }, lead: .milliseconds(2)).play(Schedule(play))
         #expect(played.reports.map(\.scheduled) == [Self.epoch, Self.epoch + 10_000])
         // The watch put the clock exactly on the deadline, so nothing went out late.
         #expect(played.lateness.max == 0)
@@ -214,7 +214,7 @@ import Testing
             {"t_ms":1900,"keys":[]}
             {"t_ms":2000,"buttons":[]}
             """)
-        let played = try await Player(pointer: fake.pointer, keyboard: fake.keyboard, clock: clock, wall: { Self.epoch }, lead: .zero).play(Schedule(play))
+        let played = try await Player(pointer: fake.pointer(on: clock), keyboard: fake.keyboard, wall: { Self.epoch }, lead: .zero).play(Schedule(play))
         #expect(fake.log == [
             "keys hold [e1]", "hold [1]", "move 5 0", "keys hold [e1]", "scroll -1 0",
             "hold [1 2]", "hold [2]", "keys hold [4 e1]", "keys hold []", "hold []",
@@ -236,7 +236,7 @@ import Testing
             {"t_ms":3,"buttons":[]}
             """)
         let stopped = try await #require(throws: PlayStopped.self) {
-            try await Player(pointer: fake.pointer, keyboard: fake.keyboard, clock: ManualClock(), wall: { Self.epoch }, lead: .zero).play(Schedule(play))
+            try await Player(pointer: fake.pointer, keyboard: fake.keyboard, wall: { Self.epoch }, lead: .zero).play(Schedule(play))
         }
         #expect(fake.log == ["hold [1]", "up"])
         #expect(!"\(stopped)".contains("key"))
@@ -254,7 +254,7 @@ import Testing
         }
         lines.append(#"{"t_ms":400,"buttons":[]}"#)
         let play = try Play.parse(lines.joined(separator: "\n"))
-        let played = try await Player(pointer: Pointer(mouse: watched, cursor: fake.cursor), keyboard: fake.keyboard, clock: ManualClock(), wall: { Self.epoch }, lead: .zero).play(Schedule(play))
+        let played = try await Player(pointer: Pointer(mouse: watched, cursor: fake.cursor, clock: ManualClock(), randomness: RandomSource(seed: 1), traced: { _ in }), keyboard: fake.keyboard, wall: { Self.epoch }, lead: .zero).play(Schedule(play))
         // Within half a point, which is where the pointer's loop stops: this mouse moves
         // whole points, and 410.5 is between two.
         let recorded = [ScreenPoint(x: 130, y: 110)!, ScreenPoint(x: 410.5, y: 230)!]
@@ -276,7 +276,7 @@ import Testing
             {"t_ms":8,"at":{"x":0,"y":0}}
             """))
         let calibration = try #require(script.calibration)
-        let steering = try await fake.pointer.calibrate(calibration, from: script.start, clock: ManualClock())
+        let steering = try await fake.pointer.calibrate(calibration, from: script.start)
         #expect(steering.samples.map(\.counts) == [1, 2, 4])
         #expect(steering.samples.map(\.perCount) == [1, 1, 1])
     }
@@ -293,7 +293,7 @@ import Testing
             {"t_ms":16,"buttons":[]}
             """)
         let stopped = try await #require(throws: PlayStopped.self) {
-            try await Player(pointer: fake.pointer, keyboard: fake.keyboard, clock: ManualClock(), wall: { Self.epoch }, lead: .zero).play(Schedule(play))
+            try await Player(pointer: fake.pointer, keyboard: fake.keyboard, wall: { Self.epoch }, lead: .zero).play(Schedule(play))
         }
         #expect(stopped.line == nil)
         #expect(stopped.causes.contains { $0 is Steering.Unmoved })
@@ -319,7 +319,7 @@ import Testing
             {"t_ms":2,"keys":[]}
             """)
         let stopped = try await #require(throws: PlayStopped.self) {
-            try await Player(pointer: fake.pointer, keyboard: fake.keyboard, clock: clock, wall: { Self.epoch }, lead: .zero).play(Schedule(play))
+            try await Player(pointer: fake.pointer(on: clock), keyboard: fake.keyboard, wall: { Self.epoch }, lead: .zero).play(Schedule(play))
         }
         #expect(stopped.played.count == 1)
         #expect(stopped.of == 5)

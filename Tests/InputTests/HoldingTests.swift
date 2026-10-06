@@ -22,6 +22,15 @@ import Testing
         }
     }
 
+    /// The log with each run of motion reports as one `moves`: how many a move takes is
+    /// the trajectory's business, and these tests are about what is held around it.
+    static func collapsed(_ log: [String]) -> [String] {
+        log.reduce(into: [String]()) { runs, report in
+            let entry = report.hasPrefix("move ") ? "moves" : report
+            if entry != "moves" || runs.last != "moves" { runs.append(entry) }
+        }
+    }
+
     /// Modifiers down in a fixed order, then the click with them held, then the mouse and
     /// then the keyboard let go.
     @Test func aModifiedClickIsModifiersDownThenTheClickThenEverythingUp() async throws {
@@ -30,26 +39,26 @@ import Testing
             try await $0.click(at: Self.target, button: .left, times: .single)
         }
         #expect(click.at == Self.target)
-        #expect(mouse.log == ["key down e1", "key down e3", "move 5 0", "down 1", "up", "keys up"])
+        #expect(Self.collapsed(mouse.log) == ["key down e1", "key down e3", "moves", "down 1", "up", "keys up"])
     }
 
     /// No modifiers touches no key: the act's reports are the whole run.
     @Test func noModifiersIsTheSameRunWithNothingHeld() async throws {
         let mouse = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
         try await mouse.pointer.holding(.none, on: mouse.keyboard) {
-            try await $0.scroll(at: Self.target, vertical: 3, horizontal: 0, clock: ManualClock())
+            try await $0.scroll(at: Self.target, vertical: 3, horizontal: 0)
         }
-        #expect(mouse.log == ["move 5 0", "scroll 1 0", "scroll 1 0", "scroll 1 0"])
+        #expect(Self.collapsed(mouse.log) == ["moves", "scroll 1 0", "scroll 1 0", "scroll 1 0"])
     }
 
     /// A drag carries the modifiers from the press to the release.
     @Test func aModifiedDragHoldsTheModifiersAcrossTheCarry() async throws {
         let mouse = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
         let option = try HeldModifiers([.leftOption])
-        try await mouse.pointer.holding(option, on: mouse.keyboard) {
+        _ = try await mouse.pointer.holding(option, on: mouse.keyboard) {
             try await $0.drag(from: Self.target, to: ScreenPoint(x: 8, y: 0)!, button: .left)
         }
-        #expect(mouse.log == ["key down e2", "move 5 0", "down 1", "move 3 0", "up", "keys up"])
+        #expect(Self.collapsed(mouse.log) == ["key down e2", "moves", "down 1", "moves", "up", "keys up"])
     }
 
     /// Refuse any one report of the run and it stops as `HoldingStopped`, with the refusal
@@ -69,7 +78,7 @@ import Testing
             }
             #expect(stop?.causes.last is Refused, "step \(step): \(whole.log[step])")
             #expect(stop?.unreleased == nil, "step \(step): \(whole.log[step])")
-            #expect(stop?.stage == (step < 2 ? .pressing : step < 5 ? .acting : .releasing), "step \(step)")
+            #expect(stop?.stage == (step < 2 ? .pressing : step < whole.log.count - 1 ? .acting : .releasing), "step \(step)")
             #expect(Self.held(after: mouse.log).isEmpty, "step \(step): \(mouse.log)")
             #expect(Array(mouse.log.prefix(step + 1)) == Array(whole.log.prefix(step + 1)), "step \(step)")
         }

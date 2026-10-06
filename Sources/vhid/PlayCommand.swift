@@ -39,7 +39,7 @@ struct PlayCommand: AsyncParsableCommand {
 
     /// The verb itself, over devices from anywhere. [LAW:decomposition]
     static func play(_ schedule: Schedule, with devices: Devices) async throws -> Played {
-        try await Player(pointer: devices.pointer, keyboard: devices.keyboard, clock: ContinuousClock(), wall: epochMicroseconds, lead: lead).play(schedule)
+        try await Player(pointer: devices.pointer, keyboard: devices.keyboard, wall: epochMicroseconds, lead: lead).play(schedule)
     }
 
     /// What a play left behind: the reports that went out, and - only when it finished -

@@ -92,13 +92,15 @@ enum Help {
         reads the screen. What is under the point is the caller's to know.
 
         The device sends counts, not coordinates, and macOS accelerates them, so the pointer is \
-        steered in a loop - post a delta, read the cursor back, repeat - and the point it reports \
-        landing at is read back from the cursor rather than the point that was asked for. The two \
-        can differ by under a point.
+        steered: along a person's path, slightly curved, speeding up and slowing down, reading \
+        the cursor back every 8 ms, then in a loop - post a delta, read the cursor back, repeat - \
+        until it lands. A move takes as long as a hand's would, about 0.8 s across 740 points. The \
+        point it reports landing at is read back from the cursor rather than the point that was \
+        asked for. The two can differ by under a point.
         """, commandLine: [negative(NegativeExample.click)])
 
     static let move = VerbHelp(name: "move", abstract: "Move the pointer to a point on the screen, pressing nothing.", discussion: """
-        Steered the way click steers it - post a delta, read the cursor back, repeat - and the \
+        Steered the way click steers it - a person's path, then a loop that lands it - and the \
         point it reports is read back from the cursor.
         """, commandLine: [negative(NegativeExample.move)])
 
