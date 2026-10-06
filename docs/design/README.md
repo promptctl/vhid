@@ -17,7 +17,8 @@ the macOS version and the hardware, then how each result was shown, so you can r
 
 The probes the notes ran are kept beside them: `trackpad-probe.c` and
 `trackpad-mtwatch.c` for the trackpad note, `browser-probe.html` for the browser note,
-`human-probe.html`, `human-probe.py` and `human-cursor-poll.swift` for the human note.
+`human-probe.html`, `human-probe.py`, `human-cursor-poll.swift` and `human-hid-params.swift`
+for the human note.
 
 A finding a later version could change is dated, so check the date against the code
 before you rely on it. When a change rests on a new measurement, add a note in the same
