@@ -2,6 +2,7 @@ import Input
 import Keystrokes
 import Pointing
 import Synchronization
+import TestClock
 
 /// A keyboard that records what it was asked to do and refuses after a given number of
 /// calls, so a run can be stopped at any point inside a character.
@@ -155,8 +156,11 @@ final class FakeMouse: Mouse {
 
     func cursor() throws -> ScreenPoint { position }
 
-    /// The pointer over this mouse, reading this screen.
-    var pointer: Pointer { Pointer(mouse: self, cursor: cursor) }
+    /// The pointer over this mouse, reading this screen, its moves drawn from seed 1.
+    var pointer: Pointer { pointer(on: ManualClock()) }
+
+    /// That pointer timed on `clock`, for a test that reads the time back.
+    func pointer(on clock: ManualClock) -> Pointer { Pointer(mouse: self, cursor: cursor, clock: clock, randomness: RandomSource(seed: 1)) }
 
     /// A keyboard beside this mouse, posting into the same log under the same `refused`, so
     /// a run over both devices reads back as one sequence and can be refused at any report
@@ -229,5 +233,5 @@ final class SteadyGainMouse: Mouse {
         }
     }
 
-    var pointer: Pointer { Pointer(mouse: self) { self.position } }
+    var pointer: Pointer { Pointer(mouse: self, cursor: { self.position }, clock: ManualClock(), randomness: RandomSource(seed: 1)) }
 }

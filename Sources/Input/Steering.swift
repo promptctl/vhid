@@ -6,7 +6,7 @@ import Pointing
 /// distance without reading it back.
 ///
 /// Recorded `at` lines come every few milliseconds, faster than a report is seen to land,
-/// so the player cannot learn from the cursor between them the way `Pointer.move(to:)`
+/// so the player cannot learn from the cursor between them the way `Pointer.home(on:)`
 /// does: a read taken before the last report landed would send the same motion twice.
 /// This is learned once instead, before the clock starts, and between clicks the cursor
 /// goes where the table says. Error can build up; the closed loop before every button
@@ -52,7 +52,7 @@ public struct Steering: Hashable, Sendable {
     /// and the nearest sample's value beyond them.
     public func perCount(_ counts: Double) -> Double { Self.perCount(counts, samples) }
 
-    private static func perCount(_ counts: Double, _ samples: [Sample]) -> Double {
+    static func perCount(_ counts: Double, _ samples: [Sample]) -> Double {
         guard counts > samples[0].counts else { return samples[0].perCount }
         for (low, high) in zip(samples, samples.dropFirst()) where counts <= high.counts {
             return low.perCount + (high.perCount - low.perCount) * (counts - low.counts) / (high.counts - low.counts)
@@ -130,7 +130,7 @@ extension Pointer {
 
     /// How far `times` reports of `step`, `every` apart from `start`, carried the cursor.
     private func run<C: Clock>(_ step: Move, times: Int, from start: ScreenPoint, every interval: Duration, clock: C) async throws -> Double where C.Duration == Duration {
-        try await move(to: start)
+        try await home(on: start)
         let before = try await cursor()
         for _ in 0..<times {
             try Task.checkCancellation()

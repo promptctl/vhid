@@ -115,7 +115,7 @@ enum Tools {
         return VerbTool(Help.scroll, [x, y, vertical, horizontal, modifiers]) { arguments, installation in
             let (at, vertical, horizontal, held) = (try point(arguments), try arguments[vertical], try arguments[horizontal], try arguments[modifiers])
             return try await Devices.using(installation) {
-                try await ScrollCommand.scroll(at: at, vertical: vertical, horizontal: horizontal, holding: held, with: $0.pointer, $0.keyboard, clock: ContinuousClock())
+                try await ScrollCommand.scroll(at: at, vertical: vertical, horizontal: horizontal, holding: held, with: $0.pointer, $0.keyboard)
             }
         }
     }()

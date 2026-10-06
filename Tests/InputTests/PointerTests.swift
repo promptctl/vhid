@@ -50,7 +50,7 @@ import Testing
     /// and the arrival round still asks the check.
     @Test func aMoveLearnsTheGainAndConvergesFromBelow() async throws {
         let mouse = FakeMouse(at: ScreenPoint(x: 100, y: 100)!)
-        let reports = try await mouse.pointer.move(to: ScreenPoint(x: 641.5, y: 475)!)
+        let reports = try await mouse.pointer.home(on: ScreenPoint(x: 641.5, y: 475)!)
         #expect(reports == 3)
         #expect(mouse.position == ScreenPoint(x: 641, y: 475)!)
         #expect(mouse.log == ["move 127 127", "move 53 -2", "move 1 0"])
@@ -61,7 +61,7 @@ import Testing
     @Test func aCursorThatWillNotMoveIsGivenUpAfterThreeStalls() async throws {
         let mouse = FakeMouse(at: Self.origin)
         mouse.stuck = true
-        let refused = try await #require(throws: WouldNotReach.self) { try await mouse.pointer.move(to: ScreenPoint(x: 50, y: 0)!) }
+        let refused = try await #require(throws: WouldNotReach.self) { try await mouse.pointer.home(on: ScreenPoint(x: 50, y: 0)!) }
         #expect(refused.reports == 3)
         #expect(refused.cursor == Self.origin)
         #expect(mouse.log == ["move 50 0", "move 100 0", "move 127 0"])
@@ -72,7 +72,7 @@ import Testing
     @Test func aClickPostsOneDownAndOneUpPerClick() async throws {
         let mouse = FakeMouse(at: Self.origin)
         let click = try await mouse.pointer.click(at: Self.origin, button: .middle, times: Clicks(rawValue: 3)!)
-        #expect(click == Pointer.Click(at: Self.origin, reports: 0))
+        #expect(click == Pointer.Click(at: Self.origin, moved: Pointer.Moved(planned: .zero, steered: 0, closing: 0)))
         #expect(mouse.log == ["down 3", "up", "down 3", "up", "down 3", "up"])
     }
 
@@ -93,7 +93,7 @@ import Testing
     @Test func aScrollIsOneNotchAReportWithARestAfterEach() async throws {
         let mouse = FakeMouse(at: Self.origin)
         let clock = ManualClock()
-        try await mouse.pointer.scroll(at: Self.origin, vertical: 300, horizontal: -5, clock: clock)
+        try await mouse.pointer(on: clock).scroll(at: Self.origin, vertical: 300, horizontal: -5)
         #expect(mouse.log == Array(repeating: "scroll 1 -1", count: 5) + Array(repeating: "scroll 1 0", count: 295))
         #expect(clock.sleeps == 300)
         #expect(clock.now.offset == Pointer.notchRest * 300)
@@ -106,7 +106,7 @@ import Testing
     @Test func aScrollCancelledInARestStopsBeforeTheNextNotch() async throws {
         let mouse = FakeMouse(at: Self.origin)
         let clock = ManualClock()
-        let roll = Task { try await mouse.pointer.scroll(at: Self.origin, vertical: Int.min, horizontal: 0, clock: clock) }
+        let roll = Task { try await mouse.pointer(on: clock).scroll(at: Self.origin, vertical: Int.min, horizontal: 0) }
         clock.cancel(afterSleeps: 3) { roll.cancel() }
         let stopped = try await #require(throws: PointingStopped.self) { try await roll.value }
         #expect(stopped.cause is CancellationError)
@@ -131,7 +131,7 @@ import Testing
         for offset in [1.4, 1.6, 2.5, 3.0, 4.9, 20.0] {
             let mouse = SteadyGainMouse(at: ScreenPoint(x: 0, y: 0)!, gain: gain)
             let target = ScreenPoint(x: offset, y: 0)!
-            let reports = try await mouse.pointer.move(to: target)
+            let reports = try await mouse.pointer.home(on: target)
             let short = abs(mouse.position.x - target.x)
             #expect(short < gain, "gain \(gain), offset \(offset): stopped \(short) points short in \(reports) reports")
             #expect(reports < Pointer.rounds, "gain \(gain), offset \(offset): took every round it had")
@@ -143,7 +143,7 @@ import Testing
     @Test func aPinnedCursorIsStillWouldNotReach() async throws {
         let mouse = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
         mouse.stuck = true
-        await #expect(throws: WouldNotReach.self) { try await mouse.pointer.move(to: ScreenPoint(x: 400, y: 0)!) }
+        await #expect(throws: WouldNotReach.self) { try await mouse.pointer.home(on: ScreenPoint(x: 400, y: 0)!) }
     }
 }
 
@@ -159,7 +159,7 @@ import Testing
     @Test func aPinnedCursorIsWouldNotReachEvenWhenTheTargetIsOneCountAway() async throws {
         let mouse = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
         mouse.stuck = true
-        await #expect(throws: WouldNotReach.self) { try await mouse.pointer.move(to: ScreenPoint(x: 1.4, y: 0)!) }
+        await #expect(throws: WouldNotReach.self) { try await mouse.pointer.home(on: ScreenPoint(x: 1.4, y: 0)!) }
     }
 
     /// The click reports where the button went down, not where it was asked to go down.

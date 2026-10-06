@@ -151,6 +151,13 @@ enum Tally: String, CaseIterable, Sendable {
 enum Attribute: String, Sendable {
     /// How long the wheel rested after each notch.
     case notchRestMilliseconds = "notch_rest_ms"
+    /// What the pointer's random source was seeded with, as hex: what draws its moves
+    /// again. Absent when the devices were never opened.
+    case seed
+    /// Each pointer move the verb made, in order: how long its trajectory was drawn to take
+    /// and how many reports steered it and then closed onto the target. Absent for a verb
+    /// that made none.
+    case paths
     /// How long an MCP tool call waited behind the calls before it, which its
     /// `duration_ms` includes.
     case queuedMilliseconds = "queued_ms"
@@ -248,5 +255,16 @@ enum JSON: Sendable, Equatable, Encodable {
             encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
             return try encoder.encode(self) + Data("\n".utf8)
         }
+    }
+}
+
+extension Invocation {
+    /// Puts `moves` on the running invocation as its `paths`.
+    static func moved(_ moves: [Pointer.Moved]) {
+        set(.paths, .array(moves.map {
+            .object(["planned_ms": .double($0.planned / .milliseconds(1)),
+                     "steered_reports": .int($0.steered),
+                     "closing_reports": .int($0.closing)])
+        }))
     }
 }

@@ -23,9 +23,10 @@ struct MoveCommand: AsyncParsableCommand {
 
     /// The verb itself, over a pointer from anywhere. [LAW:decomposition]
     static func move(to point: ScreenPoint, with pointer: Pointer) async throws -> String {
-        let reports = try await pointer.move(to: point)
+        let moved = try await pointer.move(to: point)
+        Invocation.moved([moved])
         // Where the cursor ended up, read back, for the reason `click` reads it back.
         // [LAW:no-silent-failure]
-        return "moved to \(try await pointer.cursor()) after \(counted(reports, "motion report"))"
+        return "moved to \(try await pointer.cursor()) after \(counted(moved.reports, "motion report"))"
     }
 }

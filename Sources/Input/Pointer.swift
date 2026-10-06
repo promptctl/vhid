@@ -37,6 +37,11 @@ public struct Clicks: RawRepresentable, Hashable, Codable, Sendable {
 /// [LAW:no-ambient-temporal-coupling] The cursor's position is the state the loop waits
 /// on, never a sleep after a report.
 ///
+/// **That loop is how a move ends, not how it travels.** A verb's move first follows a
+/// person's trajectory, a report every `tick` on `timeline`, and only the last fraction of a
+/// point is `home`'s. The ticks are the hand's pace, not a wait for the cursor: each is
+/// aimed from where the cursor was read. `docs/design/human.md`.
+///
 /// Where the cursor is is read through a closure the caller hands in, so the loop runs
 /// against a fake screen with a fake curve in a test and against the window server in
 /// the field. [LAW:effects-at-boundaries]
@@ -64,12 +69,37 @@ public struct Pointer: Sendable {
     /// it nowhere. The window server applies a report within a frame or two; this is many.
     public static let settle: Duration = .milliseconds(50)
 
-    public init(mouse: any Mouse, cursor: @escaping @Sendable () async throws -> ScreenPoint) {
+    /// What a move's ticks and a scroll's rests are timed on, so a test runs them on a
+    /// clock of its own. [LAW:effects-at-boundaries]
+    public let timeline: Timeline
+    /// What every move's trajectory is drawn from.
+    public let randomness: RandomSource
+
+    /// How often a moving pointer reports: every 8 ms, a 125 Hz USB mouse's rate.
+    public static let tick: Duration = .milliseconds(8)
+
+    public init<C: Clock>(mouse: any Mouse, cursor: @escaping @Sendable () async throws -> ScreenPoint, clock: C, randomness: RandomSource) where C.Duration == Duration {
         self.mouse = mouse
         self.cursor = cursor
+        timeline = Timeline(clock)
+        self.randomness = randomness
     }
 
-    /// A click that landed: where, and how many motion reports it took to get there.
+    /// A clock as offsets from when the pointer was made: what time it is, and a sleep
+    /// until a given one. A move's deadlines are offsets from its start, so this is all of
+    /// a clock a pointer needs, and it keeps the pointer free of the clock's type.
+    public struct Timeline: Sendable {
+        public let now: @Sendable () -> Duration
+        public let sleep: @Sendable (_ until: Duration) async throws -> Void
+
+        public init<C: Clock>(_ clock: C) where C.Duration == Duration {
+            let origin = clock.now
+            now = { origin.duration(to: clock.now) }
+            sleep = { try await clock.sleep(until: origin.advanced(by: $0), tolerance: .zero) }
+        }
+    }
+
+    /// A click that landed: where, and the move that got it there.
     ///
     /// `at` is where the cursor was when the button went down, read back rather than
     /// repeated from the request. [FRAMING:representation] The move stops beside a target
@@ -78,7 +108,18 @@ public struct Pointer: Sendable {
     /// has to be the one that happened.
     public struct Click: Equatable, Sendable {
         public let at: ScreenPoint
-        public let reports: Int
+        public let moved: Moved
+    }
+
+    /// A move that arrived: how long its trajectory was drawn to take, and the motion
+    /// reports that steered it along that and then homed it onto the target.
+    /// [LAW:nothing-unseen] How well the steering landed is the closing count.
+    public struct Moved: Equatable, Sendable {
+        public let planned: Duration
+        public let steered: Int
+        public let closing: Int
+
+        public var reports: Int { steered + closing }
     }
 
     /// How far the OS carries the cursor per count, and for how fast a report that holds.
@@ -148,7 +189,57 @@ public struct Pointer: Sendable {
         return moved > 0 ? Gain(perCount: moved / asked, upTo: asked) : Gain(perCount: previous.perCount / 2, upTo: .infinity)
     }
 
-    /// Moves the cursor to `target` and answers with how many reports it took.
+    /// Moves the cursor to `target` as a person's hand would, and lands it there as `home`
+    /// does: along a `Trajectory` drawn from `randomness`, a report every `tick`, each aimed
+    /// at where the trajectory is at that tick's deadline from where the cursor was read and
+    /// the reports it has not yet shown. The deadlines are counted from the start, so a late
+    /// report is followed by a larger one rather than pushing the rest of the path back.
+    /// `docs/design/human.md`, "Steering the path".
+    ///
+    /// Then the closed loop, its reports `tick` apart, takes the cursor the last fraction of
+    /// a point, once every report the trajectory sent has shown or been given up on - so it
+    /// starts from where the cursor is, not from where it was a report ago.
+    public func move(to target: ScreenPoint) async throws -> Moved {
+        let start = try await cursor()
+        let trajectory = randomness.draw { Trajectory(from: start, to: target, drawing: &$0) }
+        let began = timeline.now()
+        var tracking = Tracking(at: trajectory.start)
+        let ticks = Int((trajectory.duration / Self.tick).rounded(.up))
+        var steered = 0
+        for tick in stride(from: 1, through: ticks, by: 1) {
+            try Task.checkCancellation()
+            try await timeline.sleep(began + Self.tick * tick)
+            tracking.saw(try await cursor(), on: tick)
+            let report = tracking.report(toward: trajectory.point(after: Self.tick * tick))
+            // A tick whose share of the path is under half a count sends nothing, as a
+            // still mouse does; what it leaves the next tick takes up.
+            guard report != .none else { continue }
+            try await mouse.move(by: report)
+            tracking.sent(report, on: tick)
+            steered += 1
+        }
+        let deadline = ContinuousClock.now + Self.settle
+        while !tracking.unseen.isEmpty, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(1))
+            tracking.saw(try await cursor(), on: ticks)
+        }
+        var slot = began + Self.tick * ticks
+        let closing = try await home(on: trajectory.target) {
+            slot += Self.tick
+            try await timeline.sleep(slot)
+        }
+        return Moved(planned: trajectory.duration, steered: steered, closing: closing)
+    }
+
+    /// Moves the cursor to `target` by the closed loop alone, its reports as fast as the
+    /// cursor shows them, and answers with how many reports it took. `vhid play` homes this
+    /// way before a click; the verbs reach it through `move`.
+    @discardableResult
+    public func home(on target: ScreenPoint) async throws -> Int {
+        try await home(on: target) {}
+    }
+
+    /// The closed loop, waiting on `pace` before each report.
     ///
     /// Within half a point on each axis where the device can do that, and otherwise as
     /// near as one count of its motion puts it: a mouse whose smallest report moves three
@@ -175,8 +266,7 @@ public struct Pointer: Sendable {
     /// decide this with, and what happened is exactly the right thing.
     /// `aMoveEndsBesideTheTargetRatherThanOscillatingPastIt` holds it over four gains and
     /// six remainders. [LAW:verifiable-goals]
-    @discardableResult
-    public func move(to target: ScreenPoint) async throws -> Int {
+    func home(on target: ScreenPoint, pace: () async throws -> Void) async throws -> Int {
         var at = try await cursor()
         var gain = Gain.assumed
         var stalls = 0
@@ -184,6 +274,7 @@ public struct Pointer: Sendable {
             try Task.checkCancellation()
             let step = Self.step(from: at, to: target, gain: gain)
             guard step != .none else { return reports }
+            try await pace()
             try await mouse.move(by: step)
             let landed = try await settled(from: at)
             gain = Self.gain(after: step, from: at, to: landed, previous: gain)
@@ -216,14 +307,14 @@ public struct Pointer: Sendable {
     /// the button down and one with everything up, each awaited.
     public func click(at point: ScreenPoint, button: Button, times: Clicks) async throws -> Click {
         do {
-            let reports = try await move(to: point)
+            let moved = try await move(to: point)
             let pressed = try await cursor()
             for _ in 0..<times.rawValue {
                 try Task.checkCancellation()
                 try await mouse.down(button)
                 try await mouse.releaseAll()
             }
-            return Click(at: pressed, reports: reports)
+            return Click(at: pressed, moved: moved)
         } catch {
             throw PointingStopped(cause: error, unreleased: await release())
         }
@@ -242,7 +333,7 @@ public struct Pointer: Sendable {
     public static let notchRest: Duration = .milliseconds(200)
 
     /// Moves to `point` and rolls the wheel there one notch at a time, a report each,
-    /// resting `notchRest` on `clock` after every one. Vertical positive away from the hand,
+    /// resting `notchRest` after every one, and answers with the move there. Vertical positive away from the hand,
     /// horizontal positive to the right; a notch carries one count on each axis that has
     /// any left, so both axes roll together until the shorter is done.
     ///
@@ -256,14 +347,15 @@ public struct Pointer: Sendable {
     /// as it is, and the device has no opinion about how far a wheel rolls. A roll that is
     /// longer than its caller wanted is stopped by cancelling it, which this loop asks
     /// about once per notch.
-    public func scroll<C: Clock>(at point: ScreenPoint, vertical: Int, horizontal: Int, clock: C) async throws where C.Duration == Duration {
+    public func scroll(at point: ScreenPoint, vertical: Int, horizontal: Int) async throws -> Moved {
         do {
-            try await move(to: point)
+            let moved = try await move(to: point)
             for notch in 0..<max(vertical.magnitude, horizontal.magnitude) {
                 try Task.checkCancellation()
                 try await mouse.scroll(by: Scroll(vertical: Self.count(vertical, at: notch), horizontal: Self.count(horizontal, at: notch)))
-                try await clock.sleep(for: Self.notchRest)
+                try await timeline.sleep(timeline.now() + Self.notchRest)
             }
+            return moved
         } catch {
             throw PointingStopped(cause: error, unreleased: await release())
         }
@@ -275,19 +367,20 @@ public struct Pointer: Sendable {
         Count(clamping: notch < total.magnitude ? total.signum() : 0)
     }
 
-    /// A drag that finished: where the button went down, where it came up, and how many
-    /// motion reports the whole of it took. Both places are read back, for the reason
+    /// A drag that finished: where the button went down, where it came up, and the move
+    /// to the first and the carry to the second. Both places are read back, for the reason
     /// `Click.at` is. [FRAMING:representation]
     public struct Drag: Equatable, Sendable {
         public let from: ScreenPoint
         public let to: ScreenPoint
-        public let reports: Int
+        public let approach: Moved
+        public let carry: Moved
     }
 
     /// Moves to `start`, holds `button` down there, moves to `end` with it held, and lets
     /// every button go.
     ///
-    /// The carry is the same loop as any move: the device's motion reports carry whatever
+    /// The carry is the same trajectory as any move: the device's motion reports carry whatever
     /// buttons it is holding, so a move with a button down is a drag to macOS and needs
     /// nothing of its own. The release is `releaseAll` rather than the one button, for the
     /// reason `PointingDevice` has no `up`. [LAW:composability]
@@ -299,7 +392,7 @@ public struct Pointer: Sendable {
             let carry = try await move(to: end)
             let released = try await cursor()
             try await mouse.releaseAll()
-            return Drag(from: pressed, to: released, reports: approach + carry)
+            return Drag(from: pressed, to: released, approach: approach, carry: carry)
         } catch {
             throw PointingStopped(cause: error, unreleased: await release())
         }

@@ -29,7 +29,7 @@ import Testing
 
     private static func scroll(vertical: Int, horizontal: Int, clock: ManualClock = ManualClock(), on devices: Devices) async throws -> String {
         try await ScrollCommand.scroll(at: at, vertical: vertical, horizontal: horizontal, holding: .none,
-                                       with: Pointer(mouse: devices.mouse, cursor: { at }), devices.keyboard, clock: clock)
+                                       with: Pointer(mouse: devices.mouse, cursor: { at }, clock: clock, randomness: RandomSource(seed: 1)), devices.keyboard)
     }
 
     private static func only(_ export: EventExport) throws -> [String: Any] {
@@ -66,7 +66,11 @@ import Testing
         #expect(counts["scroll_notches_vertical"] == 3)
         #expect(counts["scroll_notches_horizontal"] == 2)
         #expect(counts["mouse_reports"] == 3)
-        #expect(record["attributes"] as? [String: Int] == ["notch_rest_ms": 200])
+        let attributes = try #require(record["attributes"] as? [String: Any])
+        #expect(attributes["notch_rest_ms"] as? Int == 200)
+        #expect(attributes["seed"] is String)
+        // The pointer was already on its point, so the move there drew a path of no length.
+        #expect(attributes["paths"] as? [[String: Double]] == [["planned_ms": 0, "steered_reports": 0, "closing_reports": 0]])
     }
 
     /// The cancel lands inside the second rest, from the task the roll runs in, so the roll

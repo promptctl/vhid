@@ -60,8 +60,11 @@ both omissions are deliberate:
   ([`Input/Typist.swift`](../Sources/Input/Typist.swift),
   [`KeyboardLayouts/`](../Sources/KeyboardLayouts)).
 - *Positions* aren't something a mouse can say. It reports movement, and macOS
-  accelerates that movement. So the CLI steers in a loop: send a delta, read the cursor
-  back, repeat ([`Input/Pointer.swift`](../Sources/Input/Pointer.swift)). Replay can't
+  accelerates that movement. So the CLI steers: a report every 8 ms along a person's
+  trajectory, each aimed from where the cursor was read, then a closed loop that sends a
+  delta, reads the cursor back and repeats until it lands
+  ([`Input/Pointer.swift`](../Sources/Input/Pointer.swift),
+  [design/human.md](design/human.md)). Replay can't
   read back between recorded moves that arrive milliseconds apart, so it steers from an
   acceleration table measured once before the clock starts
   ([`Input/Steering.swift`](../Sources/Input/Steering.swift),

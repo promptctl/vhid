@@ -23,6 +23,11 @@ struct Devices {
     let mouse: any Mouse
     let cursor: @Sendable () async throws -> ScreenPoint
     let front: @Sendable () async throws -> FrontApp?
+    /// The pointer this mouse is steered by, reading the cursor back after every report -
+    /// which is the only place the truth about where the pointer went lives, since macOS
+    /// accelerates the counts the device sends. One per opening, so a verb's moves draw
+    /// from one seed, and that seed is on its record. [LAW:nothing-unseen]
+    let pointer: Pointer
 
     /// Runs `body` with the devices over a connection to this installation's daemon, and
     /// hands them back when it returns.
@@ -47,10 +52,13 @@ struct Devices {
         // [LAW:nothing-unseen] Every report a verb sends passes here, so here is where they
         // are counted, from zero: a verb that opened the devices and sent nothing says so.
         for tally in Tally.allCases { Invocation.count(tally, by: 0) }
+        let mouse = TalliedMouse(mouse: QueuedMouse(pointing: helper.mouse, queue: queue))
+        let cursor = cursor(helper, on: queue)
+        let randomness = RandomSource(seed: UInt64.random(in: .min ... .max))
+        Invocation.set(.seed, .string(String(randomness.seed, radix: 16)))
         let devices = Devices(keyboard: TalliedKeyboard(keyboard: QueuedKeyboard(keyboard: helper.keyboard, queue: queue)),
-                              mouse: TalliedMouse(mouse: QueuedMouse(pointing: helper.mouse, queue: queue)),
-                              cursor: cursor(helper, on: queue),
-                              front: front(helper, on: queue))
+                              mouse: mouse, cursor: cursor, front: front(helper, on: queue),
+                              pointer: Pointer(mouse: mouse, cursor: cursor, clock: ContinuousClock(), randomness: randomness))
         let done: T
         do {
             done = try await body(devices)
@@ -78,11 +86,6 @@ struct Devices {
 
     /// The typist these keys are typed by.
     var typist: Typist { Typist(keyboard: keyboard) }
-
-    /// The pointer this mouse is steered by, reading the cursor back after every report -
-    /// which is the only place the truth about where the pointer went lives, since macOS
-    /// accelerates the counts the device sends.
-    var pointer: Pointer { Pointer(mouse: mouse, cursor: cursor) }
 
     /// The app in front, asked once the daemon has answered that the devices are up.
     ///

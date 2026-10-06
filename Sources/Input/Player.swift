@@ -187,14 +187,14 @@ public struct Player<C: Clock> where C.Duration == Duration {
         // The act being waited on or played, which a stop names.
         var line: Int?
         do {
-            var reports = try await pointer.move(to: play.start)
+            var reports = try await pointer.home(on: play.start)
             // Measured before the clock starts, from the start, and the cursor brought back
             // to it after. [LAW:no-ambient-temporal-coupling] The table exists before any
             // at act can ask for it.
             var course: Course?
             if let calibration = play.calibration {
                 let steering = try await pointer.calibrate(calibration, from: play.start, clock: clock)
-                reports += try await pointer.move(to: play.start)
+                reports += try await pointer.home(on: play.start)
                 // Read back: the loop stops beside a point it cannot land on.
                 course = Course(steering: steering, interval: calibration.interval, at: try await pointer.cursor())
             }
@@ -256,7 +256,7 @@ public struct Player<C: Clock> where C.Duration == Duration {
                 case .steer(let point):
                     let current = try steered(course)
                     let began = clock.now
-                    try await pointer.move(to: point)
+                    try await pointer.home(on: point)
                     delay += began.duration(to: clock.now)
                     course = Course(steering: current.steering, interval: current.interval, at: try await pointer.cursor())
                 case .at(let point):

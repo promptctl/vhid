@@ -39,6 +39,7 @@ struct DragCommand: AsyncParsableCommand {
     /// The verb itself, over a pointer from anywhere. [LAW:decomposition]
     static func drag(from start: ScreenPoint, to end: ScreenPoint, button: Button, holding held: HeldModifiers, with pointer: Pointer, _ keyboard: any Keyboard) async throws -> String {
         let drag = try await pointer.holding(held, on: keyboard) { try await $0.drag(from: start, to: end, button: button) }
-        return "dragged \(button)\(holding(held)) from \(drag.from) to \(drag.to) after \(counted(drag.reports, "motion report"))"
+        Invocation.moved([drag.approach, drag.carry])
+        return "dragged \(button)\(holding(held)) from \(drag.from) to \(drag.to) after \(counted(drag.approach.reports + drag.carry.reports, "motion report"))"
     }
 }
