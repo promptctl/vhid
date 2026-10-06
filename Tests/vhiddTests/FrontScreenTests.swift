@@ -11,12 +11,10 @@ import Testing
         let session: FrontScreen.Session
         let log: Log
         var fails = false
-        var refuses = false
         init(_ session: FrontScreen.Session, _ log: Log) { self.session = session; self.log = log }
         func cursor() throws -> (x: Double, y: Double) {
             log.add("read in \(session.audit)")
             if fails { throw FrontScreen.NobodyInFront() }
-            if refuses { throw WindowServerRefused(session: session, question: .cursor) }
             return (Double(session.audit), 1)
         }
         func displays() throws -> [CGRect] {
@@ -66,21 +64,6 @@ import Testing
         #expect(try cursor.cursor() == (100003, 1))
         #expect(readers.count == 2)
         #expect(log.all == ["read in 100003", "read in 100003", "stop 100003", "read in 100003"])
-    }
-
-    /// A window server that would not answer is not the reader failing: the same reader is
-    /// asked next time.
-    @Test func aRefusalKeepsTheReader() throws {
-        let log = Log()
-        var readers: [Reader] = []
-        let cursor = FrontScreen(front: { bmf }, start: { let reader = Reader($0, log); readers.append(reader); return reader })
-        _ = try cursor.cursor()
-        readers[0].refuses = true
-        #expect(throws: WindowServerRefused.self) { try cursor.cursor() }
-        readers[0].refuses = false
-        #expect(try cursor.cursor() == (100003, 1))
-        #expect(readers.count == 1)
-        #expect(log.all == ["read in 100003", "read in 100003", "read in 100003"])
     }
 
     @Test func nobodyInFrontIsSaidAndStartsNothing() {

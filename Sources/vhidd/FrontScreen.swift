@@ -68,13 +68,10 @@ final class FrontScreen: ScreenSource, @unchecked Sendable {
         let reader = try reader(for: session)
         do {
             return try question(reader)
-        } catch let refused as WindowServerRefused {
-            // The reader answered; it was the window server that would not. Kept for the
-            // next read, which may be answered. [LAW:no-silent-failure] Said all the same.
-            logFailure("\(refused)")
-            throw refused
         } catch {
             // A reader that failed once is not asked again: the next read starts another.
+            // A refusal included, since a child tied to its session cannot tell a window
+            // server that declined once from a connection to it that will never answer.
             reader.stop()
             reading = nil
             logFailure("the screen reader in \(session) failed: \(error)")
@@ -122,8 +119,8 @@ final class FrontScreen: ScreenSource, @unchecked Sendable {
     }
 }
 
-/// A reader that is well, asked a question the window server in its session would not
-/// answer: not a reason to start another.
+/// A reader that answered, saying the window server in its session would not: told apart
+/// from a reader that failed so the log names the window server.
 struct WindowServerRefused: Error, CustomStringConvertible {
     let session: FrontScreen.Session
     let question: ScreenQuestion
