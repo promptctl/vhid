@@ -13,9 +13,11 @@ the macOS version and the hardware, then how each result was shown, so you can r
 | [trackpad.md](trackpad.md) | Could vhid present a virtual trackpad instead? (Not without an entitlement from Apple.) |
 | [menus.md](menus.md) | Which route reaches a menu item that has no shortcut: the Help menu's search, clicking down the menus, or an App Shortcut? |
 | [browser.md](browser.md) | How far does finding text with `eyes` and clicking it with `vhid` get in Safari, Chrome and Firefox? |
+| [human.md](human.md) | How does vhid's input look to a page next to a person's, and what timing and path do the verbs follow to match? |
 
 The probes the notes ran are kept beside them: `trackpad-probe.c` and
-`trackpad-mtwatch.c` for the trackpad note, `browser-probe.html` for the browser note.
+`trackpad-mtwatch.c` for the trackpad note, `browser-probe.html` for the browser note,
+`human-probe.html`, `human-probe.py` and `human-cursor-poll.swift` for the human note.
 
 A finding a later version could change is dated, so check the date against the code
 before you rely on it. When a change rests on a new measurement, add a note in the same
