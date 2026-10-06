@@ -65,15 +65,21 @@ final class FrontScreen: ScreenSource, @unchecked Sendable {
     private func read<Answer>(_ question: (any Reader) throws -> Answer) throws -> Answer {
         lock.lock(); defer { lock.unlock() }
         let session = try front()
-        let reader = try reader(for: session)
+        // [LAW:nothing-unseen] A reader that could not start is logged as one that failed
+        // a question is: either way the client hears it, and only the log keeps it.
         do {
-            return try question(reader)
+            let reader = try reader(for: session)
+            do {
+                return try question(reader)
+            } catch {
+                // A reader that failed once is not asked again: the next read starts another.
+                // A refusal included, since a child tied to its session cannot tell a window
+                // server that declined once from a connection to it that will never answer.
+                reader.stop()
+                reading = nil
+                throw error
+            }
         } catch {
-            // A reader that failed once is not asked again: the next read starts another.
-            // A refusal included, since a child tied to its session cannot tell a window
-            // server that declined once from a connection to it that will never answer.
-            reader.stop()
-            reading = nil
             logFailure("the screen reader in \(session) failed: \(error)")
             throw error
         }
@@ -185,9 +191,9 @@ final class ChildReader: FrontScreen.Reader {
         }
     }
 
-    /// This very executable, reading in `session`.
+    /// This very executable, reading in `session`: this build, or none.
     convenience init(in session: FrontScreen.Session) throws {
-        try self.init(in: session, executable: Bundle.main.executablePath!, arguments: [screenReaderFlag, String(session.audit)])
+        try self.init(in: session, executable: RunningBuild.executable(), arguments: [screenReaderFlag, String(session.audit)])
     }
 
     struct Failed: Error, CustomStringConvertible {

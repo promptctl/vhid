@@ -66,6 +66,18 @@ import Testing
         #expect(log.all == ["read in 100003", "read in 100003", "stop 100003", "read in 100003"])
     }
 
+    /// A reader that could not start is the daemon's failure as much as one that failed a
+    /// read: kept for a client that asks after the fact, and the next read tries again.
+    @Test func aReaderThatCouldNotStartIsTheLastFailure() throws {
+        let replaced = RunningBuild.Replaced(path: "/\(UUID())/vhidd")
+        var starts = 0
+        let cursor = FrontScreen(front: { bmf }, start: { _ in starts += 1; throw replaced })
+        #expect(throws: RunningBuild.Replaced.self) { try cursor.cursor() }
+        #expect(lastFailure.current?.text == "the screen reader in bmf's session 100003 failed: \(replaced)")
+        #expect(throws: RunningBuild.Replaced.self) { try cursor.cursor() }
+        #expect(starts == 2)
+    }
+
     @Test func nobodyInFrontIsSaidAndStartsNothing() {
         let cursor = FrontScreen(front: { throw FrontScreen.NobodyInFront() }, start: { _ in Issue.record("started a reader"); throw FrontScreen.NobodyInFront() })
         #expect(throws: FrontScreen.NobodyInFront.self) { try cursor.cursor() }
