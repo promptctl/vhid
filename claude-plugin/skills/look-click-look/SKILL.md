@@ -7,7 +7,7 @@ description: Operate apps on this Mac through its real screen, keyboard and mous
 
 vhid and eyes are two MCP servers that work as a pair. eyes reads the screen: what is in front, and where text is. vhid drives a virtual keyboard and mouse that macOS takes for hardware. A client with only one of them is half the pair; both come with vhid, served by `vhid mcp` and `eyes mcp`.
 
-Every point either server prints or takes is the same screen point. The point eyes `find` prints is the point vhid `click` takes, as printed: no scaling, no offset, negative on a display left of or above the main one.
+Every point either server prints or takes is the same screen point. The point eyes `find` prints is the point vhid `click` takes, as printed: no scaling, no offset, negative on a display left of or above the main one. Beside each point, eyes prints the box it is the centre of, as x,y,width,height in the same points: the form eyes' `rect` takes.
 
 Neither server decides anything. `click` presses whatever is at the point it is given, `type` types into whatever has keyboard focus, and `find` reports what is on screen, not whether an act did what was meant. So work in a loop:
 
@@ -23,8 +23,9 @@ Done means a look after the act showed the change. An act's answer says the act 
    the text you want says where it is - `{"text": "Save"}`, narrowed with `window` or
    `display` when the text could be in more than one place. `read` gives every run of
    text in a window in reading order, for when you do not yet know what to look for.
-   Each row is the point, the text, and what it is: the element's role, such as
-   `AXButton` or `AXLink`, or `pixels` for text drawn with no element behind it.
+   Each row is the point, the box it is the centre of, the text, and what it is: the
+   element's role, such as `AXButton` or `AXLink`, or `pixels` for text drawn with no
+   element behind it.
    In a browser, pass `page` with the window's id instead of `window`: it reads the
    web page alone, so a bookmark or toolbar button with the same name is not a match.
    When the same label appears several times, such as a Remove button on every row,

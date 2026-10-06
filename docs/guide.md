@@ -127,7 +127,7 @@ nothing. [design/replay.md](design/replay.md) explains how the format was chosen
 ```sh
 eyes windows                            # every window: its id, its app, where it is
 eyes displays                           # every display: its id, where it is, its scale
-eyes find Save                          # where "Save" is on screen: the point, then the text
+eyes find Save                          # where "Save" is on screen: the point, its box, then the text
 eyes find Remove --near Beta            # several "Remove" buttons: the one beside "Beta" first
 eyes read --window 4127                 # all the text in one window, in reading order
 eyes find Saving --until absent --timeout 30   # wait until "Saving" has gone

@@ -22,7 +22,7 @@ enum Help {
     static let edits = "Match a run within this many single-character edits of the text, for recogniser slips."
     static let display = "Read this display, by its window-server id, which `eyes displays` lists and every scope line names. Defaults to the main display."
     static let window = "Read this window's bounds, by the id `eyes windows` prints."
-    static let rect = "Read this rectangle: x,y,width,height in the points vhid clicks."
+    static let rect = "Read this rectangle: x,y,width,height in the points vhid clicks, the form each row's box prints in."
     static let page = "Read the web page this window shows, by the id `eyes windows` prints: the page alone,"
         + " not the browser's toolbar and bookmarks around it. Needs Accessibility, which finds the page."
     static let near = "Order the matches by how close each sits to a run containing this text, nearest first:"
@@ -76,7 +76,9 @@ struct Where: ParsableArguments {
     @Option(help: .init(stringLiteral: Help.window))
     var window: UInt32?
 
-    @Option(help: .init(stringLiteral: Help.rect))
+    /// Takes the next argument whatever it starts with: a box on a display left of or
+    /// above the main one starts with a minus, which would otherwise read as a flag.
+    @Option(parsing: .unconditional, help: .init(stringLiteral: Help.rect))
     var rect: String?
 
     @Option(help: .init(stringLiteral: Help.page))
@@ -185,12 +187,12 @@ enum Report {
             reach(s.reach, grantNote),
             reading.outcome.misses.isEmpty ? nil : "nearest follow",
         ]
-        return clauses.compactMap { $0 }.joined(separator: "; ") + ". Points are centres, vhid click coordinates."
+        return clauses.compactMap { $0 }.joined(separator: "; ") + ". Each row's point is the centre of its box, x,y,width,height, in vhid click coordinates."
     }
 
-    /// One run per row: the centre a click lands on, the text, and what it is - the role
-    /// the tree gave it, or `pixels` for text only the pixels reader saw, which has none.
-    /// The nearest rows add how many edits off they were.
+    /// One run per row: the centre a click lands on, the box it is the centre of, the
+    /// text, and what it is - the role the tree gave it, or `pixels` for text only the
+    /// pixels reader saw, which has none. The nearest rows add how many edits off they were.
     static func rows(_ outcome: Outcome) -> [String] {
         switch outcome {
         case .matched(let m): m.all.map(row)
@@ -199,7 +201,16 @@ enum Report {
     }
 
     private static func row(_ found: Found) -> String {
-        "\(point(found.frame.centre))\t\(found.text)\t\(found.source.role?.rawValue ?? "pixels")"
+        "\(point(found.frame.centre))\t\(box(found.frame))\t\(found.text)\t\(found.source.role?.rawValue ?? "pixels")"
+    }
+
+    /// A frame as `rect` takes it, so a box is copied into a narrower look as printed.
+    /// Whole points rounded outward, the smallest such box covering the frame, which is
+    /// what keeps the rounded centre beside it inside it. [LAW:one-source-of-truth]
+    static func box(_ r: ScreenRect) -> String {
+        let (x, y) = (r.x.rounded(.down), r.y.rounded(.down))
+        let (right, bottom) = ((r.x + r.width).rounded(.up), (r.y + r.height).rounded(.up))
+        return "\(Int(x)),\(Int(y)),\(Int(right - x)),\(Int(bottom - y))"
     }
 
     private static func wanted(_ match: Match) -> String {
