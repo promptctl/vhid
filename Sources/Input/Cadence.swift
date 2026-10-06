@@ -29,9 +29,9 @@ public struct Cadence: Sendable, Equatable {
     /// A practised typist on a Mac whose held key repeats after `keyRepeatDelay`.
     ///
     /// The dwell is cut off at 200 ms, and lower, at 80% of the delay, on a Mac set shorter
-    /// than 250 ms, as `defaults write -g InitialKeyRepeat` can: a long draw, or a key-up
-    /// sent late behind a slow acknowledgement, never holds a key long enough to type its
-    /// character twice. Below that the whole distribution shrinks with it, as `Hand`'s does.
+    /// than 250 ms, as `defaults write -g InitialKeyRepeat` can from the next login: a long
+    /// draw, or a key-up sent late behind a slow acknowledgement, never holds a key long
+    /// enough to type its character twice. Below that the whole distribution shrinks with it, as `Hand`'s does.
     public init(keyRepeatDelay: Duration) {
         let dwell = Normal(95, 25, within: 40 ... 200)
         let longest = Self.withinRepeat * (keyRepeatDelay / .milliseconds(1))
