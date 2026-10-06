@@ -1,3 +1,4 @@
+import Foundation
 import Input
 import Keystrokes
 import Pointing
@@ -160,7 +161,7 @@ final class FakeMouse: Mouse {
     var pointer: Pointer { pointer(on: ManualClock()) }
 
     /// That pointer timed on `clock`, for a test that reads the time back.
-    func pointer(on clock: ManualClock) -> Pointer { Pointer(mouse: self, cursor: cursor, clock: clock, randomness: RandomSource(seed: 1), traced: { _ in }) }
+    func pointer(on clock: ManualClock) -> Pointer { Pointer(mouse: self, cursor: cursor, displays: { .vast }, clock: clock, randomness: RandomSource(seed: 1), traced: { _ in }) }
 
     /// A keyboard beside this mouse, posting into the same log under the same `refused`, so
     /// a run over both devices reads back as one sequence and can be refused at any report
@@ -233,5 +234,11 @@ final class SteadyGainMouse: Mouse {
         }
     }
 
-    var pointer: Pointer { Pointer(mouse: self, cursor: { self.position }, clock: ManualClock(), randomness: RandomSource(seed: 1), traced: { _ in }) }
+    var pointer: Pointer { Pointer(mouse: self, cursor: { self.position }, displays: { .vast }, clock: ManualClock(), randomness: RandomSource(seed: 1), traced: { _ in }) }
+}
+
+extension Displays {
+    /// A screen whose edges are further than any test's path goes, for tests that are not
+    /// about the edges.
+    static let vast = Displays(frames: [CGRect(x: -100_000, y: -100_000, width: 200_000, height: 200_000)])!
 }

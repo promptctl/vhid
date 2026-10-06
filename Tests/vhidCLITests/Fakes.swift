@@ -105,3 +105,9 @@ extension EventExport {
         }
     }
 }
+
+extension Displays {
+    /// A screen whose edges are further than any test's path goes, for tests that are not
+    /// about the edges.
+    static let vast = Displays(frames: [CGRect(x: -100_000, y: -100_000, width: 200_000, height: 200_000)])!
+}

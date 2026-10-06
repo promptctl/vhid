@@ -55,6 +55,9 @@ public struct Pointer: Sendable {
     public let mouse: any Mouse
     /// Where the cursor is now, in the same coordinates as the targets.
     public let cursor: @Sendable () async throws -> ScreenPoint
+    /// Where the displays are, read at the start of every move, so a path is kept on the
+    /// layout as it is then.
+    public let displays: @Sendable () async throws -> Displays
 
     /// The most motion reports one move may take. Each halves the remaining distance or
     /// better once the gain is known, so a screen's width takes a handful; the cap is for
@@ -84,10 +87,11 @@ public struct Pointer: Sendable {
     /// How often a moving pointer reports: every 8 ms, a 125 Hz USB mouse's rate.
     public static let tick: Duration = .milliseconds(8)
 
-    public init<C: Clock>(mouse: any Mouse, cursor: @escaping @Sendable () async throws -> ScreenPoint, clock: C,
-                          randomness: RandomSource, traced: @escaping @Sendable (Moved) -> Void) where C.Duration == Duration {
+    public init<C: Clock>(mouse: any Mouse, cursor: @escaping @Sendable () async throws -> ScreenPoint, displays: @escaping @Sendable () async throws -> Displays,
+                          clock: C, randomness: RandomSource, traced: @escaping @Sendable (Moved) -> Void) where C.Duration == Duration {
         self.mouse = mouse
         self.cursor = cursor
+        self.displays = displays
         timeline = Timeline(clock)
         self.randomness = randomness
         self.traced = traced
@@ -119,12 +123,14 @@ public struct Pointer: Sendable {
         public let moved: Moved
     }
 
-    /// A move: how long its trajectory was drawn to take, the motion reports that steered it
-    /// along that and then homed it onto the target, and how many steered reports the
-    /// cursor never showed. [LAW:nothing-unseen] How well the steering landed is the closing
-    /// count; how well it was tracked is `lost`.
+    /// A move: how long its trajectory was drawn to take, how much of its drawn bow the
+    /// displays let it keep, the motion reports that steered it along that and then homed
+    /// it onto the target, and how many steered reports the cursor never showed.
+    /// [LAW:nothing-unseen] How well the steering landed is the closing count; how well it
+    /// was tracked is `lost`; how near an edge it ran is `kept` below one.
     public struct Moved: Equatable, Sendable {
         public let planned: Duration
+        public let kept: Double
         public let steered: Int
         public let closing: Int
         public let lost: Int
@@ -200,7 +206,7 @@ public struct Pointer: Sendable {
     }
 
     /// Moves the cursor to `target` as a person's hand would, and lands it there as `home`
-    /// does: along a `Trajectory` drawn from `randomness`, a report every `tick`, each aimed
+    /// does: along a `Trajectory` drawn from `randomness` and kept on `displays`, a report every `tick`, each aimed
     /// at where the trajectory is at that tick's deadline from where the cursor was read and
     /// the reports it has not yet shown. The deadlines are counted from the start, so a late
     /// report is followed by a larger one rather than pushing the rest of the path back.
@@ -215,12 +221,13 @@ public struct Pointer: Sendable {
     @discardableResult
     public func move(to target: ScreenPoint) async throws -> Moved {
         let start = try await cursor()
-        let trajectory = randomness.draw { Trajectory(from: start, to: target, drawing: &$0) }
+        let displays = try await displays()
+        let trajectory = randomness.draw { Trajectory(from: start, to: target, within: displays, drawing: &$0) }
         let began = timeline.now()
         var tracking = Tracking(at: trajectory.start)
         let ticks = Int((trajectory.duration / Self.tick).rounded(.up))
         var steered = 0, closing = 0
-        var moved: Moved { Moved(planned: trajectory.duration, steered: steered, closing: closing, lost: tracking.lost) }
+        var moved: Moved { Moved(planned: trajectory.duration, kept: trajectory.kept, steered: steered, closing: closing, lost: tracking.lost) }
         defer { traced(moved) }
         for tick in stride(from: 1, through: ticks, by: 1) {
             try Task.checkCancellation()
@@ -456,6 +463,16 @@ public struct CursorUnreadable: Error, CustomStringConvertible {
     public init() {}
 
     public var description: String { "the window server would not say where the cursor is" }
+}
+
+/// The window server listed no display a cursor could be on: none at all, or one with no
+/// area.
+public struct DisplaysUnreadable: Error, CustomStringConvertible {
+    public let frames: [CGRect]
+
+    public init(frames: [CGRect]) { self.frames = frames }
+
+    public var description: String { "the window server listed no displays a path could be kept on: \(frames)" }
 }
 
 /// A pointing run that stopped: vhidd went quiet, the caller cancelled it, or the

@@ -59,7 +59,8 @@ struct Devices {
         Invocation.set(.seed, .string(String(randomness.seed, radix: 16)))
         let devices = Devices(keyboard: TalliedKeyboard(keyboard: QueuedKeyboard(keyboard: helper.keyboard, queue: queue)),
                               mouse: mouse, cursor: cursor, front: front(helper, on: queue),
-                              pointer: Pointer(mouse: mouse, cursor: cursor, clock: ContinuousClock(), randomness: randomness, traced: Invocation.moved))
+                              pointer: Pointer(mouse: mouse, cursor: cursor, displays: displays(helper, on: queue), clock: ContinuousClock(),
+                                               randomness: randomness, traced: Invocation.moved))
         let done: T
         do {
             done = try await body(devices)
@@ -112,6 +113,16 @@ struct Devices {
             let at = try await queue.run { try helper.cursor() }
             guard let point = ScreenPoint(x: at.x, y: at.y) else { throw CursorUnreadable() }
             return point
+        }
+    }
+
+    /// The displays as the daemon reads them, in the session in front, for the reason the
+    /// cursor is read there. [LAW:single-enforcer] Every move reads them here.
+    static func displays(_ helper: HelperConnection, on queue: DeviceQueue) -> @Sendable () async throws -> Displays {
+        {
+            let frames = try await queue.run { try helper.displays() }
+            guard let displays = Displays(frames: frames) else { throw DisplaysUnreadable(frames: frames) }
+            return displays
         }
     }
 }

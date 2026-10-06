@@ -72,7 +72,7 @@ import Testing
     @Test func aClickPostsOneDownAndOneUpPerClick() async throws {
         let mouse = FakeMouse(at: Self.origin)
         let click = try await mouse.pointer.click(at: Self.origin, button: .middle, times: Clicks(rawValue: 3)!)
-        #expect(click == Pointer.Click(at: Self.origin, moved: Pointer.Moved(planned: .zero, steered: 0, closing: 0, lost: 0)))
+        #expect(click == Pointer.Click(at: Self.origin, moved: Pointer.Moved(planned: .zero, kept: 1, steered: 0, closing: 0, lost: 0)))
         #expect(mouse.log == ["down 3", "up", "down 3", "up", "down 3", "up"])
     }
 

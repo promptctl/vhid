@@ -69,7 +69,7 @@ verb at once, unrecorded, and an MCP call `vhid mcp` was running when it was sto
 names the signal too.
 
 ```json
-{"attributes":{"notch_rest_ms":200,"paths":[{"closing_reports":1,"lost_reports":0,"planned_ms":612.4,"steered_reports":71}],"seed":"9e3779b97f4a7c15"},"counts":{"keyboard_reports":0,"mouse_reports":82,"scroll_notches_horizontal":0,"scroll_notches_vertical":10},"duration_ms":2071.4,"entry":"cli","event":"scroll","outcome":"ok","service":"vhid","sink":"file","started_at":"2026-10-04T13:20:00.512Z","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736"}
+{"attributes":{"notch_rest_ms":200,"paths":[{"bow_kept":1,"closing_reports":1,"lost_reports":0,"planned_ms":612.4,"steered_reports":71}],"seed":"9e3779b97f4a7c15"},"counts":{"keyboard_reports":0,"mouse_reports":82,"scroll_notches_horizontal":0,"scroll_notches_vertical":10},"duration_ms":2071.4,"entry":"cli","event":"scroll","outcome":"ok","service":"vhid","sink":"file","started_at":"2026-10-04T13:20:00.512Z","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736"}
 ```
 
 `event` is the verb as it is typed (`scroll`, `driver state`), and an MCP call's is its
@@ -87,7 +87,9 @@ naming no tool is recorded as `tools/call`. An MCP call's
 A verb that opens the devices records `attributes.seed`, the hex seed every pointer move
 it makes is drawn from, and `attributes.paths` has one entry for each such move, in order,
 the move a failed verb stopped in included: `planned_ms` is how long its trajectory was
-drawn to take, `steered_reports` how many reports carried the cursor along it,
+drawn to take, `bow_kept` how much of its drawn curve it kept to stay clear of the
+displays' edges (1 for all of it, 0 for a straight line), `steered_reports` how many
+reports carried the cursor along it,
 `lost_reports` how many of those the cursor never showed, and `closing_reports` how many
 the closed loop took to land it after. `click`, `move` and `scroll` make one move and
 `drag` two.

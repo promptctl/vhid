@@ -270,6 +270,7 @@ extension Invocation {
     /// opens this, so no verb records its own moves. [LAW:single-enforcer]
     @Sendable static func moved(_ move: Pointer.Moved) {
         append(.object(["planned_ms": .double(move.planned / .milliseconds(1)),
+                        "bow_kept": .double(move.kept),
                         "steered_reports": .int(move.steered),
                         "closing_reports": .int(move.closing),
                         "lost_reports": .int(move.lost)]), to: .paths)

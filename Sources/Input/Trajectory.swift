@@ -10,6 +10,9 @@ public struct Trajectory: Sendable, Equatable {
     public let target: ScreenPoint
     /// How long the whole movement takes, by Fitts' law and a drawn pace.
     public let duration: Duration
+    /// How much of its drawn bow and aim off the line the path kept to stay on the
+    /// displays: one for all of it, zero for the straight line.
+    public let kept: Double
     /// The movement that gets most of the way.
     public let primary: Submovement
     /// The one that takes it the rest of the way, straight.
@@ -32,10 +35,32 @@ public struct Trajectory: Sendable, Equatable {
     /// How far its path bows to one side at the middle, as a fraction of D.
     static let bow = Normal(0, 0.03, within: -0.06 ... 0.06)
 
+    /// How near the displays' edges a bow may carry the path, in points, where the straight
+    /// line keeps further off: `width` again, a button's height of room. The steering
+    /// follows the path to within a few points, so the cursor stays clear of an edge it
+    /// does not mean to touch.
+    static let margin = width
+    /// The shares of the drawn deviation tried, most first, until one keeps the path on the
+    /// displays; none fitting leaves the straight line.
+    static let shares = stride(from: 1.0, to: 0.05, by: -0.1).map { $0 }
+    /// How many evenly spaced moments of the movement are checked against the displays:
+    /// a few milliseconds apart on the longest move, closer than the steering's ticks.
+    static let checks = 256
+
     /// A movement from `start` to `target` with every variable drawn from `generator`, in
     /// one fixed order whatever the distance, so one seed always means one movement.
     /// A movement under a point long takes no time: the closing loop has it all.
-    public init(from start: ScreenPoint, to target: ScreenPoint, drawing generator: inout some RandomNumberGenerator) {
+    ///
+    /// **The bow and the aim off the line are drawn whole and kept in part.** A path that
+    /// bows by up to a tenth of its length runs into the edge beside a target approached
+    /// along it: an auto-hidden Dock rises and covers the target, a corner fires, and while
+    /// the cursor is held at the edge the curve is learned from reports macOS clamped. So
+    /// the path keeps the largest of `shares` of its deviation under which, at every check,
+    /// it is no nearer an edge than the straight line is there, to within `margin`; a
+    /// straight line between two points on one display is on it, and the share is a value
+    /// rather than a branch, so a path far from every edge keeps it all.
+    /// [LAW:dataflow-not-control-flow]
+    public init(from start: ScreenPoint, to target: ScreenPoint, within displays: Displays, drawing generator: inout some RandomNumberGenerator) {
         let (pace, short, offLine, bow) = (Self.pace.draw(using: &generator), Self.short.draw(using: &generator),
                                            Self.offLine.draw(using: &generator), Self.bow.draw(using: &generator))
         let (dx, dy) = (target.x - start.x, target.y - start.y)
@@ -45,18 +70,35 @@ public struct Trajectory: Sendable, Equatable {
         // Along the line toward the target, and across it, as unit vectors; the zero vector
         // for a movement of no length, which then has no aim to set off either way.
         let (along, across) = distance > 0 ? ((dx / distance, dy / distance), (-dy / distance, dx / distance)) : ((0, 0), (0, 0))
-        let aim = (x: target.x - along.0 * short * distance + across.0 * offLine * distance,
-                   y: target.y - along.1 * short * distance + across.1 * offLine * distance)
+        func path(keeping share: Double) -> (primary: Submovement, correction: Submovement) {
+            let aim = (x: target.x - along.0 * short * distance + across.0 * offLine * share * distance,
+                       y: target.y - along.1 * short * distance + across.1 * offLine * share * distance)
+            return (Submovement(from: (start.x, start.y), to: aim, bow: bow * share * distance, duration: duration * Self.primaryShare),
+                    Submovement(from: aim, to: (target.x, target.y), bow: 0, duration: duration * (1 - Self.primaryShare)))
+        }
+        let moments = (0 ... Self.checks).map { duration * (Double($0) / Double(Self.checks)) }
+        let straight = path(keeping: 0)
+        let depths = moments.map { displays.depth(of: Self.point(after: $0, on: straight), upTo: Self.margin) }
+        let kept = Self.shares.first { share in
+            let bowed = path(keeping: share)
+            return zip(moments, depths).allSatisfy { moment, depth in
+                depth.map { displays.covers(Self.point(after: moment, on: bowed), by: $0) } ?? true
+            }
+        } ?? 0
         self.start = start
         self.target = target
         self.duration = duration
-        primary = Submovement(from: (start.x, start.y), to: aim, bow: bow * distance, duration: duration * Self.primaryShare)
-        correction = Submovement(from: aim, to: (target.x, target.y), bow: 0, duration: duration * (1 - Self.primaryShare))
+        self.kept = kept
+        (primary, correction) = path(keeping: kept)
     }
 
     /// Where the movement is `elapsed` after it began: the target from `duration` on.
     public func point(after elapsed: Duration) -> (x: Double, y: Double) {
-        elapsed < primary.duration ? primary.point(after: elapsed) : correction.point(after: elapsed - primary.duration)
+        Self.point(after: elapsed, on: (primary, correction))
+    }
+
+    private static func point(after elapsed: Duration, on path: (primary: Submovement, correction: Submovement)) -> Submovement.Point {
+        elapsed < path.primary.duration ? path.primary.point(after: elapsed) : path.correction.point(after: elapsed - path.primary.duration)
     }
 }
 

@@ -29,8 +29,11 @@ final class RecordingDevices: NSObject, ServedDevices, @unchecked Sendable {
     func releaseEverything(because reason: String) { lock.lock(); acts.append(reason); lock.unlock() }
 }
 
-/// A cursor that is always at one place, for seats whose tests never read it.
-struct FixedCursor: CursorSource {
+/// A screen whose cursor is always at one place over one display, for seats whose tests
+/// never read it.
+struct FixedScreen: ScreenSource {
     var at = (x: 12.5, y: 40.0)
-    func read() throws -> (x: Double, y: Double) { at }
+    var frames = [CGRect(x: 0, y: 0, width: 1920, height: 1080)]
+    func cursor() throws -> (x: Double, y: Double) { at }
+    func displays() throws -> [CGRect] { frames }
 }

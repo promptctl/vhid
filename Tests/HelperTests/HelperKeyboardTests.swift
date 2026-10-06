@@ -88,9 +88,13 @@ import Testing
             lock.lock(); pointing.append("cursor"); lock.unlock()
             respond { reply(812.5, 400, $0) }
         }
+        func displays(reply: @escaping ([NSNumber], Error?) -> Void) {
+            lock.lock(); pointing.append("displays"); lock.unlock()
+            respond { reply([0, 0, 1920, 1080, 1920, -200, 1280, 800].map { NSNumber(value: $0) }, $0) }
+        }
 
         func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
-            connection.exportedInterface = NSXPCInterface(with: HelperService.self)
+            connection.exportedInterface = .helper()
             connection.exportedObject = self
             connection.resume()
             return true
@@ -190,6 +194,15 @@ import Testing
         #expect(try helper.cursor() == (812.5, 400))
         try helper.leave()
         #expect(far.service.pointed == ["cursor"])
+    }
+
+    /// The displays cross the wire as four numbers each and arrive as rectangles, a display
+    /// above the main one's top included, and the read leaves the connection unspoken.
+    @Test func theDisplaysAreReadAsRectangles() throws {
+        let (helper, far) = helper(.acknowledge)
+        #expect(try helper.displays() == [CGRect(x: 0, y: 0, width: 1920, height: 1080), CGRect(x: 1920, y: -200, width: 1280, height: 800)])
+        try helper.leave()
+        #expect(far.service.pointed == ["displays"])
     }
 
     /// A service that neither answers nor hangs up is unreachable at the deadline, rather

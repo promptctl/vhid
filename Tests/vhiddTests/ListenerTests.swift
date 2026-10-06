@@ -67,7 +67,7 @@ import Testing
 
     private func serve(requiring requirement: String? = nil) throws -> Served {
         let devices = FakeDevices()
-        let delegate = Listener(readiness: .serving(devices), callers: try CallerIdentity(requirement: try requirement ?? OwnProcess.requirement()), cursor: FixedCursor())
+        let delegate = Listener(readiness: .serving(devices), callers: try CallerIdentity(requirement: try requirement ?? OwnProcess.requirement()), screen: FixedScreen())
         let listener = NSXPCListener.anonymous()
         listener.delegate = delegate
         listener.resume()

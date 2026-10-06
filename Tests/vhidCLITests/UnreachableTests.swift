@@ -53,10 +53,11 @@ import Testing
         func status(reply: @escaping (NSNumber?, Error?) -> Void) { respond { reply(nil, $0) } }
         func lastFailure(reply: @escaping (String?, Date?) -> Void) { reply(nil, nil) }
         func cursor(reply: @escaping (Double, Double, Error?) -> Void) { respond { reply(0, 0, $0) } }
+        func displays(reply: @escaping ([NSNumber], Error?) -> Void) { reply([0, 0, 1920, 1080].map { NSNumber(value: $0) }, nil) }
 
         func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
             guard case .refusing = answer else { return false }
-            connection.exportedInterface = NSXPCInterface(with: HelperService.self)
+            connection.exportedInterface = .helper()
             connection.exportedObject = self
             connection.resume()
             return true
@@ -72,7 +73,7 @@ import Testing
         let at = ScreenPoint(x: 5, y: 5)!
         let typed = await failure(against: far) { try await TypeCommand.type("ab", on: VerbTests.us, into: .anywhere, with: $0.typist, front: $0.front) }
         let clicked = await failure(against: far) {
-            try await ClickCommand.click(at: at, button: .left, times: .single, holding: .none, with: Pointer(mouse: $0.mouse, cursor: { at }, clock: ManualClock(), randomness: RandomSource(seed: 1), traced: { _ in }), $0.keyboard)
+            try await ClickCommand.click(at: at, button: .left, times: .single, holding: .none, with: Pointer(mouse: $0.mouse, cursor: { at }, displays: { .vast }, clock: ManualClock(), randomness: RandomSource(seed: 1), traced: { _ in }), $0.keyboard)
         }
         return (typed, clicked)
     }
@@ -109,7 +110,7 @@ import Testing
         let at = ScreenPoint(x: 5, y: 5)!
         let typed = await Self.failure { try await Devices.using(helper()) { try await TypeCommand.type("ab", on: VerbTests.us, into: .anywhere, with: $0.typist, front: $0.front) } }
         let clicked = await Self.failure {
-            try await Devices.using(helper()) { try await ClickCommand.click(at: at, button: .left, times: .single, holding: .none, with: Pointer(mouse: $0.mouse, cursor: { at }, clock: ManualClock(), randomness: RandomSource(seed: 1), traced: { _ in }), $0.keyboard) }
+            try await Devices.using(helper()) { try await ClickCommand.click(at: at, button: .left, times: .single, holding: .none, with: Pointer(mouse: $0.mouse, cursor: { at }, displays: { .vast }, clock: ManualClock(), randomness: RandomSource(seed: 1), traced: { _ in }), $0.keyboard) }
         }
         #expect(typed == "\(unreachable). 0 of 2 characters had been posted and acknowledged before this, and the rest were not sent")
         #expect(clicked == unreachable)
@@ -170,4 +171,5 @@ private final class Unanswered: NSXPCConnection, HelperService, @unchecked Senda
     func status(reply: @escaping (NSNumber?, Error?) -> Void) {}
     func lastFailure(reply: @escaping (String?, Date?) -> Void) {}
     func cursor(reply: @escaping (Double, Double, Error?) -> Void) {}
+    func displays(reply: @escaping ([NSNumber], Error?) -> Void) {}
 }

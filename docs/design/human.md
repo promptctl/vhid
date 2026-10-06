@@ -47,6 +47,8 @@ A person's aimed movement is a main movement that gets most of the way, then one
 
 There is no added tremor. Rounding each report to whole counts already makes the step lengths uneven.
 
+**The path stays on the displays.** The bow and the aim off the line are drawn in full, then scaled down together to the largest of 100%, 90%, … 10% that keeps every point of the path at least as far from the displays' edges as the straight line is at that moment, up to 20 points; if no share fits, the path is the straight line. Without this, a target beside an edge, approached along it, sends the path into the edge mid-move. The display layout is read by vhidd in the session in front, as the cursor is. It reads the online displays, not the active ones, because a display that is asleep is not active but the cursor still moves on it. On studious, 20 clicks 10 points from the edge holding its auto-hidden Dock, each approached along that edge, never raised the Dock. Each move records the share it kept as `bow_kept`.
+
 ### Steering the path
 
 Each 8 ms tick asks where the path should be at that tick's deadline, reads where the cursor is, and sends the report the acceleration curve learned so far says covers the difference. The deadlines are measured from the start of the move, so a late report is followed by a larger one rather than pushing the rest of the path back.

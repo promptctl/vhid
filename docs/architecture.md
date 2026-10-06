@@ -81,12 +81,12 @@ still waits for its acknowledgement, on a serial queue of its own
 ([`Input/DeviceQueue.swift`](../Sources/Input/DeviceQueue.swift)), so the wait blocks
 neither the caller's actor nor Swift's shared thread pool.
 
-**The cursor is read in the session in front.** Anywhere else, the window server answers
+**The cursor and the display layout are read in the session in front.** Anywhere else, the window server answers
 (0, 0) as if it were a real position. That would break clicks at the login window, or
 after fast user switching. And a process stays tied to the first session it reads in. So
 `vhidd` runs a child of itself that joins the front session, and starts a new one when
 another session comes to the front
-([`vhidd/FrontCursor.swift`](../Sources/vhidd/FrontCursor.swift)).
+([`vhidd/FrontScreen.swift`](../Sources/vhidd/FrontScreen.swift)).
 
 ## Who may call the daemon
 
