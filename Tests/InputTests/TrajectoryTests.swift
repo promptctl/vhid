@@ -206,10 +206,18 @@ import Testing
     }
 
     /// A cursor that will not move is still `WouldNotReach`, from the closing loop.
+    /// It counts every report the move sent, the steered ones too, as the move's trace does.
     @Test func aPinnedCursorIsStillWouldNotReach() async throws {
-        let mouse = FakeMouse(at: Self.start)
+        final class Traced: Sendable { let moves = Mutex<[Pointer.Moved]>([]) }
+        let mouse = FakeMouse(at: Self.start), traced = Traced()
         mouse.stuck = true
-        await #expect(throws: WouldNotReach.self) { try await mouse.pointer.move(to: Self.target) }
+        let pointer = Pointer(mouse: mouse, cursor: mouse.cursor, clock: ManualClock(), randomness: RandomSource(seed: 1),
+                              traced: { move in traced.moves.withLock { $0.append(move) } })
+        let stop = try await #require(throws: WouldNotReach.self) { try await pointer.move(to: Self.target) }
+        let moved = try #require(traced.moves.withLock { $0.first })
+        #expect(moved.steered > 0)
+        #expect(stop.reports == moved.reports)
+        #expect(stop.reports == mouse.log.count)
     }
 
     /// The match: a change is put on the oldest unseen reports whose expected motion sums

@@ -239,10 +239,16 @@ public struct Pointer: Sendable {
         var slot = began + Self.tick * ticks
         // Counted as each report is paced, which is just before it goes out, so a move the
         // closing loop threw out of still says how far it got.
-        _ = try await home(on: trajectory.target) {
-            closing += 1
-            slot += Self.tick
-            try await timeline.sleep(slot)
+        do {
+            _ = try await home(on: trajectory.target) {
+                closing += 1
+                slot += Self.tick
+                try await timeline.sleep(slot)
+            }
+        } catch let stop as WouldNotReach {
+            // The move's reports, not the closing loop's alone: what the error says the move
+            // sent is what the record counts. [LAW:one-source-of-truth]
+            throw WouldNotReach(target: stop.target, cursor: stop.cursor, reports: steered + stop.reports)
         }
         return moved
     }
