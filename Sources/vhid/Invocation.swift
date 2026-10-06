@@ -166,7 +166,8 @@ enum Attribute: String, Sendable {
     case keyRepeatDelayMilliseconds = "key_repeat_delay_ms"
     /// How far behind its drawn timing the typist's last report went out, in milliseconds:
     /// what slow acknowledgements and late wakes added to the run, every key after them
-    /// moved rather than shortened. Absent for a verb that pressed no keys.
+    /// moved rather than shortened. Zero for a run that sent nothing, and
+    /// absent for a verb that never typed.
     case keysLateMilliseconds = "keys_late_ms"
     /// The pauses the pointer and the typist made between reports, the one it stopped in
     /// too, by kind - the pointer's `rest`, `hold`, `gap`, `drag_hold`, `notch`, and the

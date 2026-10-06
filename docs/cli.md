@@ -104,7 +104,8 @@ for the report each wait ends in: `modifier_down`, `key_down`, `key_up` (a key's
 fitted to, as this process read it, and `attributes.key_repeat_delay_ms` the delay until a
 held key repeats that key holds were fitted to. `attributes.keys_late_ms` is how far behind
 its drawn timing `type`'s or `press`'s last report went out: slow acknowledgements and late
-wakes move every key after them rather than shorten a hold.
+wakes move every key after them rather than shorten a hold. It is 0 for a run that sent
+no keys, and absent for a verb that never typed.
 
 With `OTEL_EXPORTER_OTLP_ENDPOINT` set, the record goes to that OpenTelemetry collector
 instead, as an OTLP/HTTP JSON log on `/v1/logs`, and the file is not written.
