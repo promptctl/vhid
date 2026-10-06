@@ -178,4 +178,26 @@ import Testing
         #expect(Region.display(main) == Region.display(main))
         #expect(Region.display(main) != Region.display(main &+ 1))
     }
+
+    /// Near misses print a box as matches do, so they are checked as matches are, a row
+    /// whose check found nothing to cut keeps the very value it had, and each row's hit
+    /// tests and reason it went unchecked are summed.
+    @Test func pressingChecksEveryPrintedRowAndCountsWhatItFound() {
+        let cut = ScreenRect(x: 12, y: 22, width: 20, height: 30)
+        let press: (Found) -> Checked = {
+            switch $0.text.value { case "Allow": Checked(.narrowed(cut), calls: 9); case "Deny": Checked(.unchecked(.overTime), calls: 0)
+            default: Checked(.kept, calls: 5) }
+        }
+        let near = reading(outcome: .nearest([Near(found: found("Allow"), distance: 1), Near(found: found("Deny"), distance: 2),
+                                              Near(found: found("Help"), distance: 3)]), examined: 3, reach: .whole).pressing(press)
+        guard case .nearest(let rows) = near.outcome else { Issue.record("\(near)"); return }
+        #expect(rows.map(\.found.frame) == [cut, found("Deny").frame, found("Help").frame])
+        #expect(rows.map(\.distance) == [1, 2, 3])
+        #expect(rows[2].found == found("Help"))
+        #expect(near.scope.boxes == Boxes(narrowed: 1, unchecked: [.overTime: 1], calls: 14))
+        #expect(near.scope.boxes.unchecked == [.unanswered: 0, .elsewhere: 0, .overTime: 1])
+        let matched = reading(outcome: .matched(Matches([found("Allow")])!), examined: 1, reach: .whole).pressing(press)
+        #expect(matched.outcome == .matched(Matches([Found(text: Text("Allow")!, frame: cut, source: found("Allow").source)])!))
+        #expect(matched.scope.boxes == Boxes(narrowed: 1, calls: 9))
+    }
 }

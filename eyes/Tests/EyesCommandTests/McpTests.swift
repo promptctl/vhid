@@ -33,7 +33,8 @@ import Testing
     private static let asked = Asked()
 
     /// A reader that sees one run, "Save", everywhere but display 666, where it has no grant.
-    private static let look: EyesTools.Look = { source, query in
+    private static let look: EyesTools.Look = { source, query in .standing(try await seen(source, query)) }
+    private static let seen: @Sendable (SourceKind, Query) async throws -> Reading = { source, query in
         await asked.add(query, source)
         if query.region == .display(666) { throw PixelsError.noGrant }
         if query.region == .display(667), source == .tree { throw TreeError.noGrant }
@@ -280,9 +281,9 @@ import Testing
             await gauge.enter()
             try await Task.sleep(for: .milliseconds(20))
             await gauge.leave()
-            return Reading(outcome: .nearest([]), scope: Scope(region: ScreenRect(x: 0, y: 0, width: 1, height: 1), examined: 0, reach: .whole))
+            return .standing(Reading(outcome: .nearest([]), scope: Scope(region: ScreenRect(x: 0, y: 0, width: 1, height: 1), examined: 0, reach: .whole)))
         }
-        try await withThrowingTaskGroup(of: Reading.self) { group in
+        try await withThrowingTaskGroup(of: Judged.self) { group in
             for _ in 0..<5 { group.addTask { try await serial.read(.pixels, Query(match: nil, region: .display(1))) } }
             for try await _ in group {}
         }
@@ -296,7 +297,7 @@ import Testing
         let (reading, started) = AsyncStream.makeStream(of: Void.self)
         let serial = OneAtATime { _, query in
             if query.match != nil { started.finish(); try await Task.sleep(for: .milliseconds(100)) }
-            return blank
+            return .standing(blank)
         }
         let events = Collected()
         let blocker = Task { try await serial.read(.pixels, Query(match: .contains("slow"), region: .display(1))) }
@@ -324,7 +325,7 @@ import Testing
                 starting.yield()
                 for await _ in gate { break }
             }
-            return Reading(outcome: .nearest([]), scope: Scope(region: ScreenRect(x: 0, y: 0, width: 1, height: 1), examined: 0, reach: .whole))
+            return .standing(Reading(outcome: .nearest([]), scope: Scope(region: ScreenRect(x: 0, y: 0, width: 1, height: 1), examined: 0, reach: .whole)))
         }
         let query = Query(match: nil, region: .display(1))
         let first = Task { try await serial.read(.pixels, query) }

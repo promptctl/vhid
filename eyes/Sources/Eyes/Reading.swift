@@ -228,13 +228,44 @@ public struct Scope: Sendable, Hashable {
     /// the same reading silent about them is a false negative nobody can detect.
     public let excluded: [Exclusion]
     public let reach: Reach
+    /// How the rows' boxes stand against where a click presses what each row names.
+    public let boxes: Boxes
 
-    public init(region: ScreenRect, examined: Int, excluded: [Exclusion] = [], reach: Reach) {
+    public init(region: ScreenRect, examined: Int, excluded: [Exclusion] = [], reach: Reach, boxes: Boxes = Boxes()) {
         self.region = region
         self.examined = examined
         self.excluded = excluded
         self.reach = reach
+        self.boxes = boxes
     }
+}
+
+/// How many of a reading's rows had their box cut to where a click presses the element
+/// they name, how many could not be checked and why, and the calls into apps the checks made.
+///
+/// The accessibility tree reports an element's frame, and a frame is the app's claim, not
+/// where a click lands: measured on studious, Safari gives a page's `<button>` a frame 7
+/// points left of and 5 above the element the page hit-tests, room for the focus ring a
+/// native control draws, and a click inside the frame pressed the page beside the button.
+/// A row that could not be checked keeps its frame, and the reading says how many did.
+/// [LAW:no-silent-failure]
+public struct Boxes: Sendable, Hashable {
+    /// Rows whose box was cut to the part of the frame a click presses the element in.
+    public let narrowed: Int
+    /// Rows whose box was not checked, by why. Every reason is present, zeros included.
+    public let unchecked: [Unchecked: Int]
+    /// Calls into apps across every row, hit tests and reads alike: the cost of the checks,
+    /// which a busy app makes each as slow as the messaging timeout.
+    public let calls: Int
+
+    public init(narrowed: Int = 0, unchecked: [Unchecked: Int] = [:], calls: Int = 0) {
+        self.narrowed = narrowed
+        self.unchecked = Dictionary(uniqueKeysWithValues: Unchecked.allCases.map { ($0, unchecked[$0, default: 0]) })
+        self.calls = calls
+    }
+
+    /// Every row whose box was not checked, whatever the reason.
+    public var uncheckedCount: Int { unchecked.values.reduce(0, +) }
 }
 
 /// Some candidates left out, named by why.
@@ -334,6 +365,31 @@ public protocol ReaderError: Error {
 }
 
 public extension Reading {
+    /// The same reading with every row it prints - matches and near misses alike - put
+    /// through `press`, and the boxes' counts it reports. The one way a reader's
+    /// `pressing` rewrites rows, so no row printed escapes it. [LAW:single-enforcer]
+    func pressing(_ press: (Found) throws -> Checked) rethrows -> Reading {
+        var narrowed = scope.boxes.narrowed, unchecked = scope.boxes.unchecked, calls = scope.boxes.calls
+        func pressed(_ found: Found) throws -> Found {
+            let checked = try press(found)
+            calls += checked.calls
+            switch checked.pressed {
+            case .kept: return found
+            case .narrowed(let frame): narrowed += 1; return Found(text: found.text, frame: frame, source: found.source)
+            case .unchecked(let why): unchecked[why, default: 0] += 1; return found
+            }
+        }
+        func near(_ rows: [Near]) throws -> [Near] { try rows.map { Near(found: try pressed($0.found), distance: $0.distance) } }
+        let outcome: Outcome = switch outcome {
+        case .matched(let m): .matched(Matches(try m.all.map(pressed))!)
+        case .nearest(let n): .nearest(try near(n))
+        case .unanchored(let n): .unanchored(try near(n))
+        }
+        let s = scope
+        return Reading(outcome: outcome, scope: Scope(region: s.region, examined: s.examined, excluded: s.excluded, reach: s.reach,
+                                                      boxes: Boxes(narrowed: narrowed, unchecked: unchecked, calls: calls)))
+    }
+
     /// Whether "it is not there" is a fact about the screen rather than about the read.
     ///
     /// [LAW:single-enforcer] Derived in the one place, because the two conditions are easy

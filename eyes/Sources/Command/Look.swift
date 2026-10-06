@@ -184,10 +184,30 @@ enum Report {
             "\(head) in \(place(query.region)) \(s.region) \(looked(source, s.reach))",
             "\(s.examined) run\(s.examined == 1 ? "" : "s") read",
             s.excluded.isEmpty ? nil : s.excluded.map { "\($0.count) \($0.reason.rawValue)" }.joined(separator: ", "),
+            boxes(s.boxes),
             reach(s.reach, grantNote),
             reading.outcome.misses.isEmpty ? nil : "nearest follow",
         ]
         return clauses.compactMap { $0 }.joined(separator: "; ") + ". Each row's point is its centre and its box holds it, x,y,width,height, in vhid click coordinates."
+    }
+
+    /// What checking the boxes did, when it did anything: a box cut is a row whose frame the
+    /// app claimed wider than a click presses it, and a box unchecked stands as claimed, with
+    /// why.
+    static func boxes(_ b: Boxes) -> String? {
+        let unchecked = b.uncheckedCount
+        let why = Unchecked.allCases.compactMap { reason in b.unchecked[reason, default: 0] > 0 ? "\(b.unchecked[reason, default: 0]) \(said(reason))" : nil }
+        let clauses = [b.narrowed > 0 ? "\(b.narrowed) box\(b.narrowed == 1 ? "" : "es") cut to where a click presses it" : nil,
+                    unchecked > 0 ? "\(unchecked) box\(unchecked == 1 ? "" : "es") unchecked (\(why.joined(separator: ", ")))" : nil].compactMap { $0 }
+        return clauses.isEmpty ? nil : clauses.joined(separator: ", ")
+    }
+
+    private static func said(_ why: Unchecked) -> String {
+        switch why {
+        case .unanswered: "unanswered"
+        case .elsewhere: "its point on something else"
+        case .overTime: "out of time"
+        }
     }
 
     /// One run per row: the centre a click lands on, the box around the run, the text,
@@ -310,7 +330,7 @@ private extension Outcome {
 /// Reads with the chosen reader and prints. The one place the verbs meet the screen.
 @MainActor
 func look(_ query: Query, source: SourceKind, wait: Wait? = nil) async throws {
-    print(try await Report.text(query, source: source, wait: wait) { @MainActor in try await $0.reader.read($1) })
+    print(try await Report.text(query, source: source, wait: wait) { @MainActor in try await $0.reader.judged($1) })
 }
 
 extension Report {
@@ -319,7 +339,7 @@ extension Report {
     /// [LAW:one-source-of-truth]
     static func text(
         _ query: Query, source: SourceKind, wait: Wait? = nil, grantNote: String = "",
-        reading read: @Sendable (SourceKind, Query) async throws -> Reading
+        reading read: @Sendable (SourceKind, Query) async throws -> Judged
     ) async throws -> String {
         // [LAW:nothing-unseen] One event per look, from the one path every verb and tool
         // reads through: which reader, what it read, and how it ended.
@@ -329,9 +349,20 @@ extension Report {
             Telemetry.note("order", query.near == nil ? "reading" : "near")
             // Tallied as each read starts, so a look that fails says how many it spent.
             Telemetry.count("reads", 0)
-            func counted(_ query: Query) async throws -> Reading { Telemetry.tally("reads"); return try await read(source, query) }
+            Telemetry.count("box_ms", 0)
+            // The boxes' checks timed apart from the read, wherever they run - after a read,
+            // or at the end of a wait.
+            func counted(_ query: Query) async throws -> Judged {
+                Telemetry.tally("reads")
+                let judged = try await read(source, query)
+                return Judged(judged.reading) { _, deadline in
+                    let start = ContinuousClock.now
+                    defer { Telemetry.tally("box_ms", by: Int((ContinuousClock.now - start) / .milliseconds(1))) }
+                    return try await judged.pressed(until: deadline)
+                }
+            }
             guard let wait else {
-                let reading = try await counted(query)
+                let reading = try await counted(query).pressed()
                 Self.count(reading)
                 return (text: lines(reading, query: query, source: source, grantNote: grantNote).joined(separator: "\n"),
                         outcome: reading.outcome.said)
@@ -348,6 +379,9 @@ extension Report {
     /// The counts of the reading a look ended on, zeros included.
     private static func count(_ reading: Reading) {
         Telemetry.count("examined", reading.scope.examined)
+        Telemetry.count("boxes_narrowed", reading.scope.boxes.narrowed)
+        for (why, count) in reading.scope.boxes.unchecked { Telemetry.count("boxes_unchecked_\(why.rawValue)", count) }
+        Telemetry.count("box_calls", reading.scope.boxes.calls)
         switch reading.outcome {
         case .matched(let m): Telemetry.count("matched", m.count); Telemetry.count("nearest", 0)
         case .nearest(let n), .unanchored(let n): Telemetry.count("matched", 0); Telemetry.count("nearest", n.count)

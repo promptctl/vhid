@@ -33,6 +33,12 @@ public struct MergedReader: Reader {
         return try Candidates.merging(try await a, try await b)
     }
 
+    /// Each reader checks the boxes it placed: a row found by both carries the first
+    /// reader's frame, and the second leaves it as the first left it.
+    public func pressing(_ reading: Reading, until deadline: ContinuousClock.Instant) async throws -> Reading {
+        try await second.pressing(try await first.pressing(reading, until: deadline), until: deadline)
+    }
+
     private static func attempt(_ reader: any Reader, _ query: Query) async throws -> Attempt {
         do {
             return .looked(reader.source, try await reader.look(query))

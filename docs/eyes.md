@@ -33,6 +33,18 @@ field from its label. The box is `x,y,width,height` in the same points, the form
 takes, rounded outward to whole points so it covers the run and holds the point printed
 beside it.
 
+A row the accessibility tree found has its box checked against where a click lands. An
+element's frame is its app's claim: Safari gives a page's native-looking button a frame
+several points wider than the button, and a click inside the frame can press the page
+beside it. So eyes asks the system's hit test, which is what routes a click, outward from
+the row's point along the lines through it, and cuts each edge in to the last point a click
+still presses the element; then along the diagonals to the box's corners, drawing its sides
+in where a rounded button's corner presses the page. The checks get two seconds on top of
+the read. The scope line says how many boxes were cut, and how many were left as the app
+claimed them and why: the hit test did not answer, the row's own point lands on something
+else, or the time ran out. Text only the pixels reader saw keeps the box its text is drawn
+in. A wait checks only the boxes of the reading it ends on, in what is left of its timeout.
+
 `--page <window id>` reads the web page a browser window shows, without the browser's
 toolbar and bookmarks. The accessibility tree finds the page, so it needs Accessibility
 even with `--source pixels`. A window showing no page, or two side by side such as a page
