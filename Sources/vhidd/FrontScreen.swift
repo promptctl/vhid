@@ -267,5 +267,5 @@ final class ChildReader: FrontScreen.Reader {
 /// What a reader says first when it has joined its session.
 let joinedAnswer = "joined"
 
-/// The flag that makes this executable a cursor reader rather than the daemon.
+/// The flag that makes this executable a screen reader rather than the daemon.
 let screenReaderFlag = "--read-screen-in"

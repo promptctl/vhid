@@ -15,8 +15,8 @@ enum ScreenQuestion: String {
     case displays
 }
 
-/// The answer to either question when the window server would not give one: the reader
-/// is well, and asked again it may yet answer.
+/// The answer to either question when the window server would not give one: said apart
+/// from a garbled answer so the daemon's log names the window server.
 let refusedAnswer = "refused"
 
 /// The child `FrontScreen` starts: joins `session` and says so, then answers each question
