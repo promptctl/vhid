@@ -24,13 +24,33 @@ public protocol Reader: Sendable {
     /// the screen, and a caller told "nothing matched" would take them for an absence.
     /// [LAW:no-silent-failure]
     func look(_ query: Query) async throws -> Candidates
+
+    /// The judged rows with each box this reader can check cut to where a click presses
+    /// what the row names, and every other row as it was.
+    ///
+    /// After judging, so the checks - calls into other processes - are spent on the rows a
+    /// caller is shown and not on every element a walk read. A reader whose boxes are
+    /// already where a click lands answers the reading it was given.
+    func pressing(_ reading: Reading) async throws -> Reading
 }
 
 public extension Reader {
-    /// Answers the query: what the reader saw, judged by the one rule every reader shares.
+    /// Answers the query: what the reader saw, judged by the one rule every reader shares,
+    /// its boxes then checked by the reader that placed them.
     func read(_ query: Query) async throws -> Reading {
-        Reading.judging(try await look(query), query: query)
+        try await pressing(Reading.judging(try await look(query), query: query))
     }
+}
+
+/// What checking one row's box against where a click lands found.
+public enum Pressed: Sendable, Hashable {
+    /// The box stands: a click anywhere in it presses the element, as far as was checked,
+    /// or the row is another reader's to check.
+    case kept
+    /// Part of the box presses something else; this is the part that presses the element.
+    case narrowed(ScreenRect)
+    /// The box could not be checked, and stands as the reader placed it.
+    case unchecked
 }
 
 /// Which kind of reader, without the per-finding payload `Source` carries.

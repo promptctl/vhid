@@ -184,10 +184,19 @@ enum Report {
             "\(head) in \(place(query.region)) \(s.region) \(looked(source, s.reach))",
             "\(s.examined) run\(s.examined == 1 ? "" : "s") read",
             s.excluded.isEmpty ? nil : s.excluded.map { "\($0.count) \($0.reason.rawValue)" }.joined(separator: ", "),
+            boxes(s.boxes),
             reach(s.reach, grantNote),
             reading.outcome.misses.isEmpty ? nil : "nearest follow",
         ]
         return clauses.compactMap { $0 }.joined(separator: "; ") + ". Each row's point is its centre and its box holds it, x,y,width,height, in vhid click coordinates."
+    }
+
+    /// What checking the boxes did, when it did anything: a box cut is a row whose frame the
+    /// app claimed wider than a click presses it, and a box unchecked stands as claimed.
+    static func boxes(_ b: Boxes) -> String? {
+        let said = [b.narrowed > 0 ? "\(b.narrowed) box\(b.narrowed == 1 ? "" : "es") cut to where a click presses it" : nil,
+                    b.unchecked > 0 ? "\(b.unchecked) box\(b.unchecked == 1 ? "" : "es") unchecked" : nil].compactMap { $0 }
+        return said.isEmpty ? nil : said.joined(separator: ", ")
     }
 
     /// One run per row: the centre a click lands on, the box around the run, the text,
@@ -348,6 +357,8 @@ extension Report {
     /// The counts of the reading a look ended on, zeros included.
     private static func count(_ reading: Reading) {
         Telemetry.count("examined", reading.scope.examined)
+        Telemetry.count("boxes_narrowed", reading.scope.boxes.narrowed)
+        Telemetry.count("boxes_unchecked", reading.scope.boxes.unchecked)
         switch reading.outcome {
         case .matched(let m): Telemetry.count("matched", m.count); Telemetry.count("nearest", 0)
         case .nearest(let n), .unanchored(let n): Telemetry.count("matched", 0); Telemetry.count("nearest", n.count)

@@ -228,12 +228,37 @@ public struct Scope: Sendable, Hashable {
     /// the same reading silent about them is a false negative nobody can detect.
     public let excluded: [Exclusion]
     public let reach: Reach
+    /// How the rows' boxes stand against where a click presses what each row names.
+    public let boxes: Boxes
 
-    public init(region: ScreenRect, examined: Int, excluded: [Exclusion] = [], reach: Reach) {
+    public init(region: ScreenRect, examined: Int, excluded: [Exclusion] = [], reach: Reach, boxes: Boxes = Boxes()) {
         self.region = region
         self.examined = examined
         self.excluded = excluded
         self.reach = reach
+        self.boxes = boxes
+    }
+}
+
+/// How many of a reading's rows had their box cut to where a click presses the element
+/// they name, and how many could not be checked.
+///
+/// The accessibility tree reports an element's frame, and a frame is the app's claim, not
+/// where a click lands: measured on studious, Safari gives a page's `<button>` a frame 7
+/// points left of and 5 above the element the page hit-tests, room for the focus ring a
+/// native control draws, and a click inside the frame pressed the page beside the button.
+/// A row that could not be checked keeps its frame, and the reading says how many did.
+/// [LAW:no-silent-failure]
+public struct Boxes: Sendable, Hashable {
+    /// Rows whose box was cut to the part of the frame a click presses the element in.
+    public let narrowed: Int
+    /// Rows whose box was not checked: the hit test did not answer, or a click at the
+    /// row's own point lands on something other than the element the row names.
+    public let unchecked: Int
+
+    public init(narrowed: Int = 0, unchecked: Int = 0) {
+        self.narrowed = narrowed
+        self.unchecked = unchecked
     }
 }
 
@@ -334,6 +359,29 @@ public protocol ReaderError: Error {
 }
 
 public extension Reading {
+    /// The same reading with every row it prints - matches and near misses alike - put
+    /// through `press`, and the boxes' counts it reports. The one way a reader's
+    /// `pressing` rewrites rows, so no row printed escapes it. [LAW:single-enforcer]
+    func pressing(_ press: (Found) throws -> Pressed) rethrows -> Reading {
+        var narrowed = scope.boxes.narrowed, unchecked = scope.boxes.unchecked
+        func pressed(_ found: Found) throws -> Found {
+            switch try press(found) {
+            case .kept: return found
+            case .narrowed(let frame): narrowed += 1; return Found(text: found.text, frame: frame, source: found.source)
+            case .unchecked: unchecked += 1; return found
+            }
+        }
+        func near(_ rows: [Near]) throws -> [Near] { try rows.map { Near(found: try pressed($0.found), distance: $0.distance) } }
+        let outcome: Outcome = switch outcome {
+        case .matched(let m): .matched(Matches(try m.all.map(pressed))!)
+        case .nearest(let n): .nearest(try near(n))
+        case .unanchored(let n): .unanchored(try near(n))
+        }
+        let s = scope
+        return Reading(outcome: outcome, scope: Scope(region: s.region, examined: s.examined, excluded: s.excluded, reach: s.reach,
+                                                      boxes: Boxes(narrowed: narrowed, unchecked: unchecked)))
+    }
+
     /// Whether "it is not there" is a fact about the screen rather than about the read.
     ///
     /// [LAW:single-enforcer] Derived in the one place, because the two conditions are easy

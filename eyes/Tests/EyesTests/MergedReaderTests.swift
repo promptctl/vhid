@@ -11,6 +11,8 @@ import Testing
         var reach = Reach.whole
         var fails = false
         var region = MergedReaderTests.region
+        /// What this reader's check of a row's box finds.
+        var press: @Sendable (Found) -> Pressed = { _ in .kept }
 
         struct Blind: Error, CustomStringConvertible { var description: String { "no grant" } }
 
@@ -18,6 +20,8 @@ import Testing
             if fails { throw Blind() }
             return Candidates(found: found, region: region, examined: found.count, excluded: [], reach: reach)
         }
+
+        func pressing(_ reading: Reading) async throws -> Reading { reading.pressing(press) }
     }
 
     static let role = Source.tree(role: Role(rawValue: "AXButton"))
@@ -202,6 +206,7 @@ import Testing
     struct Refusing: Reader {
         let source = SourceKind.tree
         func look(_ query: Query) async throws -> Candidates { throw NoGrant() }
+        func pressing(_ reading: Reading) async throws -> Reading { reading }
     }
 
     @Test func aBlindReadersMissingGrantIsCarriedInItsPart() async throws {
@@ -215,6 +220,7 @@ import Testing
     struct Gone: Reader {
         let source = SourceKind.pixels
         func look(_ query: Query) async throws -> Candidates { throw NoSuchPlace.window(7) }
+        func pressing(_ reading: Reading) async throws -> Reading { reading }
     }
 
     @Test func aPlaceGoneBeforeOneReaderLookedIsThatReadersBlindness() async throws {
@@ -229,6 +235,7 @@ import Testing
             Issue.record("the \(source) reader was asked about a region that names nowhere")
             return Candidates(found: [], region: MergedReaderTests.region, examined: 0, excluded: [], reach: .whole)
         }
+        func pressing(_ reading: Reading) async throws -> Reading { reading }
     }
 
     /// Refused as the merge's answer even with both readers blind, so a bad id is never
@@ -240,5 +247,18 @@ import Testing
                 _ = try await MergedReader(a, b, locate: { _ in throw nowhere }).read(Query(match: nil, region: .display(4_000_000_000)))
             } throws: { "\($0)" == nowhere.description }
         }
+    }
+
+    /// Each reader checks the rows it placed: the tree's cut stands, and the pixels reader,
+    /// asked after it, sees the cut row and leaves it.
+    @Test func eachReaderChecksTheBoxesOfTheRowsItPlaced() async throws {
+        let cut = ScreenRect(x: 17, y: 15, width: 40, height: 12)
+        let tree = Fake(source: .tree, found: [at("Allow", 10, 10, Self.role), at("Deny", 100, 10, Self.role)],
+                        press: { $0.text.value == "Allow" ? .narrowed(cut) : .unchecked })
+        let pixels = Fake(source: .pixels, found: [at("Allow", 12, 11, Self.seen)],
+                          press: { $0.source.role == nil ? .unchecked : .kept })
+        let r = try await read(tree, pixels)
+        #expect(all(r).map(\.frame) == [cut, ScreenRect(x: 100, y: 10, width: 60, height: 20)])
+        #expect(r.scope.boxes == Boxes(narrowed: 1, unchecked: 1))
     }
 }

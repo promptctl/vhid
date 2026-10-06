@@ -63,6 +63,14 @@ public struct TreeReader: Reader {
         )
     }
 
+    /// Each row the tree placed, its box cut to where the system's hit test lands a click
+    /// on the element it names. `Probe.press` decides; this is its reads.
+    public func pressing(_ reading: Reading) async throws -> Reading {
+        guard try await granted(Self.grant) else { throw TreeError.noGrant }
+        let probe = Probe<AXUIElement>(hit: Self.element(at:), lineage: Self.lineage, same: { CFEqual($0, $1) })
+        return try reading.pressing(probe.press)
+    }
+
     /// What window `id`'s tree says of the web pages in it, for `Paged.page` to make one
     /// region of. Throws when the window is not on screen. [LAW:no-silent-failure]
     public func pages(in id: UInt32) async throws -> Paged {
@@ -95,15 +103,10 @@ public struct TreeReader: Reader {
         var matched: [UInt32: AXUIElement] = [:]
         for window in windows {
             if listed[window.pid] == nil { listed[window.pid] = try Self.windows(of: window.pid) }
-            guard let claimed = listed[window.pid]!.firstIndex(where: { same($0.frame, window.frame) }) else { continue }
+            guard let claimed = listed[window.pid]!.firstIndex(where: { $0.frame.same(as: window.frame) }) else { continue }
             matched[window.id] = listed[window.pid]!.remove(at: claimed).element
         }
         return matched
-    }
-
-    /// Frames agree to the point; the two sources round differently below that.
-    private static func same(_ a: ScreenRect, _ b: ScreenRect) -> Bool {
-        abs(a.x - b.x) < 1 && abs(a.y - b.y) < 1 && abs(a.width - b.width) < 1 && abs(a.height - b.height) < 1
     }
 
     /// An app's windows and their sheets that said where they are, minimized windows left
@@ -148,6 +151,29 @@ public struct TreeReader: Reader {
             return .answered(pid)
         case .absent?, .unanswered?, nil: return .unanswered
         }
+    }
+
+    /// The element a click at `point` lands on, by the system's own hit test.
+    static func element(at point: ScreenPoint) throws(TreeError) -> Heard<AXUIElement?> {
+        var element: AXUIElement?
+        let call = AXUIElementCopyElementAtPosition(systemWide, Float(point.x), Float(point.y), &element)
+        switch try Answer(call, for: .structure) {
+        case .answered: return .answered(element.map(bounded))
+        case .absent: return .answered(nil)
+        case .unanswered: return .unanswered
+        }
+    }
+
+    /// An element's role, frame and parent, in one round trip.
+    static func lineage(_ element: AXUIElement) throws(TreeError) -> Heard<Lineage<AXUIElement>> {
+        let names = [kAXRoleAttribute, kAXPositionAttribute, kAXSizeAttribute, kAXParentAttribute]
+        let reads = try read(names, of: element, as: [.structure, .structure, .structure, .structure])
+        guard case .answered(let role) = reads[0], case .answered(let position) = reads[1],
+              case .answered(let size) = reads[2], case .answered(let parent) = reads[3]
+        else { return .unanswered }
+        return .answered(Lineage(role: Role(rawValue: role as? String ?? kAXUnknownRole),
+                                 frame: frame(position, size),
+                                 parent: parent.flatMap(Self.element).map(bounded)))
     }
 
     private static func elements(_ value: CFTypeRef?) -> [AXUIElement] {

@@ -30,6 +30,19 @@ import Testing
         ])
     }
 
+    /// A box cut and a box left unchecked are each said in the scope, so a row whose box is
+    /// the app's claim is never taken for one checked against where a click lands.
+    @Test func theScopeSaysWhichBoxesWereCutAndWhichUnchecked() {
+        let query = Query(match: .contains("OK"), region: .display(12))
+        func scope(_ boxes: Boxes) -> String {
+            Report.scope(Reading(outcome: .nearest([]), scope: Scope(region: Self.display, examined: 4, reach: .whole, boxes: boxes)),
+                         query: query, source: .tree)
+        }
+        #expect(scope(Boxes()).contains("4 runs read; whole region read."))
+        #expect(scope(Boxes(narrowed: 1, unchecked: 0)).contains("4 runs read; 1 box cut to where a click presses it; whole region read."))
+        #expect(scope(Boxes(narrowed: 2, unchecked: 3)).contains("4 runs read; 2 boxes cut to where a click presses it, 3 boxes unchecked; whole"))
+    }
+
     /// Each row says what it is: the tree's role, kept through a merge, or `pixels` for text
     /// only pixels saw - so a page's button is told from a bookmark of the same name.
     @Test func aRowNamesItsRole() {
@@ -142,7 +155,8 @@ import Testing
     @Test func aLookIsOneEvent() async throws {
         let events = Collected()
         let near = Reading(outcome: .nearest([]), scope: Scope(region: Self.display, examined: 5, reach: .whole))
-        let hit = Reading(outcome: .matched(Matches([found("OK", x: -100)])!), scope: Scope(region: Self.display, examined: 9, reach: .whole))
+        let hit = Reading(outcome: .matched(Matches([found("OK", x: -100)])!),
+                          scope: Scope(region: Self.display, examined: 9, reach: .whole, boxes: Boxes(narrowed: 1, unchecked: 2)))
         try await Telemetry.$export.withValue(events.export) {
             _ = try await Report.text(Query(match: .contains("OK"), region: .display(12)), source: .tree) { _, _ in near }
             _ = try await Report.text(Query(match: .contains("OK"), region: .display(12)), source: .pixels,
@@ -157,8 +171,8 @@ import Testing
         #expect(seen.map { $0.facts["source"] } == ["tree", "pixels", "merged", "tree"])
         #expect(seen.map { $0.facts["region"] } == ["display", "display", "display", "page"])
         #expect(seen.map { $0.facts["order"] } == ["reading", "reading", "reading", "near"])
-        #expect(seen[0].counts == ["reads": 1, "examined": 5, "matched": 0, "nearest": 0])
-        #expect(seen[1].counts == ["reads": 1, "examined": 9, "matched": 1, "nearest": 0])
+        #expect(seen[0].counts == ["reads": 1, "examined": 5, "matched": 0, "nearest": 0, "boxes_narrowed": 0, "boxes_unchecked": 0])
+        #expect(seen[1].counts == ["reads": 1, "examined": 9, "matched": 1, "nearest": 0, "boxes_narrowed": 1, "boxes_unchecked": 2])
         #expect(seen[1].facts["until"] == "present")
         #expect(seen[2].error != nil && seen[2].counts == ["reads": 1])
     }
