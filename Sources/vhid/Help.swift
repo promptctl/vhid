@@ -94,7 +94,9 @@ enum Help {
         The device sends counts, not coordinates, and macOS accelerates them, so the pointer is \
         steered: along a person's path, slightly curved, speeding up and slowing down, reading \
         the cursor back every 8 ms, then in a loop - post a delta, read the cursor back, repeat - \
-        until it lands. A move takes as long as a hand's would, about 0.8 s across 740 points. The \
+        until it lands. A move takes as long as a hand's would, about 0.8 s across 740 points. \
+        Then it rests on the point about a quarter of a second, as a hand does and as some \
+        web menus need before they take a click, and holds the button about a tenth of one. The \
         point it reports landing at is read back from the cursor rather than the point that was \
         asked for. The two can differ by under a point.
         """, commandLine: [negative(NegativeExample.click)])
@@ -108,15 +110,16 @@ enum Help {
         The pointer is moved to the point first, because a wheel scrolls whatever is under the \
         pointer. The ticks are the device's own, and macOS decides how far each one scrolls.
 
-        Each tick goes out as a report of its own, \(Int(Pointer.notchRest / .milliseconds(1))) ms \
-        after the last, because macOS takes a report as one notch whatever count it carries \
-        and speeds up notches that come faster. So N ticks scroll N times as far as one, and \
-        take N times as long.
+        The pointer rests on the point first, as a hand does. Each tick then goes out as a \
+        report of its own, 200 to 300 ms after the last, because macOS takes a report as one \
+        notch whatever count it carries and speeds up notches that come faster. So N ticks \
+        scroll N times as far as one, and take N times as long.
         """, commandLine: [negative(NegativeExample.scroll)])
 
     static let drag = VerbHelp(name: "drag", abstract: "Drag from one point on the screen to another.", discussion: """
-        The pointer is moved to the first point, the button goes down, the pointer is moved to \
-        the second with it held, and every button comes up. Both points it reports are read \
+        The pointer is moved to the first point and rests, the button goes down and is held a \
+        moment, the pointer is moved to the second with it held and rests, and every button \
+        comes up. Both points it reports are read \
         back from the cursor.
         """, commandLine: [negative(NegativeExample.drag)])
 

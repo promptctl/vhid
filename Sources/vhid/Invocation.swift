@@ -148,15 +148,20 @@ enum Tally: String, CaseIterable, Sendable {
     case keyboardReports = "keyboard_reports"
     case mouseReports = "mouse_reports"
     /// Wheel reports with a count on the vertical axis: notches, since macOS takes a
-    /// report as one notch whatever count it carries (`Pointer.notchRest`).
+    /// report as one notch whatever count it carries (`Pointer.scroll`).
     case verticalNotches = "scroll_notches_vertical"
     case horizontalNotches = "scroll_notches_horizontal"
 }
 
 /// A fact a verb decided that is not a count.
 enum Attribute: String, Sendable {
-    /// How long the wheel rested after each notch.
-    case notchRestMilliseconds = "notch_rest_ms"
+    /// The double-click interval the pointer's hand was fitted to, as this process read it.
+    /// Absent when the devices were never opened.
+    case doubleClickMilliseconds = "double_click_ms"
+    /// Each pause the pointer made between reports, in order, the one it stopped in too:
+    /// its kind (`rest`, `hold`, `gap`, `drag_hold`, `notch`) and drawn length. Absent for
+    /// a verb that made none.
+    case pauses
     /// What the pointer's random source was seeded with, as hex: what draws its moves
     /// again. Absent when the devices were never opened.
     case seed
@@ -266,9 +271,17 @@ enum JSON: Sendable, Equatable, Encodable {
 }
 
 extension Invocation {
-    /// Adds `move` to the running invocation's `paths`. `Devices` hands every pointer it
-    /// opens this, so no verb records its own moves. [LAW:single-enforcer]
-    @Sendable static func moved(_ move: Pointer.Moved) {
+    /// Adds what a pointer traced to the running invocation: a move to `paths`, a pause to
+    /// `pauses`. `Devices` hands every pointer it opens this, so no verb records its own.
+    /// [LAW:single-enforcer]
+    @Sendable static func traced(_ traced: Pointer.Traced) {
+        switch traced {
+        case .moved(let move): moved(move)
+        case .paused(let pause): append(.object(["kind": .string(pause.kind.rawValue), "ms": .double(pause.length / .milliseconds(1))]), to: .pauses)
+        }
+    }
+
+    private static func moved(_ move: Pointer.Moved) {
         append(.object(["planned_ms": .double(move.planned / .milliseconds(1)),
                         "displays": .array(move.displays.frames.map { frame in .array([frame.minX, frame.minY, frame.width, frame.height].map { .double(Double($0)) }) }),
                         "bow_kept": .double(move.kept),

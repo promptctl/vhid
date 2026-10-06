@@ -89,25 +89,24 @@ import Testing
     }
 
     /// The wheel goes out a notch a report, both axes together until the shorter is done,
-    /// with the rest after every notch, the last included.
-    @Test func aScrollIsOneNotchAReportWithARestAfterEach() async throws {
+    /// after a rest and with a pause after every notch, the last included.
+    @Test func aScrollIsOneNotchAReportWithAPauseAfterEach() async throws {
         let mouse = FakeMouse(at: Self.origin)
         let clock = ManualClock()
         try await mouse.pointer(on: clock).scroll(at: Self.origin, vertical: 300, horizontal: -5)
         #expect(mouse.log == Array(repeating: "scroll 1 -1", count: 5) + Array(repeating: "scroll 1 0", count: 295))
-        #expect(clock.sleeps == 300)
-        #expect(clock.now.offset == Pointer.notchRest * 300)
+        #expect(clock.sleeps == 301)
     }
 
-    /// A roll is mostly rests, so a cancel lands in one and stops the roll at the next
+    /// A roll is mostly pauses, so a cancel lands in one and stops the roll at the next
     /// notch, with the buttons released on the way out. `Int.min` because it has no `abs`
     /// and only a cancel ends it. The task is made on this actor and cannot begin until
-    /// the test suspends, so the aim is taken before the first rest.
+    /// the test suspends, so the aim is taken before the rest that comes first.
     @Test func aScrollCancelledInARestStopsBeforeTheNextNotch() async throws {
         let mouse = FakeMouse(at: Self.origin)
         let clock = ManualClock()
         let roll = Task { try await mouse.pointer(on: clock).scroll(at: Self.origin, vertical: Int.min, horizontal: 0) }
-        clock.cancel(afterSleeps: 3) { roll.cancel() }
+        clock.cancel(afterSleeps: 4) { roll.cancel() }
         let stopped = try await #require(throws: PointingStopped.self) { try await roll.value }
         #expect(stopped.cause is CancellationError)
         #expect(mouse.log == Array(repeating: "scroll -1 0", count: 3) + ["up"])

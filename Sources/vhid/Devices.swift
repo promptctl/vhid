@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Helper
 import Input
@@ -57,10 +58,14 @@ struct Devices {
         let cursor = cursor(helper, on: queue)
         let randomness = RandomSource(seed: UInt64.random(in: .min ... .max))
         Invocation.set(.seed, .string(String(randomness.seed, radix: 16)))
+        // Read in this process, as the keyboard layout is: the root daemon would read its
+        // own default, not the user's setting. `Hand`.
+        let doubleClick = Duration.seconds(NSEvent.doubleClickInterval)
+        Invocation.set(.doubleClickMilliseconds, .double(doubleClick / .milliseconds(1)))
         let devices = Devices(keyboard: TalliedKeyboard(keyboard: QueuedKeyboard(keyboard: helper.keyboard, queue: queue)),
                               mouse: mouse, cursor: cursor, front: front(helper, on: queue),
                               pointer: Pointer(mouse: mouse, cursor: cursor, displays: displays(helper, on: queue), clock: ContinuousClock(),
-                                               randomness: randomness, traced: Invocation.moved))
+                                               randomness: randomness, hand: Hand(doubleClickInterval: doubleClick), traced: Invocation.traced))
         let done: T
         do {
             done = try await body(devices)

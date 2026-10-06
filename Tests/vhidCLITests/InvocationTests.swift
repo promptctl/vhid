@@ -29,7 +29,7 @@ import Testing
 
     private static func scroll(vertical: Int, horizontal: Int, clock: ManualClock = ManualClock(), on devices: Devices) async throws -> String {
         try await ScrollCommand.scroll(at: at, vertical: vertical, horizontal: horizontal, holding: .none,
-                                       with: Pointer(mouse: devices.mouse, cursor: { at }, displays: { .vast }, clock: clock, randomness: RandomSource(seed: 1), traced: Invocation.moved), devices.keyboard)
+                                       with: Pointer(mouse: devices.mouse, cursor: { at }, displays: { .vast }, clock: clock, randomness: RandomSource(seed: 1), hand: .atDefaults, traced: Invocation.traced), devices.keyboard)
     }
 
     private static func only(_ export: EventExport) throws -> [String: Any] {
@@ -67,7 +67,11 @@ import Testing
         #expect(counts["scroll_notches_horizontal"] == 2)
         #expect(counts["mouse_reports"] == 3)
         let attributes = try #require(record["attributes"] as? [String: Any])
-        #expect(attributes["notch_rest_ms"] as? Int == 200)
+        // The rest on the point, then a pause after each notch, each as it was drawn.
+        let pauses = try #require(attributes["pauses"] as? [[String: Any]])
+        #expect(pauses.compactMap { $0["kind"] as? String } == ["rest", "notch", "notch", "notch"])
+        #expect(pauses.dropFirst().compactMap { $0["ms"] as? Double }.allSatisfy { (200 ... 300).contains($0) })
+        #expect(attributes["double_click_ms"] is Double)
         #expect(attributes["seed"] is String)
         // The pointer was already on its point, so the move there drew a path of no length.
         let paths = try #require(attributes["paths"] as? [[String: Any]])
@@ -102,11 +106,12 @@ import Testing
         #expect(paths[0]["closing_reports"] == Double(Pointer.stalls))
     }
 
-    /// The cancel lands inside the second rest, from the task the roll runs in, so the roll
-    /// stops before its third notch and the record says how far it got.
+    /// The cancel lands inside the pause after the second notch, from the task the roll runs
+    /// in, so the roll stops before its third notch and the record says how far it got,
+    /// the pause it stopped in included.
     @Test func aScrollCancelledPartWayIsRecordedAsCancelledWithTheNotchesItSent() async throws {
         let export = EventExport.scratch(), clock = ManualClock()
-        clock.cancel(afterSleeps: 2) { withUnsafeCurrentTask { $0?.cancel() } }
+        clock.cancel(afterSleeps: 3) { withUnsafeCurrentTask { $0?.cancel() } }
         let roll = Task {
             try await Invocation.record("scroll", via: .mcp, to: export.export) { _ in
                 try await Self.against { try await Self.scroll(vertical: 10, horizontal: 0, clock: clock, on: $0) }
@@ -118,6 +123,8 @@ import Testing
         #expect(record["outcome"] as? String == "cancelled")
         #expect(record["error"] as? String == "the run was cancelled")
         #expect((record["counts"] as? [String: Int])?["scroll_notches_vertical"] == 2)
+        let pauses = try #require((record["attributes"] as? [String: Any])?["pauses"] as? [[String: Any]])
+        #expect(pauses.compactMap { $0["kind"] as? String } == ["rest", "notch", "notch"])
     }
 
     /// The error on the record is the sentence the caller was given.
@@ -242,7 +249,7 @@ import Testing
     private static func record(_ outcome: Outcome = .ok) -> InvocationRecord {
         InvocationRecord(event: "scroll", entry: .commandLine, traceID: "4bf92f3577b34da6a3ce929d0e0e4736",
                          startedAt: Date(timeIntervalSince1970: 1_791_000_000.5), duration: .milliseconds(12),
-                         outcome: outcome, error: nil, counts: [.verticalNotches: 3], attributes: [.notchRestMilliseconds: .int(200)])
+                         outcome: outcome, error: nil, counts: [.verticalNotches: 3], attributes: [.doubleClickMilliseconds: .double(500)])
     }
 
     @Test func withNoCollectorTheRecordGoesToTheFile() async throws {
