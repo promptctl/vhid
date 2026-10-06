@@ -17,7 +17,7 @@ import Testing
         let acknowledgingKeys: Duration
 
         init(acknowledgingKeys: Duration = .zero) { self.acknowledgingKeys = acknowledgingKeys }
-        private let state = Mutex<(log: [(ms: Double, held: Set<Usage>)], pauses: [Pause], late: [Duration], rollovers: [Int])>(([], [], [], []))
+        private let state = Mutex<(log: [(ms: Double, held: Set<Usage>)], pauses: [Pause], late: [Duration], rollovers: [Int], hesitations: [Duration])>(([], [], [], [], []))
 
         var log: [(ms: Double, held: Set<Usage>)] { state.withLock { $0.log } }
         var pauses: [Pause] { state.withLock { $0.pauses } }
@@ -25,6 +25,8 @@ import Testing
         var late: [Duration] { state.withLock { $0.late } }
         /// Each run's rollovers, as traced when it ended.
         var rollovers: [Int] { state.withLock { $0.rollovers } }
+        /// Every run's hesitations, as traced when each ended.
+        var hesitations: [Duration] { state.withLock { $0.hesitations } }
 
         func down(_ usage: Usage) throws { Issue.record("a typist pressed \(usage) by down rather than hold") }
         func releaseAll() throws { state.withLock { $0.log.append((clock.now.offset / .milliseconds(1), [])) } }
@@ -38,9 +40,10 @@ import Testing
                 state.withLock {
                     switch traced {
                     case .paused(let pause): $0.pauses.append(pause)
-                    case .ran(let late, let rollovers):
+                    case .ran(let late, let rollovers, let hesitations):
                         $0.late.append(late)
                         $0.rollovers.append(rollovers)
+                        $0.hesitations += hesitations
                     }
                 }
             })
@@ -121,6 +124,19 @@ import Testing
         #expect(keyboard.late[0] > .zero)
     }
 
+    /// A key that rolls over has other reports sent while it is held, and a slow
+    /// acknowledgement of any of them holds it longer. Inside the headroom the dwell's cut
+    /// leaves under the delay until repeat - 50 ms on a 250 ms Mac - no key is held long
+    /// enough to repeat, however many reports its hold spans.
+    @Test func aKeyHeldThroughSlowAcknowledgementsStillDoesNotRepeat() async throws {
+        for seed in UInt64(1) ... 20 {
+            let keyboard = Timed(acknowledgingKeys: .milliseconds(40))
+            let typist = keyboard.typist(seed: seed)
+            try await typist.type(try typist.lower("the quick brown fox jumps over the lazy dog", on: Self.us))
+            for stroke in keyboard.strokes { #expect(stroke.up - stroke.down < 250, "seed \(seed): held \(stroke.up - stroke.down) ms") }
+        }
+    }
+
     /// A run on time traces a slip of nothing: zero, not absent.
     @Test func aRunOnTimeTracesNoSlip() async throws {
         let keyboard = Timed()
@@ -152,7 +168,7 @@ import Testing
         }
         var generator = SeededGenerator(seed: 3)
         let changes = Cadence.typist.type(text, drawing: &generator)
-        let downs = changes.filter { $0.wait == .keyDown || $0.wait == .hesitation }
+        let downs = changes.filter { $0.wait == .keyDown }
         try! #require(downs.count == text.count)
         let ms = { (duration: Duration) in duration / .milliseconds(1) }
         let gaps = zip(downs, downs.dropFirst()).map { ms($1.at - $0.at) }
@@ -173,8 +189,33 @@ import Testing
         #expect((0.15 ... 0.35).contains(rolledOver), "rolled over on \(rolledOver)")
         let wordsPerMinute = Double(text.count) / 5 / (ms(downs.last!.at - downs.first!.at) / 60_000)
         #expect((55 ... 75).contains(wordsPerMinute), "\(wordsPerMinute) words a minute")
-        #expect(changes.contains { $0.wait == .hesitation })
+        #expect(changes.contains { $0.hesitation > .zero })
         #expect(changes.last?.held == HeldKeys.none)
+    }
+
+    /// A stop or a comma pauses only where whitespace follows it: inside "3.14" and
+    /// "1,000" the keys run on as one word's, and the space after a sentence pauses.
+    @Test func punctuationPausesOnlyBeforeWhitespace() {
+        typealias Place = Cadence.Interval.Place
+        #expect(Place("1", after: ".") == .inWord)
+        #expect(Place("0", after: ",") == .inWord)
+        #expect(Place(" ", after: ".") == .sentence)
+        #expect(Place(" ", after: ",") == .clause)
+        #expect(Place("\n", after: "x") == .sentence)
+        #expect(Place("W", after: " ") == .wordStart)
+        #expect(Place("W", after: "\n") == .wordStart)
+    }
+
+    /// The first character's later keystrokes are inside it, as every character's are: the
+    /// e of a dead-key é that starts the text is never placed as a word's start, so a
+    /// one-word text never hesitates, not even between the accent and its letter.
+    @Test func aFirstCharactersLaterKeystrokesAreInsideIt() async throws {
+        let keyboard = Timed()
+        for seed in UInt64(1) ... 100 {
+            let typist = keyboard.typist(seed: seed)
+            try await typist.type(try typist.lower("\u{e9}t\u{e9}", on: Self.us))
+        }
+        #expect(keyboard.hesitations == [])
     }
 
     /// A key that rolls over still never goes down a second time before it is up: the l of

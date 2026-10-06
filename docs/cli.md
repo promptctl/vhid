@@ -100,7 +100,11 @@ pointer's are a
 `hold`, the `gap` between the clicks of a double click, a drag's `drag_hold` before it
 carries the button, and a `notch` pause after each notch. `type`'s and `press`'s are named
 for the report each wait ends in: `modifier_down`, `key_down`, `key_up` (a key's hold) and
-`modifier_up`. Each is drawn from the seed too. `attributes.double_click_ms` is the
+`modifier_up`. Each is drawn from the seed too. `counts.key_rollovers` is how many keys went
+down while another was held, and `counts.key_hesitations` how many words a hesitation came
+before; `attributes.key_hesitation_ms` totals the hesitations' drawn lengths, which the
+waits they precede already include. Both counts are 0 for a verb that opened the devices
+and typed nothing, and `key_hesitation_ms` is absent for a verb that never typed. `attributes.double_click_ms` is the
 double-click interval the click timings were fitted to, and `attributes.key_repeat_delay_ms`
 the delay until a held key repeats that key holds were fitted to, both as the HID system
 holds them for the session in front. `attributes.keys_late_ms` is how far behind

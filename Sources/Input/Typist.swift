@@ -33,9 +33,10 @@ public struct Typist {
     public enum Traced: Equatable, Sendable {
         case paused(Pause)
         /// A run's slip, once it ends: how far behind its drawn timing its last report went
-        /// out, which slow acknowledgements and late wakes add up to; and how many of its
-        /// keys went down while another was held.
-        case ran(late: Duration, rollovers: Int)
+        /// out, which slow acknowledgements and late wakes add up to; how many of its keys
+        /// went down while another was held; and the hesitation drawn before each word that
+        /// had one.
+        case ran(late: Duration, rollovers: Int, hesitations: [Duration])
     }
 
     public init<C: Clock>(keyboard: any Keyboard, clock: C, randomness: RandomSource, cadence: Cadence = .typist,
@@ -83,7 +84,7 @@ public struct Typist {
     public func type(_ text: Text, isolation: isolated (any Actor)? = #isolation) async throws -> Int {
         let changes = randomness.draw { cadence.type(text.characters, drawing: &$0) }
         var scribe = scribe
-        defer { traced(.ran(late: scribe.slip, rollovers: scribe.rollovers)) }
+        defer { traced(.ran(late: scribe.slip, rollovers: scribe.rollovers, hesitations: scribe.hesitations)) }
         do {
             try await scribe.run(changes)
         } catch {
@@ -99,7 +100,7 @@ public struct Typist {
     public func press(_ chords: [Chord], isolation: isolated (any Actor)? = #isolation) async throws -> Int {
         let changes = randomness.draw { cadence.press(chords.map(\.keystroke), drawing: &$0) }
         var scribe = scribe
-        defer { traced(.ran(late: scribe.slip, rollovers: scribe.rollovers)) }
+        defer { traced(.ran(late: scribe.slip, rollovers: scribe.rollovers, hesitations: scribe.hesitations)) }
         do {
             try await scribe.run(changes)
         } catch {

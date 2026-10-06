@@ -34,8 +34,11 @@ public struct Cadence: Sendable, Equatable {
     ///
     /// The dwell is cut off at 200 ms, and lower, at 80% of the delay, on a Mac set shorter
     /// than 250 ms, as `defaults write -g InitialKeyRepeat` can from the next login: a long
-    /// draw, or a key-up sent late behind a slow acknowledgement, never holds a key long
-    /// enough to type its character twice. Below that the whole distribution shrinks with it, as `Hand`'s does.
+    /// draw never holds a key long enough to type its character twice. The 20% left over is
+    /// what acknowledgements may take: a key that rolls over has other reports sent while it
+    /// is held, and its key-up waits behind theirs, so an acknowledgement slower than that -
+    /// 50 ms on a 250 ms Mac - can repeat it. Below that the whole distribution shrinks with
+    /// it, as `Hand`'s does.
     public init(keyRepeatDelay: Duration) {
         let dwell = LogNormal(median: 114, sigma: 0.2, within: 50 ... 200)
         let longest = Self.withinRepeat * (keyRepeatDelay / .milliseconds(1))
@@ -59,8 +62,8 @@ public struct Cadence: Sendable, Equatable {
         /// Added for a pair split between the hands (quicker, so negative), for two keys
         /// under one finger, and for one key pressed twice.
         let alternation: Double, sameFinger: Double, repeated: Double
-        /// Added before a word's first letter (word initiation), after a comma, semicolon
-        /// or colon, and after the end of a sentence or a line.
+        /// Added before a word's first letter (word initiation), on the space after a comma,
+        /// semicolon or colon, and on the space after the end of a sentence or on a line break.
         let wordStart: Double, clause: Double, sentence: Double
         /// Each word's pace: a factor on the gaps inside it, so some words run fast and
         /// others slow.
@@ -85,13 +88,13 @@ public struct Cadence: Sendable, Equatable {
             case outsideWord
             case wordStart, clause, sentence
 
-            /// The place of `character`'s first keystroke, typed after `previous`.
+            /// The place of `character`'s first keystroke, typed after `previous`. A stop or
+            /// a comma pauses only where whitespace follows it, so "3.14", "1,000" and
+            /// "example.com" are each typed as one word.
             init(_ character: Character, after previous: Character) {
-                self = if previous.isNewline || ".!?".contains(previous) { .sentence }
-                    else if ",;:".contains(previous) { .clause }
-                    else if previous.isWhitespace { character.isWhitespace ? .outsideWord : .wordStart }
-                    else if character.isWhitespace { .outsideWord }
-                    else { .inWord }
+                self = if character.isNewline || character.isWhitespace && ".!?".contains(previous) { .sentence }
+                    else if character.isWhitespace { ",;:".contains(previous) ? .clause : .outsideWord }
+                    else { previous.isWhitespace ? .wordStart : .inWord }
             }
         }
 
@@ -108,11 +111,11 @@ public struct Cadence: Sendable, Equatable {
         }
 
         /// The gap before `key`, pressed after `previous` at `place` in a word going at
-        /// `pace`, and whether a hesitation came first. Both draws are taken every time,
+        /// `pace`, and the hesitation in it, zero for none. Every draw is taken every time,
         /// so one seed lays out a run the same way whatever its text.
         /// [LAW:dataflow-not-control-flow]
         func draw(_ key: Usage, after previous: Usage, at place: Place, pace: Double,
-                  using generator: inout some RandomNumberGenerator) -> (gap: Duration, hesitated: Bool) {
+                  using generator: inout some RandomNumberGenerator) -> (gap: Duration, hesitation: Duration) {
             let added = switch place {
             case .inWord, .outsideWord: 0.0
             case .wordStart: wordStart
@@ -122,17 +125,16 @@ public struct Cadence: Sendable, Equatable {
             let median = (withinWord + pair(previous, key)) * (place == .inWord ? pace : 1) + added
             let gap = LogNormal(median: median, sigma: sigma, within: floor ... .infinity).draw(using: &generator)
             let pause = hesitation.draw(using: &generator)
-            let hesitated = place == .wordStart && Double.random(in: 0 ..< 1, using: &generator) < hesitationChance
-            return (.milliseconds(gap + (hesitated ? pause : 0)), hesitated)
+            let coin = Double.random(in: 0 ..< 1, using: &generator)
+            let hesitated = Duration.milliseconds(place == .wordStart && coin < hesitationChance ? pause : 0)
+            return (.milliseconds(gap) + hesitated, hesitated)
         }
     }
 
-    /// What a typist waits for: the report a wait ends in, or a hesitation, which ends in a
-    /// word's first key going down and is totalled apart from the key-downs it is not.
+    /// What a typist waits for: the report a wait ends in.
     public enum Wait: String, Sendable {
         case modifierDown = "modifier_down"
         case keyDown = "key_down"
-        case hesitation
         case keyUp = "key_up"
         case modifierUp = "modifier_up"
     }
@@ -146,27 +148,30 @@ public struct Cadence: Sendable, Equatable {
     }
 
     /// One report: the keys held from `at` on, measured from the start of the run, the wait
-    /// it ends, and what it puts in the app.
+    /// it ends, what it puts in the app, and the hesitation drawn into the gap before its
+    /// key goes down, zero for none and for every report but a key-down.
     public struct Change: Equatable, Sendable {
         public let at: Duration
         public let held: HeldKeys
         public let wait: Wait
         public let lands: Landing
+        public let hesitation: Duration
 
         /// A key going down while another is still held.
         public var rollsOver: Bool {
-            (wait == .keyDown || wait == .hesitation) && held.usages.filter { $0.modifierBit == nil }.count > 1
+            wait == .keyDown && held.usages.filter { $0.modifierBit == nil }.count > 1
         }
     }
 
     /// The changes that type `text`, character by character, and let go of every modifier
     /// at the end.
     public func type(_ text: [(character: Character, keystrokes: [Keystroke])], drawing generator: inout some RandomNumberGenerator) -> [Change] {
+        // The text is taken as following a space: its first word starts a word.
         let strokes = text.indices.flatMap { index in
             let (character, keystrokes) = text[index]
+            let place = Interval.Place(character, after: index == 0 ? " " : text[index - 1].character)
             return keystrokes.indices.map { offset in
-                Stroke(keystroke: keystrokes[offset],
-                       place: index == 0 ? .wordStart : offset > 0 ? .inWord : Interval.Place(character, after: text[index - 1].character),
+                Stroke(keystroke: keystrokes[offset], place: offset > 0 ? .inWord : place,
                        lands: offset == keystrokes.count - 1 ? .typed : .pending(character), wholeAct: false)
             }
         }
@@ -196,6 +201,7 @@ public struct Cadence: Sendable, Equatable {
         let down: Bool
         let wait: Wait
         let lands: Landing
+        var hesitation = Duration.zero
     }
 
     /// Each key goes down its drawn gap after the last, and no sooner than a settle after the
@@ -220,7 +226,7 @@ public struct Cadence: Sendable, Equatable {
             let key = stroke.keystroke.usage
             let drawnPace = interval.pace.draw(using: &generator)
             pace = stroke.place == .wordStart ? drawnPace : pace
-            let (gap, hesitated) = last.map { interval.draw(key, after: $0.key, at: stroke.place, pace: pace, using: &generator) } ?? (.zero, false)
+            let (gap, hesitation) = last.map { interval.draw(key, after: $0.key, at: stroke.place, pace: pace, using: &generator) } ?? (.zero, .zero)
             let held = Duration.milliseconds(dwell.draw(using: &generator))
             let lifted = lift(modifiers.subtracting(stroke.keystroke.modifiers))
             let added = stroke.keystroke.modifiers.subtracting(modifiers).usages
@@ -233,7 +239,7 @@ public struct Cadence: Sendable, Equatable {
                         upOf[key].map { $0 + settle }].compactMap { $0 }.max()!
             events += lifted
             events += added.map { Event(at: down - $0.lead, usage: $0.usage, down: true, wait: .modifierDown, lands: .nothing) }
-            events.append(Event(at: down, usage: key, down: true, wait: hesitated ? .hesitation : .keyDown, lands: stroke.lands))
+            events.append(Event(at: down, usage: key, down: true, wait: .keyDown, lands: stroke.lands, hesitation: hesitation))
             events.append(Event(at: down + held, usage: key, down: false, wait: .keyUp, lands: .nothing))
             modifiers = stroke.keystroke.modifiers
             last = (key, down, stroke.wholeAct)
@@ -254,7 +260,7 @@ public struct Cadence: Sendable, Equatable {
             if event.down { keys.insert(event.usage) } else { keys.remove(event.usage) }
             // At most four keys are ever down at once - a 200 ms hold over 60 ms gaps - far
             // under the 32 a report carries.
-            return Change(at: event.at, held: try! HeldKeys(keys), wait: event.wait, lands: event.lands)
+            return Change(at: event.at, held: try! HeldKeys(keys), wait: event.wait, lands: event.lands, hesitation: event.hesitation)
         }
     }
 
@@ -267,7 +273,7 @@ public struct Cadence: Sendable, Equatable {
             (character: character, keystrokes: [Keystroke(Usage(rawValue: Finger.keys.first { $0.character == character }!.usage))])
         }
         var generator = SeededGenerator(seed: 0)
-        let downs = type(text, drawing: &generator).filter { $0.wait == .keyDown || $0.wait == .hesitation }.map(\.at)
+        let downs = type(text, drawing: &generator).filter { $0.wait == .keyDown }.map(\.at)
         return (downs.last! - downs.first!) / (downs.count - 1)
     }
 }

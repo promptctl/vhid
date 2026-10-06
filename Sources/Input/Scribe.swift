@@ -49,6 +49,9 @@ public struct Scribe {
     /// Keys that went down, acknowledged, while another key was still held.
     public private(set) var rollovers = 0
 
+    /// The hesitation drawn before each key that went down, acknowledged, after one.
+    public private(set) var hesitations: [Duration] = []
+
     /// Makes every change of a planned run, in order, each at its time.
     public mutating func run(_ changes: [Cadence.Change], isolation: isolated (any Actor)? = #isolation) async throws {
         for change in changes { try await make(change) }
@@ -97,5 +100,6 @@ public struct Scribe {
             halfTyped = nil
         }
         if change.rollsOver { rollovers += 1 }
+        if change.hesitation > .zero { hesitations.append(change.hesitation) }
     }
 }
