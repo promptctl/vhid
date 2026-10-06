@@ -7,12 +7,17 @@ body { font: 18px -apple-system, sans-serif; margin: 0; padding: 70px 30px 30px;
 #b { position: absolute; left: 820px; top: 520px; }
 #text { position: absolute; left: 80px; top: 300px; width: 600px; height: 120px; font-size: 18px; }
 button { font-size: 18px; }
+#menu { position: absolute; left: 1100px; top: 160px; width: 240px; }
+#items { list-style: none; margin: 0; padding: 0; border: 1px solid #888; }
+#items li { padding: 10px 14px; }
+#items li.armed { background: #cde; }
 </style></head>
 <body>
 <div id="status">events: 0</div>
 <button id="a">Target A</button>
 <button id="b">Target B</button>
 <textarea id="text"></textarea>
+<div id="menu"><button id="open">Menu</button><ul id="items" hidden><li>Alpha</li><li>Bravo</li><li>Charlie</li><li>Delta</li></ul><div id="chosen">chosen: none</div></div>
 <script>
 // Logs every pointer and key event a page can see, with its own timestamp, and posts
 // the log to the server that served the page every half second. Coalesced pointer
@@ -25,7 +30,24 @@ const pointer = e => {
   for (const c of all.length ? all : [e]) log.push({ type: e.type, t: t(c), x: c.clientX, y: c.clientY, buttons: e.buttons, target: e.target.id || e.target.tagName });
 };
 for (const type of ['pointermove', 'pointerdown', 'pointerup', 'click', 'dblclick']) document.addEventListener(type, pointer, true);
+document.addEventListener('wheel', e => log.push({ type: 'wheel', t: t(e), x: e.clientX, y: e.clientY, dy: e.deltaY }), true);
 for (const type of ['keydown', 'keyup']) document.addEventListener(type, e => log.push({ type, t: t(e), code: e.code, key: e.key, repeat: e.repeat }), true);
+// A hover-intent menu: it opens while the pointer is over it, and an item takes a click
+// only once the pointer has rested on it for 100 ms. A click before that is ignored, as
+// such menus ignore a pointer that is only passing through.
+const menu = document.getElementById('menu'), items = document.getElementById('items');
+menu.addEventListener('pointerenter', () => { items.hidden = false; });
+menu.addEventListener('pointerleave', () => { items.hidden = true; });
+for (const li of items.children) {
+  let timer;
+  li.addEventListener('pointerenter', () => { timer = setTimeout(() => li.classList.add('armed'), 100); });
+  li.addEventListener('pointerleave', () => { clearTimeout(timer); li.classList.remove('armed'); });
+  li.addEventListener('click', e => {
+    const armed = li.classList.contains('armed');
+    log.push({ type: armed ? 'chosen' : 'ignored', t: t(e), item: li.textContent });
+    if (armed) document.getElementById('chosen').textContent = 'chosen: ' + li.textContent;
+  });
+}
 const page = crypto.randomUUID();
 let sent = 0, posting = false, failed = '';
 const post = () => {

@@ -85,6 +85,25 @@ This works because the cursor moves soon after a report. [human-cursor-poll.swif
 
 A character typed as a dead key and then a letter is two keystrokes, and each gets its own gap.
 
+## Checked live
+
+On studious, 2026-10-06, vhid built from master at 47469d9, with the probe page in Safari and the HID system's double-click interval and key-repeat delay both at 0.5 s. The page saw every verb as the model above describes.
+
+| What | The page saw |
+| --- | --- |
+| Seven moves of 822 points | 0.70–1.01 s, against Fitts' 0.86 s; one event a frame (median 17 ms); no step over 72 points; a bow of 7–27 points off the straight line; speed peaking 29–48% of the way through and falling to 1–3 points a frame at the end |
+| Landing | every click read back within 0.2 points of the point asked for, and the page's press was on the button aimed at |
+| Rest before a press | 134–343 ms |
+| Button held | 84–184 ms; a double click's clicks 126 ms apart, and Safari fired `dblclick` |
+| Drag | rested 265 ms, held 134 ms before carrying, carried 647 ms, rested 339 ms before letting go |
+| Scroll | rested 252 ms, then one wheel event per notch, 230–259 ms apart |
+| 55 characters typed | holds 50–177 ms (median 104), key-down to key-down 111–316 ms (median 188), about 63 words a minute, no repeats |
+| Shift around a capital | down 39–83 ms before its key, up 22–88 ms after it, over 19 capitals |
+
+Shift's lead and trail are the page's timestamps, not vhid's schedule: of 37 leads and trails, five fell 1–4 ms outside the drawn 30–80 and 20–60 ms, and one trail 28 ms outside. Safari reports no key-up for a key pressed while Command is down, so `press leftCommand+a` shows only the A going down.
+
+The page's hover-intent menu takes a click on an item only after the pointer has rested on it 100 ms. With the menu opened by a `vhid move` to its button, a bare `vhid click` on an item chose it 4 times out of 4. vhid 0.4.1's clicks never reached an item, 3 times out of 3; in the one traced, its first report threw the cursor 126 points past the item and out of the menu, which closed, and the press landed on the page.
+
 ## Sources
 
 1. V. Choudhary et al., "What Does It Take to Detect an AI Agent? Minimal Feature Sets for Behavioral Detection under Browser Automation", arXiv:2607.26935, 2026. Appendix B (click duration, typing speed, teleportation, teleport-click ratio) and Appendix D (the Fitts constants, click holds N(110, 30) ms and key gaps N(180, 60) ms, which it takes as human distributions).
@@ -93,7 +112,7 @@ A character typed as a dead key and then a letter is two keystrokes, and each ge
 
 ## Repeating it
 
-**The page.** Copy `human-probe.html` and `human-probe.py` to the Mac, run `python3 human-probe.py` in a scratch directory, and open `http://localhost:8765/` in Safari. Find the buttons with `eyes find "Target A"`, then run the verbs against them. The page posts what it saw every half second, and the server appends it to `events.jsonl`, one event a line with the page's own millisecond timestamp. Split pointer events into moves at gaps of more than 300 ms. A move's distance is in screen points from where the cursor rested to the button; the first event a page sees comes after the first jump, so it is not the start. The page sees what the browser dispatches, about one pointer event a frame, so it understates the event rate of a move that runs longer than a frame.
+**The page.** Copy `human-probe.html` and `human-probe.py` to the Mac, run `python3 human-probe.py` in a scratch directory, and open `http://localhost:8765/` in Safari. Find the buttons with `eyes find "Target A"`, then run the verbs against them. It logs pointer, wheel and key events, and has a hover-intent menu (`eyes find Menu`; hover it, then find the items) that logs `chosen` or `ignored` for each click on an item. The page posts what it saw every half second, and the server appends it to `events.jsonl`, one event a line with the page's own millisecond timestamp. Split pointer events into moves at gaps of more than 300 ms. A move's distance is in screen points from where the cursor rested to the button; the first event a page sees comes after the first jump, so it is not the start. The page sees what the browser dispatches, about one pointer event a frame, so it understates the event rate of a move that runs longer than a frame.
 
 **The HID system's timings.** Build `human-hid-params.swift` with `swiftc -O`. Run as any user, it prints `NSEvent`'s double-click interval and delay until a held key repeats, in seconds; run as root with a key and nanoseconds, `HIDClickTime 900000000`, it first sets that IOHIDSystem parameter. On studious (macOS 15.0.1), 2026-10-06, setting `HIDClickTime` to 0.9 s or `HIDInitialKeyRepeat` to 0.3 s moved what it printed both as bmf, logged in at the screen, and as bbb, who had no session; bmf's `defaults write -g com.apple.mouse.doubleClickThreshold 1.5` and `InitialKeyRepeat 15` moved neither. Note what it prints before setting anything, and set both back to that after.
 
