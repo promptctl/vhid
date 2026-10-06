@@ -71,8 +71,8 @@ import Testing
     /// move's own check found the cursor already there.
     @Test func aClickPostsOneDownAndOneUpPerClick() async throws {
         let mouse = FakeMouse(at: Self.origin)
-        let click = try await mouse.pointer.click(at: Self.origin, button: .middle, times: Clicks(rawValue: 3)!)
-        #expect(click == Pointer.Click(at: Self.origin, moved: Pointer.Moved(planned: .zero, displays: .vast, kept: 1, steered: 0, closing: 0, lost: 0)))
+        let click = try await mouse.pointer.click(at: .point(Self.origin), button: .middle, times: Clicks(rawValue: 3)!)
+        #expect(click == Pointer.Click(at: Self.origin, moved: Pointer.Moved(aimed: Self.origin, toward: .point(Self.origin), planned: .zero, displays: .vast, kept: 1, steered: 0, closing: 0, lost: 0, landed: Self.origin)))
         #expect(mouse.log == ["down 3", "up", "down 3", "up", "down 3", "up"])
     }
 
@@ -81,7 +81,7 @@ import Testing
     @Test func aClickThatStopsReleasesAndReportsARefusedRelease() async throws {
         let mouse = FakeMouse(at: Self.origin)
         mouse.refused = 1 ..< .max
-        let stopped = try await #require(throws: PointingStopped.self) { try await mouse.pointer.click(at: Self.origin, button: .left, times: .single) }
+        let stopped = try await #require(throws: PointingStopped.self) { try await mouse.pointer.click(at: .point(Self.origin), button: .left, times: .single) }
         #expect(stopped.cause is Refused)
         #expect(stopped.unreleased != nil)
         #expect("\(stopped)".contains("A button may be left held"))
@@ -93,7 +93,7 @@ import Testing
     @Test func aScrollIsOneNotchAReportWithAPauseAfterEach() async throws {
         let mouse = FakeMouse(at: Self.origin)
         let clock = ManualClock()
-        try await mouse.pointer(on: clock).scroll(at: Self.origin, vertical: 300, horizontal: -5)
+        try await mouse.pointer(on: clock).scroll(at: .point(Self.origin), vertical: 300, horizontal: -5)
         #expect(mouse.log == Array(repeating: "scroll 1 -1", count: 5) + Array(repeating: "scroll 1 0", count: 295))
         #expect(clock.sleeps == 301)
     }
@@ -105,7 +105,7 @@ import Testing
     @Test func aScrollCancelledInARestStopsBeforeTheNextNotch() async throws {
         let mouse = FakeMouse(at: Self.origin)
         let clock = ManualClock()
-        let roll = Task { try await mouse.pointer(on: clock).scroll(at: Self.origin, vertical: Int.min, horizontal: 0) }
+        let roll = Task { try await mouse.pointer(on: clock).scroll(at: .point(Self.origin), vertical: Int.min, horizontal: 0) }
         clock.cancel(afterSleeps: 4) { roll.cancel() }
         let stopped = try await #require(throws: PointingStopped.self) { try await roll.value }
         #expect(stopped.cause is CancellationError)
@@ -167,7 +167,7 @@ import Testing
     @Test func aClickSaysWhereItLandedAndNotWhereItWasAimed() async throws {
         let mouse = SteadyGainMouse(at: ScreenPoint(x: 0, y: 0)!, gain: 3)
         let aim = ScreenPoint(x: 1.4, y: 0)!
-        let click = try await mouse.pointer.click(at: aim, button: .left, times: .single)
+        let click = try await mouse.pointer.click(at: .point(aim), button: .left, times: .single)
         #expect(click.at == mouse.position)
         #expect(click.at != aim)
     }

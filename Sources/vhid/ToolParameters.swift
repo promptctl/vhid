@@ -44,6 +44,11 @@ extension Parameter: DeclaredParameter {
 extension Parameter {
     /// This parameter, taking `value` when it is left out.
     func absent(_ value: Taken) -> Self { Self(name: name, expected: expected, schema: schema, absent: value, read: read) }
+
+    /// This parameter, nil when it is left out: one of two forms a tool takes one of.
+    var optional: Parameter<Taken?> {
+        Parameter<Taken?>(name: name, expected: expected, schema: schema, absent: .some(nil)) { [read] in try read($0).map(Optional.some) }
+    }
 }
 
 extension Parameter where Taken == Double {
@@ -102,16 +107,27 @@ extension Parameter where Taken == Gesture {
     }
 }
 
-extension Parameter where Taken == ScreenPoint {
-    /// A place as an object of its own, `{"x": …, "y": …}`, for a tool that takes two.
+extension Parameter where Taken == ScreenRect {
+    /// A box as eyes prints it, read by `ScreenRect(spelled:)`, as the command line reads
+    /// one. [LAW:single-enforcer]
+    static func box(_ name: String, _ expected: String) -> Self {
+        Self(name: name, expected: expected, schema: ["type": "string"], absent: nil) { $0.stringValue.flatMap(ScreenRect.init(spelled:)) }
+    }
+}
+
+extension Parameter where Taken == Target {
+    /// A place as a value of its own, for a tool that takes two: a point as an object,
+    /// `{"x": …, "y": …}`, or a box as a string, `"x,y,width,height"`.
     static func place(_ name: String, _ expected: String) -> Self {
-        Self(name: name, expected: expected + ": {\"x\": …, \"y\": …} in " + Help.place,
-             schema: ["type": "object", "properties": ["x": ["type": "number"], "y": ["type": "number"]],
-                      "required": ["x", "y"], "additionalProperties": false],
+        Self(name: name, expected: expected + ": a point as {\"x\": …, \"y\": …}, or a box to press a point inside as \"x,y,width,height\", the box eyes prints beside each point, in " + Help.place,
+             schema: ["anyOf": [["type": "object", "properties": ["x": ["type": "number"], "y": ["type": "number"]],
+                                 "required": ["x", "y"], "additionalProperties": false],
+                                ["type": "string"]]],
              absent: nil) {
+            if let box = $0.stringValue { return ScreenRect(spelled: box).map(Target.box) }
             guard let object = $0.objectValue, Set(object.keys) == ["x", "y"],
                   let x = object["x"]?.number, let y = object["y"]?.number else { return nil }
-            return ScreenPoint(x: x, y: y)
+            return ScreenPoint(x: x, y: y).map(Target.point)
         }
     }
 }

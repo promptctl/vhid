@@ -9,6 +9,7 @@ vhid press leftCommand+s
 vhid gesture mission-control
 vhid click 800 500 --button left --times 2
 vhid click 800 500 --modifiers leftCommand+leftShift
+vhid click 760,488,80,24     # inside the box eyes printed: x,y,width,height
 vhid move 800 500
 vhid scroll 800 500 --vertical 3
 vhid drag 100 100 400 300
@@ -52,6 +53,15 @@ build from this tree. `vhid service` prints which. Coordinates are screen points
 left of or above it has negative ones, which follow `--` after every option:
 `vhid click --button left -- -100 -40`.
 
+`click`, `move`, `scroll` and `drag` take each place as a point, two numbers `x y`, or as a
+box, one word `x,y,width,height`: the box `eyes find` prints beside each point. A point is
+pressed where it is. In a box, the pointer lands on a point drawn inside it, spread about
+the centre as a person's clicks spread on a button and never within 2 points of its edge
+(a side too narrow for that is aimed at its centre, and one under a point is refused),
+and the move there takes as long as Fitts' law says a hand's would to a target that size.
+The MCP tools take `box` in place of `x` and `y`, and `drag`'s `from` and `to` take the
+box as a string. [design/human.md](design/human.md#where-a-click-lands) has the model.
+
 ## What each run leaves behind
 
 Every `vhid` run, and every MCP tool call, leaves one record: a line of JSON appended to
@@ -69,7 +79,7 @@ verb at once, unrecorded, and an MCP call `vhid mcp` was running when it was sto
 names the signal too.
 
 ```json
-{"attributes":{"double_click_ms":500,"paths":[{"bow_kept":1,"closing_reports":1,"displays":[[0,0,1512,982]],"lost_reports":0,"planned_ms":612.4,"steered_reports":71}],"pauses":{"notch":{"count":3,"ms":691.4},"rest":{"count":1,"ms":262.7}},"seed":"9e3779b97f4a7c15"},"counts":{"keyboard_reports":0,"mouse_reports":75,"scroll_notches_horizontal":0,"scroll_notches_vertical":3},"duration_ms":1601.3,"entry":"cli","event":"scroll","outcome":"ok","service":"vhid","sink":"file","started_at":"2026-10-04T13:20:00.512Z","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736"}
+{"attributes":{"double_click_ms":500,"paths":[{"aimed":[812.4,503.1],"bow_kept":1,"box":[772,491,80,24],"closing_reports":1,"displays":[[0,0,1512,982]],"fitts_width":24,"landed":[812.4,503.1],"lost_reports":0,"planned_ms":612.4,"steered_reports":71}],"pauses":{"notch":{"count":3,"ms":691.4},"rest":{"count":1,"ms":262.7}},"seed":"9e3779b97f4a7c15"},"counts":{"keyboard_reports":0,"mouse_reports":75,"scroll_notches_horizontal":0,"scroll_notches_vertical":3},"duration_ms":1601.3,"entry":"cli","event":"scroll","outcome":"ok","service":"vhid","sink":"file","started_at":"2026-10-04T13:20:00.512Z","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736"}
 ```
 
 `event` is the verb as it is typed (`scroll`, `driver state`), and an MCP call's is its
@@ -86,7 +96,11 @@ naming no tool is recorded as `tools/call`. An MCP call's
 
 A verb that opens the devices records `attributes.seed`, the hex seed every pointer move
 it makes and every key it times is drawn from, and `attributes.paths` has one entry for each such move, in order,
-the move a failed verb stopped in included: `planned_ms` is how long its trajectory was
+the move a failed verb stopped in included: `aimed` is the point it aimed at, `x` and `y`,
+drawn inside the box when it was given one, `box` that box as `x,y,width,height` (absent
+for a point), `fitts_width` the target width its time was
+read from (the box's smaller side, or 20 for a point), `landed` where the cursor was read
+when it landed, absent for a move that stopped first, `planned_ms` is how long its trajectory was
 drawn to take, `displays` the display layout it was kept on, each display as its left,
 top, width and height, `bow_kept` how much of its drawn curve it kept to stay clear of the
 displays' edges (1 for all of it, 0 for a straight line), `steered_reports` how many

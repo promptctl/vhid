@@ -14,13 +14,14 @@ import Testing
 
     static func trajectory(seed: UInt64, from start: ScreenPoint = start, to target: ScreenPoint = across) -> Trajectory {
         var generator = SeededGenerator(seed: seed)
-        return Trajectory(from: start, to: target, within: .vast, drawing: &generator)
+        return Trajectory(from: start, toward: .point(target), within: .vast, drawing: &generator)
     }
 
-    /// MT = 50 ms + 150 ms × log2(D/20 + 1), times the pace drawn first: about 0.84 s
-    /// across 740 points before the pace.
+    /// MT = 50 ms + 150 ms × log2(D/20 + 1), times the pace drawn after the aim: about
+    /// 0.84 s across 740 points before the pace.
     @Test func aMoveTakesFittsTimeTimesItsDrawnPace() {
         var generator = SeededGenerator(seed: 7)
+        _ = Target.point(Self.across).aim(drawing: &generator)
         let pace = Trajectory.pace.draw(using: &generator)
         let fitts = Duration.milliseconds(50) + .milliseconds(150) * log2(740.0 / 20 + 1)
         #expect(Self.trajectory(seed: 7).duration == fitts * pace)
@@ -113,7 +114,7 @@ import Testing
 
     static func trajectory(seed: UInt64, from start: ScreenPoint, to target: ScreenPoint, within displays: Displays = screen) -> Trajectory {
         var generator = SeededGenerator(seed: seed)
-        return Trajectory(from: start, to: target, within: displays, drawing: &generator)
+        return Trajectory(from: start, toward: .point(target), within: displays, drawing: &generator)
     }
 
     /// Every millisecond of every path along the bottom edge is on the screen and no lower
@@ -174,7 +175,7 @@ import Testing
         let trace = SteeringTheTrajectoryTests.Trace(), clock = ManualClock()
         let pointer = Pointer(mouse: mouse, cursor: { trace.read(mouse.cursor(), at: clock.now.offset) }, displays: { Self.screen },
                               clock: clock, randomness: RandomSource(seed: seed), hand: .macOSDefault, traced: { _ in })
-        try await pointer.move(to: target)
+        try await pointer.move(to: .point(target))
         #expect(trace.all.allSatisfy { $0.point.y < 1075 }, "lowest \(trace.all.map(\.point.y).max()!)")
         #expect(abs(mouse.position.x - target.x) <= 0.5 && abs(mouse.position.y - target.y) <= 0.5)
     }
@@ -206,7 +207,7 @@ import Testing
         let mouse = CurvedMouse(at: start, lateEvery: 0)
         let clock = ManualClock(), trace = Trace()
         let pointer = Pointer(mouse: mouse, cursor: { trace.read(mouse.cursor(), at: clock.now.offset) }, displays: { .vast }, clock: clock, randomness: RandomSource(seed: seed), hand: .macOSDefault, traced: { _ in })
-        let moved = try await pointer.move(to: target)
+        let moved = try await pointer.move(to: .point(target))
         let path = TrajectoryTests.trajectory(seed: seed, from: start, to: target)
         let ticks = Int((path.duration / Pointer.tick).rounded(.up))
         return (moved, path, Array(trace.all.dropFirst().prefix(ticks)), mouse.position, clock.now.offset)
@@ -241,7 +242,8 @@ import Testing
     func aLongMoveSpeedsUpAndSlowsDown(seed: UInt64, move: Int) async throws {
         let (moved, path, reads, _, _) = try await Self.steer(seed: seed, move: move)
         let ticks = Int((path.duration / Pointer.tick).rounded(.up))
-        #expect(moved.steered >= ticks - 8)
+        // At most ten silent: over seeds 1-40 of these three moves, 2 to 10 were.
+        #expect(moved.steered >= ticks - 10)
         let points = [Self.moves[move].0] + reads.map(\.point)
         let steps = zip(points, points.dropFirst()).map { hypot($1.x - $0.x, $1.y - $0.y) }
         let third = steps.count / 3
@@ -257,7 +259,7 @@ import Testing
     func reportsTheCursorHasNotShownAreNotSentAgain(seed: UInt64) async throws {
         let mouse = CurvedMouse(at: Self.start, lateEvery: 4)
         let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor() }, displays: { .vast }, clock: ManualClock(), randomness: RandomSource(seed: seed), hand: .macOSDefault, traced: { _ in })
-        _ = try await pointer.move(to: Self.target)
+        _ = try await pointer.move(to: .point(Self.target))
         #expect(mouse.farthest <= Self.target.x + 3, "went to \(mouse.farthest)")
         #expect(abs(mouse.position.x - Self.target.x) <= 0.5 && abs(mouse.position.y - Self.target.y) <= 0.5)
     }
@@ -266,7 +268,7 @@ import Testing
     /// closing loop still lands the move.
     @Test func aMoveLandsEvenOnACurveWithAStep() async throws {
         let mouse = FakeMouse(at: Self.start)
-        _ = try await mouse.pointer.move(to: Self.target)
+        _ = try await mouse.pointer.move(to: .point(Self.target))
         #expect(abs(mouse.position.x - Self.target.x) <= 0.5 && abs(mouse.position.y - Self.target.y) <= 0.5)
     }
 
@@ -277,7 +279,7 @@ import Testing
         let mouse = CurvedMouse(at: Self.start, lateEvery: 0), traced = Traced()
         let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor() }, displays: { .vast }, clock: ManualClock(), randomness: RandomSource(seed: 1),
                               hand: .macOSDefault, traced: { if case .moved(let move) = $0 { traced.moves.withLock { $0.append(move) } } })
-        let drag = try await pointer.drag(from: Self.target, to: Self.start, button: .left)
+        let drag = try await pointer.drag(from: .point(Self.target), to: .point(Self.start), button: .left)
         #expect(traced.moves.withLock { $0 } == [drag.approach, drag.carry])
         #expect(drag.approach.steered > 0 && drag.carry.steered > 0)
         #expect(drag.approach.lost == 0 && drag.carry.lost == 0)
@@ -291,7 +293,7 @@ import Testing
         mouse.stuck = true
         let pointer = Pointer(mouse: mouse, cursor: mouse.cursor, displays: { .vast }, clock: ManualClock(), randomness: RandomSource(seed: 1),
                               hand: .macOSDefault, traced: { if case .moved(let move) = $0 { traced.moves.withLock { $0.append(move) } } })
-        let stop = try await #require(throws: WouldNotReach.self) { try await pointer.move(to: Self.target) }
+        let stop = try await #require(throws: WouldNotReach.self) { try await pointer.move(to: .point(Self.target)) }
         let moved = try #require(traced.moves.withLock { $0.first })
         #expect(moved.steered > 0)
         #expect(stop.reports == moved.reports)

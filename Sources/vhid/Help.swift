@@ -31,6 +31,11 @@ enum Help {
 
     static let x = "the x coordinate, in " + place
     static let y = "the y coordinate, in " + place
+    /// A place as a command line writes one.
+    static let targetForm = "a point as two numbers, x y, or a box as one word, x,y,width,height - the box eyes prints beside each point - in " + place
+    static let target = "where: " + targetForm
+    /// A box as a tool takes one.
+    static let box = "a box to press a point inside, as x,y,width,height in " + place + ": the box eyes prints beside each point. Given instead of x and y"
     static let text = "the text to type: anything the keyboard layout has keys for, dead-key sequences and line breaks included"
     static let chords = "the chords, pressed in order"
     static let layout = "the keyboard layout to read keys off, by input source id, e.g. com.apple.keylayout.Dvorak; left out, the calling user's own layout, or US English when the system reports none. Name it when the Mac is at the login window or another user is in front, whose layout the caller cannot see"
@@ -104,9 +109,11 @@ enum Help {
         up after it. No key is held as long as this Mac's delay until a held key repeats.
         """
 
-    static let click = VerbHelp(name: "click", abstract: "Click at a point on the screen.", discussion: """
-        Coordinates, and nothing else: there is no click-by-element here, because nothing in vhid \
-        reads the screen. What is under the point is the caller's to know.
+    static let click = VerbHelp(name: "click", abstract: "Click at a point on the screen, or inside a box on it.", discussion: """
+        A point or a box, and nothing else: there is no click-by-element here, because nothing in \
+        vhid reads the screen. What is under them is the caller's to know.
+
+        \(aim)
 
         The device sends counts, not coordinates, and macOS accelerates them, so the pointer is \
         steered: along a person's path, slightly curved, speeding up and slowing down, reading \
@@ -119,28 +126,37 @@ enum Help {
         asked for. The two can differ by under a point.
         """, commandLine: [negative(NegativeExample.click)])
 
-    static let move = VerbHelp(name: "move", abstract: "Move the pointer to a point on the screen, pressing nothing.", discussion: """
-        Steered the way click steers it - a person's path, then a loop that lands it - and the \
-        point it reports is read back from the cursor.
+    static let move = VerbHelp(name: "move", abstract: "Move the pointer to a point on the screen, or inside a box on it, pressing nothing.", discussion: """
+        Steered the way click steers it - a person's path, then a loop that lands it - and aimed \
+        inside a box the way click aims. The point it reports is read back from the cursor.
         """, commandLine: [negative(NegativeExample.move)])
 
-    static let scroll = VerbHelp(name: "scroll", abstract: "Roll the mouse wheel at a point on the screen.", discussion: """
-        The pointer is moved to the point first, because a wheel scrolls whatever is under the \
-        pointer. The ticks are the device's own, and macOS decides how far each one scrolls.
+    static let scroll = VerbHelp(name: "scroll", abstract: "Roll the mouse wheel at a point on the screen, or inside a box on it.", discussion: """
+        The pointer is moved to the point first, or into the box as click aims, because a wheel \
+        scrolls whatever is under the pointer. The ticks are the device's own, and macOS decides how far each one scrolls.
 
-        The pointer rests on the point first, as a hand does. Each tick then goes out as a \
+        The pointer rests there first, as a hand does. Each tick then goes out as a \
         report of its own, \(Int(Hand.macOSDefault.notch.bounds.lowerBound)) to \
         \(Int(Hand.macOSDefault.notch.bounds.upperBound)) ms after the last, because macOS takes a report as one \
         notch whatever count it carries and speeds up notches that come faster. So N ticks \
         scroll N times as far as one, and take N times as long.
         """, commandLine: [negative(NegativeExample.scroll)])
 
-    static let drag = VerbHelp(name: "drag", abstract: "Drag from one point on the screen to another.", discussion: """
+    static let drag = VerbHelp(name: "drag", abstract: "Drag from one point or box on the screen to another.", discussion: """
         The pointer is moved to the first point and rests, the button goes down and is held a \
         moment, the pointer is moved to the second with it held and rests, and every button \
-        comes up. Both points it reports are read \
+        comes up. Either end may be a box, aimed inside as click aims. Both points it reports are read \
         back from the cursor.
         """, commandLine: [negative(NegativeExample.drag)])
+
+    /// What a box does to a pointer verb, said once for all four. [LAW:one-source-of-truth]
+    static let aim = """
+        Given a point, it presses that point. Given a box - the one eyes prints beside each \
+        point - it presses a point drawn inside it, spread about the centre as a person's clicks \
+        spread on a target and never within \(Int(Target.margin)) points of its edge, or at its centre \
+        when a side is too narrow for that, and the move \
+        takes as long as a hand's would to a target that size.
+        """
 
     static let script = "the script, as JSON Lines: the start line, then one act a line"
 

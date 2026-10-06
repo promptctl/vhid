@@ -7,7 +7,10 @@ import Pointing
 /// every draw is taken when it is made. `docs/design/human.md`, "The model".
 public struct Trajectory: Sendable, Equatable {
     public let start: ScreenPoint
+    /// The point drawn inside the target it was aimed at, where it ends.
     public let target: ScreenPoint
+    /// The point or box it was aimed at, whose width its time was read off by Fitts' law.
+    public let toward: Target
     /// How long the whole movement takes, by Fitts' law and a drawn pace.
     public let duration: Duration
     /// How much of its drawn bow and aim off the line the path kept to stay on the
@@ -19,11 +22,9 @@ public struct Trajectory: Sendable, Equatable {
     public let correction: Submovement
 
     /// Fitts' law, MT = a + b × log2(D/W + 1), with the constants of the human-like
-    /// generator in Choudhary et al. W is fixed: vhid is given a point, not a target, and
-    /// 20 points is about a button's height or a line of text's.
+    /// generator in Choudhary et al. W is the target's: `Target.width`.
     static let intercept: Duration = .milliseconds(50)
     static let slope: Duration = .milliseconds(150)
-    static let width = 20.0
     /// What MT is multiplied by, so two moves of one distance do not take one time.
     static let pace = Normal(1, 0.15, within: 0.7 ... 1.3)
     /// The primary submovement's share of MT; the correction has the rest.
@@ -36,10 +37,9 @@ public struct Trajectory: Sendable, Equatable {
     static let bow = Normal(0, 0.03, within: -0.06 ... 0.06)
 
     /// How near the displays' edges a bow may carry the path, in points, where the straight
-    /// line keeps further off: `width` again, a button's height of room. The steering
-    /// follows the path to within a few points, so the cursor stays clear of an edge it
-    /// does not mean to touch.
-    static let margin = width
+    /// line keeps further off: a button's height of room. The steering follows the path to
+    /// within a few points, so the cursor stays clear of an edge it does not mean to touch.
+    static let margin = Target.button
     /// The shares of the drawn deviation tried, most first, until one keeps the path on the
     /// displays; none fitting leaves the straight line.
     static let shares = stride(from: 1.0, to: 0.05, by: -0.1).map { $0 }
@@ -47,9 +47,10 @@ public struct Trajectory: Sendable, Equatable {
     /// a few milliseconds apart on the longest move, closer than the steering's ticks.
     static let checks = 256
 
-    /// A movement from `start` to `target` with every variable drawn from `generator`, in
-    /// one fixed order whatever the distance, so one seed always means one movement.
-    /// A movement under a point long takes no time: the closing loop has it all.
+    /// A movement from `start` to a point aimed at inside `target` with every variable drawn
+    /// from `generator`, in one fixed order whatever the distance, the aim first, so one seed
+    /// always means one movement. A movement under a point long takes no time: the closing
+    /// loop has it all.
     ///
     /// **The bow and the aim off the line are drawn whole and kept in part.** A path that
     /// bows by up to a tenth of its length runs into the edge beside a target approached
@@ -60,12 +61,13 @@ public struct Trajectory: Sendable, Equatable {
     /// straight line between two points on one display is on it, and the share is a value
     /// rather than a branch, so a path far from every edge keeps it all.
     /// [LAW:dataflow-not-control-flow]
-    public init(from start: ScreenPoint, to target: ScreenPoint, within displays: Displays, drawing generator: inout some RandomNumberGenerator) {
+    public init(from start: ScreenPoint, toward aimed: Target, within displays: Displays, drawing generator: inout some RandomNumberGenerator) {
+        let target = aimed.aim(drawing: &generator)
         let (pace, short, offLine, bow) = (Self.pace.draw(using: &generator), Self.short.draw(using: &generator),
                                            Self.offLine.draw(using: &generator), Self.bow.draw(using: &generator))
         let (dx, dy) = (target.x - start.x, target.y - start.y)
         let distance = hypot(dx, dy)
-        let fitts = Self.intercept + Self.slope * log2(distance / Self.width + 1)
+        let fitts = Self.intercept + Self.slope * log2(distance / aimed.width + 1)
         let duration = distance < 1 ? .zero : fitts * pace
         // Along the line toward the target, and across it, as unit vectors; the zero vector
         // for a movement of no length, which then has no aim to set off either way.
@@ -87,6 +89,7 @@ public struct Trajectory: Sendable, Equatable {
         } ?? 0
         self.start = start
         self.target = target
+        toward = aimed
         self.duration = duration
         self.kept = kept
         (primary, correction) = path(keeping: kept)

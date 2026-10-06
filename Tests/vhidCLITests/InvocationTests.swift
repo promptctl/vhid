@@ -28,7 +28,7 @@ import Testing
     }
 
     private static func scroll(vertical: Int, horizontal: Int, clock: ManualClock = ManualClock(), on devices: Devices) async throws -> String {
-        try await ScrollCommand.scroll(at: at, vertical: vertical, horizontal: horizontal, holding: .none,
+        try await ScrollCommand.scroll(at: .point(at), vertical: vertical, horizontal: horizontal, holding: .none,
                                        with: Pointer(mouse: devices.mouse, cursor: { at }, displays: { .vast }, clock: clock, randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: Invocation.traced), devices.keyboard)
     }
 
@@ -80,7 +80,11 @@ import Testing
         // The pointer was already on its point, so the move there drew a path of no length.
         let paths = try #require(attributes["paths"] as? [[String: Any]])
         try #require(paths.count == 1)
-        #expect(paths[0].compactMapValues { $0 as? Double } == ["planned_ms": 0, "bow_kept": 1, "steered_reports": 0, "closing_reports": 0, "lost_reports": 0])
+        #expect(paths[0].compactMapValues { $0 as? Double } == ["fitts_width": 20, "planned_ms": 0, "bow_kept": 1, "steered_reports": 0, "closing_reports": 0, "lost_reports": 0])
+        // A point is aimed at exactly, and the cursor read back there when it landed.
+        #expect(paths[0]["aimed"] as? [Double] == [40, 30])
+        #expect(paths[0]["landed"] as? [Double] == [40, 30])
+        #expect(paths[0]["box"] == nil)
         // The layout the path was kept on, as the pointer read it.
         #expect(paths[0]["displays"] as? [[Double]] == [[-100_000, -100_000, 200_000, 200_000]])
     }
@@ -130,17 +134,19 @@ import Testing
         #expect(pauses["key_down"]?["count"] as? Int == text.count)
     }
 
-    /// A move the cursor never follows throws, and its record still carries the move: every
-    /// steered report given up on, and the closing loop's reports up to the stall that
-    /// stopped it. Through the pointer `Devices` opens, which is where moves are recorded.
+    /// A move the cursor never follows throws, and its record still carries the move: the box
+    /// it was given and the point drawn inside it, every steered report given up on, and the
+    /// closing loop's reports up to the stall that stopped it, and no landing. The error
+    /// names the box too. Through the pointer `Devices` opens, which is where moves are recorded.
     @Test func aMoveThatWouldNotReachIsRecordedWithItsPath() async throws {
         let export = EventExport.scratch()
-        await #expect(throws: (any Error).self) {
+        let thrown = await #expect(throws: (any Error).self) {
             try await Invocation.record("move", via: .mcp, to: export.export) { _ in
                 // The far end's cursor is always at (0, 0).
-                try await Self.against { try await MoveCommand.move(to: ScreenPoint(x: 30, y: 0)!, with: $0.pointer) }
+                try await Self.against { try await MoveCommand.move(to: .box(ScreenRect(x: 30, y: -5, width: 20, height: 10)!), with: $0.pointer) }
             }
         }
+        #expect(thrown.map { "\($0)".contains("drawn inside the box 30,-5,20,10") } == true, "\(String(describing: thrown))")
         let record = try Self.only(export)
         #expect(record["outcome"] as? String == "failed")
         let recorded = try #require((record["attributes"] as? [String: Any])?["paths"] as? [[String: Any]])
@@ -153,6 +159,11 @@ import Testing
         #expect(paths[0]["steered_reports"].map { $0 > 0 } == true)
         #expect(paths[0]["lost_reports"] == paths[0]["steered_reports"])
         #expect(paths[0]["closing_reports"] == Double(Pointer.stalls))
+        #expect(paths[0]["fitts_width"] == 10)
+        #expect(recorded[0]["box"] as? [Double] == [30, -5, 20, 10])
+        let aimed = try #require(recorded[0]["aimed"] as? [Double])
+        #expect((32 ... 48).contains(aimed[0]) && (-3 ... 3).contains(aimed[1]), "\(aimed)")
+        #expect(recorded[0]["landed"] == nil)
     }
 
     /// The cancel lands inside the pause after the second notch, from the task the roll runs

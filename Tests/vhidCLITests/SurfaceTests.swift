@@ -80,23 +80,28 @@ import Testing
     }
 
     /// A tool's arguments as the command line would show them. A required argument is a
-    /// positional and an optional one an option. A place is one argument over MCP and one
-    /// per coordinate on the command line, `from-x` and `from-y`; the tool's phrase for it
-    /// goes on to spell the JSON, which is the tool's alone.
+    /// positional and an optional one an option. Where a tool takes a place as `x` and `y`
+    /// or `box`, the command line takes it as one positional, `place`; where it takes two,
+    /// `from` and `to`, each a point object or a box string, the command line takes both as
+    /// `places`. How each is spelled is each surface's own.
     static func expected(_ tool: Tool) -> [Shown] {
         let schema = tool.inputSchema.objectValue ?? [:]
-        let properties = schema["properties"]?.objectValue ?? [:]
+        var properties = schema["properties"]?.objectValue ?? [:]
         let required = Set(schema["required"]?.arrayValue?.compactMap(\.stringValue) ?? [])
-        return properties.flatMap { name, property -> [Shown] in
-            let property = property.objectValue ?? [:]
-            let phrase = property["description"]?.stringValue ?? ""
+        var shown: [Shown] = []
+        if properties.removeValue(forKey: "box") != nil {
+            (properties["x"], properties["y"]) = (nil, nil)
+            shown.append(Shown(name: "place", required: true, help: sentence(Help.target)))
+        }
+        if properties["from"]?.objectValue?["anyOf"] != nil {
+            (properties["from"], properties["to"]) = (nil, nil)
+            shown.append(Shown(name: "places", required: true, help: sentence(Help.from + ", then " + Help.to + ": each " + Help.targetForm)))
+        }
+        return (shown + properties.map { name, property in
             let isRequired = required.contains(name)
-            guard let coordinates = property["properties"]?.objectValue?.keys.sorted() else {
-                return [Shown(name: isRequired ? name : "--" + name, required: isRequired, help: sentence(phrase))]
-            }
-            let place = phrase.components(separatedBy: ": {").first!
-            return coordinates.map { Shown(name: "\(name)-\($0)", required: isRequired, help: sentence(place + ": " + $0)) }
-        }.sorted { $0.name < $1.name }
+            let phrase = property.objectValue?["description"]?.stringValue ?? ""
+            return Shown(name: isRequired ? name : "--" + name, required: isRequired, help: sentence(phrase))
+        }).sorted { $0.name < $1.name }
     }
 
     private static func sentence(_ phrase: String) -> String { Help.sentence(phrase).abstract }

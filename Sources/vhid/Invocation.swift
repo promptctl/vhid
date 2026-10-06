@@ -187,10 +187,12 @@ enum Attribute: String, Sendable {
     /// What the devices' random source was seeded with, as hex: what draws the pointer's
     /// moves and pauses and the typist's key timings again. Absent when the devices were never opened.
     case seed
-    /// Each pointer move the verb made, in order, the one it stopped in too: how long its
-    /// trajectory was drawn to take, how many reports steered it and then closed onto the
-    /// target, and how many steered reports the cursor never showed. Absent for a verb that
-    /// made none.
+    /// Each pointer move the verb made, in order, the one it stopped in too: the point it
+    /// aimed at (`aimed`), the box it was drawn inside (`box`, absent for a point, which is
+    /// `aimed` itself) and the target width its time was read from (`fitts_width`), how long its trajectory was drawn to take, how many reports
+    /// steered it and then closed onto the aim, how many steered reports the cursor never
+    /// showed, and where the cursor was read when it landed (`landed`, absent for a move that
+    /// stopped first). Absent for a verb that made none.
     case paths
     /// How long an MCP tool call waited behind the calls before it, which its
     /// `duration_ms` includes.
@@ -327,11 +329,22 @@ extension Invocation {
     }
 
     private static func moved(_ move: Pointer.Moved) {
-        append(.object(["planned_ms": .double(move.planned / .milliseconds(1)),
-                        "displays": .array(move.displays.frames.map { frame in .array([frame.minX, frame.minY, frame.width, frame.height].map { .double(Double($0)) }) }),
-                        "bow_kept": .double(move.kept),
-                        "steered_reports": .int(move.steered),
-                        "closing_reports": .int(move.closing),
-                        "lost_reports": .int(move.lost)]), to: .paths)
+        var path: [String: JSON] = ["aimed": point(move.aimed),
+                                    "fitts_width": .double(move.width),
+                                    "planned_ms": .double(move.planned / .milliseconds(1)),
+                                    "displays": .array(move.displays.frames.map { frame in .array([frame.minX, frame.minY, frame.width, frame.height].map { .double(Double($0)) }) }),
+                                    "bow_kept": .double(move.kept),
+                                    "steered_reports": .int(move.steered),
+                                    "closing_reports": .int(move.closing),
+                                    "lost_reports": .int(move.lost)]
+        path["landed"] = move.landed.map(point)
+        // The box the aim was drawn inside, which with the seed draws the path again; a point
+        // target is `aimed` itself.
+        if case .box(let box) = move.toward { path["box"] = .array([box.x, box.y, box.width, box.height].map(JSON.double)) }
+        append(.object(path), to: .paths)
+    }
+
+    private static func point(_ point: ScreenPoint) -> JSON {
+        .array([.double(point.x), .double(point.y)])
     }
 }
