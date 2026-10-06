@@ -74,7 +74,7 @@ import Testing
         let click = try await mouse.pointer.click(at: .point(Self.origin), button: .middle, times: Clicks(rawValue: 3)!)
         let structure = TrajectoryTests.trajectory(seed: 1, from: Self.origin, to: Self.origin).structure
         #expect(click == Pointer.Click(at: Self.origin, moved: Pointer.Moved(aimed: Self.origin, toward: .point(Self.origin), planned: .zero, structure: structure,
-                                                                             displays: .vast, kept: 1, steered: 0, closing: 0, lost: 0, landed: Self.origin)))
+                                                                             displays: .vast, kept: Trajectory.Kept(ends: 1, bow: 1), steered: 0, closing: 0, lost: 0, landed: Self.origin)))
         #expect(mouse.log == ["down 3", "up", "down 3", "up", "down 3", "up"])
     }
 

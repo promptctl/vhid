@@ -80,7 +80,7 @@ import Testing
         // The pointer was already on its point, so the move there drew a path of no length.
         let paths = try #require(attributes["paths"] as? [[String: Any]])
         try #require(paths.count == 1)
-        #expect(paths[0].compactMapValues { $0 as? Double } == ["fitts_width": 20, "planned_ms": 0, "bow_kept": 1, "steered_reports": 0, "closing_reports": 0, "lost_reports": 0])
+        #expect(paths[0].compactMapValues { $0 as? Double } == ["fitts_width": 20, "planned_ms": 0, "ends_kept": 1, "bow_kept": 1, "steered_reports": 0, "closing_reports": 0, "lost_reports": 0])
         // A point is aimed at exactly, and the cursor read back there when it landed.
         #expect(paths[0]["aimed"] as? [Double] == [40, 30])
         #expect(paths[0]["landed"] as? [Double] == [40, 30])
@@ -157,6 +157,7 @@ import Testing
         #expect(recorded[0]["displays"] as? [[Double]] == [[0, 0, 1920, 1080]])
         let paths = recorded.map { $0.compactMapValues { $0 as? Double } }
         #expect(paths[0]["planned_ms"].map { $0 > 0 } == true)
+        #expect(paths[0]["ends_kept"].map { (0 ... 1).contains($0) } == true)
         #expect(paths[0]["bow_kept"].map { (0 ... 1).contains($0) } == true)
         #expect(paths[0]["steered_reports"].map { $0 > 0 } == true)
         #expect(paths[0]["lost_reports"] == paths[0]["steered_reports"])

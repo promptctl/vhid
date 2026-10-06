@@ -121,7 +121,7 @@ public struct Pointer: Sendable {
 
     /// A move: the point it aimed at, drawn inside the target it was given, how long
     /// its trajectory was drawn to take, the displays it was kept on and how much of its
-    /// drawn bow they let it keep, the motion reports that steered it along that and then
+    /// drawn deviation from the straight line they let it keep, the motion reports that steered it along that and then
     /// homed it onto the aim, how many steered reports the cursor never showed, and where the
     /// cursor was read when it landed. [LAW:nothing-unseen] How well the steering landed is
     /// the closing count; how well it was tracked is `lost`; how near an edge it ran is
@@ -132,7 +132,7 @@ public struct Pointer: Sendable {
         public let planned: Duration
         public let structure: Trajectory.Structure
         public let displays: Displays
-        public let kept: Double
+        public let kept: Trajectory.Kept
         public let steered: Int
         public let closing: Int
         public let lost: Int

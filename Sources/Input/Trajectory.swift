@@ -14,15 +14,30 @@ public struct Trajectory: Sendable, Equatable {
     public let toward: Target
     /// How long the whole movement takes, by Fitts' law and a drawn pace.
     public let duration: Duration
-    /// How much of its drawn deviation from the straight line the path kept to stay on the
-    /// displays: one for all of it, zero for the straight line.
-    public let kept: Double
+    /// How much of each drawn deviation from the straight line the path kept to stay on the
+    /// displays.
+    public let kept: Kept
     /// Which corrections follow the main movement.
     public let structure: Structure
-    /// The movements in order, the main one first and the last ending on the target.
-    public let strokes: [Submovement]
-    /// The sideways shake laid over them.
+    /// The movements in order, with when each begins.
+    private let chain: Chain
+    /// The sideways shake laid over them, always whole.
     public let tremor: Tremor
+
+    /// The movements in order, the main one first and the last ending on the target.
+    public var strokes: [Submovement] { chain.strokes }
+
+    /// How much of a drawn deviation a path kept to stay on the displays, one for all of it
+    /// and zero for none, for each of the two it keeps apart: where its movements end off the
+    /// straight line, which near an edge it is approached toward is the overshoot, and the
+    /// bow, which near an edge it runs along is the curve. Kept apart, the one that would
+    /// carry the path into an edge is cut without taking the other with it.
+    public struct Kept: Sendable, Equatable {
+        /// Of where its movements end past the target and beside the line.
+        public let ends: Double
+        /// Of the main movement's bow.
+        public let bow: Double
+    }
 
     /// Fitts' law, MT = a + b × log2(D/W + 1), with the constants of the human-like
     /// generator in Choudhary et al. W is the target's: `Target.width`.
@@ -46,13 +61,14 @@ public struct Trajectory: Sendable, Equatable {
     /// down: 30° right of straight down, a right hand's on a mouse beside a keyboard.
     static let forearm = (x: sin(Double.pi / 6), y: cos(Double.pi / 6))
 
-    /// How near the displays' edges a bow may carry the path, in points, where the straight
-    /// line keeps further off: a button's height of room. The steering follows the path to
-    /// within a few points, so the cursor stays clear of an edge it does not mean to touch.
+    /// How near the displays' edges a deviation may carry the path, in points, where the
+    /// straight line keeps further off: a button's height of room. The steering follows the
+    /// path to within a few points, so the cursor stays clear of an edge it does not mean to
+    /// touch.
     static let margin = Target.button
-    /// The shares of the drawn deviation tried, most first, until one keeps the path on the
-    /// displays; none fitting leaves the straight line.
-    static let shares = stride(from: 1.0, to: 0.05, by: -0.1).map { $0 }
+    /// The shares of a drawn deviation tried, most first, until one keeps the path on the
+    /// displays. The last, none of it, always does: it leaves the path as it was without it.
+    static let shares = (0 ... 10).reversed().map { Double($0) / 10 }
     /// How many evenly spaced moments of the movement are checked against the displays:
     /// a few milliseconds apart on the longest move, closer than the steering's ticks.
     static let checks = 256
@@ -63,22 +79,22 @@ public struct Trajectory: Sendable, Equatable {
         case direct, undershoot, overshoot
         case twoCorrections = "two_corrections"
 
-        /// The share of moves built this way.
+        /// The share of moves built this way: the last has what the others leave, so the
+        /// shares sum to one however the others are set.
         var share: Double {
             switch self {
             case .direct: 0.25
             case .undershoot: 0.45
             case .overshoot: 0.15
-            case .twoCorrections: 0.15
+            case .twoCorrections: 1 - Self.allCases.dropLast().map(\.share).reduce(0, +)
             }
         }
 
-        /// One drawn as their shares have it.
+        /// One drawn as their shares have it: a pick past every other share is the last's.
         static func draw(using generator: inout some RandomNumberGenerator) -> Structure {
             let pick = Double.random(in: 0 ..< 1, using: &generator)
             var below = 0.0
-            // The shares sum to one, so only rounding reaches past the last.
-            return allCases.first { below += $0.share; return pick < below } ?? .twoCorrections
+            return allCases.dropLast().first { below += $0.share; return pick < below } ?? .twoCorrections
         }
 
         /// Where each movement ends, in space and in time: `past` the target along the line
@@ -106,11 +122,14 @@ public struct Trajectory: Sendable, Equatable {
     /// a tenth of its length runs into the edge beside a target approached along it or
     /// toward it: an auto-hidden Dock rises and covers the target, a corner fires, and while
     /// the cursor is held at the edge the curve is learned from reports macOS clamped. So
-    /// the path keeps the largest of `shares` of its bow, aims off the line, overshoot and
-    /// tremor under which, at every check, it is no nearer an edge than the straight line is
-    /// there, to within `margin`; a straight line between two points on one display is on
-    /// it, and the share is a value rather than a branch, so a path far from every edge keeps
-    /// it all. [LAW:dataflow-not-control-flow]
+    /// the path keeps the largest of `shares` of where its movements end off the line, then
+    /// the largest of its bow, under which, at every check, it is no nearer an edge than the
+    /// straight line is there, to within `margin`; a straight line between two points on one
+    /// display is on it, and each share is a value rather than a branch, so a path far from
+    /// every edge keeps it all. [LAW:dataflow-not-control-flow] The tremor is not checked
+    /// and always whole: at most 1.6 points, under the few the steering follows the path to,
+    /// it swings toward every edge it runs beside, and checking it would cut every other
+    /// deviation with it.
     public init(from start: ScreenPoint, toward aimed: Target, within displays: Displays, drawing generator: inout some RandomNumberGenerator) {
         let target = aimed.aim(drawing: &generator)
         let pace = Self.pace.draw(using: &generator)
@@ -118,7 +137,6 @@ public struct Trajectory: Sendable, Equatable {
         let (short, over) = (Self.short.draw(using: &generator), Self.over.draw(using: &generator))
         let miss = Self.miss.draw(using: &generator) * (Bool.random(using: &generator) ? 1 : -1)
         let (offLine, bowing) = (Self.offLine.draw(using: &generator), Self.bow.draw(using: &generator))
-        let shake = Tremor.Drawn(using: &generator)
         let (dx, dy) = (target.x - start.x, target.y - start.y)
         let distance = hypot(dx, dy)
         let fitts = Self.intercept + Self.slope * log2(distance / aimed.width + 1)
@@ -130,58 +148,69 @@ public struct Trajectory: Sendable, Equatable {
         // forearm: the stroke's component across the forearm, signed so that a positive one
         // bows toward `across` and the elbow is always on the inside of the arc.
         let bow = -bowing * distance * (along.0 * Self.forearm.y - along.1 * Self.forearm.x)
+        let tremor = Tremor(across: across, drawing: &generator)
         let legs = structure.legs(short: short, over: over, miss: miss)
-        func path(keeping share: Double) -> Path {
+        func drawn(ends kept: Double, bow bowKept: Double) -> Chain {
             let ends: [Submovement.Point] = legs.map { leg in
-                // Short of the target is on the straight line; past it is off it, kept as the bow is.
-                let past = (min(leg.past, 0) + max(leg.past, 0) * share) * distance
-                let off = leg.across * offLine * share * distance
+                // Short of the target is on the straight line; past it is off it, kept as the aim beside it is.
+                let past = (min(leg.past, 0) + max(leg.past, 0) * kept) * distance
+                let off = leg.across * offLine * kept * distance
                 return (target.x + along.0 * past + across.0 * off, target.y + along.1 * past + across.1 * off)
             }
             let froms = [(start.x, start.y)] + ends.dropLast()
             let begins = [0] + legs.dropLast().map(\.until)
-            return Path(strokes: zip(zip(froms, ends), zip(legs, begins)).map { stroke, timed in
-                Submovement(from: stroke.0, to: stroke.1, bow: bow * timed.0.bow * share, duration: duration * timed.0.until - duration * timed.1)
-            }, tremor: Tremor(shake, across: across, keeping: share), duration: duration)
+            return Chain(zip(zip(froms, ends), zip(legs, begins)).map { stroke, timed in
+                Submovement(from: stroke.0, to: stroke.1, bow: bow * timed.0.bow * bowKept, duration: duration * timed.0.until - duration * timed.1)
+            })
         }
         let moments = (0 ... Self.checks).map { duration * (Double($0) / Double(Self.checks)) }
-        let straight = path(keeping: 0)
+        let straight = drawn(ends: 0, bow: 0)
         let depths = moments.map { displays.depth(of: straight.point(after: $0), upTo: Self.margin) }
-        let kept = Self.shares.first { share in
-            let bowed = path(keeping: share)
-            return zip(moments, depths).allSatisfy { moment, depth in
-                depth.map { displays.covers(bowed.point(after: moment), by: $0) } ?? true
-            }
-        } ?? 0
-        let chosen = path(keeping: kept)
+        // The largest share whose chain is no nearer an edge than the straight line, and that
+        // chain. One is always found, at none if not before: the ends kept at none are the
+        // straight line itself, and the bow kept at none is the chain whose ends were kept.
+        func largest(_ keeping: @escaping (Double) -> Chain) -> (share: Double, chain: Chain) {
+            Self.shares.lazy.map { ($0, keeping($0)) }.first { _, kept in
+                zip(moments, depths).allSatisfy { moment, depth in depth.map { displays.covers(kept.point(after: moment), by: $0) } ?? true }
+            }!
+        }
+        let ends = largest { drawn(ends: $0, bow: 0) }.share
+        let (bowKept, chosen) = largest { drawn(ends: ends, bow: $0) }
         self.start = start
         self.target = target
         toward = aimed
         self.duration = duration
-        self.kept = kept
+        kept = Kept(ends: ends, bow: bowKept)
         self.structure = structure
-        strokes = chosen.strokes
-        tremor = chosen.tremor
+        self.chain = chosen
+        self.tremor = tremor
     }
 
     /// Where the movement is `elapsed` after it began: the target from `duration` on.
     public func point(after elapsed: Duration) -> (x: Double, y: Double) {
-        Path(strokes: strokes, tremor: tremor, duration: duration).point(after: elapsed)
+        let (point, shake) = (unshaken(after: elapsed), tremor.offset(after: elapsed, lasting: duration))
+        return (point.x + shake.x, point.y + shake.y)
     }
 
-    /// The strokes and tremor of one share of the drawn deviation, for the whole movement's
-    /// `duration`.
-    private struct Path {
-        let strokes: [Submovement]
-        let tremor: Tremor
-        let duration: Duration
+    /// Where the strokes alone put it `elapsed` after it began, without the tremor.
+    func unshaken(after elapsed: Duration) -> Submovement.Point {
+        chain.point(after: elapsed)
+    }
 
-        /// The stroke under way at `elapsed`, the last one that has begun, plus the tremor.
+    /// The strokes in order and when each begins, summed once rather than on every read.
+    private struct Chain: Sendable, Equatable {
+        let strokes: [Submovement]
+        let begins: [Duration]
+
+        init(_ strokes: [Submovement]) {
+            self.strokes = strokes
+            begins = strokes.dropLast().reduce(into: [.zero]) { $0.append($0.last! + $1.duration) }
+        }
+
+        /// Where the stroke under way at `elapsed`, the last one that has begun, is.
         func point(after elapsed: Duration) -> Submovement.Point {
-            let begins = strokes.indices.map { strokes[..<$0].reduce(Duration.zero) { $0 + $1.duration } }
             let under = begins.lastIndex { $0 <= elapsed } ?? 0
-            let (point, shake) = (strokes[under].point(after: elapsed - begins[under]), tremor.offset(after: elapsed, lasting: duration))
-            return (point.x + shake.x, point.y + shake.y)
+            return strokes[under].point(after: elapsed - begins[under])
         }
     }
 }
@@ -246,21 +275,11 @@ public struct Tremor: Sendable, Equatable {
     /// How long it takes to fade in at the start and out at the end.
     static let fade: Duration = .milliseconds(80)
 
-    /// The three draws, taken in one order before the path they shake is known.
-    struct Drawn {
-        let amplitude: Double, frequency: Double, phase: Double
-
-        init(using generator: inout some RandomNumberGenerator) {
-            amplitude = Tremor.amplitudes.draw(using: &generator)
-            frequency = Tremor.frequencies.draw(using: &generator)
-            phase = Double.random(in: 0 ..< 2 * .pi, using: &generator)
-        }
-    }
-
-    init(_ drawn: Drawn, across: Submovement.Point, keeping share: Double) {
-        amplitude = drawn.amplitude * share
-        frequency = drawn.frequency
-        phase = drawn.phase
+    /// One across the line `across`, its amplitude, frequency and phase drawn in that order.
+    init(across: Submovement.Point, drawing generator: inout some RandomNumberGenerator) {
+        amplitude = Tremor.amplitudes.draw(using: &generator)
+        frequency = Tremor.frequencies.draw(using: &generator)
+        phase = Double.random(in: 0 ..< 2 * .pi, using: &generator)
         self.across = across
     }
 

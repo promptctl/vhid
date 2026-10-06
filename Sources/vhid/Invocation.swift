@@ -334,7 +334,8 @@ extension Invocation {
                                     "planned_ms": .double(move.planned / .milliseconds(1)),
                                     "structure": .string(move.structure.rawValue),
                                     "displays": .array(move.displays.frames.map { frame in .array([frame.minX, frame.minY, frame.width, frame.height].map { .double(Double($0)) }) }),
-                                    "bow_kept": .double(move.kept),
+                                    "ends_kept": .double(move.kept.ends),
+                                    "bow_kept": .double(move.kept.bow),
                                     "steered_reports": .int(move.steered),
                                     "closing_reports": .int(move.closing),
                                     "lost_reports": .int(move.lost)]
