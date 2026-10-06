@@ -52,7 +52,7 @@ import Testing
         listener.delegate = reader
         listener.resume()
         let connection = NSXPCConnection(listenerEndpoint: listener.endpoint)
-        connection.remoteObjectInterface = NSXPCInterface(with: HelperService.self)
+        connection.remoteObjectInterface = .helper()
         connection.resume()
         let proxy = try #require(connection.remoteObjectProxyWithErrorHandler { _ in } as? HelperService)
         proxy.releaseAll { _ in }

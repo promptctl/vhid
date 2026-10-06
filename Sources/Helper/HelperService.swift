@@ -126,6 +126,25 @@ import Foundation
     /// position; a root daemon can join that session and a client cannot, which is why
     /// this read is the daemon's.
     func cursor(reply: @escaping (Double, Double, Error?) -> Void)
+
+    /// Where the online displays are, in the space `cursor` answers in, read in the session
+    /// in front for the reason `cursor` is: four numbers a display, its left, top, width
+    /// and height. Claims nothing and sends no report.
+    ///
+    /// A flat array of numbers because that is what the wire carries without a class of
+    /// its own; `HelperConnection.displays` is where they become rectangles.
+    func displays(reply: @escaping ([NSNumber], Error?) -> Void)
+}
+
+public extension NSXPCInterface {
+    /// `HelperService` as both ends speak it, with the classes its replies may carry.
+    /// [LAW:single-enforcer] The daemon, the client and every test's listener make it here,
+    /// so a reply's classes are allowed at one place and not at each end separately.
+    static func helper() -> NSXPCInterface {
+        let interface = NSXPCInterface(with: HelperService.self)
+        interface.setClasses(NSSet(objects: NSArray.self, NSNumber.self) as! Set<AnyHashable>, for: #selector(HelperService.displays(reply:)), argumentIndex: 0, ofReply: true)
+        return interface
+    }
 }
 
 /// Something that went wrong in the daemon, and when: what a person debugging a headless

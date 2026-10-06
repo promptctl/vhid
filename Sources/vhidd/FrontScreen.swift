@@ -1,8 +1,10 @@
 import ChildProcess
+import CoreGraphics
 import Foundation
 import IOKit
 
-/// Where the cursor is, read in the session in front, whoever's it is.
+/// Where the cursor is and where the displays are, read in the session in front, whoever's
+/// it is.
 ///
 /// **Only a process in the session in front reads the cursor.** Anywhere else the window
 /// server answers (0, 0) as though it were a position, not an error: an SSH caller at the
@@ -18,8 +20,12 @@ import IOKit
 /// [LAW:no-ambient-temporal-coupling] Which session is in front is asked on every read, so
 /// the child that answers is always the front one's.
 ///
+/// **The displays are read there for the same reason.** They are the session's screen as
+/// much as the cursor is, and a client that read them for itself would read its own
+/// session's, or none at the login window.
+///
 /// Reads are serialized: one child, one line in and one line out at a time.
-final class FrontCursor: CursorSource, @unchecked Sendable {
+final class FrontScreen: ScreenSource, @unchecked Sendable {
     /// A console session, as IOConsoleUsers names it.
     struct Session: Hashable, CustomStringConvertible {
         let audit: au_asid_t
@@ -28,9 +34,10 @@ final class FrontCursor: CursorSource, @unchecked Sendable {
         var description: String { "\(user)'s session \(audit)" }
     }
 
-    /// Something that reads the cursor in one session, until it is stopped.
+    /// Something that reads the screen in one session, until it is stopped.
     protocol Reader: AnyObject {
-        func read() throws -> (x: Double, y: Double)
+        func cursor() throws -> (x: Double, y: Double)
+        func displays() throws -> [CGRect]
         func stop()
     }
 
@@ -48,19 +55,26 @@ final class FrontCursor: CursorSource, @unchecked Sendable {
     }
 
     /// Over the console this Mac has, with children of this very executable.
-    static let real = FrontCursor(front: { try frontSession(consoleUsers()) }, start: { try ChildReader(in: $0) })
+    static let real = FrontScreen(front: { try frontSession(consoleUsers()) }, start: { try ChildReader(in: $0) })
 
-    func read() throws -> (x: Double, y: Double) {
+    func cursor() throws -> (x: Double, y: Double) { try read { try $0.cursor() } }
+
+    func displays() throws -> [CGRect] { try read { try $0.displays() } }
+
+    /// `question` asked of the front session's reader.
+    private func read<Answer>(_ question: (any Reader) throws -> Answer) throws -> Answer {
         lock.lock(); defer { lock.unlock() }
         let session = try front()
         let reader = try reader(for: session)
         do {
-            return try reader.read()
+            return try question(reader)
         } catch {
             // A reader that failed once is not asked again: the next read starts another.
+            // A refusal included, since a child tied to its session cannot tell a window
+            // server that declined once from a connection to it that will never answer.
             reader.stop()
             reading = nil
-            logFailure("the cursor reader in \(session) failed: \(error)")
+            logFailure("the screen reader in \(session) failed: \(error)")
             throw error
         }
     }
@@ -71,14 +85,14 @@ final class FrontCursor: CursorSource, @unchecked Sendable {
         reading?.reader.stop()
         reading = nil
         let reader = try start(session)
-        log("reading the cursor in \(session)")
+        log("reading the screen in \(session)")
         reading = (session, reader)
         return reader
     }
 
     /// No session is marked on console: between one user leaving and the next arriving.
     struct NobodyInFront: Error, CustomStringConvertible {
-        var description: String { "no session is in front to read the cursor in" }
+        var description: String { "no session is in front to read the screen in" }
     }
 
     /// A session is marked on console but does not say whose it is or which it is.
@@ -105,34 +119,43 @@ final class FrontCursor: CursorSource, @unchecked Sendable {
     }
 }
 
-/// Where the cursor is, as the daemon answers it.
-protocol CursorSource: Sendable {
-    func read() throws -> (x: Double, y: Double)
+/// A reader that answered, saying the window server in its session would not: told apart
+/// from a reader that failed so the log names the window server.
+struct WindowServerRefused: Error, CustomStringConvertible {
+    let session: FrontScreen.Session
+    let question: ScreenQuestion
+    var description: String { "the window server in \(session) would not answer '\(question.rawValue)'" }
 }
 
-/// This executable, run as `--read-cursor-in <audit session>`: a child in the session in
-/// front, saying first whether it joined, then answering one line with the cursor for each
-/// line it is sent.
-final class ChildReader: FrontCursor.Reader {
+/// Where the cursor is and where the displays are, as the daemon answers them.
+protocol ScreenSource: Sendable {
+    func cursor() throws -> (x: Double, y: Double)
+    func displays() throws -> [CGRect]
+}
+
+/// This executable, run as `--read-screen-in <audit session>`: a child in the session in
+/// front, saying first whether it joined, then answering each question it is sent with a
+/// line.
+final class ChildReader: FrontScreen.Reader {
     private let pid: pid_t
     /// The child's stdin and stdout, from this side.
     private let requests: Int32
     private let answers: Int32
-    private let session: FrontCursor.Session
+    private let session: FrontScreen.Session
     private let patience: Duration
     /// Bytes read past the last whole line; a read may hand back less than a line.
     private var pending: [UInt8] = []
 
     /// `patience` is how long one answer may take: well under the client's own wait, so a
     /// child stuck in the window server is ended and replaced while the client is still
-    /// listening, and the lock `FrontCursor` holds across the read is never held forever.
+    /// listening, and the lock `FrontScreen` holds across the read is never held forever.
     ///
     /// Waits for the child's first line, which says whether it joined `session`: read
     /// before anything is written to it, so a child that could not join and ended is heard
     /// saying why, and not taken for a broken pipe. [LAW:no-ambient-temporal-coupling]
     /// `joinWithin` is how long that first line may take. It is a limit of its own because
     /// it covers the child being started, which an answer does not.
-    init(in session: FrontCursor.Session, executable: String, arguments: [String], joinWithin: Duration = .seconds(1), patience: Duration = .seconds(1)) throws {
+    init(in session: FrontScreen.Session, executable: String, arguments: [String], joinWithin: Duration = .seconds(1), patience: Duration = .seconds(1)) throws {
         self.session = session
         self.patience = patience
         var stdin: [Int32] = [0, 0], stdout: [Int32] = [0, 0]
@@ -163,22 +186,45 @@ final class ChildReader: FrontCursor.Reader {
     }
 
     /// This very executable, reading in `session`.
-    convenience init(in session: FrontCursor.Session) throws {
-        try self.init(in: session, executable: Bundle.main.executablePath!, arguments: [cursorReaderFlag, String(session.audit)])
+    convenience init(in session: FrontScreen.Session) throws {
+        try self.init(in: session, executable: Bundle.main.executablePath!, arguments: [screenReaderFlag, String(session.audit)])
     }
 
     struct Failed: Error, CustomStringConvertible {
-        let session: FrontCursor.Session
+        let session: FrontScreen.Session
         let what: String
         var description: String { "the reader in \(session) \(what)" }
     }
 
-    func read() throws -> (x: Double, y: Double) {
-        guard Darwin.write(requests, "\n", 1) == 1 else { throw Failed(session: session, what: "could not be asked: errno \(errno)") }
-        let line = try answerLine(within: patience, to: "answer")
-        let fields = line.split(separator: " ").compactMap { Double($0) }
-        guard fields.count == 2 else { throw Failed(session: session, what: "answered '\(line)'") }
+    func cursor() throws -> (x: Double, y: Double) {
+        let line = try ask(.cursor)
+        guard let fields = Self.numbers(line), fields.count == 2 else { throw Failed(session: session, what: "answered '\(line)'") }
         return (fields[0], fields[1])
+    }
+
+    func displays() throws -> [CGRect] {
+        let line = try ask(.displays)
+        return try line.split(separator: ";").map { frame in
+            guard let fields = Self.numbers(frame), fields.count == 4 else { throw Failed(session: session, what: "answered '\(line)'") }
+            return CGRect(x: fields[0], y: fields[1], width: fields[2], height: fields[3])
+        }
+    }
+
+    /// `question` sent as its line, and the line answering it: `WindowServerRefused` when
+    /// the child says the window server would not answer.
+    private func ask(_ question: ScreenQuestion) throws -> String {
+        let line = question.rawValue + "\n"
+        guard Darwin.write(requests, line, line.utf8.count) == line.utf8.count else { throw Failed(session: session, what: "could not be asked: errno \(errno)") }
+        let answer = try answerLine(within: patience, to: "answer")
+        guard answer != refusedAnswer else { throw WindowServerRefused(session: session, question: question) }
+        return answer
+    }
+
+    /// The space-separated numbers in `text`, or nil when any of it is not one.
+    private static func numbers(_ text: some StringProtocol) -> [Double]? {
+        let fields = text.split(separator: " ")
+        let numbers = fields.compactMap { Double($0) }
+        return numbers.count == fields.count ? numbers : nil
     }
 
     /// One line from the child, or `Failed` once `limit` has passed or the child ends.
@@ -221,5 +267,5 @@ final class ChildReader: FrontCursor.Reader {
 /// What a reader says first when it has joined its session.
 let joinedAnswer = "joined"
 
-/// The flag that makes this executable a cursor reader rather than the daemon.
-let cursorReaderFlag = "--read-cursor-in"
+/// The flag that makes this executable a screen reader rather than the daemon.
+let screenReaderFlag = "--read-screen-in"

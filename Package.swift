@@ -115,7 +115,7 @@ let package = Package(
         // The pointer's loop against a fake screen with an acceleration curve of its own,
         // and the typist against a keyboard that can be made to fail at the third keystroke
         // of four: no device, no window server, no grant.
-        .testTarget(name: "InputTests", dependencies: ["Input", "KeyboardLayouts", "Keystrokes", "Pointing", "TestClock"]),
+        .testTarget(name: "InputTests", dependencies: ["Input", "KeyboardLayouts", "Keystrokes", "OwnThread", "Pointing", "TestClock"]),
         // What must hold before a verb can reach the devices, as a table from readings of
         // this Mac to a step for a person. The table reads nothing: every requirement is a
         // pure function of readings, so every combination is exercised in its tests,

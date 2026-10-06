@@ -37,8 +37,8 @@ after fast user switching:
 - A root process that joined the audit session IOConsoleUsers marks on console (`audit_session_join`)
   read the real position, and one that joined bmf's session in the background read (0, 0).
 - A process is tied to the session of its first read: after joining another session and reading again,
-  it kept its first answer. So vhidd runs a reader child (`vhidd --read-cursor-in <session>`) per
-  session in front and starts a new one when the session changes (`Sources/vhidd/FrontCursor.swift`).
+  it kept its first answer. So vhidd runs a reader child (`vhidd --read-screen-in <session>`) per
+  session in front and starts a new one when the session changes (`Sources/vhidd/FrontScreen.swift`).
 - `launchctl asuser 88` (`_windowserver`) read at the empty login window but not after fast user
   switching, and `launchctl bsexec` into the front loginwindow read (0, 0): neither is the session.
 

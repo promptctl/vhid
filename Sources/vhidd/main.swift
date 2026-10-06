@@ -6,9 +6,9 @@ import Signals
 import VirtualHID
 import os
 
-// A cursor reader is this executable run by the daemon, and is nothing else of it: it
-// takes no --service and serves nothing. See `FrontCursor`.
-if let session = cursorReaderArgument(CommandLine.arguments) { readCursor(in: session) }
+// A screen reader is this executable run by the daemon, and is nothing else of it: it
+// takes no --service and serves nothing. See `FrontScreen`.
+if let session = screenReaderArgument(CommandLine.arguments) { readScreen(in: session) }
 
 /// Which installation this daemon serves, from the `--service` its plist passes.
 ///
@@ -103,7 +103,7 @@ do {
     let driver: @Sendable () throws -> DriverState = { try DriverState(DriverProbe.facts(by: .within(Readiness.driverReadLimit, or: .never))) }
     let readiness = Readiness(driver: driver)
     let listener = NSXPCListener(machServiceName: installation.service)
-    let delegate = Listener(readiness: readiness, callers: callers, cursor: FrontCursor.real)
+    let delegate = Listener(readiness: readiness, callers: callers, screen: FrontScreen.real)
     listener.delegate = delegate
     listener.resume()
     log("listening on \(installation.service)")

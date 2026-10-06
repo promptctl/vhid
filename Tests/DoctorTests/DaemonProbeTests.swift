@@ -35,7 +35,7 @@ import Testing
 
         func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
             if case .refuseTheConnection = answer { return false }
-            connection.exportedInterface = NSXPCInterface(with: HelperService.self)
+            connection.exportedInterface = .helper()
             connection.exportedObject = self
             connection.resume()
             return true
@@ -52,6 +52,7 @@ import Testing
 
         func lastFailure(reply: @escaping (String?, Date?) -> Void) { Issue.record("doctor asked for the last failure"); reply(nil, nil) }
         func cursor(reply: @escaping (Double, Double, Error?) -> Void) { Issue.record("doctor read the cursor"); reply(0, 0, nil) }
+        func displays(reply: @escaping ([NSNumber], Error?) -> Void) { Issue.record("doctor read the displays"); reply([], nil) }
 
         // A status call is all doctor sends; any device act reaching here is a failure.
         func down(usage: UInt16, reply: @escaping (Error?) -> Void) { Issue.record("doctor pressed a key"); reply(nil) }

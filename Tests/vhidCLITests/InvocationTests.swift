@@ -29,7 +29,7 @@ import Testing
 
     private static func scroll(vertical: Int, horizontal: Int, clock: ManualClock = ManualClock(), on devices: Devices) async throws -> String {
         try await ScrollCommand.scroll(at: at, vertical: vertical, horizontal: horizontal, holding: .none,
-                                       with: Pointer(mouse: devices.mouse, cursor: { at }, clock: clock, randomness: RandomSource(seed: 1), traced: Invocation.moved), devices.keyboard)
+                                       with: Pointer(mouse: devices.mouse, cursor: { at }, displays: { .vast }, clock: clock, randomness: RandomSource(seed: 1), traced: Invocation.moved), devices.keyboard)
     }
 
     private static func only(_ export: EventExport) throws -> [String: Any] {
@@ -70,7 +70,11 @@ import Testing
         #expect(attributes["notch_rest_ms"] as? Int == 200)
         #expect(attributes["seed"] is String)
         // The pointer was already on its point, so the move there drew a path of no length.
-        #expect(attributes["paths"] as? [[String: Double]] == [["planned_ms": 0, "steered_reports": 0, "closing_reports": 0, "lost_reports": 0]])
+        let paths = try #require(attributes["paths"] as? [[String: Any]])
+        try #require(paths.count == 1)
+        #expect(paths[0].compactMapValues { $0 as? Double } == ["planned_ms": 0, "bow_kept": 1, "steered_reports": 0, "closing_reports": 0, "lost_reports": 0])
+        // The layout the path was kept on, as the pointer read it.
+        #expect(paths[0]["displays"] as? [[Double]] == [[-100_000, -100_000, 200_000, 200_000]])
     }
 
     /// A move the cursor never follows throws, and its record still carries the move: every
@@ -86,9 +90,13 @@ import Testing
         }
         let record = try Self.only(export)
         #expect(record["outcome"] as? String == "failed")
-        let paths = try #require((record["attributes"] as? [String: Any])?["paths"] as? [[String: Double]])
-        try #require(paths.count == 1)
+        let recorded = try #require((record["attributes"] as? [String: Any])?["paths"] as? [[String: Any]])
+        try #require(recorded.count == 1)
+        // The layout as the daemon answered it, which the path was kept on.
+        #expect(recorded[0]["displays"] as? [[Double]] == [[0, 0, 1920, 1080]])
+        let paths = recorded.map { $0.compactMapValues { $0 as? Double } }
         #expect(paths[0]["planned_ms"].map { $0 > 0 } == true)
+        #expect(paths[0]["bow_kept"].map { (0 ... 1).contains($0) } == true)
         #expect(paths[0]["steered_reports"].map { $0 > 0 } == true)
         #expect(paths[0]["lost_reports"] == paths[0]["steered_reports"])
         #expect(paths[0]["closing_reports"] == Double(Pointer.stalls))

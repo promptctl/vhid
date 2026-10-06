@@ -1,3 +1,4 @@
+import CoreGraphics
 import Installations
 import Foundation
 
@@ -118,7 +119,7 @@ public final class HelperConnection: @unchecked Sendable {
         self.connection = connection
         self.service = service
         self.replyTimeout = replyTimeout
-        connection.remoteObjectInterface = NSXPCInterface(with: HelperService.self)
+        connection.remoteObjectInterface = .helper()
         connection.resume()
     }
 
@@ -191,6 +192,18 @@ public final class HelperConnection: @unchecked Sendable {
     /// Not a word on the devices either, so it leaves the connection unspoken.
     public func cursor() throws -> (x: Double, y: Double) {
         try exchange { service, reply in service.cursor { x, y, error in reply(error.map { .failed($0) } ?? .answered((x, y))) } }
+    }
+
+    /// Where the displays are, read in the session in front, as rectangles.
+    ///
+    /// [LAW:parse-dont-validate] The wire's flat numbers become rectangles here, once: a
+    /// count that is not four to a display is a daemon this client does not understand.
+    public func displays() throws -> [CGRect] {
+        let numbers: [NSNumber] = try exchange { service, reply in service.displays { numbers, error in reply(error.map { .failed($0) } ?? .answered(numbers)) } }
+        guard numbers.count % 4 == 0 else { throw Unreachable(service: service, cause: .notAHelper) }
+        return stride(from: 0, to: numbers.count, by: 4).map {
+            CGRect(x: numbers[$0].doubleValue, y: numbers[$0 + 1].doubleValue, width: numbers[$0 + 2].doubleValue, height: numbers[$0 + 3].doubleValue)
+        }
     }
 
     /// The keyboard over this connection.
