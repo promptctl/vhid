@@ -36,7 +36,7 @@ import Testing
     @Test func aModifiedClickIsModifiersDownThenTheClickThenEverythingUp() async throws {
         let mouse = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
         let click = try await mouse.pointer.holding(Self.shiftCommand, on: mouse.keyboard) {
-            try await $0.click(at: Self.target, button: .left, times: .single)
+            try await $0.click(at: .point(Self.target), button: .left, times: .single)
         }
         #expect(click.at == Self.target)
         #expect(Self.collapsed(mouse.log) == ["key down e1", "key down e3", "moves", "down 1", "up", "keys up"])
@@ -46,7 +46,7 @@ import Testing
     @Test func noModifiersIsTheSameRunWithNothingHeld() async throws {
         let mouse = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
         try await mouse.pointer.holding(.none, on: mouse.keyboard) {
-            try await $0.scroll(at: Self.target, vertical: 3, horizontal: 0)
+            try await $0.scroll(at: .point(Self.target), vertical: 3, horizontal: 0)
         }
         #expect(Self.collapsed(mouse.log) == ["moves", "scroll 1 0", "scroll 1 0", "scroll 1 0"])
     }
@@ -56,7 +56,7 @@ import Testing
         let mouse = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
         let option = try HeldModifiers([.leftOption])
         _ = try await mouse.pointer.holding(option, on: mouse.keyboard) {
-            try await $0.drag(from: Self.target, to: ScreenPoint(x: 8, y: 0)!, button: .left)
+            try await $0.drag(from: .point(Self.target), to: .point(ScreenPoint(x: 8, y: 0)!), button: .left)
         }
         #expect(Self.collapsed(mouse.log) == ["key down e2", "moves", "down 1", "moves", "up", "keys up"])
     }
@@ -66,14 +66,14 @@ import Testing
     @Test func aFailureAtEachStepLeavesNothingHeld() async throws {
         let whole = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
         _ = try await whole.pointer.holding(Self.shiftCommand, on: whole.keyboard) {
-            try await $0.click(at: Self.target, button: .left, times: .single)
+            try await $0.click(at: .point(Self.target), button: .left, times: .single)
         }
         for step in whole.log.indices {
             let mouse = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
             mouse.refused = step ..< step + 1
             let stop = await #expect(throws: HoldingStopped.self) {
                 try await mouse.pointer.holding(Self.shiftCommand, on: mouse.keyboard) {
-                    try await $0.click(at: Self.target, button: .left, times: .single)
+                    try await $0.click(at: .point(Self.target), button: .left, times: .single)
                 }
             }
             #expect(stop?.causes.last is Refused, "step \(step): \(whole.log[step])")
@@ -91,7 +91,7 @@ import Testing
         mouse.refused = 1 ..< .max
         let stop = await #expect(throws: HoldingStopped.self) {
             try await mouse.pointer.holding(Self.shiftCommand, on: mouse.keyboard) {
-                try await $0.click(at: Self.target, button: .left, times: .single)
+                try await $0.click(at: .point(Self.target), button: .left, times: .single)
             }
         }
         #expect(stop?.unreleased != nil)
@@ -105,7 +105,7 @@ import Testing
         let keyboard = CancellingKeyboard(afterReports: 1)
         let run = Task { @MainActor in
             _ = try await mouse.pointer.holding(Self.shiftCommand, on: keyboard) {
-                try await $0.click(at: Self.target, button: .left, times: .single)
+                try await $0.click(at: .point(Self.target), button: .left, times: .single)
             }
         }
         keyboard.aim(at: run)

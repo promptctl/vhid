@@ -16,6 +16,36 @@ func place(_ x: Double, _ y: Double) throws -> ScreenPoint {
     return point
 }
 
+/// `count` places from a command line's words, in order: each a point as two numbers, `x y`,
+/// or a box as one word, `x,y,width,height`, the form eyes prints beside each point. A word
+/// with a comma in it is a box, and any other starts a point.
+///
+/// [LAW:single-enforcer] Every pointer verb reads its places through here, so a point is
+/// refused by `place` and a box by `ScreenRect(spelled:)`, as the MCP server refuses them.
+func places(_ words: [String], count: Int) throws -> [Target] {
+    var rest = words[...], read: [Target] = []
+    while let word = rest.first {
+        if word.contains(",") {
+            guard let box = ScreenRect(spelled: word) else {
+                throw ValidationError("\(word) is not a box: a box is x,y,width,height in points, finite, with a positive size")
+            }
+            read.append(.box(box))
+            rest = rest.dropFirst()
+        } else {
+            let pair = Array(rest.prefix(2))
+            guard pair.count == 2, let x = Double(pair[0]), let y = Double(pair[1]) else {
+                throw ValidationError("\(pair.joined(separator: " ")) is not a point: a point is two numbers, x y")
+            }
+            read.append(.point(try place(x, y)))
+            rest = rest.dropFirst(2)
+        }
+    }
+    guard read.count == count else {
+        throw ValidationError("\(words.joined(separator: " ")) is \(counted(read.count, "place")), and this takes \(count)")
+    }
+    return read
+}
+
 /// A button as a command line writes one: the word for the three that have a word, the
 /// number for the other twenty-nine.
 ///

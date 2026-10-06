@@ -98,7 +98,7 @@ import Testing
     /// click once where three were asked for.
     @Test func anArgumentTheToolDoesNotTakeIsRefusedByName() async {
         #expect(await Self.refusal(Tools.click, ["x": 1, "y": 2, "count": 3])
-            == "count is not an argument this tool takes: it takes x, y, button, times, modifiers")
+            == "count is not an argument this tool takes: it takes x, y, box, button, times, modifiers")
         #expect(await Self.refusal(Tools.cursor, ["x": 1]) == "x is not an argument this tool takes, and it takes none")
     }
 
@@ -124,8 +124,24 @@ import Testing
             == "times is 0, and it is how many presses without moving between them, at least 1")
     }
 
-    @Test func aMissingCoordinateIsNamed() async {
-        #expect(await Self.refusal(Tools.move, ["x": 1])?.hasPrefix("y is missing") == true)
+    /// A place is x and y or a box, never half of one or both.
+    @Test(arguments: [["x": 1], ["box": "0,0,10,10", "x": 1, "y": 2], [:]] as [[String: Value]])
+    func aPlaceThatIsNeitherOrBothIsRefused(given: [String: Value]) async {
+        #expect(await Self.refusal(Tools.move, given) == "give x and y, or box, and not both")
+    }
+
+    /// A box is read as eyes prints it, and refused by name when it is not one.
+    @Test func aBoxIsReadAsEyesPrintsIt() async {
+        #expect(await Self.refusal(Tools.click, ["box": "10,20,0,40"])?.hasPrefix("box is \"10,20,0,40\"") == true)
+        #expect(await Self.refusal(Tools.scroll, ["box": ["x": 1, "y": 2]])?.hasPrefix("box is ") == true)
+        // Read, and so past every argument's refusal to the devices, which are nobody's here.
+        for tool in [Tools.click, Tools.move, Tools.scroll] {
+            let said = await Self.refusal(tool, ["box": "-10,20,30,40"])
+            #expect(said?.hasPrefix("box") == false && said?.hasPrefix("give") == false, "\(said ?? "nil")")
+        }
+        let dragged = await Self.refusal(Tools.drag, ["from": "-10,20,30,40", "to": ["x": 3, "y": 4]])
+        #expect(dragged?.hasPrefix("from") == false && dragged?.hasPrefix("to") == false, "\(dragged ?? "nil")")
+        #expect(await Self.refusal(Tools.drag, ["from": "1,2,3", "to": ["x": 3, "y": 4]])?.hasPrefix("from is ") == true)
     }
 
     /// The SDK has already turned `data:,hi` into bytes it cannot give back as sent, when

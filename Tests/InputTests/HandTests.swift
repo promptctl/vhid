@@ -43,21 +43,21 @@ import Testing
     /// before it add up to. [LAW:verifiable-goals]
     @Test func aDoubleClickRestsHoldsAndGapsAtExactTimes() async throws {
         let timed = Timed()
-        _ = try await timed.pointer().click(at: Self.origin, button: .left, times: .double)
+        _ = try await timed.pointer().click(at: .point(Self.origin), button: .left, times: .double)
         #expect(timed.pauses.map(\.kind) == [.hand(.rest), .hand(.hold), .hand(.gap), .hand(.hold)])
         let (rest, hold1, gap, hold2) = (timed.pauses[0].length, timed.pauses[1].length, timed.pauses[2].length, timed.pauses[3].length)
         #expect(timed.log == ["\(rest / .milliseconds(1)) down", "\((rest + hold1) / .milliseconds(1)) up",
                               "\((rest + hold1 + gap) / .milliseconds(1)) down", "\((rest + hold1 + gap + hold2) / .milliseconds(1)) up"])
         #expect(timed.clock.now.offset == rest + hold1 + gap + hold2)
-        #expect(Self.ms(timed.pauses) == [351, 147, 82, 160])
+        #expect(Self.ms(timed.pauses) == [149, 160, 143, 123])
     }
 
     /// One seed draws one set of pauses, and another seed another.
     @Test func theSeedDecidesThePauses() async throws {
         let (a, b, c) = (Timed(), Timed(), Timed())
-        _ = try await a.pointer(seed: 7).click(at: Self.origin, button: .left, times: .double)
-        _ = try await b.pointer(seed: 7).click(at: Self.origin, button: .left, times: .double)
-        _ = try await c.pointer(seed: 8).click(at: Self.origin, button: .left, times: .double)
+        _ = try await a.pointer(seed: 7).click(at: .point(Self.origin), button: .left, times: .double)
+        _ = try await b.pointer(seed: 7).click(at: .point(Self.origin), button: .left, times: .double)
+        _ = try await c.pointer(seed: 8).click(at: .point(Self.origin), button: .left, times: .double)
         #expect(a.pauses == b.pauses)
         #expect(a.pauses != c.pauses)
     }
@@ -68,7 +68,7 @@ import Testing
         var rests: Set<Double> = [], holds: Set<Double> = []
         for seed in UInt64(1) ... 50 {
             let timed = Timed()
-            _ = try await timed.pointer(seed: seed).click(at: Self.origin, button: .left, times: Clicks(rawValue: 3)!)
+            _ = try await timed.pointer(seed: seed).click(at: .point(Self.origin), button: .left, times: Clicks(rawValue: 3)!)
             for pause in timed.pauses {
                 let ms = pause.length / .milliseconds(1)
                 switch pause.kind {
@@ -92,7 +92,7 @@ import Testing
         let ceiling = 0.8 * Double(interval)
         for seed in UInt64(1) ... 50 {
             let timed = Timed()
-            _ = try await timed.pointer(hand: hand, seed: seed).click(at: Self.origin, button: .left, times: Clicks(rawValue: 3)!)
+            _ = try await timed.pointer(hand: hand, seed: seed).click(at: .point(Self.origin), button: .left, times: Clicks(rawValue: 3)!)
             let presses = timed.pauses.filter { $0.kind != .hand(.rest) }.map { $0.length / .milliseconds(1) }
             #expect(presses.allSatisfy { $0 >= min(60, ceiling / 2) })
             // hold, gap, hold, gap, hold: a press is the hold before it and the gap after.
@@ -114,7 +114,7 @@ import Testing
     /// before letting go.
     @Test func aDragRestsHoldsCarriesAndRestsBeforeLettingGo() async throws {
         let timed = Timed()
-        _ = try await timed.pointer().drag(from: Self.origin, to: ScreenPoint(x: 40, y: 0)!, button: .left)
+        _ = try await timed.pointer().drag(from: .point(Self.origin), to: .point(ScreenPoint(x: 40, y: 0)!), button: .left)
         #expect(timed.pauses.map(\.kind) == [.hand(.rest), .hand(.dragHold), .hand(.rest)])
         let rest = timed.pauses[0].length
         #expect(timed.log.first == "\(rest / .milliseconds(1)) down")
@@ -129,7 +129,7 @@ import Testing
     /// after is not taken as its continuation.
     @Test func aScrollRestsThenSpacesItsNotches() async throws {
         let timed = Timed()
-        try await timed.pointer().scroll(at: Self.origin, vertical: 20, horizontal: 0)
+        try await timed.pointer().scroll(at: .point(Self.origin), vertical: 20, horizontal: 0)
         #expect(timed.pauses.map(\.kind) == [.hand(.rest)] + Array(repeating: .hand(.notch), count: 20))
         let notches = timed.pauses.dropFirst().map { $0.length / .milliseconds(1) }
         #expect(notches.allSatisfy { (200 ... 300).contains($0) })

@@ -54,18 +54,24 @@ struct VerbTool: Sendable {
 enum Tools {
     static let all: [VerbTool] = [type, press, gesture, click, move, scroll, drag, play, cursor, doctor]
 
-    private static let x = Parameter.number("x", Help.x)
-    private static let y = Parameter.number("y", Help.y)
+    private static let x = Parameter.number("x", Help.x + ", given with y unless box is").optional
+    private static let y = Parameter.number("y", Help.y + ", given with x unless box is").optional
+    private static let box = Parameter.box("box", Help.box).optional
     private static let modifiers = Parameter.modifiers("modifiers").absent(.none)
     private static let layoutName = Parameter.layout("layout")
     private static let into = Parameter.aim("into")
 
-    /// Two coordinates as one place. Never refused for a JSON number: every number JSON
-    /// hands over is finite, and the one that is not, `1e400`, never gets this far.
-    /// `AnsweringTransport` answers for it. The refusal is still `place`'s, worded once for
-    /// the command line and here alike. [LAW:single-enforcer]
-    private static func point(_ arguments: Arguments) throws -> ScreenPoint {
-        try vhid.place(try arguments[x], try arguments[y])
+    /// Where a tool that takes one place is aimed: two coordinates as a point, or a box,
+    /// and refused as neither or both. A point is never refused for a JSON number: every
+    /// number JSON hands over is finite, and the one that is not, `1e400`, never gets this
+    /// far. `AnsweringTransport` answers for it. The refusal is still `place`'s, worded once
+    /// for the command line and here alike. [LAW:single-enforcer]
+    private static func target(_ arguments: Arguments) throws -> Target {
+        switch (try arguments[x], try arguments[y], try arguments[box]) {
+        case let (x?, y?, nil): .point(try vhid.place(x, y))
+        case let (nil, nil, box?): .box(box)
+        default: throw ArgumentRefused("give x and y, or box, and not both")
+        }
     }
 
     static let type: VerbTool = {
@@ -96,24 +102,24 @@ enum Tools {
     static let click: VerbTool = {
         let button = Parameter.button("button").absent(.left)
         let times = Parameter.clicks("times").absent(.single)
-        return VerbTool(Help.click, [x, y, button, times, modifiers]) { arguments, installation in
-            let (at, button, times, held) = (try point(arguments), try arguments[button], try arguments[times], try arguments[modifiers])
+        return VerbTool(Help.click, [x, y, box, button, times, modifiers]) { arguments, installation in
+            let (at, button, times, held) = (try target(arguments), try arguments[button], try arguments[times], try arguments[modifiers])
             return try await Devices.using(installation) {
                 try await ClickCommand.click(at: at, button: button, times: times, holding: held, with: $0.pointer, $0.keyboard)
             }
         }
     }()
 
-    static let move: VerbTool = VerbTool(Help.move, [x, y]) { arguments, installation in
-        let to = try point(arguments)
+    static let move: VerbTool = VerbTool(Help.move, [x, y, box]) { arguments, installation in
+        let to = try target(arguments)
         return try await Devices.using(installation) { try await MoveCommand.move(to: to, with: $0.pointer) }
     }
 
     static let scroll: VerbTool = {
         let vertical = Parameter.whole("vertical", Help.vertical).absent(0)
         let horizontal = Parameter.whole("horizontal", Help.horizontal).absent(0)
-        return VerbTool(Help.scroll, [x, y, vertical, horizontal, modifiers]) { arguments, installation in
-            let (at, vertical, horizontal, held) = (try point(arguments), try arguments[vertical], try arguments[horizontal], try arguments[modifiers])
+        return VerbTool(Help.scroll, [x, y, box, vertical, horizontal, modifiers]) { arguments, installation in
+            let (at, vertical, horizontal, held) = (try target(arguments), try arguments[vertical], try arguments[horizontal], try arguments[modifiers])
             return try await Devices.using(installation) {
                 try await ScrollCommand.scroll(at: at, vertical: vertical, horizontal: horizontal, holding: held, with: $0.pointer, $0.keyboard)
             }

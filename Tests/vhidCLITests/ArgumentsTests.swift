@@ -72,8 +72,7 @@ import Testing
 
     @Test func anOrdinaryPointParses() throws {
         let click = try ClickCommand.parse(["100", "40.5"])
-        #expect(click.x == 100)
-        #expect(click.y == 40.5)
+        #expect(try places(click.place, count: 1) == [.point(ScreenPoint(x: 100, y: 40.5)!)])
         #expect(click.button == .left)
         #expect(click.times == .single)
     }
@@ -83,8 +82,7 @@ import Testing
     /// the help says so.
     @Test func negativeCoordinatesAreReachableAfterADoubleDash() throws {
         let click = try ClickCommand.parse(["--", "-100", "-40.5"])
-        #expect(click.x == -100)
-        #expect(click.y == -40.5)
+        #expect(try places(click.place, count: 1) == [.point(ScreenPoint(x: -100, y: -40.5)!)])
     }
 
     /// Each pointer verb's help shows options before `--`, the one order that parses: the
@@ -110,11 +108,12 @@ import Testing
 
     @Test func theNegativeExamplesLandOnTheNumbersTheyShow() throws {
         let click = try #require(try Vhid.parseAsRoot(Help.NegativeExample.click) as? ClickCommand)
-        #expect((click.x, click.y) == (-100, -40))
+        #expect(try places(click.place, count: 1) == [.point(ScreenPoint(x: -100, y: -40)!)])
         let drag = try #require(try Vhid.parseAsRoot(Help.NegativeExample.drag) as? DragCommand)
-        #expect((drag.fromX, drag.fromY, drag.toX, drag.toY) == (-100, 40, 200, 40))
+        #expect(try places(drag.places, count: 2) == [.point(ScreenPoint(x: -100, y: 40)!), .point(ScreenPoint(x: 200, y: 40)!)])
         let scroll = try #require(try Vhid.parseAsRoot(Help.NegativeExample.scroll) as? ScrollCommand)
-        #expect((scroll.x, scroll.y, scroll.vertical) == (-100, -40, 3))
+        #expect(try places(scroll.place, count: 1) == [.point(ScreenPoint(x: -100, y: -40)!)])
+        #expect(scroll.vertical == 3)
     }
 
     @Test func aBareNegativeCoordinateIsRefusedRatherThanMisread() {
@@ -122,3 +121,31 @@ import Testing
     }
 }
 
+
+/// Places on a command line: a point as two words, a box as one, as eyes prints it.
+@Suite struct PlacesTests {
+    static let box = Target.box(ScreenRect(x: -10, y: 20, width: 30, height: 40)!)
+
+    @Test func aBoxIsOneWordAndAPointTwo() throws {
+        #expect(try places(["-10,20,30,40"], count: 1) == [Self.box])
+        #expect(try places(["-10, 20, 30, 40"], count: 1) == [Self.box])
+        #expect(try places(["5", "6", "-10,20,30,40"], count: 2) == [.point(ScreenPoint(x: 5, y: 6)!), Self.box])
+        #expect(try places(["-10,20,30,40", "5", "6"], count: 2) == [Self.box, .point(ScreenPoint(x: 5, y: 6)!)])
+    }
+
+    @Test func theVerbsTakeABox() throws {
+        let click = try ClickCommand.parse(["--", "-10,20,30,40"])
+        #expect(try places(click.place, count: 1) == [Self.box])
+        let drag = try #require(try Vhid.parseAsRoot(["drag", "--", "-10,20,30,40", "100", "200"]) as? DragCommand)
+        #expect(try places(drag.places, count: 2) == [Self.box, .point(ScreenPoint(x: 100, y: 200)!)])
+    }
+
+    @Test(arguments: [
+        (["1,2,3"], "1,2,3 is not a box"), (["1,2,0,4"], "1,2,0,4 is not a box"), (["1,2,3,nan"], "1,2,3,nan is not a box"),
+        (["1,2,3,4,5"], "1,2,3,4,5 is not a box"), (["1"], "1 is not a point"), (["1", "x"], "1 x is not a point"),
+        (["1", "2", "3", "4"], "1 2 3 4 is 2 places, and this takes 1"), (["inf", "2"], "(inf, 2.0) is not a place"),
+    ])
+    func whatIsNotAPlaceIsRefusedByName(words: [String], said: String) {
+        #expect { try places(words, count: 1) } throws: { "\($0)".contains(said) }
+    }
+}

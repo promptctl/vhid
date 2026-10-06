@@ -99,6 +99,7 @@ vhid move 800 500                       # move it, pressing nothing
 vhid click 800 500                      # left-click there
 vhid click 800 500 --button right --times 2
 vhid click 800 500 --modifiers leftCommand
+vhid click 760,488,80,24                # click inside the box eyes printed, as a hand lands on a button
 vhid scroll 800 500 --vertical 3        # roll the wheel over that point
 vhid drag 100 100 400 300               # press at one point, release at the other
 ```

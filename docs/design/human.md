@@ -6,7 +6,8 @@ Measured on studious on 2026-10-06: macOS 15.0.1, Safari 18.0.1, vhid 0.4.1, the
 
 ## The decisions
 
-- **A move takes as long as a person's would, by Fitts' law:** 50 ms + 150 ms × log2(D/20 + 1), D in points, varied by ±15% (one standard deviation). That is about 0.84 s across 740 points and 0.44 s across 100.
+- **A move takes as long as a person's would, by Fitts' law:** 50 ms + 150 ms × log2(D/W + 1), D in points and W the target's width, the smaller side of a box or 20 points for a bare point, varied by ±15% (one standard deviation). To a point, that is about 0.84 s across 740 points and 0.44 s across 100.
+- **A click given a box lands somewhere in it, as a person's does:** each axis drawn from a normal about the centre whose spread puts 96% of clicks inside, never within 2 points of the edge. A bare point is pressed exactly.
 - **The path is a person's:** a main movement with a bell-shaped speed profile (minimum jerk) that bows slightly to one side and stops short, then a short correction onto the target. Reports go out every 8 ms, the rate of a 125 Hz USB mouse.
 - **The path is steered by reading the cursor back once a tick**, not from a table calibrated beforehand. The cursor reflects a report about a millisecond after it is sent, so each report can be aimed from where the last one actually landed, and the acceleration curve is learned from the reports as they land.
 - **The end point is today's.** The path ends with the closed loop `Pointer.move(to:)` ran in 0.4.1, now `Pointer.home(on:)`, with its reports paced at the same 8 ms, so a click lands where it landed.
@@ -35,7 +36,13 @@ Every vhid click is a *teleport click* as the bot-detection literature defines i
 
 ### How long a move takes
 
-Fitts' law, with the constants [1] uses for its human-like generator: MT = 50 ms + 150 ms × log2(D/W + 1). vhid is given a point, not a target, so W is fixed at 20 points, about the height of a button or a line of text. MT is multiplied by a factor drawn from N(1, 0.15), cut off to 0.7–1.3, so two moves over the same distance do not take the same time. A move under a point long takes no time and is just the closing loop.
+Fitts' law, with the constants [1] uses for its human-like generator: MT = 50 ms + 150 ms × log2(D/W + 1). Given a box, W is its smaller side, the "smaller-of" model of Fitts' law for a target with two dimensions [7], so a move to a wide field is quicker than one as long to a small checkbox. Given a bare point, whose size vhid is not told, W is 20 points, about the height of a button or a line of text. MT is multiplied by a factor drawn from N(1, 0.15), cut off to 0.7–1.3, so two moves over the same distance do not take the same time. A move under a point long takes no time and is just the closing loop.
+
+### Where a click lands
+
+Given a bare point, the pointer lands on it, as it always has. Given a box, the box `eyes find` prints around a run of text, it lands on a point drawn inside the box. People do not press the centre of a target: their endpoints scatter around it in a normal distribution, and the spread grows with the target, so that about 96% land inside. That is the relation behind the effective target width of Fitts' law, W_e = 4.133 σ [6]. So each axis of the aim is drawn from a normal about the box's centre with a standard deviation of that axis's aimable width over 4.133, and drawn again outside it. The aimable width is the box less a margin of 2 points on each side: eyes rounds a box out to whole points, up to a point beyond what it found, and the pointer lands within half a point of its aim, so a click 2 points in is on the text eyes found. A side no wider than the two margins is aimed at its centre. The aim is the movement's first draw, before its pace, so the seed draws it again.
+
+A move records the point it `aimed` at, where the cursor `landed`, and the `fitts_width` its time was read from.
 
 ### The path
 
@@ -111,6 +118,8 @@ The page's hover-intent menu takes a click on an item only if the pointer had re
 
 Bursts, checked on studious later on 2026-10-06, with the probe page in Safari and `vhid type --into Safari` typing 169 characters of prose. The text arrived exactly, with no repeated keys, at 67 words a minute. The median gap was 155 ms inside words, 166 ms onto a space, 202 ms onto a word's first letter, 276 ms after a comma and 390 ms after a full stop or exclamation mark, against 194 and 230 ms under the old model. Each word went at its own pace: one word's mean in-word gap was 88 ms and another's 289 ms. The gaps had a skewness of 1.46 and a minimum of 66 ms. 37 of 169 keys (22%) went down while another was held, overlapping it by 32 ms on average and 105 ms at most, against [4]'s 25%, 30 ms and 100 ms. The run record counted the same 37 (`key_rollovers`) and one hesitation, in a wait of 359 ms, and was 1.3 s behind its drawn times by the end (`keys_late_ms`).
 
+Boxes, checked on studious later on 2026-10-06, with the probe page in Safari. `eyes find "Target A"` printed the button's box, `73,260,97,34`, and `vhid click 73,260,97,34` ran 20 times, each after a move away to (700, 600). The page saw 20 clicks, every one on Target A, at 20 different points, 92–156 points across and 266–289 down the screen, inside the 75–168 and 262–292 the margin leaves. Each run record's `landed` was within 0.3 points of its `aimed`, and its `fitts_width` was 34, the box's height.
+
 ## Sources
 
 1. V. Choudhary et al., "What Does It Take to Detect an AI Agent? Minimal Feature Sets for Behavioral Detection under Browser Automation", arXiv:2607.26935, 2026. Appendix B (click duration, typing speed, teleportation, teleport-click ratio) and Appendix D (the Fitts constants, click holds N(110, 30) ms and key gaps N(180, 60) ms, which it takes as human distributions).
@@ -118,6 +127,8 @@ Bursts, checked on studious later on 2026-10-06, with the probe page in Safari a
 3. T. Flash and N. Hogan, "The coordination of arm movements: an experimentally confirmed mathematical model", Journal of Neuroscience 5(7):1688–1703, 1985.
 4. V. Dhakal, A. M. Feit, P. O. Kristensson and A. Oulasvirta, "Observations on Typing from 136 Million Keystrokes", CHI 2018, doi:10.1145/3173574.3174220. Table 3 and "Inter-key intervals", "Keypress durations", "Differences between Hands" and "Rollover Behaviour": 168,960 typists. The mean inter-key interval is 238.7 ms (SD 111.6, skewness 1.98, floor about 60 ms), and a keypress lasts 116.25 ms (SD 23.88). The rollover ratio is 25% (SD 17%), and keys overlap by 30 ms on average, up to 100 ms.
 5. T. A. Salthouse, "Perceptual, cognitive, and motoric aspects of transcription typing", Psychological Bulletin 99(3):303–319, 1986, as [4] reports it (reference 34 there): letter pairs on different hands 30–60 ms quicker than on one hand and about 80 ms quicker than on one finger, and a slower first keystroke after a space (word initiation). Not read here.
+6. I. S. MacKenzie, "Fitts' law as a research and design tool in human-computer interaction", Human-Computer Interaction 7(1):91–139, 1992. Effective target width, W_e = 4.133 × the standard deviation of the endpoints, the spread under which 96% of selections hit; ISO 9241-9 adopts it. Not read here.
+7. I. S. MacKenzie and W. Buxton, "Extending Fitts' law to two-dimensional tasks", CHI 1992, doi:10.1145/142750.142794. The smaller of a target's width and height as W, one of the two models that fit two-dimensional selection times best. Not read here.
 
 ## Repeating it
 
