@@ -77,23 +77,33 @@ public struct Pointer: Sendable {
     /// runs all of it on one clock of its own. [LAW:effects-at-boundaries]
     /// [LAW:one-source-of-truth] One pointer, one clock.
     public let timeline: Timeline
-    /// What every move's trajectory is drawn from.
+    /// What every move's trajectory and every pause is drawn from.
     public let randomness: RandomSource
-    /// Where every move is handed once it has ended, however it ended: the record of the
-    /// verb it is part of. [LAW:nothing-unseen] A move that threw is the one most worth
-    /// seeing, so the pointer hands it over, not the verb that may never get it back.
-    public let traced: @Sendable (Moved) -> Void
+    /// How long the hand waits around a press, by kind of wait.
+    public let hand: Hand
+    /// Where every move and every pause is handed once it has ended, however it ended: the
+    /// record of the verb it is part of. [LAW:nothing-unseen] A move that
+    /// threw is the one most worth seeing, so the pointer hands it over, not the verb that
+    /// may never get it back.
+    public let traced: @Sendable (Traced) -> Void
+
+    /// What a pointer hands `traced`, in the order it happened.
+    public enum Traced: Equatable, Sendable {
+        case moved(Moved)
+        case paused(Pause)
+    }
 
     /// How often a moving pointer reports: every 8 ms, a 125 Hz USB mouse's rate.
     public static let tick: Duration = .milliseconds(8)
 
     public init<C: Clock>(mouse: any Mouse, cursor: @escaping @Sendable () async throws -> ScreenPoint, displays: @escaping @Sendable () async throws -> Displays,
-                          clock: C, randomness: RandomSource, traced: @escaping @Sendable (Moved) -> Void) where C.Duration == Duration {
+                          clock: C, randomness: RandomSource, hand: Hand, traced: @escaping @Sendable (Traced) -> Void) where C.Duration == Duration {
         self.mouse = mouse
         self.cursor = cursor
         self.displays = displays
         timeline = Timeline(clock)
         self.randomness = randomness
+        self.hand = hand
         self.traced = traced
     }
 
@@ -230,7 +240,7 @@ public struct Pointer: Sendable {
         let ticks = Int((trajectory.duration / Self.tick).rounded(.up))
         var steered = 0, closing = 0
         var moved: Moved { Moved(planned: trajectory.duration, displays: displays, kept: trajectory.kept, steered: steered, closing: closing, lost: tracking.lost) }
-        defer { traced(moved) }
+        defer { traced(.moved(moved)) }
         for tick in stride(from: 1, through: ticks, by: 1) {
             try Task.checkCancellation()
             try await timeline.sleep(began + Self.tick * tick)
@@ -341,16 +351,29 @@ public struct Pointer: Sendable {
         }
     }
 
-    /// Moves to `point` and clicks `button` there `times` times, each click a report with
-    /// the button down and one with everything up, each awaited.
+    /// A pause of `kind`, drawn from `hand` and handed to `traced` once it ends, however it
+    /// ends, with the time it slept: a run cancelled inside it says so, and says how long it
+    /// got. [LAW:single-enforcer] Every wait a verb makes between its reports is one of these.
+    func pause(_ kind: Pause.Kind) async throws {
+        let length = Duration.milliseconds(randomness.draw { hand.spread(of: kind).draw(using: &$0) })
+        let began = timeline.now()
+        defer { traced(.paused(Pause(kind: kind, length: timeline.now() - began))) }
+        try await timeline.sleep(began + length)
+    }
+
+    /// Moves to `point`, rests on it, and clicks `button` there `times` times, each click a
+    /// report with the button down, a hold, and one with everything up, the clicks a gap
+    /// apart. `docs/design/human.md`, "Clicks": some web menus open an item only once the
+    /// pointer has rested on it.
     public func click(at point: ScreenPoint, button: Button, times: Clicks) async throws -> Click {
         do {
             let moved = try await move(to: point)
+            try await pause(.rest)
             let pressed = try await cursor()
-            for _ in 0..<times.rawValue {
-                try Task.checkCancellation()
-                try await mouse.down(button)
-                try await mouse.releaseAll()
+            try await press(button)
+            for _ in 1..<times.rawValue {
+                try await pause(.gap)
+                try await press(button)
             }
             return Click(at: pressed, moved: moved)
         } catch {
@@ -358,24 +381,29 @@ public struct Pointer: Sendable {
         }
     }
 
-    /// How long the wheel rests after each notch.
+    /// One click: `button` down, held, and every button up.
+    private func press(_ button: Button) async throws {
+        try Task.checkCancellation()
+        try await mouse.down(button)
+        try await pause(.hold)
+        try await mouse.releaseAll()
+    }
+
+    /// Moves to `point`, rests on it, and rolls the wheel there one notch at a time, a
+    /// report each, with a `notch` pause after every one. Vertical positive away from the
+    /// hand, horizontal positive to the right; a notch carries one count on each axis that
+    /// has any left, so both axes roll together until the shorter is done.
     ///
     /// **A report is one notch to macOS, whatever count it carries, and notches closer
-    /// together than this are accelerated.** Measured on studious (macOS 15) in Safari,
-    /// TextEdit and Firefox, 2026-10-04: a report of 1, 10 or 30 scrolled as far as a report
-    /// of 1, and so did 5 in Firefox. Ten one-count reports scrolled Safari 40 points at
-    /// 150ms apart or slower - ten times one notch's 4 - and 239 points at 120ms, 560 at
-    /// 100ms, 2572 back to back. TextEdit was accelerated at 140ms and not at 150ms;
-    /// Firefox was at 100ms and not at 150ms. This is a third clear of that edge, so
-    /// `--vertical N` scrolls N times as far as `--vertical 1`.
-    public static let notchRest: Duration = .milliseconds(200)
-
-    /// Moves to `point` and rolls the wheel there one notch at a time, a report each,
-    /// resting `notchRest` after every one. Vertical positive away from the hand,
-    /// horizontal positive to the right; a notch carries one count on each axis that has
-    /// any left, so both axes roll together until the shorter is done.
+    /// together than 200 ms are accelerated**, which is `Hand.notch`'s floor. Measured on
+    /// studious (macOS 15) in Safari, TextEdit and Firefox, 2026-10-04: a report of 1, 10 or
+    /// 30 scrolled as far as a report of 1, and so did 5 in Firefox. Ten one-count reports
+    /// scrolled Safari 40 points at 150ms apart or slower - ten times one notch's 4 - and
+    /// 239 points at 120ms, 560 at 100ms, 2572 back to back. TextEdit was accelerated at
+    /// 140ms and not at 150ms; Firefox was at 100ms and not at 150ms. 200 ms is a third
+    /// clear of that edge, so `--vertical N` scrolls N times as far as `--vertical 1`.
     ///
-    /// The rest follows the last notch too, so a roll started straight after this one is
+    /// The pause follows the last notch too, so a roll started straight after this one is
     /// not taken by macOS as its continuation and accelerated.
     /// [LAW:dataflow-not-control-flow]
     ///
@@ -388,10 +416,11 @@ public struct Pointer: Sendable {
     public func scroll(at point: ScreenPoint, vertical: Int, horizontal: Int) async throws {
         do {
             try await move(to: point)
+            try await pause(.rest)
             for notch in 0..<max(vertical.magnitude, horizontal.magnitude) {
                 try Task.checkCancellation()
                 try await mouse.scroll(by: Scroll(vertical: Self.count(vertical, at: notch), horizontal: Self.count(horizontal, at: notch)))
-                try await timeline.sleep(timeline.now() + Self.notchRest)
+                try await pause(.notch)
             }
         } catch {
             throw PointingStopped(cause: error, unreleased: await release())
@@ -414,8 +443,8 @@ public struct Pointer: Sendable {
         public let carry: Moved
     }
 
-    /// Moves to `start`, holds `button` down there, moves to `end` with it held, and lets
-    /// every button go.
+    /// Moves to `start`, rests, holds `button` down there a `dragHold`, moves to `end` with
+    /// it held, rests again, and lets every button go.
     ///
     /// The carry is the same trajectory as any move: the device's motion reports carry whatever
     /// buttons it is holding, so a move with a button down is a drag to macOS and needs
@@ -424,9 +453,12 @@ public struct Pointer: Sendable {
     public func drag(from start: ScreenPoint, to end: ScreenPoint, button: Button) async throws -> Drag {
         do {
             let approach = try await move(to: start)
+            try await pause(.rest)
             let pressed = try await cursor()
             try await mouse.down(button)
+            try await pause(.dragHold)
             let carry = try await move(to: end)
+            try await pause(.rest)
             let released = try await cursor()
             try await mouse.releaseAll()
             return Drag(from: pressed, to: released, approach: approach, carry: carry)

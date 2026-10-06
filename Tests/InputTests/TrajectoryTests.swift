@@ -173,7 +173,7 @@ import Testing
         let mouse = CurvedMouse(at: start, lateEvery: 0)
         let trace = SteeringTheTrajectoryTests.Trace(), clock = ManualClock()
         let pointer = Pointer(mouse: mouse, cursor: { trace.read(mouse.cursor(), at: clock.now.offset) }, displays: { Self.screen },
-                              clock: clock, randomness: RandomSource(seed: seed), traced: { _ in })
+                              clock: clock, randomness: RandomSource(seed: seed), hand: .macOSDefault, traced: { _ in })
         try await pointer.move(to: target)
         #expect(trace.all.allSatisfy { $0.point.y < 1075 }, "lowest \(trace.all.map(\.point.y).max()!)")
         #expect(abs(mouse.position.x - target.x) <= 0.5 && abs(mouse.position.y - target.y) <= 0.5)
@@ -205,7 +205,7 @@ import Testing
         let (start, target) = moves[move]
         let mouse = CurvedMouse(at: start, lateEvery: 0)
         let clock = ManualClock(), trace = Trace()
-        let pointer = Pointer(mouse: mouse, cursor: { trace.read(mouse.cursor(), at: clock.now.offset) }, displays: { .vast }, clock: clock, randomness: RandomSource(seed: seed), traced: { _ in })
+        let pointer = Pointer(mouse: mouse, cursor: { trace.read(mouse.cursor(), at: clock.now.offset) }, displays: { .vast }, clock: clock, randomness: RandomSource(seed: seed), hand: .macOSDefault, traced: { _ in })
         let moved = try await pointer.move(to: target)
         let path = TrajectoryTests.trajectory(seed: seed, from: start, to: target)
         let ticks = Int((path.duration / Pointer.tick).rounded(.up))
@@ -256,7 +256,7 @@ import Testing
     @Test(arguments: 1 ... 10)
     func reportsTheCursorHasNotShownAreNotSentAgain(seed: UInt64) async throws {
         let mouse = CurvedMouse(at: Self.start, lateEvery: 4)
-        let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor() }, displays: { .vast }, clock: ManualClock(), randomness: RandomSource(seed: seed), traced: { _ in })
+        let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor() }, displays: { .vast }, clock: ManualClock(), randomness: RandomSource(seed: seed), hand: .macOSDefault, traced: { _ in })
         _ = try await pointer.move(to: Self.target)
         #expect(mouse.farthest <= Self.target.x + 3, "went to \(mouse.farthest)")
         #expect(abs(mouse.position.x - Self.target.x) <= 0.5 && abs(mouse.position.y - Self.target.y) <= 0.5)
@@ -276,7 +276,7 @@ import Testing
         final class Traced: Sendable { let moves = Mutex<[Pointer.Moved]>([]) }
         let mouse = CurvedMouse(at: Self.start, lateEvery: 0), traced = Traced()
         let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor() }, displays: { .vast }, clock: ManualClock(), randomness: RandomSource(seed: 1),
-                              traced: { move in traced.moves.withLock { $0.append(move) } })
+                              hand: .macOSDefault, traced: { if case .moved(let move) = $0 { traced.moves.withLock { $0.append(move) } } })
         let drag = try await pointer.drag(from: Self.target, to: Self.start, button: .left)
         #expect(traced.moves.withLock { $0 } == [drag.approach, drag.carry])
         #expect(drag.approach.steered > 0 && drag.carry.steered > 0)
@@ -290,7 +290,7 @@ import Testing
         let mouse = FakeMouse(at: Self.start), traced = Traced()
         mouse.stuck = true
         let pointer = Pointer(mouse: mouse, cursor: mouse.cursor, displays: { .vast }, clock: ManualClock(), randomness: RandomSource(seed: 1),
-                              traced: { move in traced.moves.withLock { $0.append(move) } })
+                              hand: .macOSDefault, traced: { if case .moved(let move) = $0 { traced.moves.withLock { $0.append(move) } } })
         let stop = try await #require(throws: WouldNotReach.self) { try await pointer.move(to: Self.target) }
         let moved = try #require(traced.moves.withLock { $0.first })
         #expect(moved.steered > 0)
