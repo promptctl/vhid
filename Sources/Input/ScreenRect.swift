@@ -32,6 +32,12 @@ public struct ScreenRect: Hashable, Sendable, CustomStringConvertible {
 
     public var centre: ScreenPoint { ScreenPoint(x: x + width / 2, y: y + height / 2)! }
 
-    /// Spelled as eyes prints it, so a box read back is a box that can be passed on.
-    public var description: String { [x, y, width, height].map { String(format: "%g", $0) }.joined(separator: ",") }
+    /// Spelled as eyes prints it, so a box read back is a box that can be passed on: each side
+    /// the shortest digits that read back as it, a whole number without its `.0`.
+    public var description: String {
+        [x, y, width, height].map { side in
+            let digits = "\(side)"
+            return digits.hasSuffix(".0") ? String(digits.dropLast(2)) : digits
+        }.joined(separator: ",")
+    }
 }

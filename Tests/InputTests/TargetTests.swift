@@ -79,6 +79,8 @@ import Testing
         #expect(ScreenRect(spelled: "800,290,80,24") == Self.button)
         #expect(ScreenRect(spelled: " -5 ,2.5,1,1") == ScreenRect(x: -5, y: 2.5, width: 1, height: 1))
         #expect(Self.button.description == "800,290,80,24")
+        let typed = ScreenRect(x: 1234.567, y: -0.125, width: 30, height: 40)!
+        #expect(ScreenRect(spelled: typed.description) == typed, "\(typed)")
         for refused in ["", "1,2,3", "1,2,3,4,5", "1,2,0,4", "1,2,3,-4", "1,2,0.5,4", "0,0,1e-320,10", "1,,3,4", "a,2,3,4", "1,2,inf,4", "1e308,0,1e308,1"] {
             #expect(ScreenRect(spelled: refused) == nil, "\(refused)")
         }
