@@ -351,13 +351,14 @@ public struct Pointer: Sendable {
         }
     }
 
-    /// A pause of `kind`, drawn from `hand` and handed to `traced` before it is slept, so a
-    /// run cancelled inside it still says it began. [LAW:single-enforcer] Every wait a verb
-    /// makes between its reports is one of these.
+    /// A pause of `kind`, drawn from `hand` and handed to `traced` once it ends, however it
+    /// ends, with the time it slept: a run cancelled inside it says so, and says how long it
+    /// got. [LAW:single-enforcer] Every wait a verb makes between its reports is one of these.
     func pause(_ kind: Pause.Kind) async throws {
         let length = Duration.milliseconds(randomness.draw { hand.spread(of: kind).draw(using: &$0) })
-        traced(.paused(Pause(kind: kind, length: length)))
-        try await timeline.sleep(timeline.now() + length)
+        let began = timeline.now()
+        defer { traced(.paused(Pause(kind: kind, length: timeline.now() - began))) }
+        try await timeline.sleep(began + length)
     }
 
     /// Moves to `point`, rests on it, and clicks `button` there `times` times, each click a

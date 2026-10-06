@@ -111,9 +111,3 @@ extension Displays {
     /// about the edges.
     static let vast = Displays(frames: [CGRect(x: -100_000, y: -100_000, width: 200_000, height: 200_000)])!
 }
-
-extension Hand {
-    /// The hand on a Mac at macOS's default double-click interval of 0.5 s, which both test
-    /// Macs keep.
-    static let atDefaults = Hand(doubleClickInterval: .milliseconds(500))
-}

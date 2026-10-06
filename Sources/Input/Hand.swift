@@ -16,29 +16,34 @@ public struct Hand: Sendable, Equatable {
     public let notch: Normal
 
     /// The share of the double-click interval a press may come within of the one before,
-    /// and the shortest a hold or gap is scaled to however short the interval is.
+    /// and the shortest a hold or gap is scaled to while two of them fit in that share.
     static let withinInterval = 0.8
     static let pressFloor = 60.0
+
+    /// The hand at macOS's default double-click interval of 0.5 s, which both test Macs keep.
+    public static let macOSDefault = Hand(doubleClickInterval: .milliseconds(500))
 
     /// The hand for a Mac whose double-click interval is `doubleClickInterval`.
     ///
     /// A click's hold and gap are scaled down together until the longest of each, back to
     /// back, is within 80% of the interval, so a double click is one double click to macOS;
-    /// never below their 60 ms floor. At macOS's default 0.5 s they are not scaled.
+    /// never below their 60 ms floor, which yields to half the 80% on a Mac set so short
+    /// that two floors would not fit. At macOS's default 0.5 s they are not scaled.
     ///
     /// The scale is the largest under which max(hold·s, f) + max(gap·s, f) fits the budget
     /// B, and since max(a, f) + max(b, f) = max(a + b, a + f, f + b, 2f), that is the least
-    /// of B / (hold + gap), (B − f) / hold and (B − f) / gap. Under a 150 ms interval even
-    /// two floors do not fit, and the floors win.
+    /// of B / (hold + gap), (B − f) / hold and (B − f) / gap. With f at most B / 2 two floors
+    /// always fit, so a double click is one however short the interval.
     public init(doubleClickInterval: Duration) {
         let hold = Normal(110, 30, within: Self.pressFloor ... 200)
         let gap = Normal(120, 30, within: Self.pressFloor ... 180)
         let budget = Self.withinInterval * (doubleClickInterval / .milliseconds(1))
+        let floor = min(Self.pressFloor, budget / 2)
         let (longestHold, longestGap) = (hold.bounds.upperBound, gap.bounds.upperBound)
-        let scale = min(1, budget / (longestHold + longestGap), (budget - Self.pressFloor) / longestHold, (budget - Self.pressFloor) / longestGap)
+        let scale = min(1, budget / (longestHold + longestGap), (budget - floor) / longestHold, (budget - floor) / longestGap)
         rest = Normal(250, 80, within: 120 ... 500)
-        self.hold = hold.scaled(by: scale, floor: Self.pressFloor)
-        self.gap = gap.scaled(by: scale, floor: Self.pressFloor)
+        self.hold = hold.scaled(by: scale, floor: floor)
+        self.gap = gap.scaled(by: scale, floor: floor)
         dragHold = Normal(100, 25, within: 50 ... 200)
         // [LAW:one-source-of-truth] The floor is the notch spacing below which Safari and
         // TextEdit were measured accelerating notches, a third clear. `Pointer.scroll`.
@@ -57,9 +62,10 @@ public struct Hand: Sendable, Equatable {
     }
 }
 
-/// One pause a pointer made, as drawn: what it was for and how long.
+/// One pause a pointer made: what it was for and how long it slept, which is less than was
+/// drawn for a pause a cancel cut short.
 public struct Pause: Sendable, Equatable {
-    public enum Kind: String, Sendable, CaseIterable {
+    public enum Kind: String, Sendable {
         case rest, hold, gap
         case dragHold = "drag_hold"
         case notch

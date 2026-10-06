@@ -131,7 +131,7 @@ import Testing
             {"t_ms":1,"move":{"dx":5,"dy":0}}
             {"t_ms":10,"buttons":[]}
             """)
-        let played = try await Player(pointer: Pointer(mouse: mouse, cursor: fake.cursor, displays: { .vast }, clock: clock, randomness: RandomSource(seed: 1), hand: .atDefaults, traced: { _ in }), keyboard: fake.keyboard, wall: { Self.epoch }, lead: .zero).play(Schedule(play))
+        let played = try await Player(pointer: Pointer(mouse: mouse, cursor: fake.cursor, displays: { .vast }, clock: clock, randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in }), keyboard: fake.keyboard, wall: { Self.epoch }, lead: .zero).play(Schedule(play))
         #expect(played.startReports == 0)
         #expect(played.reports == [
             Played.Report(line: 2, scheduled: Self.epoch, sent: Self.epoch, acked: Self.epoch + 3000),
@@ -254,7 +254,7 @@ import Testing
         }
         lines.append(#"{"t_ms":400,"buttons":[]}"#)
         let play = try Play.parse(lines.joined(separator: "\n"))
-        let played = try await Player(pointer: Pointer(mouse: watched, cursor: fake.cursor, displays: { .vast }, clock: ManualClock(), randomness: RandomSource(seed: 1), hand: .atDefaults, traced: { _ in }), keyboard: fake.keyboard, wall: { Self.epoch }, lead: .zero).play(Schedule(play))
+        let played = try await Player(pointer: Pointer(mouse: watched, cursor: fake.cursor, displays: { .vast }, clock: ManualClock(), randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in }), keyboard: fake.keyboard, wall: { Self.epoch }, lead: .zero).play(Schedule(play))
         // Within half a point, which is where the pointer's loop stops: this mouse moves
         // whole points, and 410.5 is between two.
         let recorded = [ScreenPoint(x: 130, y: 110)!, ScreenPoint(x: 410.5, y: 230)!]

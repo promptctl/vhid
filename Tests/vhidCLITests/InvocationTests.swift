@@ -29,7 +29,7 @@ import Testing
 
     private static func scroll(vertical: Int, horizontal: Int, clock: ManualClock = ManualClock(), on devices: Devices) async throws -> String {
         try await ScrollCommand.scroll(at: at, vertical: vertical, horizontal: horizontal, holding: .none,
-                                       with: Pointer(mouse: devices.mouse, cursor: { at }, displays: { .vast }, clock: clock, randomness: RandomSource(seed: 1), hand: .atDefaults, traced: Invocation.traced), devices.keyboard)
+                                       with: Pointer(mouse: devices.mouse, cursor: { at }, displays: { .vast }, clock: clock, randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: Invocation.traced), devices.keyboard)
     }
 
     private static func only(_ export: EventExport) throws -> [String: Any] {
@@ -67,10 +67,12 @@ import Testing
         #expect(counts["scroll_notches_horizontal"] == 2)
         #expect(counts["mouse_reports"] == 3)
         let attributes = try #require(record["attributes"] as? [String: Any])
-        // The rest on the point, then a pause after each notch, each as it was drawn.
-        let pauses = try #require(attributes["pauses"] as? [[String: Any]])
-        #expect(pauses.compactMap { $0["kind"] as? String } == ["rest", "notch", "notch", "notch"])
-        #expect(pauses.dropFirst().compactMap { $0["ms"] as? Double }.allSatisfy { (200 ... 300).contains($0) })
+        // The rest on the point, then a pause after each notch, totalled by kind.
+        let pauses = try #require(attributes["pauses"] as? [String: [String: Any]])
+        #expect(Set(pauses.keys) == ["rest", "notch"])
+        #expect(pauses["rest"]?["count"] as? Int == 1)
+        #expect(pauses["notch"]?["count"] as? Int == 3)
+        #expect((pauses["notch"]?["ms"] as? Double).map { (600 ... 900).contains($0) } == true)
         #expect(attributes["double_click_ms"] is Double)
         #expect(attributes["seed"] is String)
         // The pointer was already on its point, so the move there drew a path of no length.
@@ -123,8 +125,9 @@ import Testing
         #expect(record["outcome"] as? String == "cancelled")
         #expect(record["error"] as? String == "the run was cancelled")
         #expect((record["counts"] as? [String: Int])?["scroll_notches_vertical"] == 2)
-        let pauses = try #require((record["attributes"] as? [String: Any])?["pauses"] as? [[String: Any]])
-        #expect(pauses.compactMap { $0["kind"] as? String } == ["rest", "notch", "notch"])
+        let pauses = try #require((record["attributes"] as? [String: Any])?["pauses"] as? [String: [String: Any]])
+        #expect(pauses["rest"]?["count"] as? Int == 1)
+        #expect(pauses["notch"]?["count"] as? Int == 2)
     }
 
     /// The error on the record is the sentence the caller was given.

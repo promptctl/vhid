@@ -95,8 +95,9 @@ enum Help {
         steered: along a person's path, slightly curved, speeding up and slowing down, reading \
         the cursor back every 8 ms, then in a loop - post a delta, read the cursor back, repeat - \
         until it lands. A move takes as long as a hand's would, about 0.8 s across 740 points. \
-        Then it rests on the point about a quarter of a second, as a hand does and as some \
-        web menus need before they take a click, and holds the button about a tenth of one. The \
+        Then it rests on the point about \(Int(Hand.macOSDefault.rest.mean)) ms, as a hand does and as \
+        some web menus need before they take a click, and holds the button about \
+        \(Int(Hand.macOSDefault.hold.mean)) ms. The \
         point it reports landing at is read back from the cursor rather than the point that was \
         asked for. The two can differ by under a point.
         """, commandLine: [negative(NegativeExample.click)])
@@ -111,7 +112,8 @@ enum Help {
         pointer. The ticks are the device's own, and macOS decides how far each one scrolls.
 
         The pointer rests on the point first, as a hand does. Each tick then goes out as a \
-        report of its own, 200 to 300 ms after the last, because macOS takes a report as one \
+        report of its own, \(Int(Hand.macOSDefault.notch.bounds.lowerBound)) to \
+        \(Int(Hand.macOSDefault.notch.bounds.upperBound)) ms after the last, because macOS takes a report as one \
         notch whatever count it carries and speeds up notches that come faster. So N ticks \
         scroll N times as far as one, and take N times as long.
         """, commandLine: [negative(NegativeExample.scroll)])

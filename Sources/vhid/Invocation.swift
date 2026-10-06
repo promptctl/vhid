@@ -50,12 +50,12 @@ final class Invocation: Sendable {
     let signals: FirstSignal?
     /// W3C trace ID: 16 random bytes as 32 lowercase hex digits.
     let traceID = (0..<16).map { _ in String(format: "%02x", UInt8.random(in: .min ... .max)) }.joined()
-    private let state: Mutex<(event: String, counts: [Tally: Int], attributes: [Attribute: JSON], lists: [Attribute: [JSON]], typesText: Bool)>
+    private let state: Mutex<(event: String, counts: [Tally: Int], attributes: [Attribute: JSON], lists: [Attribute: [JSON]], pauses: [Pause.Kind: (count: Int, slept: Duration)], typesText: Bool)>
 
     private init(_ event: String, via entry: Entry, stoppedBy signals: FirstSignal?) {
         self.entry = entry
         self.signals = signals
-        state = Mutex((event, [:], [:], [:], false))
+        state = Mutex((event, [:], [:], [:], [:], false))
     }
 
     /// Runs `body` as one invocation of `event`, and hands its record to `hand` however
@@ -113,8 +113,11 @@ final class Invocation: Sendable {
     }
 
     private func record(startedAt: Date, duration: Duration, ending: Result<Void, any Error>) -> InvocationRecord {
-        let (event, counts, decided, lists, typesText) = state.withLock { ($0.event, $0.counts, $0.attributes, $0.lists, $0.typesText) }
+        let (event, counts, decided, lists, pauses, typesText) = state.withLock { ($0.event, $0.counts, $0.attributes, $0.lists, $0.pauses, $0.typesText) }
         var attributes = decided.merging(lists.mapValues(JSON.array)) { $1 }
+        attributes[.pauses] = pauses.isEmpty ? nil : .object(Dictionary(uniqueKeysWithValues: pauses.map { kind, total in
+            (kind.rawValue, .object(["count": .int(total.count), "ms": .double(total.slept / .milliseconds(1))]))
+        }))
         attributes[.signal] = signals?.taken.map { .string(Attribute.name(ofSignal: $0)) }
         func told(_ failure: any Error) -> String? {
             typesText ? failure.causes.map { "\(type(of: $0))" }.joined(separator: ": ") : entry.told(failure)
@@ -158,9 +161,10 @@ enum Attribute: String, Sendable {
     /// The double-click interval the pointer's hand was fitted to, as this process read it.
     /// Absent when the devices were never opened.
     case doubleClickMilliseconds = "double_click_ms"
-    /// Each pause the pointer made between reports, in order, the one it stopped in too:
-    /// its kind (`rest`, `hold`, `gap`, `drag_hold`, `notch`) and drawn length. Absent for
-    /// a verb that made none.
+    /// The pauses the pointer made between reports, the one it stopped in too, by kind
+    /// (`rest`, `hold`, `gap`, `drag_hold`, `notch`): how many and how long they slept in
+    /// all. By kind, not one by one, so a roll of any length is a record of bounded size;
+    /// the seed draws each one again. Absent for a verb that made none.
     case pauses
     /// What the pointer's random source was seeded with, as hex: what draws its moves
     /// again. Absent when the devices were never opened.
@@ -272,12 +276,16 @@ enum JSON: Sendable, Equatable, Encodable {
 
 extension Invocation {
     /// Adds what a pointer traced to the running invocation: a move to `paths`, a pause to
-    /// `pauses`. `Devices` hands every pointer it opens this, so no verb records its own.
-    /// [LAW:single-enforcer]
+    /// its kind's total in `pauses`. `Devices` hands every pointer it opens this, so no verb
+    /// records its own. [LAW:single-enforcer]
     @Sendable static func traced(_ traced: Pointer.Traced) {
         switch traced {
         case .moved(let move): moved(move)
-        case .paused(let pause): append(.object(["kind": .string(pause.kind.rawValue), "ms": .double(pause.length / .milliseconds(1))]), to: .pauses)
+        case .paused(let pause):
+            current?.state.withLock {
+                let total = $0.pauses[pause.kind, default: (0, .zero)]
+                $0.pauses[pause.kind] = (total.count + 1, total.slept + pause.length)
+            }
         }
     }
 

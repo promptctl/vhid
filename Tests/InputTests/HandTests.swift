@@ -29,7 +29,7 @@ import Testing
         func move(by delta: Move) throws { try mouse.move(by: delta) }
         func scroll(by delta: Scroll) throws { try mouse.scroll(by: delta); logged("notch") }
 
-        func pointer(hand: Hand = .atDefaults, seed: UInt64 = 1) -> Pointer {
+        func pointer(hand: Hand = .macOSDefault, seed: UInt64 = 1) -> Pointer {
             Pointer(mouse: self, cursor: mouse.cursor, displays: { .vast }, clock: clock, randomness: RandomSource(seed: seed), hand: hand,
                     traced: { [self] in if case .paused(let pause) = $0 { self.state.withLock { $0.pauses.append(pause) } } })
         }
@@ -83,17 +83,18 @@ import Testing
     }
 
     /// Each press of a double or triple click comes inside 80% of the double-click interval
-    /// after the one before, at the default 0.5 s and on a Mac set as short as macOS allows,
-    /// where the hold and gap are scaled down to it but never under 60 ms.
-    @Test(arguments: [500, 300, 200, 150])
+    /// after the one before, at the default 0.5 s, on a Mac set as short as macOS's settings
+    /// allow, where the hold and gap are scaled down to it but never under 60 ms, and below
+    /// that, where the floor yields to half the 80% so a double click is still one.
+    @Test(arguments: [500, 300, 200, 150, 100])
     func eachPressComesInsideTheDoubleClickInterval(interval: Int) async throws {
         let hand = Hand(doubleClickInterval: .milliseconds(interval))
-        let ceiling = max(0.8 * Double(interval), 120)
+        let ceiling = 0.8 * Double(interval)
         for seed in UInt64(1) ... 50 {
             let timed = Timed()
             _ = try await timed.pointer(hand: hand, seed: seed).click(at: Self.origin, button: .left, times: Clicks(rawValue: 3)!)
             let presses = timed.pauses.filter { $0.kind != .rest }.map { $0.length / .milliseconds(1) }
-            #expect(presses.allSatisfy { $0 >= 60 })
+            #expect(presses.allSatisfy { $0 >= min(60, ceiling / 2) })
             // hold, gap, hold, gap, hold: a press is the hold before it and the gap after.
             for pair in stride(from: 0, to: presses.count - 1, by: 2) {
                 #expect(presses[pair] + presses[pair + 1] <= ceiling, "\(presses) at \(interval) ms")
@@ -103,7 +104,7 @@ import Testing
 
     /// At the default interval nothing is scaled: the click's pauses are the design note's.
     @Test func atTheDefaultIntervalTheHandIsTheDesignNotes() {
-        let hand = Hand.atDefaults
+        let hand = Hand.macOSDefault
         #expect(hand.hold == Normal(110, 30, within: 60 ... 200))
         #expect(hand.gap == Normal(120, 30, within: 60 ... 180))
         #expect(hand.rest == Normal(250, 80, within: 120 ... 500))

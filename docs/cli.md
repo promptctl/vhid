@@ -69,7 +69,7 @@ verb at once, unrecorded, and an MCP call `vhid mcp` was running when it was sto
 names the signal too.
 
 ```json
-{"attributes":{"double_click_ms":500,"paths":[{"bow_kept":1,"closing_reports":1,"displays":[[0,0,1512,982]],"lost_reports":0,"planned_ms":612.4,"steered_reports":71}],"pauses":[{"kind":"rest","ms":262.7},{"kind":"notch","ms":228.1},{"kind":"notch","ms":247.9},{"kind":"notch","ms":215.4}],"seed":"9e3779b97f4a7c15"},"counts":{"keyboard_reports":0,"mouse_reports":75,"scroll_notches_horizontal":0,"scroll_notches_vertical":3},"duration_ms":1601.3,"entry":"cli","event":"scroll","outcome":"ok","service":"vhid","sink":"file","started_at":"2026-10-04T13:20:00.512Z","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736"}
+{"attributes":{"double_click_ms":500,"paths":[{"bow_kept":1,"closing_reports":1,"displays":[[0,0,1512,982]],"lost_reports":0,"planned_ms":612.4,"steered_reports":71}],"pauses":{"notch":{"count":3,"ms":691.4},"rest":{"count":1,"ms":262.7}},"seed":"9e3779b97f4a7c15"},"counts":{"keyboard_reports":0,"mouse_reports":75,"scroll_notches_horizontal":0,"scroll_notches_vertical":3},"duration_ms":1601.3,"entry":"cli","event":"scroll","outcome":"ok","service":"vhid","sink":"file","started_at":"2026-10-04T13:20:00.512Z","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736"}
 ```
 
 `event` is the verb as it is typed (`scroll`, `driver state`), and an MCP call's is its
@@ -93,11 +93,11 @@ displays' edges (1 for all of it, 0 for a straight line), `steered_reports` how 
 reports carried the cursor along it,
 `lost_reports` how many of those the cursor never showed, and `closing_reports` how many
 the closed loop took to land it after. `click`, `move` and `scroll` make one move and
-`drag` two. `attributes.pauses` lists every pause the pointer made between reports, in
-order, the one a stopped verb was in included, each with its `kind` and drawn `ms`: a
+`drag` two. `attributes.pauses` totals the pauses the pointer made between reports by kind, the
+one a stopped verb was in included, each kind with its `count` and the `ms` they slept: a
 `rest` on the point before a press, a drag's release or a scroll's first notch, a click's
 `hold`, the `gap` between the clicks of a double click, a drag's `drag_hold` before it
-carries the button, and a `notch` pause after each notch. They are drawn from the seed
+carries the button, and a `notch` pause after each notch. Each is drawn from the seed
 too. `attributes.double_click_ms` is the double-click interval the click timings were
 fitted to, as this process read it.
 
