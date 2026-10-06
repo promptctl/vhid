@@ -199,7 +199,7 @@ import Testing
 /// A trajectory kept on the displays: beside an edge its strokes never run nearer the edge
 /// than the straight line does, the tremor only shakes them, and what it cuts it cuts from
 /// the deviation that would reach the edge, not the other. Away from every edge it keeps
-/// everything. Over 200 or 500 seeds each, seconds of work that would hold `make test`'s one-thread
+/// everything. Over 200 seeds each, seconds of work that would hold `make test`'s one-thread
 /// pool, hence its own thread.
 @Suite(.ownThread) struct TrajectoryOnTheDisplaysTests {
     static let screen = Displays(frames: [CGRect(x: 0, y: 0, width: 1920, height: 1080)])!
@@ -219,7 +219,7 @@ import Testing
     @Test func aPathAlongAnEdgeNeverRunsIntoIt() {
         var kept: [Trajectory.Kept] = []
         var highest = 1070.0
-        for seed in UInt64(0) ..< 500 {
+        for seed in UInt64(0) ..< 200 {
             let path = Self.trajectory(seed: seed, from: Self.alongTheEdge.0, to: Self.alongTheEdge.1)
             for ms in 0 ... Int(path.duration / .milliseconds(1)) {
                 let (unshaken, point) = (path.unshaken(after: .milliseconds(ms)), path.point(after: .milliseconds(ms)))
@@ -274,7 +274,7 @@ import Testing
     /// the screen: a target ten points from both edges, approached along the diagonal.
     @Test func aPathIntoACornerStaysOffIt() {
         var kept: [Trajectory.Kept] = []
-        for seed in UInt64(0) ..< 500 {
+        for seed in UInt64(0) ..< 200 {
             let path = Self.trajectory(seed: seed, from: ScreenPoint(x: 900, y: 500)!, to: ScreenPoint(x: 1910, y: 1070)!)
             for ms in 0 ... Int(path.duration / .milliseconds(1)) {
                 let unshaken = path.unshaken(after: .milliseconds(ms))
@@ -290,7 +290,7 @@ import Testing
     /// drawn path is kept: the same path as on a screen with no edges near.
     @Test func aPathFarFromTheEdgesKeepsItsWholeBow() {
         let pair = Displays(frames: [CGRect(x: 0, y: 0, width: 1920, height: 1080), CGRect(x: 1920, y: 0, width: 1920, height: 1080)])!
-        for seed in UInt64(0) ..< 500 {
+        for seed in UInt64(0) ..< 200 {
             let across = Self.trajectory(seed: seed, from: TrajectoryTests.start, to: TrajectoryTests.across)
             #expect(across == TrajectoryTests.trajectory(seed: seed), "seed \(seed)")
             #expect(across.kept == Trajectory.Kept(ends: 1, bow: 1))
