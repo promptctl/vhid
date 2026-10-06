@@ -1,7 +1,7 @@
 import Keystrokes
 import Synchronization
 import Testing
-import Input
+@testable import Input
 
 /// What a run reports when it stops inside a character.
 ///
@@ -23,32 +23,32 @@ import Input
 
     @Test func aCharacterIsPressedAndReleasedInThatOrder() async throws {
         var (scribe, keyboard) = scribe()
-        try await scribe.type("a", [Keystroke(Usage(rawValue: 0x04))])
+        try await scribe.type([("a", [Keystroke(Usage(rawValue: 0x04))])])
         #expect(keyboard.log == ["hold [4]", "hold []"])
         #expect(scribe.typed == 1)
         #expect(scribe.halfTyped == nil)
     }
 
     /// Every modifier goes down before the key it modifies, one report each, and the key
-    /// comes up under them; the modifiers stay down for whatever comes next, and come up
-    /// when the run finishes.
+    /// comes up under them; the modifiers come up when the run ends.
     @Test func theModifiersOfAKeystrokeGoDownBeforeItAndUpAfterIt() async throws {
         var (scribe, keyboard) = scribe()
-        try await scribe.type("\u{2014}", Self.emDash)
-        // Which of the two goes down first is the draw of their leads.
+        try await scribe.type([("\u{2014}", Self.emDash)])
+        // Which of the two goes down first, and comes up first, is the draw of their leads and trails.
         #expect(["hold [e1]", "hold [e2]"].contains(keyboard.log[0]))
-        #expect(Array(keyboard.log.dropFirst()) == ["hold [e1 e2]", "hold [2d e1 e2]", "hold [e1 e2]"])
-        #expect(scribe.typed == 1)
-        try await scribe.finish()
+        #expect(Array(keyboard.log[1 ... 3]) == ["hold [e1 e2]", "hold [2d e1 e2]", "hold [e1 e2]"])
+        #expect(["hold [e1]", "hold [e2]"].contains(keyboard.log[4]))
         #expect(keyboard.log.last == "hold []")
         #expect(keyboard.log.count == 6)
+        #expect(scribe.typed == 1)
     }
 
     /// A chord is one keystroke pressed the same way a character's is, and a whole act: it
     /// composes nothing, counts once pressed, and lets go of its modifiers.
     @Test func aChordIsPressedLikeAKeystrokeAndLeavesNothingPending() async throws {
         var (scribe, keyboard) = scribe()
-        try await scribe.press(Keystroke(Usage(rawValue: 0x04), [.leftCommand, .leftShift]))
+        var generator = SeededGenerator(seed: 1)
+        try await scribe.run(Cadence.typist.press([Keystroke(Usage(rawValue: 0x04), [.leftCommand, .leftShift])], drawing: &generator))
         #expect(Array(keyboard.log.dropFirst().prefix(3)) == ["hold [e1 e3]", "hold [4 e1 e3]", "hold [e1 e3]"])
         // Which modifier comes up first is the draw of their trails.
         #expect(["hold [e1]", "hold [e3]"].contains(keyboard.log[4]))
@@ -63,7 +63,7 @@ import Input
     /// Each change is its own report with its own round trip to the daemon.
     @Test func anAccentedLetterIsTwoKeystrokesAndThreeKeys() async throws {
         var (scribe, keyboard) = scribe()
-        try await scribe.type("\u{e9}", Self.acute)
+        try await scribe.type([("\u{e9}", Self.acute)])
         #expect(keyboard.log == ["hold [e2]", "hold [8 e2]", "hold [e2]", "hold []", "hold [8]", "hold []"])
     }
 
@@ -85,7 +85,7 @@ import Input
         let run = Task { @MainActor in
             var scribe = Scribe.on(keyboard)
             defer { outcome.withLock { $0 = (scribe.typed, scribe.halfTyped) } }
-            try await scribe.type("\u{e9}", Self.acute)
+            try await scribe.type([("\u{e9}", Self.acute)])
         }
         keyboard.aim(at: run)
         await #expect(throws: CancellationError.self) { try await run.value }
@@ -98,7 +98,7 @@ import Input
     /// both counts stay where they were.
     @Test func aRunRefusedBeforeItsFirstKeystrokeLeavesNothingBehind() async {
         var (scribe, _) = scribe(allowing: 0)
-        await #expect(throws: Refused.self) { try await scribe.type("\u{e9}", Self.acute) }
+        await #expect(throws: Refused.self) { try await scribe.type([("\u{e9}", Self.acute)]) }
         #expect(scribe.typed == 0)
         #expect(scribe.halfTyped == nil)
     }
@@ -110,7 +110,7 @@ import Input
     @Test func aCharacterStoppedBeforeItsLastKeystrokeIsHalfTyped() async {
         for stoppedAfter in [1, 2, 3, 4] {
             var (scribe, _) = scribe(allowing: stoppedAfter)
-            await #expect(throws: Refused.self) { try await scribe.type("\u{e9}", Self.acute) }
+            await #expect(throws: Refused.self) { try await scribe.type([("\u{e9}", Self.acute)]) }
             #expect(scribe.typed == 0, "stopped after \(stoppedAfter) calls")
             #expect(scribe.halfTyped == "\u{e9}", "stopped after \(stoppedAfter) calls")
         }
@@ -120,7 +120,7 @@ import Input
     /// release that follows it failed. Counted, and no longer pending.
     @Test func aCharacterStoppedAfterItsLastKeystrokeIsTypedAndNotPending() async {
         var (scribe, _) = scribe(allowing: 5)
-        await #expect(throws: Refused.self) { try await scribe.type("\u{e9}", Self.acute) }
+        await #expect(throws: Refused.self) { try await scribe.type([("\u{e9}", Self.acute)]) }
         #expect(scribe.typed == 1)
         #expect(scribe.halfTyped == nil)
     }
@@ -131,7 +131,7 @@ import Input
     /// pending accent begins, and the em dash's second modifier is before that line.
     @Test func aKeystrokeStoppedAmongItsModifiersLeavesNothingPending() async {
         var (dash, _) = scribe(allowing: 1)
-        await #expect(throws: Refused.self) { try await dash.type("\u{2014}", Self.emDash) }
+        await #expect(throws: Refused.self) { try await dash.type([("\u{2014}", Self.emDash)]) }
         #expect(dash.typed == 0)
         #expect(dash.halfTyped == nil)
     }
@@ -140,10 +140,11 @@ import Input
     /// posted rather than starting over.
     @Test func theCountIsOfTheRunAndNotOfOneCharacter() async throws {
         var (scribe, keyboard) = scribe()
-        for character in "abc" { try await scribe.type(character, [Keystroke(Usage(rawValue: 0x04))]) }
+        let abc = "abc".map { (character: $0, keystrokes: [Keystroke(Usage(rawValue: 0x04 + UInt16($0.asciiValue! - 97)))]) }
+        try await scribe.type(abc)
         #expect(scribe.typed == 3)
         keyboard.allow = keyboard.log.count + 3
-        await #expect(throws: Refused.self) { try await scribe.type("\u{e9}", Self.acute) }
+        await #expect(throws: Refused.self) { try await scribe.type([("\u{e9}", Self.acute)]) }
         #expect(scribe.typed == 3)
         #expect(scribe.halfTyped == "\u{e9}")
     }

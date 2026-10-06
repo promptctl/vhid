@@ -72,8 +72,8 @@ enum Help {
         is typing on. \
         Text it has no keys for is refused whole, before any key goes down.
 
-        \(cadence) A modifier stays down through the keys that all need it. 1,000 characters take \
-        about \(Int((Cadence.typist.latency.mean * 1000 / 60_000).rounded())) minutes.
+        \(cadence) A modifier stays down through the keys that all need it. 1,000 characters of \
+        prose take about \(Int((Cadence.typist.proseInterval * 1000 / .seconds(60)).rounded())) minutes.
         """, commandLine: ["Text starting with - follows --, as in: vhid type -- \"-5 degrees\"."])
 
     static let press = VerbHelp(name: "press", abstract: "Press chords on the virtual keyboard, one after another.", discussion: """
@@ -96,8 +96,10 @@ enum Help {
     /// How `type` and `press` time their keys, read off the one model they follow.
     /// [LAW:one-source-of-truth]
     static let cadence = """
-        Keys are timed as a typist's: each held about \(Int(Cadence.typist.dwell.mean)) ms, one key-down \
-        about \(Int(Cadence.typist.latency.mean)) ms after the last, and a modifier down \
+        Keys are timed as a typist's, in bursts: each held about \(Int(Cadence.typist.dwell.mean)) ms, \
+        the keys of a word about \(Int(Cadence.typist.interval.withinWord)) ms apart and each word at \
+        its own pace, longer pauses between words and after punctuation, the next key sometimes \
+        down before the last is up, and a modifier down \
         \(Int(Cadence.typist.lead.lowerBound)) to \(Int(Cadence.typist.lead.upperBound)) ms before its key and \
         up after it. No key is held as long as this Mac's delay until a held key repeats.
         """

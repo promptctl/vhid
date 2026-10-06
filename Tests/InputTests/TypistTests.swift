@@ -77,12 +77,14 @@ import Testing
     }
 
     /// A release that fails after the stop is said beside the stop, not instead of it:
-    /// the operator is told the count and that a key may be held.
+    /// the operator is told the count and that a key may be held. "aa", because a key
+    /// pressed twice is always up before it goes down again: the two reports allowed are the
+    /// first a's down and up, whatever the draw.
     @Test func aReleaseThatFailsAfterTheStopIsReported() async throws {
         let keyboard = RefusingKeyboard()
         keyboard.allow = 2
         let typist = Typist.on(keyboard)
-        let stopped = try await #require(throws: TypingStopped.self) { try await typist.type(try typist.lower("ab", on: Self.us)) }
+        let stopped = try await #require(throws: TypingStopped.self) { try await typist.type(try typist.lower("aa", on: Self.us)) }
         #expect(stopped.typed == 1)
         #expect(stopped.of == 2)
         #expect(stopped.unreleased is Refused)

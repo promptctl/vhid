@@ -53,6 +53,7 @@ import Testing
         #expect(record["error"] == nil)
         #expect(record["counts"] as? [String: Int] == [
             "keyboard_reports": 0, "mouse_reports": 0, "scroll_notches_vertical": 0, "scroll_notches_horizontal": 0,
+            "key_rollovers": 0, "key_hesitations": 0,
         ])
     }
 
@@ -102,6 +103,31 @@ import Testing
         #expect((pauses["key_up"]?["ms"] as? Double).map { (80 ... 400).contains($0) } == true)
         // Every report went out on time on a fake clock, and the record says so.
         #expect((record["attributes"] as? [String: Any])?["keys_late_ms"] as? Double == 0)
+        #expect((record["counts"] as? [String: Int])?["key_rollovers"] == 0)
+        #expect((record["attributes"] as? [String: Any])?["key_hesitation_ms"] as? Double == 0)
+    }
+
+    /// Prose rolls over and hesitates, and its record says how often: the rollovers counted,
+    /// the hesitations counted and their drawn lengths totalled, and every character's
+    /// key-down ending a `key_down` wait, hesitation or none.
+    @Test func typingRecordsItsRolloversAndHesitations() async throws {
+        let text = String(repeating: "the quick brown fox jumps over the lazy dog ", count: 4)
+        let export = EventExport.scratch()
+        _ = try await Invocation.record("type", via: .mcp, to: export.export) { _ in
+            try await Self.against { devices in
+                try await TypeCommand.type(text, on: VerbTests.us, into: .anywhere,
+                                           with: Typist(keyboard: devices.keyboard, clock: ManualClock(), randomness: RandomSource(seed: 1), traced: Invocation.typed),
+                                           front: { nil })
+            }
+        }
+        let record = try Self.only(export)
+        #expect(((record["counts"] as? [String: Int])?["key_rollovers"] ?? 0) > 0)
+        #expect(((record["counts"] as? [String: Int])?["key_hesitations"] ?? 0) > 0)
+        let attributes = try #require(record["attributes"] as? [String: Any])
+        // Each hesitation is 150 ms or more.
+        #expect((attributes["key_hesitation_ms"] as? Double).map { $0 >= 150 } == true)
+        let pauses = try #require(attributes["pauses"] as? [String: [String: Any]])
+        #expect(pauses["key_down"]?["count"] as? Int == text.count)
     }
 
     /// A move the cursor never follows throws, and its record still carries the move: every

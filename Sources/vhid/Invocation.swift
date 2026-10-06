@@ -154,6 +154,10 @@ enum Tally: String, CaseIterable, Sendable {
     /// report as one notch whatever count it carries (`Pointer.scroll`).
     case verticalNotches = "scroll_notches_vertical"
     case horizontalNotches = "scroll_notches_horizontal"
+    /// Keys a typist put down while another key was still held.
+    case keyRollovers = "key_rollovers"
+    /// Words a typist hesitated before.
+    case keyHesitations = "key_hesitations"
 }
 
 /// A fact a verb decided that is not a count.
@@ -169,6 +173,10 @@ enum Attribute: String, Sendable {
     /// moved rather than shortened. Zero for a run that sent nothing, and
     /// absent for a verb that never typed.
     case keysLateMilliseconds = "keys_late_ms"
+    /// The hesitations a typist drew before the words it hesitated before, in milliseconds
+    /// all told: drawn into the waits they precede, which `pauses` totals by the report
+    /// each ends in. Zero for a run with none, and absent for a verb that never typed.
+    case keyHesitationMilliseconds = "key_hesitation_ms"
     /// The pauses the pointer and the typist made between reports, the one it stopped in
     /// too, by kind - the pointer's `rest`, `hold`, `gap`, `drag_hold`, `notch`, and the
     /// typist's waits named for the report they end in, `modifier_down`, `key_down`,
@@ -296,12 +304,17 @@ extension Invocation {
     }
 
     /// Adds what a typist traced to the running invocation: a pause to its kind's total in
-    /// `pauses`, and how late its run went to `keys_late_ms`. `Devices` hands every typist
-    /// it opens this. [LAW:single-enforcer]
+    /// `pauses`, how late its run went to `keys_late_ms`, its rollovers to `key_rollovers`,
+    /// and its hesitations to `key_hesitations` and `key_hesitation_ms`. `Devices` hands
+    /// every typist it opens this. [LAW:single-enforcer]
     @Sendable static func typed(_ traced: Typist.Traced) {
         switch traced {
         case .paused(let pause): paused(pause)
-        case .ran(let late): set(.keysLateMilliseconds, .double(late / .milliseconds(1)))
+        case .ran(let late, let rollovers, let hesitations):
+            set(.keysLateMilliseconds, .double(late / .milliseconds(1)))
+            count(.keyRollovers, by: rollovers)
+            count(.keyHesitations, by: hesitations.count)
+            set(.keyHesitationMilliseconds, .double(hesitations.reduce(.zero, +) / .milliseconds(1)))
         }
     }
 

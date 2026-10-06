@@ -36,14 +36,56 @@ public struct Normal: Sendable, Equatable {
         self.bounds = bounds
     }
 
-    /// One draw, by the Box-Muller transform, redrawn until it is inside the bounds.
+    /// One draw, redrawn until it is inside the bounds.
     public func draw(using generator: inout some RandomNumberGenerator) -> Double {
         while true {
-            let u1 = 1 - Double.random(in: 0 ..< 1, using: &generator)
-            let u2 = Double.random(in: 0 ..< 1, using: &generator)
-            let drawn = mean + deviation * (-2 * log(u1)).squareRoot() * cos(2 * .pi * u2)
+            let drawn = mean + deviation * Self.standard(using: &generator)
             if bounds.contains(drawn) { return drawn }
         }
+    }
+
+    /// One draw from the standard normal, by the Box-Muller transform.
+    static func standard(using generator: inout some RandomNumberGenerator) -> Double {
+        let u1 = 1 - Double.random(in: 0 ..< 1, using: &generator)
+        let u2 = Double.random(in: 0 ..< 1, using: &generator)
+        return (-2 * log(u1)).squareRoot() * cos(2 * .pi * u2)
+    }
+}
+
+/// A log-normal distribution truncated to `bounds`: its logarithm is normal with spread
+/// `sigma`, so it is skewed right as a person's timings are, most draws near the median and
+/// a long tail of slow ones. Drawn again outside the bounds, never clamped, as `Normal` is.
+///
+/// [LAW:parse-dont-validate] `bounds` holds the median, so half the distribution's mass is
+/// inside and the redraw ends.
+public struct LogNormal: Sendable, Equatable {
+    public let median: Double
+    public let sigma: Double
+    public let bounds: ClosedRange<Double>
+
+    public init(median: Double, sigma: Double, within bounds: ClosedRange<Double>) {
+        precondition(bounds.contains(median), "a truncated log-normal's bounds hold its median")
+        self.median = median
+        self.sigma = sigma
+        self.bounds = bounds
+    }
+
+    /// The mean before truncation, which the bounds here hardly move.
+    public var mean: Double { median * exp(sigma * sigma / 2) }
+
+    public func draw(using generator: inout some RandomNumberGenerator) -> Double {
+        while true {
+            let drawn = median * exp(sigma * Normal.standard(using: &generator))
+            if bounds.contains(drawn) { return drawn }
+        }
+    }
+
+    /// This distribution shrunk by `scale`, its bounds kept at or above `floor` and its
+    /// median inside them, as `Normal.scaled` does. Scaling a log-normal keeps its shape.
+    func scaled(by scale: Double, floor: Double) -> LogNormal {
+        let bounds = max(bounds.lowerBound * scale, floor) ... max(bounds.upperBound * scale, floor)
+        return LogNormal(median: min(max(median * scale, bounds.lowerBound), bounds.upperBound),
+                         sigma: bounds.lowerBound == bounds.upperBound ? 0 : sigma, within: bounds)
     }
 }
 
