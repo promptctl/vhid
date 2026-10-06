@@ -77,7 +77,7 @@ This works because the cursor moves soon after a report. [human-cursor-poll.swif
 ### Typing
 
 - **From one key-down to the next:** N(180, 60) ms, cut off to 70 ms at the low end [1]. That is about 67 words a minute, a practised typist's speed.
-- **Each key held:** N(95, 25) ms, cut off to 40 ms at the low end. The hold is drawn before the gap is placed and is never shortened to fit it. No source here measures key holds; 80–120 ms is the range commonly given for them, and it was not checked.
+- **Each key held:** N(95, 25) ms, cut off to 40–200 ms. The top is under macOS's shortest delay until a held key repeats, 225 ms, so a long draw never types a character twice. The hold is drawn before the gap is placed and is never shortened to fit it. No source here measures key holds; 80–120 ms is the range commonly given for them, and it was not checked.
 - **Modifiers:** a Shift, Option, Control or Command a keystroke needs goes down 30–80 ms before the key and comes up 20–60 ms after it. One the next keystroke also needs stays down between them, as a person holds Shift through a capitalised word. One the next keystroke does not need is up before that keystroke's modifiers or key go down.
 - **Fitting it together:** the next keystroke's first event, its first new modifier going down or else its key, comes at least 20 ms after this key is up and after the modifiers it does not share are up. Its key goes down at the drawn gap or at that first event plus its drawn lead, whichever is later. So keys never overlap, and a modifier is never down on a key that did not ask for it.
 - **A chord** (`vhid press`) uses the same modifier lead and key hold.

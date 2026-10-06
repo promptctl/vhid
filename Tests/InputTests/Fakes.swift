@@ -38,8 +38,8 @@ final class RefusingKeyboard: Keyboard {
     func hold(_ keys: HeldKeys) throws { try record("hold \(keys.logged)") }
 }
 
-/// A keyboard whose keys will not go down but whose release still answers: the daemon
-/// that refuses a report and acknowledges the release after it.
+/// A keyboard whose keys will not go down, by `down` or by `hold`, but whose release still
+/// answers: the daemon that refuses a report and acknowledges the release after it.
 final class StuckKeyboard: Keyboard {
     private let recorded = Mutex<[String]>([])
 
@@ -51,7 +51,11 @@ final class StuckKeyboard: Keyboard {
     }
 
     func releaseAll() throws { recorded.withLock { $0.append("up") } }
-    func hold(_ keys: HeldKeys) throws { recorded.withLock { $0.append("hold \(keys.logged)") } }
+
+    func hold(_ keys: HeldKeys) throws {
+        recorded.withLock { $0.append("hold \(keys.logged)") }
+        throw Refused()
+    }
 }
 
 struct Refused: Error {}
@@ -176,8 +180,8 @@ final class FakeMouse: Mouse {
     }
 }
 
-/// A keyboard that cancels the run it is part of once `afterKeys` keys have gone down, so
-/// a cancellation can be aimed between two reports of one character.
+/// A keyboard that cancels the run it is part of once `afterReports` reports have gone
+/// out, so a cancellation can be aimed between two reports of one character.
 ///
 /// The task is handed over after it is made rather than taken at init, because the task
 /// and the keyboard each need the other: the run types on this keyboard, and this keyboard
@@ -185,23 +189,38 @@ final class FakeMouse: Mouse {
 /// made on an actor does not begin until that actor suspends.
 final class CancellingKeyboard: Keyboard {
     private let state = Mutex<(log: [String], run: Task<Void, any Error>?)>(([], nil))
-    private let afterKeys: Int
+    private let afterReports: Int
 
-    init(afterKeys: Int) { self.afterKeys = afterKeys }
+    init(afterReports: Int) { self.afterReports = afterReports }
 
     var log: [String] { state.withLock { $0.log } }
 
     func aim(at run: Task<Void, any Error>) { state.withLock { $0.run = run } }
 
-    func down(_ usage: Usage) throws {
+    private func record(_ what: String) {
         state.withLock {
-            $0.log.append("down \(String(usage.rawValue, radix: 16))")
-            if $0.log.count >= afterKeys { $0.run?.cancel() }
+            $0.log.append(what)
+            if $0.log.count >= afterReports { $0.run?.cancel() }
         }
     }
 
+    func down(_ usage: Usage) throws { record("down \(String(usage.rawValue, radix: 16))") }
     func releaseAll() throws { state.withLock { $0.log.append("up") } }
-    func hold(_ keys: HeldKeys) throws { state.withLock { $0.log.append("hold \(keys.logged)") } }
+    func hold(_ keys: HeldKeys) throws { record("hold \(keys.logged)") }
+}
+
+extension Scribe {
+    /// A scribe on `keyboard` timed on `clock`, its timings drawn from seed 1.
+    static func on(_ keyboard: any Keyboard, clock: ManualClock = ManualClock()) -> Scribe {
+        Scribe(keyboard: keyboard, timeline: Timeline(clock), randomness: RandomSource(seed: 1), cadence: .typist, traced: { _ in })
+    }
+}
+
+extension Typist {
+    /// A typist on `keyboard` timed on `clock`, its timings drawn from `seed`.
+    static func on(_ keyboard: any Keyboard, clock: ManualClock = ManualClock(), seed: UInt64 = 1, traced: @escaping @Sendable (Pause) -> Void = { _ in }) -> Typist {
+        Typist(keyboard: keyboard, clock: clock, randomness: RandomSource(seed: seed), traced: traced)
+    }
 }
 
 /// A mouse whose acceleration curve is one number, whatever the report asks for.

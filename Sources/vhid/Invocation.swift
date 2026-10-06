@@ -50,7 +50,7 @@ final class Invocation: Sendable {
     let signals: FirstSignal?
     /// W3C trace ID: 16 random bytes as 32 lowercase hex digits.
     let traceID = (0..<16).map { _ in String(format: "%02x", UInt8.random(in: .min ... .max)) }.joined()
-    private let state: Mutex<(event: String, counts: [Tally: Int], attributes: [Attribute: JSON], lists: [Attribute: [JSON]], pauses: [Pause.Kind: (count: Int, slept: Duration)], typesText: Bool)>
+    private let state: Mutex<(event: String, counts: [Tally: Int], attributes: [Attribute: JSON], lists: [Attribute: [JSON]], pauses: [String: (count: Int, slept: Duration)], typesText: Bool)>
 
     private init(_ event: String, via entry: Entry, stoppedBy signals: FirstSignal?) {
         self.entry = entry
@@ -116,7 +116,7 @@ final class Invocation: Sendable {
         let (event, counts, decided, lists, pauses, typesText) = state.withLock { ($0.event, $0.counts, $0.attributes, $0.lists, $0.pauses, $0.typesText) }
         var attributes = decided.merging(lists.mapValues(JSON.array)) { $1 }
         attributes[.pauses] = pauses.isEmpty ? nil : .object(Dictionary(uniqueKeysWithValues: pauses.map { kind, total in
-            (kind.rawValue, .object(["count": .int(total.count), "ms": .double(total.slept / .milliseconds(1))]))
+            (kind, .object(["count": .int(total.count), "ms": .double(total.slept / .milliseconds(1))]))
         }))
         attributes[.signal] = signals?.taken.map { .string(Attribute.name(ofSignal: $0)) }
         func told(_ failure: any Error) -> String? {
@@ -161,13 +161,15 @@ enum Attribute: String, Sendable {
     /// The double-click interval the pointer's hand was fitted to, as this process read it.
     /// Absent when the devices were never opened.
     case doubleClickMilliseconds = "double_click_ms"
-    /// The pauses the pointer made between reports, the one it stopped in too, by kind
-    /// (`rest`, `hold`, `gap`, `drag_hold`, `notch`): how many and how long they slept in
-    /// all. By kind, not one by one, so a roll of any length is a record of bounded size;
-    /// the seed draws each one again. Absent for a verb that made none.
+    /// The pauses the pointer and the typist made between reports, the one it stopped in
+    /// too, by kind - the pointer's `rest`, `hold`, `gap`, `drag_hold`, `notch`, and the
+    /// typist's waits named for the report they end in, `modifier_down`, `key_down`,
+    /// `key_up`, `modifier_up`: how many and how long they slept in all. By kind, not one
+    /// by one, so a roll or a text of any length is a record of bounded size; the seed draws
+    /// each one again. Absent for a verb that made none.
     case pauses
-    /// What the pointer's random source was seeded with, as hex: what draws its moves
-    /// again. Absent when the devices were never opened.
+    /// What the devices' random source was seeded with, as hex: what draws the pointer's
+    /// moves and pauses and the typist's key timings again. Absent when the devices were never opened.
     case seed
     /// Each pointer move the verb made, in order, the one it stopped in too: how long its
     /// trajectory was drawn to take, how many reports steered it and then closed onto the
@@ -281,11 +283,16 @@ extension Invocation {
     @Sendable static func traced(_ traced: Pointer.Traced) {
         switch traced {
         case .moved(let move): moved(move)
-        case .paused(let pause):
-            current?.state.withLock {
-                let total = $0.pauses[pause.kind, default: (0, .zero)]
-                $0.pauses[pause.kind] = (total.count + 1, total.slept + pause.length)
-            }
+        case .paused(let pause): paused(pause)
+        }
+    }
+
+    /// Adds a pause to its kind's total in `pauses`: a pointer's, through `traced`, and a
+    /// typist's, which `Devices` hands every typist it opens.
+    @Sendable static func paused(_ pause: Pause) {
+        current?.state.withLock {
+            let total = $0.pauses[pause.kind.name, default: (0, .zero)]
+            $0.pauses[pause.kind.name] = (total.count + 1, total.slept + pause.length)
         }
     }
 

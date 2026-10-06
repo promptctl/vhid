@@ -44,7 +44,7 @@ import Testing
     @Test func aDoubleClickRestsHoldsAndGapsAtExactTimes() async throws {
         let timed = Timed()
         _ = try await timed.pointer().click(at: Self.origin, button: .left, times: .double)
-        #expect(timed.pauses.map(\.kind) == [.rest, .hold, .gap, .hold])
+        #expect(timed.pauses.map(\.kind) == [.hand(.rest), .hand(.hold), .hand(.gap), .hand(.hold)])
         let (rest, hold1, gap, hold2) = (timed.pauses[0].length, timed.pauses[1].length, timed.pauses[2].length, timed.pauses[3].length)
         #expect(timed.log == ["\(rest / .milliseconds(1)) down", "\((rest + hold1) / .milliseconds(1)) up",
                               "\((rest + hold1 + gap) / .milliseconds(1)) down", "\((rest + hold1 + gap + hold2) / .milliseconds(1)) up"])
@@ -72,10 +72,10 @@ import Testing
             for pause in timed.pauses {
                 let ms = pause.length / .milliseconds(1)
                 switch pause.kind {
-                case .rest: #expect((120 ... 500).contains(ms)); rests.insert(ms)
-                case .hold: #expect((60 ... 200).contains(ms)); holds.insert(ms)
-                case .gap: #expect((60 ... 180).contains(ms))
-                case .dragHold, .notch: Issue.record("a click made a \(pause.kind) pause")
+                case .hand(.rest): #expect((120 ... 500).contains(ms)); rests.insert(ms)
+                case .hand(.hold): #expect((60 ... 200).contains(ms)); holds.insert(ms)
+                case .hand(.gap): #expect((60 ... 180).contains(ms))
+                case .hand(.dragHold), .hand(.notch), .keys: Issue.record("a click made a \(pause.kind.name) pause")
                 }
             }
         }
@@ -93,7 +93,7 @@ import Testing
         for seed in UInt64(1) ... 50 {
             let timed = Timed()
             _ = try await timed.pointer(hand: hand, seed: seed).click(at: Self.origin, button: .left, times: Clicks(rawValue: 3)!)
-            let presses = timed.pauses.filter { $0.kind != .rest }.map { $0.length / .milliseconds(1) }
+            let presses = timed.pauses.filter { $0.kind != .hand(.rest) }.map { $0.length / .milliseconds(1) }
             #expect(presses.allSatisfy { $0 >= min(60, ceiling / 2) })
             // hold, gap, hold, gap, hold: a press is the hold before it and the gap after.
             for pair in stride(from: 0, to: presses.count - 1, by: 2) {
@@ -115,7 +115,7 @@ import Testing
     @Test func aDragRestsHoldsCarriesAndRestsBeforeLettingGo() async throws {
         let timed = Timed()
         _ = try await timed.pointer().drag(from: Self.origin, to: ScreenPoint(x: 40, y: 0)!, button: .left)
-        #expect(timed.pauses.map(\.kind) == [.rest, .dragHold, .rest])
+        #expect(timed.pauses.map(\.kind) == [.hand(.rest), .hand(.dragHold), .hand(.rest)])
         let rest = timed.pauses[0].length
         #expect(timed.log.first == "\(rest / .milliseconds(1)) down")
         #expect(timed.log.last?.hasSuffix(" up") == true)
@@ -130,7 +130,7 @@ import Testing
     @Test func aScrollRestsThenSpacesItsNotches() async throws {
         let timed = Timed()
         try await timed.pointer().scroll(at: Self.origin, vertical: 20, horizontal: 0)
-        #expect(timed.pauses.map(\.kind) == [.rest] + Array(repeating: .notch, count: 20))
+        #expect(timed.pauses.map(\.kind) == [.hand(.rest)] + Array(repeating: .hand(.notch), count: 20))
         let notches = timed.pauses.dropFirst().map { $0.length / .milliseconds(1) }
         #expect(notches.allSatisfy { (200 ... 300).contains($0) })
         #expect(Set(notches).count > 15)

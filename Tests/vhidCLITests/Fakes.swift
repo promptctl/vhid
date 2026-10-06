@@ -4,10 +4,15 @@ import Installations
 import Keystrokes
 import Pointing
 import Synchronization
+import TestClock
 import Testing
 @testable import vhid
 
 /// A keyboard that records instead of typing, and can be told to fail at the nth key.
+///
+/// `down` is every key that went down, in order, whether by `down` or by a `hold` that
+/// added it, so a verb that types by holds and one that presses by downs read back alike;
+/// the nth key fails the same way through either.
 ///
 /// Non-isolated and `Mutex`-backed, because the verbs take the caller's isolation and a
 /// test that pinned these to an actor would be testing something the CLI does not do.
@@ -16,7 +21,7 @@ final class RecordingKeyboard: Keyboard {
         let description = "the fake keyboard refused"
     }
 
-    private let state = Mutex<(down: [Usage], releases: Int, holds: [HeldKeys], failAt: Int?)>((down: [], releases: 0, holds: [], failAt: nil))
+    private let state = Mutex<(down: [Usage], held: Set<Usage>, releases: Int, holds: [HeldKeys], failAt: Int?)>((down: [], held: [], releases: 0, holds: [], failAt: nil))
 
     init(failingAtKey failAt: Int? = nil) {
         state.withLock { $0.failAt = failAt }
@@ -30,15 +35,30 @@ final class RecordingKeyboard: Keyboard {
         try state.withLock {
             if $0.down.count == $0.failAt { throw Refused() }
             $0.down.append(usage)
+            $0.held.insert(usage)
         }
     }
 
     func releaseAll() async throws {
-        state.withLock { $0.releases += 1 }
+        state.withLock { $0.releases += 1; $0.held = [] }
     }
 
     func hold(_ keys: HeldKeys) async throws {
-        state.withLock { $0.holds.append(keys) }
+        try state.withLock {
+            let pressed = keys.usages.subtracting($0.held).sorted { $0.rawValue < $1.rawValue }
+            if let failAt = $0.failAt, (($0.down.count) ..< ($0.down.count + pressed.count)).contains(failAt) { throw Refused() }
+            $0.down += pressed
+            $0.held = keys.usages
+            $0.holds.append(keys)
+        }
+    }
+}
+
+extension Typist {
+    /// A typist on `keyboard` timed on a clock of its own, so a test's keys take no time,
+    /// its timings drawn from seed 1.
+    static func onManualClock(_ keyboard: any Keyboard, clock: ManualClock = ManualClock(), traced: @escaping @Sendable (Pause) -> Void = { _ in }) -> Typist {
+        Typist(keyboard: keyboard, clock: clock, randomness: RandomSource(seed: 1), traced: traced)
     }
 }
 

@@ -19,9 +19,27 @@ import Keystrokes
 /// knows which one that is; this does not.
 public struct Typist {
     public let keyboard: any Keyboard
+    /// What every key is timed on. [LAW:effects-at-boundaries]
+    public let timeline: Timeline
+    /// What every key's timing is drawn from: the devices' one source, so a verb's keys and
+    /// moves draw again from the one seed on its record.
+    public let randomness: RandomSource
+    public let cadence: Cadence
+    /// Where every wait between keys is handed once it ends. [LAW:nothing-unseen]
+    public let traced: @Sendable (Pause) -> Void
 
-    public init(keyboard: any Keyboard) {
+    public init<C: Clock>(keyboard: any Keyboard, clock: C, randomness: RandomSource, cadence: Cadence = .typist,
+                          traced: @escaping @Sendable (Pause) -> Void) where C.Duration == Duration {
         self.keyboard = keyboard
+        timeline = Timeline(clock)
+        self.randomness = randomness
+        self.cadence = cadence
+        self.traced = traced
+    }
+
+    /// A scribe for one run, timed from now.
+    private var scribe: Scribe {
+        Scribe(keyboard: keyboard, timeline: timeline, randomness: randomness, cadence: cadence, traced: traced)
     }
 
     /// Text proven typeable: every character has keys on the layout.
@@ -53,22 +71,29 @@ public struct Typist {
     /// with the count instead.
     @discardableResult
     public func type(_ text: Text, isolation: isolated (any Actor)? = #isolation) async throws -> Int {
-        var scribe = Scribe(keyboard: keyboard)
+        var scribe = scribe
         do {
             for (character, keystrokes) in text.characters { try await scribe.type(character, keystrokes) }
+            try await scribe.finish()
         } catch {
             throw TypingStopped(typed: scribe.typed, of: text.count, halfTyped: scribe.halfTyped, cause: error, unreleased: await release())
         }
         return scribe.typed
     }
 
-    public func press(_ chord: Chord, isolation: isolated (any Actor)? = #isolation) async throws {
-        var scribe = Scribe(keyboard: keyboard)
+    /// Presses the chords in order, spaced as a typist's keystrokes are, and answers with
+    /// how many were pressed, which is `chords.count` on every return: a run that stops
+    /// throws `ChordsStopped` with the count instead.
+    @discardableResult
+    public func press(_ chords: [Chord], isolation: isolated (any Actor)? = #isolation) async throws -> Int {
+        var scribe = scribe
         do {
-            try await scribe.press(chord.keystroke)
+            for chord in chords { try await scribe.press(chord.keystroke) }
+            try await scribe.finish()
         } catch {
-            throw ChordStopped(cause: error, unreleased: await release())
+            throw ChordsStopped(pressed: scribe.typed, of: chords.count, cause: error, unreleased: await release())
         }
+        return scribe.typed
     }
 
     /// Every key up, on the way out of a run that stopped. A run that stopped inside a
@@ -130,16 +155,26 @@ public struct TypingStopped: StoppedPartWay, CustomStringConvertible {
     }
 }
 
-/// A chord whose press stopped part way. There is no count to carry - a chord is one
-/// keystroke - but there is the same question about the keys.
-public struct ChordStopped: StoppedPartWay, CustomStringConvertible {
+/// A list of chords that stopped part way.
+///
+/// How many of the list had already gone down is the fact the operator has to act on: a
+/// `leftCommand+a` that landed in front of a `delete` that did not has left the document
+/// selected, and without the count nothing says so. [LAW:no-silent-failure]
+public struct ChordsStopped: StoppedPartWay, CustomStringConvertible {
+    public let pressed: Int
+    public let of: Int
     public let cause: any Error
+    /// The failure of the release that followed the stop, when it failed too.
     public let unreleased: (any Error)?
 
-    public init(cause: any Error, unreleased: (any Error)? = nil) {
+    public init(pressed: Int, of: Int, cause: any Error, unreleased: (any Error)? = nil) {
+        self.pressed = pressed
+        self.of = of
         self.cause = cause
         self.unreleased = unreleased
     }
 
-    public var description: String { TypingStopped.unreleased(unreleased, after: cause.reported) }
+    public var description: String {
+        TypingStopped.unreleased(unreleased, after: cause.reported.then("\(pressed) of \(of) chords had been pressed before this, and the rest were not sent"))
+    }
 }

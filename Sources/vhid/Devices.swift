@@ -30,6 +30,9 @@ struct Devices {
     /// from one seed, and that seed is on its record, as is every move it makes, however
     /// the verb ends. [LAW:nothing-unseen]
     let pointer: Pointer
+    /// The typist these keys are typed by, timed on the pointer's clock and drawing from
+    /// its random source, so the seed on a verb's record draws its keys again too.
+    let typist: Typist
 
     /// Runs `body` with the devices over a connection to this installation's daemon, and
     /// hands them back when it returns.
@@ -62,10 +65,11 @@ struct Devices {
         // own default, not the user's setting. `Hand`.
         let doubleClick = Duration.seconds(NSEvent.doubleClickInterval)
         Invocation.set(.doubleClickMilliseconds, .double(doubleClick / .milliseconds(1)))
-        let devices = Devices(keyboard: TalliedKeyboard(keyboard: QueuedKeyboard(keyboard: helper.keyboard, queue: queue)),
-                              mouse: mouse, cursor: cursor, front: front(helper, on: queue),
+        let keyboard = TalliedKeyboard(keyboard: QueuedKeyboard(keyboard: helper.keyboard, queue: queue))
+        let devices = Devices(keyboard: keyboard, mouse: mouse, cursor: cursor, front: front(helper, on: queue),
                               pointer: Pointer(mouse: mouse, cursor: cursor, displays: displays(helper, on: queue), clock: ContinuousClock(),
-                                               randomness: randomness, hand: Hand(doubleClickInterval: doubleClick), traced: Invocation.traced))
+                                               randomness: randomness, hand: Hand(doubleClickInterval: doubleClick), traced: Invocation.traced),
+                              typist: Typist(keyboard: keyboard, clock: ContinuousClock(), randomness: randomness, traced: Invocation.paused))
         let done: T
         do {
             done = try await body(devices)
@@ -90,9 +94,6 @@ struct Devices {
         }
         return done
     }
-
-    /// The typist these keys are typed by.
-    var typist: Typist { Typist(keyboard: keyboard) }
 
     /// The app in front, asked once the daemon has answered that the devices are up.
     ///

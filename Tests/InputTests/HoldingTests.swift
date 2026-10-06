@@ -102,7 +102,7 @@ import Testing
     /// that went down let go again.
     @Test func aCancelledRunReleasesTheKeysItHeld() async throws {
         let mouse = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
-        let keyboard = CancellingKeyboard(afterKeys: 1)
+        let keyboard = CancellingKeyboard(afterReports: 1)
         let run = Task { @MainActor in
             _ = try await mouse.pointer.holding(Self.shiftCommand, on: keyboard) {
                 try await $0.click(at: Self.target, button: .left, times: .single)

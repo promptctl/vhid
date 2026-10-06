@@ -83,6 +83,24 @@ import Testing
         #expect(paths[0]["displays"] as? [[Double]] == [[-100_000, -100_000, 200_000, 200_000]])
     }
 
+    /// Typing records its waits beside the pointer's, totalled by the report each ends in,
+    /// and a report for every change of the keys held.
+    @Test func typingRecordsItsWaitsByTheReportEachEndsIn() async throws {
+        let export = EventExport.scratch()
+        _ = try await Invocation.record("type", via: .mcp, to: export.export) { _ in
+            try await Self.against { devices in
+                try await TypeCommand.type("Ab", on: VerbTests.us, into: .anywhere,
+                                           with: Typist(keyboard: devices.keyboard, clock: ManualClock(), randomness: RandomSource(seed: 1), traced: Invocation.paused),
+                                           front: { nil })
+            }
+        }
+        let record = try Self.only(export)
+        #expect((record["counts"] as? [String: Int])?["keyboard_reports"] == 6)
+        let pauses = try #require((record["attributes"] as? [String: Any])?["pauses"] as? [String: [String: Any]])
+        #expect(pauses.mapValues { $0["count"] as? Int } == ["modifier_down": 1, "key_down": 2, "key_up": 2, "modifier_up": 1])
+        #expect((pauses["key_up"]?["ms"] as? Double).map { (80 ... 400).contains($0) } == true)
+    }
+
     /// A move the cursor never follows throws, and its record still carries the move: every
     /// steered report given up on, and the closing loop's reports up to the stall that
     /// stopped it. Through the pointer `Devices` opens, which is where moves are recorded.

@@ -85,7 +85,7 @@ naming no tool is recorded as `tools/call`. An MCP call's
 `duration_ms` includes.
 
 A verb that opens the devices records `attributes.seed`, the hex seed every pointer move
-it makes is drawn from, and `attributes.paths` has one entry for each such move, in order,
+it makes and every key it times is drawn from, and `attributes.paths` has one entry for each such move, in order,
 the move a failed verb stopped in included: `planned_ms` is how long its trajectory was
 drawn to take, `displays` the display layout it was kept on, each display as its left,
 top, width and height, `bow_kept` how much of its drawn curve it kept to stay clear of the
@@ -93,12 +93,14 @@ displays' edges (1 for all of it, 0 for a straight line), `steered_reports` how 
 reports carried the cursor along it,
 `lost_reports` how many of those the cursor never showed, and `closing_reports` how many
 the closed loop took to land it after. `click`, `move` and `scroll` make one move and
-`drag` two. `attributes.pauses` totals the pauses the pointer made between reports by kind, the
-one a stopped verb was in included, each kind with its `count` and the `ms` they slept: a
+`drag` two. `attributes.pauses` totals the pauses made between reports by kind, the
+one a stopped verb was in included, each kind with its `count` and the `ms` they slept. The
+pointer's are a
 `rest` on the point before a press, a drag's release or a scroll's first notch, a click's
 `hold`, the `gap` between the clicks of a double click, a drag's `drag_hold` before it
-carries the button, and a `notch` pause after each notch. Each is drawn from the seed
-too. `attributes.double_click_ms` is the double-click interval the click timings were
+carries the button, and a `notch` pause after each notch. `type`'s and `press`'s are named
+for the report each wait ends in: `modifier_down`, `key_down`, `key_up` (a key's hold) and
+`modifier_up`. Each is drawn from the seed too. `attributes.double_click_ms` is the double-click interval the click timings were
 fitted to, as this process read it.
 
 With `OTEL_EXPORTER_OTLP_ENDPOINT` set, the record goes to that OpenTelemetry collector

@@ -107,20 +107,6 @@ public struct Pointer: Sendable {
         self.traced = traced
     }
 
-    /// A clock as offsets from when the pointer was made: what time it is, and a sleep
-    /// until a given one. A move's deadlines are offsets from its start, so this is all of
-    /// a clock a pointer needs, and it keeps the pointer free of the clock's type.
-    public struct Timeline: Sendable {
-        public let now: @Sendable () -> Duration
-        public let sleep: @Sendable (_ until: Duration) async throws -> Void
-
-        public init<C: Clock>(_ clock: C) where C.Duration == Duration {
-            let origin = clock.now
-            now = { origin.duration(to: clock.now) }
-            sleep = { try await clock.sleep(until: origin.advanced(by: $0), tolerance: .zero) }
-        }
-    }
-
     /// A click that landed: where, and the move that got it there.
     ///
     /// `at` is where the cursor was when the button went down, read back rather than
@@ -354,10 +340,10 @@ public struct Pointer: Sendable {
     /// A pause of `kind`, drawn from `hand` and handed to `traced` once it ends, however it
     /// ends, with the time it slept: a run cancelled inside it says so, and says how long it
     /// got. [LAW:single-enforcer] Every wait a verb makes between its reports is one of these.
-    func pause(_ kind: Pause.Kind) async throws {
+    func pause(_ kind: Hand.Wait) async throws {
         let length = Duration.milliseconds(randomness.draw { hand.spread(of: kind).draw(using: &$0) })
         let began = timeline.now()
-        defer { traced(.paused(Pause(kind: kind, length: timeline.now() - began))) }
+        defer { traced(.paused(Pause(kind: .hand(kind), length: timeline.now() - began))) }
         try await timeline.sleep(began + length)
     }
 

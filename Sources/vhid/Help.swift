@@ -71,6 +71,8 @@ enum Help {
         question per process, and a root daemon asking it is told the US layout whatever the user \
         is typing on. \
         Text it has no keys for is refused whole, before any key goes down.
+
+        \(cadence) 1,000 characters take about three minutes.
         """, commandLine: ["Text starting with - follows --, as in: vhid type -- \"-5 degrees\"."])
 
     static let press = VerbHelp(name: "press", abstract: "Press chords on the virtual keyboard, one after another.", discussion: """
@@ -85,7 +87,18 @@ enum Help {
 
         Every chord is proven pressable before the first one goes down. Named an application to \
         go into, it refuses unless that one is in front.
+
+        \(cadence)
         """)
+
+    /// How `type` and `press` time their keys, read off the one model they follow.
+    /// [LAW:one-source-of-truth]
+    static let cadence = """
+        Keys are timed as a typist's: each held about \(Int(Cadence.typist.dwell.mean)) ms, one key-down \
+        about \(Int(Cadence.typist.latency.mean)) ms after the last, and a modifier down \
+        \(Int(Cadence.typist.lead.lowerBound)) to \(Int(Cadence.typist.lead.upperBound)) ms before its key and \
+        up after it, held through the keys that all need it.
+        """
 
     static let click = VerbHelp(name: "click", abstract: "Click at a point on the screen.", discussion: """
         Coordinates, and nothing else: there is no click-by-element here, because nothing in vhid \

@@ -15,7 +15,13 @@ public struct HeldKeys: Hashable, Sendable {
         self.usages = usages
     }
 
-    public static let none = try! HeldKeys([])
+    /// `modifiers` held, and `key` under them when there is one: what one keystroke holds
+    /// at any moment. At most one key besides the modifiers, so it always fits.
+    public init(_ modifiers: Modifiers, pressing key: Usage? = nil) {
+        usages = Set(modifiers.usages + [key].compactMap { $0 })
+    }
+
+    public static let none = HeldKeys(Modifiers())
 
     /// How long vhidd lets a key stay down with no word from its client before it lets go.
     /// Here, where both ends can read it, because the daemon enforces it and a player that
