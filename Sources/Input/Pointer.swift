@@ -130,6 +130,7 @@ public struct Pointer: Sendable {
         public let aimed: ScreenPoint
         public let toward: Target
         public let planned: Duration
+        public let structure: Trajectory.Structure
         public let displays: Displays
         public let kept: Double
         public let steered: Int
@@ -235,7 +236,7 @@ public struct Pointer: Sendable {
         var steered = 0, closing = 0
         var landed: ScreenPoint?
         var moved: Moved {
-            Moved(aimed: trajectory.target, toward: trajectory.toward, planned: trajectory.duration, displays: displays, kept: trajectory.kept,
+            Moved(aimed: trajectory.target, toward: trajectory.toward, planned: trajectory.duration, structure: trajectory.structure, displays: displays, kept: trajectory.kept,
                   steered: steered, closing: closing, lost: tracking.lost, landed: landed)
         }
         defer { traced(.moved(moved)) }

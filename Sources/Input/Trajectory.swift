@@ -2,9 +2,10 @@ import Foundation
 import Pointing
 
 /// Where a person's aimed pointer movement is, moment by moment, from one point to another:
-/// a primary submovement that bows to one side and stops short, then a corrective one onto
-/// the target, each with the bell-shaped speed profile of a minimum-jerk movement. Pure:
-/// every draw is taken when it is made. `docs/design/human.md`, "The model".
+/// a main movement that lands on the target, stops short, or overshoots, then as many
+/// corrections onto it as its structure has, each slowing down for longer than it speeds
+/// up, the main one bowing the way the forearm swings, and a faint tremor over the whole.
+/// Pure: every draw is taken when it is made. `docs/design/human.md`, "The path".
 public struct Trajectory: Sendable, Equatable {
     public let start: ScreenPoint
     /// The point drawn inside the target it was aimed at, where it ends.
@@ -13,13 +14,15 @@ public struct Trajectory: Sendable, Equatable {
     public let toward: Target
     /// How long the whole movement takes, by Fitts' law and a drawn pace.
     public let duration: Duration
-    /// How much of its drawn bow and aim off the line the path kept to stay on the
+    /// How much of its drawn deviation from the straight line the path kept to stay on the
     /// displays: one for all of it, zero for the straight line.
     public let kept: Double
-    /// The movement that gets most of the way.
-    public let primary: Submovement
-    /// The one that takes it the rest of the way, straight.
-    public let correction: Submovement
+    /// Which corrections follow the main movement.
+    public let structure: Structure
+    /// The movements in order, the main one first and the last ending on the target.
+    public let strokes: [Submovement]
+    /// The sideways shake laid over them.
+    public let tremor: Tremor
 
     /// Fitts' law, MT = a + b × log2(D/W + 1), with the constants of the human-like
     /// generator in Choudhary et al. W is the target's: `Target.width`.
@@ -27,14 +30,21 @@ public struct Trajectory: Sendable, Equatable {
     static let slope: Duration = .milliseconds(150)
     /// What MT is multiplied by, so two moves of one distance do not take one time.
     static let pace = Normal(1, 0.15, within: 0.7 ... 1.3)
-    /// The primary submovement's share of MT; the correction has the rest.
-    static let primaryShare = 0.8
-    /// How far short of the target the primary submovement aims, as a fraction of D.
+    /// How far short of the target a main movement that undershoots ends, as a fraction of D.
     static let short = Normal(0.05, 0.03, within: 0.01 ... 0.10)
-    /// How far off the line it aims, as a fraction of D.
+    /// How far past it one that overshoots ends, as a fraction of D.
+    static let over = Normal(0.04, 0.02, within: 0.01 ... 0.08)
+    /// How much of the main movement's miss a first correction that also misses leaves, on
+    /// a side drawn as a coin.
+    static let miss = Normal(0.45, 0.15, within: 0.25 ... 0.80)
+    /// How far off the line a movement that does not end on the target ends, as a fraction of D.
     static let offLine = Normal(0, 0.02, within: -0.04 ... 0.04)
-    /// How far its path bows to one side at the middle, as a fraction of D.
-    static let bow = Normal(0, 0.03, within: -0.06 ... 0.06)
+    /// How far the main movement bows at its middle, as a fraction of D, before it is scaled
+    /// by how much of the stroke lies across the forearm.
+    static let bow = Normal(0.03, 0.01, within: 0.01 ... 0.06)
+    /// The forearm, from the hand toward the elbow, as a unit vector in screen space, y
+    /// down: 30° right of straight down, a right hand's on a mouse beside a keyboard.
+    static let forearm = (x: sin(Double.pi / 6), y: cos(Double.pi / 6))
 
     /// How near the displays' edges a bow may carry the path, in points, where the straight
     /// line keeps further off: a button's height of room. The steering follows the path to
@@ -47,24 +57,68 @@ public struct Trajectory: Sendable, Equatable {
     /// a few milliseconds apart on the longest move, closer than the steering's ticks.
     static let checks = 256
 
+    /// How a movement is built: whether its main movement lands on the target, and how many
+    /// corrections take it the rest of the way. `docs/design/human.md`, "The path".
+    public enum Structure: String, Sendable, CaseIterable {
+        case direct, undershoot, overshoot
+        case twoCorrections = "two_corrections"
+
+        /// The share of moves built this way.
+        var share: Double {
+            switch self {
+            case .direct: 0.25
+            case .undershoot: 0.45
+            case .overshoot: 0.15
+            case .twoCorrections: 0.15
+            }
+        }
+
+        /// One drawn as their shares have it.
+        static func draw(using generator: inout some RandomNumberGenerator) -> Structure {
+            let pick = Double.random(in: 0 ..< 1, using: &generator)
+            var below = 0.0
+            // The shares sum to one, so only rounding reaches past the last.
+            return allCases.first { below += $0.share; return pick < below } ?? .twoCorrections
+        }
+
+        /// Where each movement ends, in space and in time: `past` the target along the line
+        /// and `across` it, both as fractions of D, the second as a multiple of the drawn aim
+        /// off the line; how much of the drawn bow it carries; and the share of MT gone when
+        /// it ends. Measured from the target and up to the whole of MT, so the last movement,
+        /// at zero, zero and one, ends on the target exactly and at the move's end exactly.
+        /// [LAW:dataflow-not-control-flow] Every structure is one list of the same legs.
+        func legs(short: Double, over: Double, miss: Double) -> [(past: Double, across: Double, bow: Double, until: Double)] {
+            switch self {
+            case .direct: [(0, 0, 1, 1)]
+            case .undershoot: [(-short, 1, 1, 0.8), (0, 0, 0, 1)]
+            case .overshoot: [(over, 1, 1, 0.8), (0, 0, 0, 1)]
+            case .twoCorrections: [(-short, 1, 1, 0.7), (-miss * short, miss, 0, 0.88), (0, 0, 0, 1)]
+            }
+        }
+    }
+
     /// A movement from `start` to a point aimed at inside `target` with every variable drawn
-    /// from `generator`, in one fixed order whatever the distance, the aim first, so one seed
-    /// always means one movement. A movement under a point long takes no time: the closing
-    /// loop has it all.
+    /// from `generator`, in one fixed order whatever the distance or the structure, the aim
+    /// first, so one seed always means one movement. A movement under a point long takes no
+    /// time: the closing loop has it all.
     ///
-    /// **The bow and the aim off the line are drawn whole and kept in part.** A path that
-    /// bows by up to a tenth of its length runs into the edge beside a target approached
-    /// along it: an auto-hidden Dock rises and covers the target, a corner fires, and while
+    /// **The deviation is drawn whole and kept in part.** A path that bows or overshoots by
+    /// a tenth of its length runs into the edge beside a target approached along it or
+    /// toward it: an auto-hidden Dock rises and covers the target, a corner fires, and while
     /// the cursor is held at the edge the curve is learned from reports macOS clamped. So
-    /// the path keeps the largest of `shares` of its deviation under which, at every check,
-    /// it is no nearer an edge than the straight line is there, to within `margin`; a
-    /// straight line between two points on one display is on it, and the share is a value
-    /// rather than a branch, so a path far from every edge keeps it all.
-    /// [LAW:dataflow-not-control-flow]
+    /// the path keeps the largest of `shares` of its bow, aims off the line, overshoot and
+    /// tremor under which, at every check, it is no nearer an edge than the straight line is
+    /// there, to within `margin`; a straight line between two points on one display is on
+    /// it, and the share is a value rather than a branch, so a path far from every edge keeps
+    /// it all. [LAW:dataflow-not-control-flow]
     public init(from start: ScreenPoint, toward aimed: Target, within displays: Displays, drawing generator: inout some RandomNumberGenerator) {
         let target = aimed.aim(drawing: &generator)
-        let (pace, short, offLine, bow) = (Self.pace.draw(using: &generator), Self.short.draw(using: &generator),
-                                           Self.offLine.draw(using: &generator), Self.bow.draw(using: &generator))
+        let pace = Self.pace.draw(using: &generator)
+        let structure = Structure.draw(using: &generator)
+        let (short, over) = (Self.short.draw(using: &generator), Self.over.draw(using: &generator))
+        let miss = Self.miss.draw(using: &generator) * (Bool.random(using: &generator) ? 1 : -1)
+        let (offLine, bowing) = (Self.offLine.draw(using: &generator), Self.bow.draw(using: &generator))
+        let shake = Tremor.Drawn(using: &generator)
         let (dx, dy) = (target.x - start.x, target.y - start.y)
         let distance = hypot(dx, dy)
         let fitts = Self.intercept + Self.slope * log2(distance / aimed.width + 1)
@@ -72,42 +126,70 @@ public struct Trajectory: Sendable, Equatable {
         // Along the line toward the target, and across it, as unit vectors; the zero vector
         // for a movement of no length, which then has no aim to set off either way.
         let (along, across) = distance > 0 ? ((dx / distance, dy / distance), (-dy / distance, dx / distance)) : ((0, 0), (0, 0))
-        func path(keeping share: Double) -> (primary: Submovement, correction: Submovement) {
-            let aim = (x: target.x - along.0 * short * distance + across.0 * offLine * share * distance,
-                       y: target.y - along.1 * short * distance + across.1 * offLine * share * distance)
-            return (Submovement(from: (start.x, start.y), to: aim, bow: bow * share * distance, duration: duration * Self.primaryShare),
-                    Submovement(from: aim, to: (target.x, target.y), bow: 0, duration: duration * (1 - Self.primaryShare)))
+        // The bow away from the elbow, by the sine of the angle between the stroke and the
+        // forearm: the stroke's component across the forearm, signed so that a positive one
+        // bows toward `across` and the elbow is always on the inside of the arc.
+        let bow = -bowing * distance * (along.0 * Self.forearm.y - along.1 * Self.forearm.x)
+        let legs = structure.legs(short: short, over: over, miss: miss)
+        func path(keeping share: Double) -> Path {
+            let ends: [Submovement.Point] = legs.map { leg in
+                // Short of the target is on the straight line; past it is off it, kept as the bow is.
+                let past = (min(leg.past, 0) + max(leg.past, 0) * share) * distance
+                let off = leg.across * offLine * share * distance
+                return (target.x + along.0 * past + across.0 * off, target.y + along.1 * past + across.1 * off)
+            }
+            let froms = [(start.x, start.y)] + ends.dropLast()
+            let begins = [0] + legs.dropLast().map(\.until)
+            return Path(strokes: zip(zip(froms, ends), zip(legs, begins)).map { stroke, timed in
+                Submovement(from: stroke.0, to: stroke.1, bow: bow * timed.0.bow * share, duration: duration * timed.0.until - duration * timed.1)
+            }, tremor: Tremor(shake, across: across, keeping: share), duration: duration)
         }
         let moments = (0 ... Self.checks).map { duration * (Double($0) / Double(Self.checks)) }
         let straight = path(keeping: 0)
-        let depths = moments.map { displays.depth(of: Self.point(after: $0, on: straight), upTo: Self.margin) }
+        let depths = moments.map { displays.depth(of: straight.point(after: $0), upTo: Self.margin) }
         let kept = Self.shares.first { share in
             let bowed = path(keeping: share)
             return zip(moments, depths).allSatisfy { moment, depth in
-                depth.map { displays.covers(Self.point(after: moment, on: bowed), by: $0) } ?? true
+                depth.map { displays.covers(bowed.point(after: moment), by: $0) } ?? true
             }
         } ?? 0
+        let chosen = path(keeping: kept)
         self.start = start
         self.target = target
         toward = aimed
         self.duration = duration
         self.kept = kept
-        (primary, correction) = path(keeping: kept)
+        self.structure = structure
+        strokes = chosen.strokes
+        tremor = chosen.tremor
     }
 
     /// Where the movement is `elapsed` after it began: the target from `duration` on.
     public func point(after elapsed: Duration) -> (x: Double, y: Double) {
-        Self.point(after: elapsed, on: (primary, correction))
+        Path(strokes: strokes, tremor: tremor, duration: duration).point(after: elapsed)
     }
 
-    private static func point(after elapsed: Duration, on path: (primary: Submovement, correction: Submovement)) -> Submovement.Point {
-        elapsed < path.primary.duration ? path.primary.point(after: elapsed) : path.correction.point(after: elapsed - path.primary.duration)
+    /// The strokes and tremor of one share of the drawn deviation, for the whole movement's
+    /// `duration`.
+    private struct Path {
+        let strokes: [Submovement]
+        let tremor: Tremor
+        let duration: Duration
+
+        /// The stroke under way at `elapsed`, the last one that has begun, plus the tremor.
+        func point(after elapsed: Duration) -> Submovement.Point {
+            let begins = strokes.indices.map { strokes[..<$0].reduce(Duration.zero) { $0 + $1.duration } }
+            let under = begins.lastIndex { $0 <= elapsed } ?? 0
+            let (point, shake) = (strokes[under].point(after: elapsed - begins[under]), tremor.offset(after: elapsed, lasting: duration))
+            return (point.x + shake.x, point.y + shake.y)
+        }
     }
 }
 
-/// One submovement: a minimum-jerk stroke from one point to another, bowing to one side by
-/// `bow` points at its middle, along (−dy, dx) of its direction when positive and the
-/// other way when negative.
+/// One submovement: a stroke from one point to another on the minimum-jerk curve with its
+/// time warped so it slows down for longer than it speeds up, bowing to one side by `bow`
+/// points at its middle, along (−dy, dx) of its direction when positive and the other way
+/// when negative.
 public struct Submovement: Sendable, Equatable {
     public let from: Point
     public let to: Point
@@ -116,22 +198,81 @@ public struct Submovement: Sendable, Equatable {
 
     public typealias Point = (x: Double, y: Double)
 
+    /// The fraction of its time at which a stroke has covered half its distance.
+    static let halfway = 0.45
+    /// The warp τ = t^k that puts the minimum-jerk curve's middle at `halfway`.
+    static let warp = log(0.5) / log(halfway)
+
     public static func == (a: Submovement, b: Submovement) -> Bool {
         a.from == b.from && a.to == b.to && a.bow == b.bow && a.duration == b.duration
     }
 
-    /// The fraction of the distance a minimum-jerk movement has covered at fraction `t` of
-    /// its time: 10t³ − 15t⁴ + 6t⁵, whose speed rises and falls in a bell (Flash and Hogan).
-    static func covered(_ t: Double) -> Double { t * t * t * (10 - 15 * t + 6 * t * t) }
+    /// The fraction of the distance covered at fraction `t` of the stroke's time: the
+    /// minimum-jerk curve 10τ³ − 15τ⁴ + 6τ⁵ (Flash and Hogan) at τ = t^`warp`. Its speed
+    /// rises and falls once, peaking at 43% of the time rather than the middle.
+    static func covered(_ t: Double) -> Double {
+        let tau = pow(t, warp)
+        return tau * tau * tau * (10 - 15 * tau + 6 * tau * tau)
+    }
 
     /// Where the stroke is `elapsed` after it began: `to` from `duration` on, and `to` for
-    /// a stroke that takes no time.
+    /// a stroke that takes no time. Measured back from `to`, so the end is exact.
     func point(after elapsed: Duration) -> Point {
         let t = duration > .zero ? min(1, max(0, elapsed / duration)) : 1
         let u = Self.covered(t)
         let (dx, dy) = (to.x - from.x, to.y - from.y)
         let length = hypot(dx, dy)
         let off = length > 0 ? bow * sin(.pi * u) / length : 0
-        return (from.x + dx * u - dy * off, from.y + dy * u + dx * off)
+        return (to.x - dx * (1 - u) - dy * off, to.y - dy * (1 - u) + dx * off)
+    }
+}
+
+/// A hand's physiological tremor, as a sideways wobble across the line of the move: a sine
+/// of drawn amplitude, frequency and phase, faded in at the start and out at the end so the
+/// path begins where the cursor is and ends on the target. `docs/design/human.md`, "A faint
+/// tremor".
+public struct Tremor: Sendable, Equatable {
+    /// Points either side of the path at its widest.
+    public let amplitude: Double
+    /// Hertz.
+    public let frequency: Double
+    /// Radians at the start of the move.
+    public let phase: Double
+    /// The unit vector across the line of the move it wobbles along.
+    public let across: Submovement.Point
+
+    static let amplitudes = Normal(1, 0.3, within: 0.4 ... 1.6)
+    static let frequencies = Normal(10, 1.5, within: 7 ... 13)
+    /// How long it takes to fade in at the start and out at the end.
+    static let fade: Duration = .milliseconds(80)
+
+    /// The three draws, taken in one order before the path they shake is known.
+    struct Drawn {
+        let amplitude: Double, frequency: Double, phase: Double
+
+        init(using generator: inout some RandomNumberGenerator) {
+            amplitude = Tremor.amplitudes.draw(using: &generator)
+            frequency = Tremor.frequencies.draw(using: &generator)
+            phase = Double.random(in: 0 ..< 2 * .pi, using: &generator)
+        }
+    }
+
+    init(_ drawn: Drawn, across: Submovement.Point, keeping share: Double) {
+        amplitude = drawn.amplitude * share
+        frequency = drawn.frequency
+        phase = drawn.phase
+        self.across = across
+    }
+
+    public static func == (a: Tremor, b: Tremor) -> Bool {
+        a.amplitude == b.amplitude && a.frequency == b.frequency && a.phase == b.phase && a.across == b.across
+    }
+
+    /// How far off the strokes the hand is `elapsed` into a move `lasting` this long: none
+    /// at either end, nor after it.
+    func offset(after elapsed: Duration, lasting duration: Duration) -> Submovement.Point {
+        let fade = max(0, min(1, elapsed / Self.fade, (duration - elapsed) / Self.fade))
+        let size = amplitude * fade * sin(2 * .pi * frequency * (elapsed / .seconds(1)) + phase)
+        return (across.x * size, across.y * size)
     }
 }
