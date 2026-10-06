@@ -106,7 +106,7 @@ import Testing
     /// and what gets printed is where the button actually went down.
     @Test func clickReportsWhereTheButtonWentDownNotWhereItWasAimed() async throws {
         let mouse = FakeMouse(at: 0, 0, gain: 3)
-        let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor }, clock: ManualClock(), randomness: RandomSource(seed: 1))
+        let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor }, clock: ManualClock(), randomness: RandomSource(seed: 1), traced: { _ in })
         let said = try await ClickCommand.click(at: ScreenPoint(x: 100, y: 50)!, button: .left, times: .single, holding: .none, with: pointer, RecordingKeyboard())
         #expect(said.contains("clicked left once at "))
         #expect(mouse.buttons == [.left])
@@ -116,7 +116,7 @@ import Testing
 
     @Test func clickPressesTheButtonAsManyTimesAsAsked() async throws {
         let mouse = FakeMouse(at: 10, 10)
-        let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor }, clock: ManualClock(), randomness: RandomSource(seed: 1))
+        let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor }, clock: ManualClock(), randomness: RandomSource(seed: 1), traced: { _ in })
         let said = try await ClickCommand.click(at: ScreenPoint(x: 10, y: 10)!, button: .right, times: .double, holding: .none, with: pointer, RecordingKeyboard())
         #expect(mouse.buttons == [.right, .right])
         #expect(said.contains("clicked right 2 times"))
@@ -126,7 +126,7 @@ import Testing
     /// the CLI deciding which the caller is allowed to press.
     @Test func aNumberedButtonIsPressedAndPrintedByItsNumber() async throws {
         let mouse = FakeMouse(at: 0, 0)
-        let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor }, clock: ManualClock(), randomness: RandomSource(seed: 1))
+        let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor }, clock: ManualClock(), randomness: RandomSource(seed: 1), traced: { _ in })
         let eight = try #require(Button(rawValue: 8))
         let said = try await ClickCommand.click(at: ScreenPoint(x: 0, y: 0)!, button: eight, times: .single, holding: .none, with: pointer, RecordingKeyboard())
         #expect(mouse.buttons == [eight])
@@ -139,7 +139,7 @@ import Testing
         let mouse = FakeMouse(at: 0, 0)
         let keyboard = RecordingKeyboard()
         let held = try HeldModifiers(spelled: "leftCommand+leftShift")
-        let said = try await ClickCommand.click(at: ScreenPoint(x: 5, y: 5)!, button: .left, times: .single, holding: held, with: Pointer(mouse: mouse, cursor: { mouse.cursor }, clock: ManualClock(), randomness: RandomSource(seed: 1)), keyboard)
+        let said = try await ClickCommand.click(at: ScreenPoint(x: 5, y: 5)!, button: .left, times: .single, holding: held, with: Pointer(mouse: mouse, cursor: { mouse.cursor }, clock: ManualClock(), randomness: RandomSource(seed: 1), traced: { _ in }), keyboard)
         #expect(keyboard.down == held.pressed.usages)
         #expect(keyboard.releases == 1)
         #expect(mouse.buttons == [.left])
@@ -149,7 +149,7 @@ import Testing
     /// Scroll and drag name what they held the same way.
     @Test func scrollAndDragSayWhatTheyHeld() async throws {
         let mouse = FakeMouse(at: 0, 0)
-        let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor }, clock: ManualClock(), randomness: RandomSource(seed: 1))
+        let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor }, clock: ManualClock(), randomness: RandomSource(seed: 1), traced: { _ in })
         let command = try HeldModifiers(spelled: "leftCommand")
         let scrolled = try await ScrollCommand.scroll(at: ScreenPoint(x: 5, y: 5)!, vertical: 1, horizontal: 0, holding: command, with: pointer, RecordingKeyboard())
         #expect(scrolled.hasPrefix("scrolled 1 tick vertically and 0 ticks horizontally holding leftCommand at "))
@@ -162,7 +162,7 @@ import Testing
 
     @Test func moveGoesThereAndPressesNothing() async throws {
         let mouse = FakeMouse(at: 0, 0, gain: 3)
-        let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor }, clock: ManualClock(), randomness: RandomSource(seed: 1))
+        let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor }, clock: ManualClock(), randomness: RandomSource(seed: 1), traced: { _ in })
         let said = try await MoveCommand.move(to: ScreenPoint(x: 200, y: 120)!, with: pointer)
         #expect(mouse.buttons.isEmpty)
         // Within a count's worth: at three points a count, that is as near as it can get.
@@ -173,7 +173,7 @@ import Testing
     /// Every tick is sent, a report each, at the place asked.
     @Test func scrollSendsEveryTickAtThePlaceAsked() async throws {
         let mouse = FakeMouse(at: 0, 0)
-        let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor }, clock: ManualClock(), randomness: RandomSource(seed: 1))
+        let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor }, clock: ManualClock(), randomness: RandomSource(seed: 1), traced: { _ in })
         let said = try await ScrollCommand.scroll(at: ScreenPoint(x: 40, y: 30)!, vertical: -2, horizontal: 1, holding: .none, with: pointer, RecordingKeyboard())
         #expect(mouse.scrolls == [Scroll(vertical: Count(clamping: -1), horizontal: Count(clamping: 1)), Scroll(vertical: Count(clamping: -1), horizontal: .zero)])
         #expect(mouse.cursor == ScreenPoint(x: 40, y: 30)!)
@@ -184,7 +184,7 @@ import Testing
     /// and everything is up again afterwards.
     @Test func dragPressesAtOneEndAndLetsGoAtTheOther() async throws {
         let mouse = FakeMouse(at: 0, 0, gain: 2)
-        let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor }, clock: ManualClock(), randomness: RandomSource(seed: 1))
+        let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor }, clock: ManualClock(), randomness: RandomSource(seed: 1), traced: { _ in })
         let said = try await DragCommand.drag(from: ScreenPoint(x: 10, y: 10)!, to: ScreenPoint(x: 300, y: 200)!, button: .left, holding: .none, with: pointer, RecordingKeyboard())
         #expect(mouse.buttons == [.left])
         #expect(mouse.releases >= 1)

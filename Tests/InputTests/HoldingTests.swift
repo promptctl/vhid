@@ -55,7 +55,7 @@ import Testing
     @Test func aModifiedDragHoldsTheModifiersAcrossTheCarry() async throws {
         let mouse = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
         let option = try HeldModifiers([.leftOption])
-        try await mouse.pointer.holding(option, on: mouse.keyboard) {
+        _ = try await mouse.pointer.holding(option, on: mouse.keyboard) {
             try await $0.drag(from: Self.target, to: ScreenPoint(x: 8, y: 0)!, button: .left)
         }
         #expect(Self.collapsed(mouse.log) == ["key down e2", "moves", "down 1", "moves", "up", "keys up"])

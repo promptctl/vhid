@@ -21,6 +21,9 @@ struct Tracking: Equatable {
 
     private(set) var cursor: ScreenPoint
     private(set) var unseen: [Unseen] = []
+    /// Reports given up on: past `patience` unshown, or still unshown when the move's
+    /// steering ended and the settle after it was up.
+    private(set) var lost = 0
     /// Points per count by report length, each length's latest showing, ascending.
     ///
     /// **A curve, not one gain.** macOS carries a long report further per count than a
@@ -74,12 +77,25 @@ struct Tracking: Equatable {
         let change = (x: read.x - cursor.x, y: read.y - cursor.y)
         let candidates = read == cursor || unseen.isEmpty ? 0 ... 0 : 1 ... unseen.count
         let covered = candidates.min { miss(unseen.prefix($0), change) < miss(unseen.prefix($1), change) } ?? 0
-        let counts = unseen.prefix(covered).reduce((x: 0.0, y: 0.0)) { ($0.x + Double($1.counts.x.value), $0.y + Double($1.counts.y.value)) }
+        let seen = unseen.prefix(covered)
+        let counts = seen.reduce((x: 0.0, y: 0.0)) { ($0.x + Double($1.counts.x.value), $0.y + Double($1.counts.y.value)) }
         let asked = hypot(counts.x, counts.y)
-        let shown = asked > 0 ? [Steering.Sample(counts: max(1, (asked / Double(covered)).rounded()), perCount: hypot(change.x, change.y) / asked)] : []
+        // Keyed by the reports' mean length, each measured alone: two that point different
+        // ways sum to a vector shorter than either. The gain is the change over that sum,
+        // which is what one gain carrying all of them would have moved.
+        let length = seen.reduce(0.0) { $0 + hypot(Double($1.counts.x.value), Double($1.counts.y.value)) } / Double(max(1, covered))
+        let shown = asked > 0 ? [Steering.Sample(counts: max(1, length.rounded()), perCount: hypot(change.x, change.y) / asked)] : []
         curve = (curve.filter { sample in !shown.contains { $0.counts == sample.counts } } + shown).sorted { $0.counts < $1.counts }
-        unseen = unseen.dropFirst(covered).filter { tick - $0.tick <= Self.patience }
+        let waiting = unseen.dropFirst(covered)
+        unseen = waiting.filter { tick - $0.tick <= Self.patience }
+        lost += waiting.count - unseen.count
         cursor = read
+    }
+
+    /// Every report still unshown is given up on, as moving nothing.
+    mutating func giveUp() {
+        lost += unseen.count
+        unseen = []
     }
 
     /// How far the expected motion of `reports` is from `change`.

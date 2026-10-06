@@ -26,7 +26,8 @@ struct Devices {
     /// The pointer this mouse is steered by, reading the cursor back after every report -
     /// which is the only place the truth about where the pointer went lives, since macOS
     /// accelerates the counts the device sends. One per opening, so a verb's moves draw
-    /// from one seed, and that seed is on its record. [LAW:nothing-unseen]
+    /// from one seed, and that seed is on its record, as is every move it makes, however
+    /// the verb ends. [LAW:nothing-unseen]
     let pointer: Pointer
 
     /// Runs `body` with the devices over a connection to this installation's daemon, and
@@ -58,7 +59,7 @@ struct Devices {
         Invocation.set(.seed, .string(String(randomness.seed, radix: 16)))
         let devices = Devices(keyboard: TalliedKeyboard(keyboard: QueuedKeyboard(keyboard: helper.keyboard, queue: queue)),
                               mouse: mouse, cursor: cursor, front: front(helper, on: queue),
-                              pointer: Pointer(mouse: mouse, cursor: cursor, clock: ContinuousClock(), randomness: randomness))
+                              pointer: Pointer(mouse: mouse, cursor: cursor, clock: ContinuousClock(), randomness: randomness, traced: Invocation.moved))
         let done: T
         do {
             done = try await body(devices)

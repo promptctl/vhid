@@ -37,8 +37,7 @@ struct ScrollCommand: AsyncParsableCommand {
     /// The verb itself, over a pointer from anywhere. [LAW:decomposition]
     static func scroll(at point: ScreenPoint, vertical: Int, horizontal: Int, holding held: HeldModifiers, with pointer: Pointer, _ keyboard: any Keyboard) async throws -> String {
         Invocation.set(.notchRestMilliseconds, .int(Int(Pointer.notchRest / .milliseconds(1))))
-        let moved = try await pointer.holding(held, on: keyboard) { try await $0.scroll(at: point, vertical: vertical, horizontal: horizontal) }
-        Invocation.moved([moved])
+        try await pointer.holding(held, on: keyboard) { try await $0.scroll(at: point, vertical: vertical, horizontal: horizontal) }
         return "scrolled \(counted(vertical, "tick")) vertically and \(counted(horizontal, "tick")) horizontally\(holding(held)) at \(try await pointer.cursor())"
     }
 }

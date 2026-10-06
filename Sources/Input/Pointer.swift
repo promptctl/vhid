@@ -69,20 +69,28 @@ public struct Pointer: Sendable {
     /// it nowhere. The window server applies a report within a frame or two; this is many.
     public static let settle: Duration = .milliseconds(50)
 
-    /// What a move's ticks and a scroll's rests are timed on, so a test runs them on a
-    /// clock of its own. [LAW:effects-at-boundaries]
+    /// What everything this pointer waits on is timed on - a move's ticks, the settle after
+    /// a report, a scroll's rests, calibration's bursts and a play's deadlines - so a test
+    /// runs all of it on one clock of its own. [LAW:effects-at-boundaries]
+    /// [LAW:one-source-of-truth] One pointer, one clock.
     public let timeline: Timeline
     /// What every move's trajectory is drawn from.
     public let randomness: RandomSource
+    /// Where every move is handed once it has ended, however it ended: the record of the
+    /// verb it is part of. [LAW:nothing-unseen] A move that threw is the one most worth
+    /// seeing, so the pointer hands it over, not the verb that may never get it back.
+    public let traced: @Sendable (Moved) -> Void
 
     /// How often a moving pointer reports: every 8 ms, a 125 Hz USB mouse's rate.
     public static let tick: Duration = .milliseconds(8)
 
-    public init<C: Clock>(mouse: any Mouse, cursor: @escaping @Sendable () async throws -> ScreenPoint, clock: C, randomness: RandomSource) where C.Duration == Duration {
+    public init<C: Clock>(mouse: any Mouse, cursor: @escaping @Sendable () async throws -> ScreenPoint, clock: C,
+                          randomness: RandomSource, traced: @escaping @Sendable (Moved) -> Void) where C.Duration == Duration {
         self.mouse = mouse
         self.cursor = cursor
         timeline = Timeline(clock)
         self.randomness = randomness
+        self.traced = traced
     }
 
     /// A clock as offsets from when the pointer was made: what time it is, and a sleep
@@ -111,13 +119,15 @@ public struct Pointer: Sendable {
         public let moved: Moved
     }
 
-    /// A move that arrived: how long its trajectory was drawn to take, and the motion
-    /// reports that steered it along that and then homed it onto the target.
-    /// [LAW:nothing-unseen] How well the steering landed is the closing count.
+    /// A move: how long its trajectory was drawn to take, the motion reports that steered it
+    /// along that and then homed it onto the target, and how many steered reports the
+    /// cursor never showed. [LAW:nothing-unseen] How well the steering landed is the closing
+    /// count; how well it was tracked is `lost`.
     public struct Moved: Equatable, Sendable {
         public let planned: Duration
         public let steered: Int
         public let closing: Int
+        public let lost: Int
 
         public var reports: Int { steered + closing }
     }
@@ -199,13 +209,19 @@ public struct Pointer: Sendable {
     /// Then the closed loop, its reports `tick` apart, takes the cursor the last fraction of
     /// a point, once every report the trajectory sent has shown or been given up on - so it
     /// starts from where the cursor is, not from where it was a report ago.
+    ///
+    /// The move is handed to `traced` on every way out, thrown or returned, with the
+    /// reports it got to.
+    @discardableResult
     public func move(to target: ScreenPoint) async throws -> Moved {
         let start = try await cursor()
         let trajectory = randomness.draw { Trajectory(from: start, to: target, drawing: &$0) }
         let began = timeline.now()
         var tracking = Tracking(at: trajectory.start)
         let ticks = Int((trajectory.duration / Self.tick).rounded(.up))
-        var steered = 0
+        var steered = 0, closing = 0
+        var moved: Moved { Moved(planned: trajectory.duration, steered: steered, closing: closing, lost: tracking.lost) }
+        defer { traced(moved) }
         for tick in stride(from: 1, through: ticks, by: 1) {
             try Task.checkCancellation()
             try await timeline.sleep(began + Self.tick * tick)
@@ -218,17 +234,17 @@ public struct Pointer: Sendable {
             tracking.sent(report, on: tick)
             steered += 1
         }
-        let deadline = ContinuousClock.now + Self.settle
-        while !tracking.unseen.isEmpty, ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(1))
-            tracking.saw(try await cursor(), on: ticks)
-        }
+        _ = try await settle { tracking.saw($0, on: ticks); return tracking.unseen.isEmpty }
+        tracking.giveUp()
         var slot = began + Self.tick * ticks
-        let closing = try await home(on: trajectory.target) {
+        // Counted as each report is paced, which is just before it goes out, so a move the
+        // closing loop threw out of still says how far it got.
+        _ = try await home(on: trajectory.target) {
+            closing += 1
             slot += Self.tick
             try await timeline.sleep(slot)
         }
-        return Moved(planned: trajectory.duration, steered: steered, closing: closing)
+        return moved
     }
 
     /// Moves the cursor to `target` by the closed loop alone, its reports as fast as the
@@ -295,11 +311,18 @@ public struct Pointer: Sendable {
 
     /// The cursor once it has left `before`, or wherever it is when the settle time is up.
     private func settled(from before: ScreenPoint) async throws -> ScreenPoint {
-        let deadline = ContinuousClock.now + Self.settle
+        try await settle { $0 != before }
+    }
+
+    /// The cursor, read every millisecond on `timeline` until `shown` says it shows what
+    /// was sent or `settle` is up, whichever is first. The one wait on the window server
+    /// applying a report. [LAW:single-enforcer]
+    private func settle(until shown: (ScreenPoint) -> Bool) async throws -> ScreenPoint {
+        let deadline = timeline.now() + Self.settle
         while true {
             let now = try await cursor()
-            if now != before || ContinuousClock.now >= deadline { return now }
-            try await Task.sleep(for: .milliseconds(1))
+            if shown(now) || timeline.now() >= deadline { return now }
+            try await timeline.sleep(timeline.now() + .milliseconds(1))
         }
     }
 
@@ -333,7 +356,7 @@ public struct Pointer: Sendable {
     public static let notchRest: Duration = .milliseconds(200)
 
     /// Moves to `point` and rolls the wheel there one notch at a time, a report each,
-    /// resting `notchRest` after every one, and answers with the move there. Vertical positive away from the hand,
+    /// resting `notchRest` after every one. Vertical positive away from the hand,
     /// horizontal positive to the right; a notch carries one count on each axis that has
     /// any left, so both axes roll together until the shorter is done.
     ///
@@ -347,15 +370,14 @@ public struct Pointer: Sendable {
     /// as it is, and the device has no opinion about how far a wheel rolls. A roll that is
     /// longer than its caller wanted is stopped by cancelling it, which this loop asks
     /// about once per notch.
-    public func scroll(at point: ScreenPoint, vertical: Int, horizontal: Int) async throws -> Moved {
+    public func scroll(at point: ScreenPoint, vertical: Int, horizontal: Int) async throws {
         do {
-            let moved = try await move(to: point)
+            try await move(to: point)
             for notch in 0..<max(vertical.magnitude, horizontal.magnitude) {
                 try Task.checkCancellation()
                 try await mouse.scroll(by: Scroll(vertical: Self.count(vertical, at: notch), horizontal: Self.count(horizontal, at: notch)))
                 try await timeline.sleep(timeline.now() + Self.notchRest)
             }
-            return moved
         } catch {
             throw PointingStopped(cause: error, unreleased: await release())
         }

@@ -29,7 +29,7 @@ import Testing
 
     private static func scroll(vertical: Int, horizontal: Int, clock: ManualClock = ManualClock(), on devices: Devices) async throws -> String {
         try await ScrollCommand.scroll(at: at, vertical: vertical, horizontal: horizontal, holding: .none,
-                                       with: Pointer(mouse: devices.mouse, cursor: { at }, clock: clock, randomness: RandomSource(seed: 1)), devices.keyboard)
+                                       with: Pointer(mouse: devices.mouse, cursor: { at }, clock: clock, randomness: RandomSource(seed: 1), traced: Invocation.moved), devices.keyboard)
     }
 
     private static func only(_ export: EventExport) throws -> [String: Any] {
@@ -70,7 +70,28 @@ import Testing
         #expect(attributes["notch_rest_ms"] as? Int == 200)
         #expect(attributes["seed"] is String)
         // The pointer was already on its point, so the move there drew a path of no length.
-        #expect(attributes["paths"] as? [[String: Double]] == [["planned_ms": 0, "steered_reports": 0, "closing_reports": 0]])
+        #expect(attributes["paths"] as? [[String: Double]] == [["planned_ms": 0, "steered_reports": 0, "closing_reports": 0, "lost_reports": 0]])
+    }
+
+    /// A move the cursor never follows throws, and its record still carries the move: every
+    /// steered report given up on, and the closing loop's reports up to the stall that
+    /// stopped it. Through the pointer `Devices` opens, which is where moves are recorded.
+    @Test func aMoveThatWouldNotReachIsRecordedWithItsPath() async throws {
+        let export = EventExport.scratch()
+        await #expect(throws: (any Error).self) {
+            try await Invocation.record("move", via: .mcp, to: export.export) { _ in
+                // The far end's cursor is always at (0, 0).
+                try await Self.against { try await MoveCommand.move(to: ScreenPoint(x: 30, y: 0)!, with: $0.pointer) }
+            }
+        }
+        let record = try Self.only(export)
+        #expect(record["outcome"] as? String == "failed")
+        let paths = try #require((record["attributes"] as? [String: Any])?["paths"] as? [[String: Double]])
+        try #require(paths.count == 1)
+        #expect(paths[0]["planned_ms"].map { $0 > 0 } == true)
+        #expect(paths[0]["steered_reports"].map { $0 > 0 } == true)
+        #expect(paths[0]["lost_reports"] == paths[0]["steered_reports"])
+        #expect(paths[0]["closing_reports"] == Double(Pointer.stalls))
     }
 
     /// The cancel lands inside the second rest, from the task the roll runs in, so the roll

@@ -104,16 +104,16 @@ extension Pointer {
     /// from `start` and heading for `toward`, which is a point the script visits, so the
     /// cursor stays where the recording went.
     ///
-    /// The clock paces the bursts and the wait after them, so a test runs it on a clock of
+    /// `timeline` paces the bursts and the wait after them, so a test runs it on a clock of
     /// its own. [LAW:effects-at-boundaries]
-    func calibrate<C: Clock>(_ calibration: Schedule.Calibration, from start: ScreenPoint, clock: C) async throws -> Steering where C.Duration == Duration {
+    func calibrate(_ calibration: Schedule.Calibration, from start: ScreenPoint) async throws -> Steering {
         let away = hypot(calibration.toward.x - start.x, calibration.toward.y - start.y)
         let unit = away > 0 ? ((calibration.toward.x - start.x) / away, (calibration.toward.y - start.y) / away) : (1.0, 0.0)
         var samples: [Steering.Sample] = []
         for size in Self.ladder {
             let step = Move(x: Count(clamping: Int((unit.0 * Double(size)).rounded())), y: Count(clamping: Int((unit.1 * Double(size)).rounded())))
-            let long = try await run(step, times: Self.burst, from: start, every: calibration.interval, clock: clock)
-            let short = try await run(step, times: 1, from: start, every: calibration.interval, clock: clock)
+            let long = try await run(step, times: Self.burst, from: start, every: calibration.interval)
+            let short = try await run(step, times: 1, from: start, every: calibration.interval)
             // The screen is only known to go as far as the recording went. A burst carried
             // past its farthest point may have been stopped at a screen edge and measured
             // short, so it is not taken, and nothing longer is tried: the table holds the
@@ -129,15 +129,15 @@ extension Pointer {
     }
 
     /// How far `times` reports of `step`, `every` apart from `start`, carried the cursor.
-    private func run<C: Clock>(_ step: Move, times: Int, from start: ScreenPoint, every interval: Duration, clock: C) async throws -> Double where C.Duration == Duration {
+    private func run(_ step: Move, times: Int, from start: ScreenPoint, every interval: Duration) async throws -> Double {
         try await home(on: start)
         let before = try await cursor()
         for _ in 0..<times {
             try Task.checkCancellation()
             try await mouse.move(by: step)
-            try await clock.sleep(until: clock.now.advanced(by: interval), tolerance: .zero)
+            try await timeline.sleep(timeline.now() + interval)
         }
-        try await clock.sleep(until: clock.now.advanced(by: Self.settle), tolerance: .zero)
+        try await timeline.sleep(timeline.now() + Self.settle)
         let after = try await cursor()
         return hypot(after.x - before.x, after.y - before.y)
     }

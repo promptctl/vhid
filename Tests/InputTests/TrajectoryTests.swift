@@ -127,7 +127,7 @@ import Testing
         let (start, target) = moves[move]
         let mouse = CurvedMouse(at: start, lateEvery: 0)
         let clock = ManualClock(), trace = Trace()
-        let pointer = Pointer(mouse: mouse, cursor: { trace.read(mouse.cursor(), at: clock.now.offset) }, clock: clock, randomness: RandomSource(seed: seed))
+        let pointer = Pointer(mouse: mouse, cursor: { trace.read(mouse.cursor(), at: clock.now.offset) }, clock: clock, randomness: RandomSource(seed: seed), traced: { _ in })
         let moved = try await pointer.move(to: target)
         let path = TrajectoryTests.trajectory(seed: seed, from: start, to: target)
         let ticks = Int((path.duration / Pointer.tick).rounded(.up))
@@ -178,7 +178,7 @@ import Testing
     @Test(arguments: 1 ... 10)
     func reportsTheCursorHasNotShownAreNotSentAgain(seed: UInt64) async throws {
         let mouse = CurvedMouse(at: Self.start, lateEvery: 4)
-        let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor() }, clock: ManualClock(), randomness: RandomSource(seed: seed))
+        let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor() }, clock: ManualClock(), randomness: RandomSource(seed: seed), traced: { _ in })
         _ = try await pointer.move(to: Self.target)
         #expect(mouse.farthest <= Self.target.x + 3, "went to \(mouse.farthest)")
         #expect(abs(mouse.position.x - Self.target.x) <= 0.5 && abs(mouse.position.y - Self.target.y) <= 0.5)
@@ -190,6 +190,19 @@ import Testing
         let mouse = FakeMouse(at: Self.start)
         _ = try await mouse.pointer.move(to: Self.target)
         #expect(abs(mouse.position.x - Self.target.x) <= 0.5 && abs(mouse.position.y - Self.target.y) <= 0.5)
+    }
+
+    /// Every move is handed to `traced` in order, as the verb that made it answered it: a
+    /// drag's approach and then its carry.
+    @Test func everyMoveIsTraced() async throws {
+        final class Traced: Sendable { let moves = Mutex<[Pointer.Moved]>([]) }
+        let mouse = CurvedMouse(at: Self.start, lateEvery: 0), traced = Traced()
+        let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor() }, clock: ManualClock(), randomness: RandomSource(seed: 1),
+                              traced: { move in traced.moves.withLock { $0.append(move) } })
+        let drag = try await pointer.drag(from: Self.target, to: Self.start, button: .left)
+        #expect(traced.moves.withLock { $0 } == [drag.approach, drag.carry])
+        #expect(drag.approach.steered > 0 && drag.carry.steered > 0)
+        #expect(drag.approach.lost == 0 && drag.carry.lost == 0)
     }
 
     /// A cursor that will not move is still `WouldNotReach`, from the closing loop.
@@ -214,6 +227,27 @@ import Testing
         // A report that has shown nothing for longer than the closed loop waits moved nothing.
         tracking.saw(ScreenPoint(x: 105, y: 300)!, on: 2 + Tracking.patience + 1)
         #expect(tracking.unseen.isEmpty)
+        #expect(tracking.lost == 1)
+        // And so does one still unshown when the move gives up waiting.
+        tracking.sent(Move(x: Count(clamping: 2), y: .zero), on: 20)
+        tracking.giveUp()
+        #expect(tracking.unseen.isEmpty)
+        #expect(tracking.lost == 2)
+    }
+
+    /// Reports matched together are learned at their mean length, each measured alone, and
+    /// at the gain the change over their summed counts shows.
+    @Test func reportsMatchedTogetherAreLearnedAtTheirMeanLength() throws {
+        var tracking = Tracking(at: Self.start)
+        tracking.sent(Move(x: Count(clamping: 4), y: .zero), on: 1)
+        tracking.sent(Move(x: .zero, y: Count(clamping: 3)), on: 2)
+        // 0.8 of (4, 3): nearer both together than the first alone.
+        tracking.saw(ScreenPoint(x: 103.2, y: 302.4)!, on: 2)
+        #expect(tracking.unseen.isEmpty)
+        let sample = try #require(tracking.curve.first)
+        #expect(tracking.curve.count == 1)
+        #expect(sample.counts == 4)
+        #expect(abs(sample.perCount - 0.8) < 1e-9)
     }
 }
 

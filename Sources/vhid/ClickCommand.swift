@@ -39,7 +39,6 @@ struct ClickCommand: AsyncParsableCommand {
     /// against a mouse and a screen that exist only in a test. [LAW:decomposition]
     static func click(at point: ScreenPoint, button: Button, times: Clicks, holding held: HeldModifiers, with pointer: Pointer, _ keyboard: any Keyboard) async throws -> String {
         let click = try await pointer.holding(held, on: keyboard) { try await $0.click(at: point, button: button, times: times) }
-        Invocation.moved([click.moved])
         // Where the button went down is read back from the cursor rather than repeated
         // from the request: the two differ, and the one worth printing is the one that
         // happened. [LAW:no-silent-failure]

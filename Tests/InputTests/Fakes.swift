@@ -160,7 +160,7 @@ final class FakeMouse: Mouse {
     var pointer: Pointer { pointer(on: ManualClock()) }
 
     /// That pointer timed on `clock`, for a test that reads the time back.
-    func pointer(on clock: ManualClock) -> Pointer { Pointer(mouse: self, cursor: cursor, clock: clock, randomness: RandomSource(seed: 1)) }
+    func pointer(on clock: ManualClock) -> Pointer { Pointer(mouse: self, cursor: cursor, clock: clock, randomness: RandomSource(seed: 1), traced: { _ in }) }
 
     /// A keyboard beside this mouse, posting into the same log under the same `refused`, so
     /// a run over both devices reads back as one sequence and can be refused at any report
@@ -233,5 +233,5 @@ final class SteadyGainMouse: Mouse {
         }
     }
 
-    var pointer: Pointer { Pointer(mouse: self, cursor: { self.position }, clock: ManualClock(), randomness: RandomSource(seed: 1)) }
+    var pointer: Pointer { Pointer(mouse: self, cursor: { self.position }, clock: ManualClock(), randomness: RandomSource(seed: 1), traced: { _ in }) }
 }
