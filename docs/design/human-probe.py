@@ -30,4 +30,4 @@ class Probe(http.server.BaseHTTPRequestHandler):
         pass
 
 
-http.server.HTTPServer(("127.0.0.1", 8765), Probe).serve_forever()
+http.server.ThreadingHTTPServer(("127.0.0.1", 8765), Probe).serve_forever()
