@@ -1,6 +1,7 @@
 import CoreGraphics
 import Testing
 import Eyes
+import Grants
 @testable import Tree
 
 /// How a row's box is checked against where a click lands, asked of trees a test wrote:
@@ -27,13 +28,14 @@ import Eyes
         return .answered(inside(text) ? 2 : inside(element) ? 1 : 0)
     }
 
-    final class Asked { var hits = 0 }
+    final class Asked { var hits = 0, parents = 0 }
 
     private func probe(_ asked: Asked = Asked(), hit: @escaping (ScreenPoint) throws -> Heard<Int?> = safari,
-                       lineages: [Int: Lineage<Int>] = lineages) -> Probe<Int> {
+                       lineages: [Int: Lineage<Int>] = lineages, spent: @escaping () -> Bool = { false }) -> Probe<Int> {
         Probe(hit: { asked.hits += 1; return try hit($0) },
               lineage: { lineages[$0].map(Heard.answered) ?? .unanswered },
-              same: ==)
+              parent: { asked.parents += 1; return lineages[$0].map { .answered($0.parent) } ?? .unanswered },
+              same: ==, spent: spent)
     }
 
     private func row(_ frame: ScreenRect = frame, source: Source = .tree(role: button)) -> Found {
@@ -43,7 +45,7 @@ import Eyes
     /// The case measured: a click 4.7 points inside the frame's top pressed the page. The
     /// box comes back within the resolution of the element, never outside it.
     @Test func aFrameWiderThanItsElementIsCutToTheElement() throws {
-        guard case .narrowed(let cut) = try probe().press(row()) else { Issue.record("not narrowed"); return }
+        guard case .narrowed(let cut) = try probe().press(row()).pressed else { Issue.record("not narrowed"); return }
         let res = Probe<Int>.resolution
         #expect(cut.x >= Self.element.x && cut.x - Self.element.x <= res)
         #expect(cut.y >= Self.element.y && cut.y - Self.element.y <= res)
@@ -54,21 +56,69 @@ import Eyes
     /// A row merged from both readers carries the tree's role and frame, and is checked.
     @Test func aMergedRowIsCheckedAsTheTreesRowIs() throws {
         let merged = Source.merged(.tree(role: Self.button), .pixels(confidence: Confidence(0.9)!))
-        guard case .narrowed = try probe().press(row(source: merged)) else { Issue.record("not narrowed"); return }
+        guard case .narrowed = try probe().press(row(source: merged)).pressed else { Issue.record("not narrowed"); return }
     }
 
-    /// A native control's frame is where it is pressed: the four edges each answer at the
-    /// first try, and the box stands.
-    @Test func aFramePressedToItsEdgesStandsAfterOneHitAPerEdge() throws {
+    /// A native control's frame is where it is pressed: the four edges and four corners
+    /// each answer at the first try, and the box stands, its hit tests counted.
+    @Test func aFramePressedToItsEdgesStandsAfterOneHitAPerEdgeAndCorner() throws {
         let asked = Asked()
-        #expect(try probe(asked, hit: { p in .answered(Self.frame.cgRect.contains(CGPoint(x: p.x, y: p.y)) ? 1 : 0) }).press(row()) == .kept)
-        #expect(asked.hits == 5)
+        let checked = try probe(asked, hit: { p in .answered(Self.frame.cgRect.contains(CGPoint(x: p.x, y: p.y)) ? 1 : 0) }).press(row())
+        #expect(checked == Checked(.kept, hitTests: 9))
+        #expect(asked.hits == 9)
+    }
+
+    /// A pill-shaped button's corners press the page though its edges press the button: the
+    /// box is drawn in until its corners lie on the button, so no point in it presses beside.
+    @Test func aRoundedCornerDrawsTheBoxIn() throws {
+        let radius = Self.frame.height / 2
+        func onPill(_ p: ScreenPoint) -> Bool {
+            let f = Self.frame
+            guard f.cgRect.contains(CGPoint(x: p.x, y: p.y)) else { return false }
+            let cx = min(max(p.x, f.x + radius), f.x + f.width - radius)
+            return (p.x - cx) * (p.x - cx) + (p.y - f.centre.y) * (p.y - f.centre.y) <= radius * radius
+        }
+        guard case .narrowed(let cut) = try probe(hit: { .answered(onPill($0) ? 1 : 0) }).press(row()).pressed else {
+            Issue.record("not narrowed"); return
+        }
+        let corners = [(cut.x, cut.y), (cut.x + cut.width, cut.y), (cut.x, cut.y + cut.height), (cut.x + cut.width, cut.y + cut.height)]
+        #expect(corners.allSatisfy { onPill(ScreenPoint(x: $0.0, y: $0.1)) })
+        #expect(cut.width > Self.frame.width - 2 * radius && cut.height > radius)
+    }
+
+    /// Time spent on earlier rows leaves this one unchecked and says why, and time running
+    /// out partway through a row does the same.
+    @Test func aRowTheTimeRanOutOnIsUncheckedOverTime() throws {
+        let asked = Asked()
+        #expect(try probe(asked, spent: { true }).press(row()) == Checked(.unchecked(.overTime), hitTests: 0))
+        #expect(asked.hits == 0)
+        var asks = 0
+        #expect(try probe(spent: { asks += 1; return asks > 4 }).press(row()) == Checked(.unchecked(.overTime), hitTests: 4))
+    }
+
+    /// A probe that lands beside the button climbs only until it meets one of the button's
+    /// own ancestors - one parent read - never to the top of the tree.
+    @Test func aClimbFromBesideStopsAtTheElementsAncestor() throws {
+        var lineages = Self.lineages
+        lineages[0] = Lineage(role: Self.page, frame: ScreenRect(x: 0, y: 105, width: 1500, height: 795), parent: 10)
+        for at in 10..<20 { lineages[at] = Lineage(role: Self.page, frame: nil, parent: at == 19 ? nil : at + 1) }
+        lineages[3] = Lineage(role: Self.label, frame: nil, parent: 0)
+        var beside = 0
+        let hit: (ScreenPoint) -> Heard<Int?> = { p in
+            guard Self.element.cgRect.contains(CGPoint(x: p.x, y: p.y)) else { beside += 1; return .answered(3) }
+            return .answered(1)
+        }
+        let asked = Asked()
+        guard case .narrowed = try probe(asked, hit: hit, lineages: lineages).press(row()).pressed else { Issue.record("not narrowed"); return }
+        // The button's parents once, 0 and 10 through 19 and the top's nil, then one per probe beside.
+        #expect(beside > 0)
+        #expect(asked.parents == 12 + beside)
     }
 
     /// The pixels reader placed it, so the tree has nothing to check it against.
     @Test func aRowTheTreeDidNotPlaceStandsUnasked() throws {
         let asked = Asked()
-        #expect(try probe(asked).press(row(source: .pixels(confidence: Confidence(0.9)!))) == .kept)
+        #expect(try probe(asked).press(row(source: .pixels(confidence: Confidence(0.9)!))) == Checked(.kept, hitTests: 0))
         #expect(asked.hits == 0)
     }
 
@@ -77,18 +127,18 @@ import Eyes
     @Test func aRowWhosePointLandsOnSomethingElseIsUnchecked() throws {
         var lineages = Self.lineages
         lineages[9] = Lineage(role: Self.page, frame: ScreenRect(x: 0, y: 0, width: 1500, height: 900), parent: nil)
-        #expect(try probe(hit: { _ in .answered(9) }, lineages: lineages).press(row()) == .unchecked)
-        #expect(try probe(hit: { _ in .answered(nil) }).press(row()) == .unchecked)
+        #expect(try probe(hit: { _ in .answered(9) }, lineages: lineages).press(row()) == Checked(.unchecked(.elsewhere), hitTests: 1))
+        #expect(try probe(hit: { _ in .answered(nil) }).press(row()) == Checked(.unchecked(.elsewhere), hitTests: 1))
     }
 
     /// An element whose parents will not say is unknown, not outside the button.
     @Test func anUnansweredReadLeavesTheBoxUnchecked() throws {
         var lineages = Self.lineages
         lineages[0] = nil
-        #expect(try probe(lineages: lineages).press(row()) == .unchecked)
+        #expect(try probe(lineages: lineages).press(row()).pressed == .unchecked(.unanswered))
         var calls = 0
         let flaky: (ScreenPoint) -> Heard<Int?> = { p in calls += 1; return calls > 3 ? .unanswered : Self.safari(p) }
-        #expect(try probe(hit: flaky).press(row()) == .unchecked)
+        #expect(try probe(hit: flaky).press(row()) == Checked(.unchecked(.unanswered), hitTests: 4))
     }
 
     /// Parents that run in a loop end the climb as unknown.
@@ -97,7 +147,16 @@ import Eyes
             1: Lineage(role: Self.label, frame: Self.text, parent: 2),
             2: Lineage(role: Self.label, frame: Self.text, parent: 1),
         ]
-        #expect(try probe(hit: { _ in .answered(1) }, lineages: loop).press(row()) == .unchecked)
+        #expect(try probe(hit: { _ in .answered(1) }, lineages: loop).press(row()).pressed == .unchecked(.unanswered))
+    }
+
+    /// A merge whose tree could not look holds only the pixels' rows: the tree checks none of
+    /// them, so it asks no grant and makes no call, and the pixels' answer stands.
+    @Test @MainActor func theTreeAsksNothingOfAReadingWithNoRowOfItsOwn() async throws {
+        let seen = Found(text: Text("OK")!, frame: Self.frame, source: .pixels(confidence: Confidence(0.9)!))
+        let reading = Reading(outcome: .matched(Matches([seen])!), scope: Scope(region: Self.frame, examined: 1, reach: .whole))
+        let tree = TreeReader(granted: { _ in Issue.record("the grant was asked"); return false })
+        #expect(try await tree.pressing(reading) == reading)
     }
 
     struct Revoked: Error {}

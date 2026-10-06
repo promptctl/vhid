@@ -65,11 +65,23 @@ public struct TreeReader: Reader {
 
     /// Each row the tree placed, its box cut to where the system's hit test lands a click
     /// on the element it names. `Probe.press` decides; this is its reads.
+    ///
+    /// The grant is not asked again: only rows this reader placed are checked, and it placed
+    /// them only when granted, so the pixels' half of a merge the tree could not look in makes
+    /// no call at all. A grant taken away since throws from the first read, as in `look`.
     public func pressing(_ reading: Reading) async throws -> Reading {
-        guard try await granted(Self.grant) else { throw TreeError.noGrant }
-        let probe = Probe<AXUIElement>(hit: Self.element(at:), lineage: Self.lineage, same: { CFEqual($0, $1) })
+        let clock = ContinuousClock()
+        let start = clock.now
+        let probe = Probe<AXUIElement>(hit: Self.element(at:), lineage: Self.lineage, parent: Self.parent, same: { CFEqual($0, $1) },
+                                       spent: { clock.now - start > Self.pressingTime })
         return try reading.pressing(probe.press)
     }
+
+    /// How long checking a reading's boxes may take, on top of the walk's own bound. A
+    /// page's button costs a few dozen hit tests at 10-35 ms each; an app too busy to answer
+    /// holds each for the messaging timeout, and the rows the time does not reach are
+    /// counted unchecked as over time.
+    static let pressingTime = Duration.seconds(2)
 
     /// What window `id`'s tree says of the web pages in it, for `Paged.page` to make one
     /// region of. Throws when the window is not on screen. [LAW:no-silent-failure]
@@ -174,6 +186,12 @@ public struct TreeReader: Reader {
         return .answered(Lineage(role: Role(rawValue: role as? String ?? kAXUnknownRole),
                                  frame: frame(position, size),
                                  parent: parent.flatMap(Self.element).map(bounded)))
+    }
+
+    /// An element's parent, nil at the top of its tree.
+    static func parent(_ element: AXUIElement) throws(TreeError) -> Heard<AXUIElement?> {
+        guard case .answered(let parent) = try read([kAXParentAttribute], of: element, as: [.structure])[0] else { return .unanswered }
+        return .answered(parent.flatMap(Self.element).map(bounded))
     }
 
     private static func elements(_ value: CFTypeRef?) -> [AXUIElement] {

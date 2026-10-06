@@ -112,7 +112,7 @@ enum EyesTools {
 
     typealias FrontmostApp = @Sendable () async -> Frontmost?
     /// A reader's answer to one query: the chosen reader in the process, a fake in a test.
-    typealias Look = @Sendable (SourceKind, Query) async throws -> Reading
+    typealias Look = @Sendable (SourceKind, Query) async throws -> Judged
     /// A fresh reading of the grants and the app they are charged to.
     typealias GrantsLook = @Sendable () async throws -> (GrantReading, Holder)
 
@@ -120,7 +120,7 @@ enum EyesTools {
         windows listing: @escaping Listing = { try await Geometry.onScreen() },
         frontmost: @escaping FrontmostApp = { await Frontmost.now() },
         displays: @escaping DisplayList = { Geometry.displays() },
-        reading look: @escaping Look = { source, query in try await source.reader.read(query) },
+        reading look: @escaping Look = { source, query in try await source.reader.judged(query) },
         grants: @escaping GrantsLook = { try await GrantsVerb.look() },
         pages: @escaping Where.Place.Pages = Where.Place.tree
     ) -> [EyesTool] {
@@ -336,14 +336,15 @@ enum EyesTools {
 
 /// Reads one query at a time. Two Vision recognitions in flight in one process crashed
 /// inside TextRecognition in 4 of 15 runs (PixelReader), and the MCP server starts a task
-/// per request, so an agent's parallel calls would otherwise put two in flight.
+/// per request, so an agent's parallel calls would otherwise put two in flight. What it
+/// queues is the look; the boxes are checked by hit tests, not Vision, once the queue moves on.
 actor OneAtATime {
     private let look: EyesTools.Look
     private var tail: Task<Void, Never>?
 
     init(_ look: @escaping EyesTools.Look) { self.look = look }
 
-    func read(_ source: SourceKind, _ query: Query) async throws -> Reading {
+    func read(_ source: SourceKind, _ query: Query) async throws -> Judged {
         // A call withdrawn before it got here never joins the queue. The check inside the
         // task below cannot see it: that task is not cancelled until the handler at the
         // bottom is installed, and with nothing ahead of it, it reads first. Measured: 1 run

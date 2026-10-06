@@ -93,12 +93,15 @@ public let waitInterval: Duration = .milliseconds(100)
 /// error: a reader that could not look has not seen the text go. [LAW:no-silent-failure]
 ///
 /// Every read after the first asks the same question of the region the first one
-/// resolved, as `Region.pinned` holds it.
+/// resolved, as `Region.pinned` holds it. Each read is judged and its boxes left unchecked:
+/// whether text is there does not turn on them, and only the reading the wait ends on is
+/// printed, so only its boxes are checked - after the deadline is weighed, by at most the
+/// time a reader allows its checks.
 ///
 /// Over a read and not a `Reader`, so any reader - or a server's serialised one - waits
 /// the same way. [LAW:composability]
 public func waiting(
-    for wait: Wait, on query: Query, every interval: Duration = waitInterval, read: (Query) async throws -> Reading
+    for wait: Wait, on query: Query, every interval: Duration = waitInterval, read: (Query) async throws -> Judged
 ) async throws -> Waited {
     let clock = ContinuousClock()
     let start = clock.now
@@ -107,7 +110,8 @@ public func waiting(
     var asked = query
     while true {
         let began = clock.now
-        let reading = try await read(asked)
+        let judged = try await read(asked)
+        let reading = judged.reading
         reads += 1
         asked = query.on(query.region.pinned(to: reading.scope.region))
         // A merge one of whose readers could not look can never read the region whole,
@@ -122,7 +126,7 @@ public func waiting(
         // reading is the answer. Measured on studious, a whole-display read is most of a
         // second, so counting only the pause overshot a 2 s timeout by 0.6 s.
         if settled || clock.now + interval + (clock.now - began) - start > wait.timeout {
-            return Waited(reading: reading, reads: reads, took: clock.now - start, settled: settled)
+            return Waited(reading: try await judged.pressed(), reads: reads, took: clock.now - start, settled: settled)
         }
         try await Task.sleep(for: interval)
     }

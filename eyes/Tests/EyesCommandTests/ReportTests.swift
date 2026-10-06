@@ -39,8 +39,10 @@ import Testing
                          query: query, source: .tree)
         }
         #expect(scope(Boxes()).contains("4 runs read; whole region read."))
-        #expect(scope(Boxes(narrowed: 1, unchecked: 0)).contains("4 runs read; 1 box cut to where a click presses it; whole region read."))
-        #expect(scope(Boxes(narrowed: 2, unchecked: 3)).contains("4 runs read; 2 boxes cut to where a click presses it, 3 boxes unchecked; whole"))
+        #expect(scope(Boxes(narrowed: 1, hitTests: 30)).contains("4 runs read; 1 box cut to where a click presses it; whole region read."))
+        #expect(scope(Boxes(narrowed: 2, unchecked: [.unanswered: 1, .overTime: 2])).contains(
+            "4 runs read; 2 boxes cut to where a click presses it, 3 boxes unchecked (1 unanswered, 2 out of time); whole"))
+        #expect(scope(Boxes(unchecked: [.elsewhere: 1])).contains("4 runs read; 1 box unchecked (1 its point on something else); whole"))
     }
 
     /// Each row says what it is: the tree's role, kept through a merge, or `pixels` for text
@@ -156,14 +158,14 @@ import Testing
         let events = Collected()
         let near = Reading(outcome: .nearest([]), scope: Scope(region: Self.display, examined: 5, reach: .whole))
         let hit = Reading(outcome: .matched(Matches([found("OK", x: -100)])!),
-                          scope: Scope(region: Self.display, examined: 9, reach: .whole, boxes: Boxes(narrowed: 1, unchecked: 2)))
+                          scope: Scope(region: Self.display, examined: 9, reach: .whole, boxes: Boxes(narrowed: 1, unchecked: [.elsewhere: 2], hitTests: 41)))
         try await Telemetry.$export.withValue(events.export) {
-            _ = try await Report.text(Query(match: .contains("OK"), region: .display(12)), source: .tree) { _, _ in near }
+            _ = try await Report.text(Query(match: .contains("OK"), region: .display(12)), source: .tree) { _, _ in .standing(near) }
             _ = try await Report.text(Query(match: .contains("OK"), region: .display(12)), source: .pixels,
-                                      wait: Wait(until: .present, seconds: 1)) { _, _ in hit }
+                                      wait: Wait(until: .present, seconds: 1)) { _, _ in .standing(hit) }
             _ = try? await Report.text(Query(match: nil, region: .display(12)), source: .merged) { _, _ in throw PixelsError.noGrant }
             _ = try await Report.text(Query(match: .contains("OK"), region: .page(window: 7, frame: Self.display), near: .contains("Beta")),
-                                      source: .tree) { _, _ in hit }
+                                      source: .tree) { _, _ in .standing(hit) }
         }
         let seen = events.all
         #expect(seen.map(\.event) == ["look", "look", "look", "look"])
@@ -171,8 +173,10 @@ import Testing
         #expect(seen.map { $0.facts["source"] } == ["tree", "pixels", "merged", "tree"])
         #expect(seen.map { $0.facts["region"] } == ["display", "display", "display", "page"])
         #expect(seen.map { $0.facts["order"] } == ["reading", "reading", "reading", "near"])
-        #expect(seen[0].counts == ["reads": 1, "examined": 5, "matched": 0, "nearest": 0, "boxes_narrowed": 0, "boxes_unchecked": 0])
-        #expect(seen[1].counts == ["reads": 1, "examined": 9, "matched": 1, "nearest": 0, "boxes_narrowed": 1, "boxes_unchecked": 2])
+        #expect(seen[0].counts == ["reads": 1, "examined": 5, "matched": 0, "nearest": 0, "boxes_narrowed": 0, "boxes_unchecked_unanswered": 0,
+                                   "boxes_unchecked_elsewhere": 0, "boxes_unchecked_over_time": 0, "hit_tests": 0])
+        #expect(seen[1].counts == ["reads": 1, "examined": 9, "matched": 1, "nearest": 0, "boxes_narrowed": 1, "boxes_unchecked_unanswered": 0,
+                                   "boxes_unchecked_elsewhere": 2, "boxes_unchecked_over_time": 0, "hit_tests": 41])
         #expect(seen[1].facts["until"] == "present")
         #expect(seen[2].error != nil && seen[2].counts == ["reads": 1])
     }
@@ -185,7 +189,7 @@ import Testing
         let unanchored = Reading(outcome: .unanchored([beta]), scope: Scope(region: Self.display, examined: 6, reach: .whole))
         let query = Query(match: .exact("Remove"), region: .display(12), near: .contains("Bta"))
         let text = try await Telemetry.$export.withValue(events.export) {
-            try await Report.text(query, source: .tree) { _, _ in unanchored }
+            try await Report.text(query, source: .tree) { _, _ in .standing(unanchored) }
         }
         #expect(text.hasPrefix("\"Bta\" not found to place exactly \"Remove\" near in "))
         #expect(text.contains("nearest follow"))
@@ -211,4 +215,9 @@ import Testing
         #expect(seen.map { $0.facts["reach"] } == ["whole", "whole", "element_limit"])
         #expect(seen[1].error?.contains("2 web pages") == true)
     }
+}
+
+extension Judged {
+    /// A reading whose boxes stand as its reader placed them, as a fake reader's do.
+    static func standing(_ reading: Reading) -> Judged { Judged(reading) { $0 } }
 }

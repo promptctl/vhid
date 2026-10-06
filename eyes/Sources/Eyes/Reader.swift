@@ -35,11 +35,34 @@ public protocol Reader: Sendable {
 }
 
 public extension Reader {
-    /// Answers the query: what the reader saw, judged by the one rule every reader shares,
-    /// its boxes then checked by the reader that placed them.
-    func read(_ query: Query) async throws -> Reading {
-        try await pressing(Reading.judging(try await look(query), query: query))
+    /// The query's rows: what the reader saw, judged by the one rule every reader shares,
+    /// held with this reader to check their boxes.
+    func judged(_ query: Query) async throws -> Judged {
+        Judged(Reading.judging(try await look(query), query: query)) { try await self.pressing($0) }
     }
+
+    /// Answers the query: its rows judged, their boxes then checked by the reader that
+    /// placed them.
+    func read(_ query: Query) async throws -> Reading {
+        try await judged(query).pressed()
+    }
+}
+
+/// A judged reading whose boxes are not yet checked, and the check: the boxes cost calls
+/// into other processes and only the rows a caller is shown need them, so a wait polls the
+/// reading and checks the boxes of the one it ends on. [LAW:types-are-the-program] Its own
+/// type, so a reading is printed only once pressed.
+public struct Judged: Sendable {
+    public let reading: Reading
+    private let press: @Sendable (Reading) async throws -> Reading
+
+    public init(_ reading: Reading, pressedBy press: @escaping @Sendable (Reading) async throws -> Reading) {
+        self.reading = reading
+        self.press = press
+    }
+
+    /// The reading, each box checked by the reader that placed it.
+    public func pressed() async throws -> Reading { try await press(reading) }
 }
 
 /// What checking one row's box against where a click lands found.
@@ -50,7 +73,28 @@ public enum Pressed: Sendable, Hashable {
     /// Part of the box presses something else; this is the part that presses the element.
     case narrowed(ScreenRect)
     /// The box could not be checked, and stands as the reader placed it.
-    case unchecked
+    case unchecked(Unchecked)
+}
+
+/// Why a row's box could not be checked.
+public enum Unchecked: String, Sendable, Hashable, CaseIterable {
+    /// The hit test, or a read of what it hit, did not answer.
+    case unanswered
+    /// A click at the row's own point lands on something other than the element it names.
+    case elsewhere
+    /// The time for checking the reading's boxes ran out first.
+    case overTime = "over_time"
+}
+
+/// One row's check, and the hit tests it spent.
+public struct Checked: Sendable, Hashable {
+    public let pressed: Pressed
+    public let hitTests: Int
+
+    public init(_ pressed: Pressed, hitTests: Int) {
+        self.pressed = pressed
+        self.hitTests = hitTests
+    }
 }
 
 /// Which kind of reader, without the per-finding payload `Source` carries.
