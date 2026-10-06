@@ -7,8 +7,9 @@ import Testing
 @testable import Input
 
 /// The trajectory model of `docs/design/human.md`, on fixed seeds: how long a move takes,
-/// the shape of its path, and the draws behind both.
-@Suite struct TrajectoryTests {
+/// the shape of its path, and the draws behind both. Seconds of work over a thousand seeds,
+/// which would hold `make test`'s one-thread pool, hence its own thread.
+@Suite(.ownThread) struct TrajectoryTests {
     static let start = ScreenPoint(x: 100, y: 300)!
     static let across = ScreenPoint(x: 840, y: 300)!
 
@@ -44,47 +45,138 @@ import Testing
         #expect(Self.trajectory(seed: 1, to: Self.start).duration == .zero)
     }
 
-    /// The primary submovement ends short of the target by 1–10% of D and within 4% of D
-    /// of the line; the correction ends on the target exactly. Over 500 seeds.
-    @Test func thePrimaryStopsShortAndTheCorrectionLands() {
-        for seed in UInt64(0) ..< 500 {
+    /// Each structure ends its main movement where the design note says, over 1,000 seeds:
+    /// on the target, short of it by 1–10% of D, past it by 1–8%, or short and then a first
+    /// correction that leaves 25–80% of the miss on either side; off the line by at most 4%
+    /// of D; each stroke from where the last ended, the last onto the target exactly. All
+    /// four come up, at about their shares.
+    @Test func eachStructureEndsItsMainMovementWhereTheNoteSays() {
+        var seen: [Trajectory.Structure: Int] = [:]
+        var sides = Set<Bool>()
+        for seed in UInt64(0) ..< 1000 {
             let path = Self.trajectory(seed: seed)
-            let aim = path.point(after: path.primary.duration)
-            #expect((840 - 74.0 ... 840 - 7.4).contains(aim.x), "seed \(seed): \(aim)")
-            #expect(abs(aim.y - 300) <= 29.6, "seed \(seed): \(aim)")
+            seen[path.structure, default: 0] += 1
+            let main = path.strokes[0].to
+            #expect(abs(main.y - 300) <= 29.6, "seed \(seed): \(main)")
+            switch path.structure {
+            case .direct:
+                #expect(path.strokes.count == 1)
+            case .undershoot:
+                #expect(path.strokes.count == 2)
+                #expect((840 - 74.0 ... 840 - 7.4).contains(main.x), "seed \(seed): \(main)")
+            case .overshoot:
+                #expect(path.strokes.count == 2)
+                #expect((840 + 7.4 ... 840 + 59.2).contains(main.x), "seed \(seed): \(main)")
+            case .twoCorrections:
+                #expect(path.strokes.count == 3)
+                #expect((840 - 74.0 ... 840 - 7.4).contains(main.x), "seed \(seed): \(main)")
+                let left = (840 - path.strokes[1].to.x) / (840 - main.x)
+                #expect((0.25 - 1e-9 ... 0.8 + 1e-9).contains(abs(left)), "seed \(seed): \(left)")
+                sides.insert(left > 0)
+            }
+            #expect(zip(path.strokes, path.strokes.dropFirst()).allSatisfy { $0.to == $1.from })
+            #expect(path.strokes.last!.to == (840, 300))
             #expect(path.point(after: path.duration) == (840, 300))
-            #expect(path.primary.duration == path.duration * 0.8)
+            let total = path.strokes.reduce(Duration.zero) { $0 + $1.duration }
+            #expect(abs((total - path.duration) / .milliseconds(1)) < 1e-6)
         }
+        #expect(sides == [true, false])
+        let shares: [Trajectory.Structure: ClosedRange<Int>] = [.direct: 200 ... 300, .undershoot: 400 ... 500, .overshoot: 110 ... 190, .twoCorrections: 110 ... 190]
+        for (structure, range) in shares { #expect(range.contains(seen[structure] ?? 0), "\(structure): \(seen[structure] ?? 0)") }
     }
 
-    /// The path leaves the line by at most the bow and the aim's offset together, 10% of D,
-    /// and does bow: over 500 seeds some leave it by more than 2% of D on either side.
-    @Test func thePathBowsWithinItsBounds() {
-        var widest = (above: 0.0, below: 0.0)
-        for seed in UInt64(0) ..< 500 {
+    /// The whole path, bow, aims off the line and tremor together, stays within the sum of
+    /// their bounds of the line, every millisecond over 200 seeds of every structure: 6% and
+    /// 4% of D and 1.6 points across it, and no further back than the start or on than the
+    /// furthest overshoot.
+    @Test func thePathStaysWithinItsBounds() {
+        var structures = Set<Trajectory.Structure>()
+        for seed in UInt64(0) ..< 200 {
             let path = Self.trajectory(seed: seed)
-            for ms in stride(from: 0, through: Int(path.duration / .milliseconds(1)), by: 4) {
-                let off = path.point(after: .milliseconds(ms)).y - 300
-                #expect(abs(off) <= 74, "seed \(seed) at \(ms) ms: \(off)")
-                widest = (max(widest.above, -off), max(widest.below, off))
+            structures.insert(path.structure)
+            for ms in 0 ... Int(path.duration / .milliseconds(1)) {
+                let point = path.point(after: .milliseconds(ms))
+                #expect(abs(point.y - 300) <= 0.10 * 740 + 1.6 && (100 - 1e-9 ... 840 + 0.08 * 740).contains(point.x), "seed \(seed) at \(ms) ms: \(point)")
             }
         }
-        #expect(widest.above > 14.8 && widest.below > 14.8)
+        #expect(structures == Set(Trajectory.Structure.allCases))
     }
 
-    /// Speed rises and falls once in each submovement, the bell of a minimum-jerk
-    /// movement: step lengths 8 ms apart climb to one peak and then only fall.
-    @Test func speedRisesThenFallsInEachSubmovement() {
-        let path = Self.trajectory(seed: 3)
-        for stroke in [path.primary, path.correction] {
-            let ticks = Int(stroke.duration / Pointer.tick)
-            let points = (0 ... ticks).map { stroke.point(after: Pointer.tick * $0) }
-            let steps = zip(points, points.dropFirst()).map { hypot($1.x - $0.x, $1.y - $0.y) }
-            let peak = steps.indices.max { steps[$0] < steps[$1] }!
-            #expect(peak > 0 && peak < steps.count - 1)
-            #expect(zip(steps[..<peak], steps[1 ... peak]).allSatisfy { $0 <= $1 })
-            #expect(zip(steps[peak...], steps[(peak + 1)...]).allSatisfy { $0 >= $1 })
+    /// The main movement bows away from the elbow in every direction, by 1–6% of D times the
+    /// sine of its angle to the forearm: a move right or left bulges up, and one along the
+    /// forearm hardly bows at all. Corrections are straight.
+    @Test func theBowFollowsTheForearm() {
+        let centre = ScreenPoint(x: 2000, y: 2000)!
+        let forearm = Trajectory.forearm
+        for degrees in stride(from: 0.0, to: 360, by: 15) {
+            let angle = degrees * .pi / 180
+            let end = ScreenPoint(x: centre.x + 740 * cos(angle), y: centre.y + 740 * sin(angle))!
+            for seed in UInt64(0) ..< 40 {
+                let path = Self.trajectory(seed: seed, from: centre, to: end)
+                let main = path.strokes[0]
+                let (dx, dy) = (main.to.x - main.from.x, main.to.y - main.from.y)
+                let length = hypot(dx, dy)
+                let across = abs(dx * forearm.y - dy * forearm.x) / length
+                #expect((0.01 * length * across - 1 ... 0.06 * length * across + 1).contains(abs(main.bow)), "\(degrees)° seed \(seed): \(main.bow)")
+                // The middle of the stroke, against the middle of its chord, is away from the elbow.
+                let middle = main.point(after: main.duration * Submovement.halfway)
+                let bulge = (middle.x - (main.from.x + main.to.x) / 2, middle.y - (main.from.y + main.to.y) / 2)
+                #expect(bulge.0 * forearm.x + bulge.1 * forearm.y <= 1e-6, "\(degrees)° seed \(seed): \(bulge)")
+                #expect(path.strokes.dropFirst().allSatisfy { $0.bow == 0 })
+                if degrees == 0 || degrees == 180 { #expect(bulge.1 < 0, "\(degrees)° seed \(seed): \(bulge)") }
+            }
         }
+        let along = Self.trajectory(seed: 1, from: centre, to: ScreenPoint(x: centre.x + 740 * forearm.x, y: centre.y + 740 * forearm.y)!)
+        #expect(abs(along.strokes[0].bow) < 0.01 * 740 * 0.05)
+    }
+
+    /// Speed rises and falls once in every stroke, peaking at about 43% of its time, so it
+    /// slows down for longer than it speeds up; and the whole move is fastest before half
+    /// its time is gone. Sampled a millisecond apart, on seeds of every structure.
+    @Test func everyStrokeSlowsDownForLongerThanItSpeedsUp() {
+        var structures = Set<Trajectory.Structure>()
+        for seed in UInt64(0) ..< 40 {
+            let path = Self.trajectory(seed: seed)
+            structures.insert(path.structure)
+            for stroke in path.strokes {
+                let ms = Int(stroke.duration / .milliseconds(1))
+                let points = (0 ... ms).map { stroke.point(after: .milliseconds($0)) }
+                let steps = zip(points, points.dropFirst()).map { hypot($1.x - $0.x, $1.y - $0.y) }
+                let peak = steps.indices.max { steps[$0] < steps[$1] }!
+                #expect((0.40 ... 0.46).contains(Double(peak) / Double(steps.count)), "seed \(seed): \(peak) of \(steps.count)")
+                #expect(zip(steps[..<peak], steps[1 ... peak]).allSatisfy { $0 <= $1 + 1e-9 })
+                #expect(zip(steps[peak...], steps[(peak + 1)...]).allSatisfy { $0 + 1e-9 >= $1 })
+            }
+            let ms = Int(path.duration / .milliseconds(1))
+            let points = (0 ... ms).map { path.point(after: .milliseconds($0)) }
+            let steps = zip(points, points.dropFirst()).map { hypot($1.x - $0.x, $1.y - $0.y) }
+            #expect(steps.indices.max { steps[$0] < steps[$1] }! < steps.count / 2, "seed \(seed)")
+        }
+        #expect(structures == Set(Trajectory.Structure.allCases))
+    }
+
+    /// The tremor shakes the path across its line by no more than its amplitude, 0.4–1.6
+    /// points, at 7–13 Hz; not at all at either end, so the path starts where the cursor is
+    /// and ends on the target; and visibly through the slow strokes after the main one.
+    @Test func theTremorShakesThePathOnlyInTheMiddle() {
+        var shown = 0
+        for seed in UInt64(0) ..< 100 {
+            let path = Self.trajectory(seed: seed)
+            #expect((0.4 ... 1.6).contains(path.tremor.amplitude) && (7 ... 13).contains(path.tremor.frequency))
+            #expect(path.tremor.across == (0, 1))
+            #expect(path.point(after: .zero) == (100, 300))
+            #expect(path.point(after: path.duration) == (840, 300))
+            let main = path.strokes[0].duration
+            var widest = 0.0
+            for ms in 0 ... Int(path.duration / .milliseconds(1)) {
+                let elapsed = Duration.milliseconds(ms)
+                let off = path.point(after: elapsed).y - path.unshaken(after: elapsed).y
+                #expect(abs(off) <= path.tremor.amplitude + 1e-9, "seed \(seed) at \(ms) ms")
+                if elapsed > main { widest = max(widest, abs(off)) }
+            }
+            if path.strokes.count > 1, widest > path.tremor.amplitude / 2 { shown += 1 }
+        }
+        #expect(shown > 30)
     }
 
     /// One seed, one movement.
@@ -104,9 +196,11 @@ import Testing
     }
 }
 
-/// A trajectory kept on the displays: beside an edge it never runs nearer the edge than the
-/// straight line does, and away from every edge it keeps its whole bow. Over 500 seeds each,
-/// seconds of work that would hold `make test`'s one-thread pool, hence its own thread.
+/// A trajectory kept on the displays: beside an edge its strokes never run nearer the edge
+/// than the straight line does, the tremor only shakes them, and what it cuts it cuts from
+/// the deviation that would reach the edge, not the other. Away from every edge it keeps
+/// everything. Over 200 seeds each, seconds of work that would hold `make test`'s one-thread
+/// pool, hence its own thread.
 @Suite(.ownThread) struct TrajectoryOnTheDisplaysTests {
     static let screen = Displays(frames: [CGRect(x: 0, y: 0, width: 1920, height: 1080)])!
     /// Ten points above the bottom edge, where an auto-hidden Dock waits, and across it.
@@ -117,52 +211,91 @@ import Testing
         return Trajectory(from: start, toward: .point(target), within: displays, drawing: &generator)
     }
 
-    /// Every millisecond of every path along the bottom edge is on the screen and no lower
-    /// than the line it was drawn about, to the few hundredths `Displays.depth` finds; and the paths still differ, some bowing up and away
-    /// with all their curve kept.
+    /// Every millisecond of every path along the bottom edge: its strokes no lower than the
+    /// line they were drawn about, to the few hundredths `Displays.depth` finds, and the
+    /// tremor no more than its amplitude below them, on the screen. The bow bulges up and
+    /// away from the edge, so every path keeps all of it, whatever its aim beside the line
+    /// kept.
     @Test func aPathAlongAnEdgeNeverRunsIntoIt() {
-        var kept: [Double] = []
+        var kept: [Trajectory.Kept] = []
         var highest = 1070.0
-        for seed in UInt64(0) ..< 500 {
+        for seed in UInt64(0) ..< 200 {
             let path = Self.trajectory(seed: seed, from: Self.alongTheEdge.0, to: Self.alongTheEdge.1)
             for ms in 0 ... Int(path.duration / .milliseconds(1)) {
-                let point = path.point(after: .milliseconds(ms))
-                #expect(point.y <= 1070.05, "seed \(seed) at \(ms) ms: \(point)")
+                let (unshaken, point) = (path.unshaken(after: .milliseconds(ms)), path.point(after: .milliseconds(ms)))
+                #expect(unshaken.y <= 1070.05 && point.y <= 1070.05 + path.tremor.amplitude, "seed \(seed) at \(ms) ms: \(point)")
                 #expect(Self.screen.covers(point, by: 0), "seed \(seed) at \(ms) ms: \(point)")
                 highest = min(highest, point.y)
             }
             kept.append(path.kept)
         }
-        #expect(kept.contains(1) && kept.contains { $0 < 1 })
+        #expect(kept.allSatisfy { $0.bow == 1 }, "\(kept.filter { $0.bow < 1 }.count) cut")
+        #expect(kept.contains { $0.ends == 1 } && kept.contains { $0.ends < 1 })
         #expect(highest < 1070 - 50)
     }
 
-    /// A path the drawn bow would carry into a corner keeps less of it and is still on the
-    /// screen: a target ten points from both edges, approached along the diagonal.
-    @Test func aPathIntoACornerStaysOffIt() {
-        var kept: [Double] = []
-        for seed in UInt64(0) ..< 500 {
-            let path = Self.trajectory(seed: seed, from: ScreenPoint(x: 900, y: 500)!, to: ScreenPoint(x: 1910, y: 1070)!)
+    /// Along the menu bar, twelve points under the top edge, the bow bulges up into it and no
+    /// path keeps all of it; but the cut takes the bow alone, and the paths that aim below
+    /// the line, about half, keep that aim and every overshoot along it whole.
+    @Test func aPathAlongTheMenuBarCutsItsBowAlone() {
+        var kept: [Trajectory.Kept] = []
+        for seed in UInt64(0) ..< 200 {
+            let path = Self.trajectory(seed: seed, from: ScreenPoint(x: 100, y: 12)!, to: ScreenPoint(x: 900, y: 12)!)
             for ms in 0 ... Int(path.duration / .milliseconds(1)) {
-                let point = path.point(after: .milliseconds(ms))
-                #expect(point.x <= 1910.05 && point.y <= 1070.05, "seed \(seed) at \(ms) ms: \(point)")
-                #expect(Self.screen.covers(point, by: 0), "seed \(seed) at \(ms) ms: \(point)")
+                #expect(path.unshaken(after: .milliseconds(ms)).y >= 11.95, "seed \(seed) at \(ms) ms")
             }
             kept.append(path.kept)
         }
-        #expect(kept.contains { $0 < 1 })
+        #expect(kept.allSatisfy { $0.bow < 1 })
+        #expect(kept.filter { $0.ends == 1 }.count >= 80, "\(kept.filter { $0.ends == 1 }.count)")
+    }
+
+    /// Up to a menu-bar item, an overshoot would carry the path past it into the top edge,
+    /// and every one is cut where it ends. The bow, bulging up and left, is cut only where
+    /// the main movement ends on the target, at its depth, or a correction carries it past:
+    /// nine in ten of those that stop short keep all of their curve.
+    @Test func aPathUpToTheMenuBarCutsItsOvershootNotItsBow() {
+        var overshoots = 0, short = 0, bowed = 0
+        for seed in UInt64(0) ..< 200 {
+            let path = Self.trajectory(seed: seed, from: ScreenPoint(x: 400, y: 600)!, to: ScreenPoint(x: 900, y: 12)!)
+            for ms in 0 ... Int(path.duration / .milliseconds(1)) {
+                #expect(path.unshaken(after: .milliseconds(ms)).y >= 11.95, "seed \(seed) at \(ms) ms")
+            }
+            if [.undershoot, .twoCorrections].contains(path.structure) { (short, bowed) = (short + 1, bowed + (path.kept.bow == 1 ? 1 : 0)) }
+            guard path.structure == .overshoot else { continue }
+            overshoots += 1
+            #expect(path.kept.ends < 1, "seed \(seed)")
+        }
+        #expect(overshoots > 15)
+        #expect(Double(bowed) >= 0.9 * Double(short), "\(bowed) of \(short)")
+    }
+
+    /// A path the drawn deviation would carry into a corner keeps less of it and is still on
+    /// the screen: a target ten points from both edges, approached along the diagonal.
+    @Test func aPathIntoACornerStaysOffIt() {
+        var kept: [Trajectory.Kept] = []
+        for seed in UInt64(0) ..< 200 {
+            let path = Self.trajectory(seed: seed, from: ScreenPoint(x: 900, y: 500)!, to: ScreenPoint(x: 1910, y: 1070)!)
+            for ms in 0 ... Int(path.duration / .milliseconds(1)) {
+                let unshaken = path.unshaken(after: .milliseconds(ms))
+                #expect(unshaken.x <= 1910.05 && unshaken.y <= 1070.05, "seed \(seed) at \(ms) ms: \(unshaken)")
+                #expect(Self.screen.covers(path.point(after: .milliseconds(ms)), by: 0), "seed \(seed) at \(ms) ms")
+            }
+            kept.append(path.kept)
+        }
+        #expect(kept.contains { $0.ends < 1 })
     }
 
     /// Far from every edge, and across the seam between two displays side by side, the whole
     /// drawn path is kept: the same path as on a screen with no edges near.
     @Test func aPathFarFromTheEdgesKeepsItsWholeBow() {
         let pair = Displays(frames: [CGRect(x: 0, y: 0, width: 1920, height: 1080), CGRect(x: 1920, y: 0, width: 1920, height: 1080)])!
-        for seed in UInt64(0) ..< 500 {
+        for seed in UInt64(0) ..< 200 {
             let across = Self.trajectory(seed: seed, from: TrajectoryTests.start, to: TrajectoryTests.across)
             #expect(across == TrajectoryTests.trajectory(seed: seed), "seed \(seed)")
-            #expect(across.kept == 1)
+            #expect(across.kept == Trajectory.Kept(ends: 1, bow: 1))
             let seam = Self.trajectory(seed: seed, from: ScreenPoint(x: 1000, y: 540)!, to: ScreenPoint(x: 2800, y: 540)!, within: pair)
-            #expect(seam.kept == 1, "seed \(seed)")
+            #expect(seam.kept == Trajectory.Kept(ends: 1, bow: 1), "seed \(seed)")
         }
     }
 
@@ -253,14 +386,16 @@ import Testing
     }
 
     /// A cursor that shows one report in four a tick late: what has been sent and not shown
-    /// is counted as covered, so the cursor never goes past the target and turns back, and
-    /// the move still lands.
+    /// is counted as covered, so the cursor never goes past the furthest the path does and
+    /// turns back, and the move still lands.
     @Test(arguments: 1 ... 10)
     func reportsTheCursorHasNotShownAreNotSentAgain(seed: UInt64) async throws {
         let mouse = CurvedMouse(at: Self.start, lateEvery: 4)
         let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor() }, displays: { .vast }, clock: ManualClock(), randomness: RandomSource(seed: seed), hand: .macOSDefault, traced: { _ in })
         _ = try await pointer.move(to: .point(Self.target))
-        #expect(mouse.farthest <= Self.target.x + 3, "went to \(mouse.farthest)")
+        let path = TrajectoryTests.trajectory(seed: seed, from: Self.start, to: Self.target)
+        let farthest = (0 ... Int(path.duration / .milliseconds(1))).map { path.point(after: .milliseconds($0)).x }.max()!
+        #expect(mouse.farthest <= farthest + 3, "went to \(mouse.farthest) on a path to \(farthest)")
         #expect(abs(mouse.position.x - Self.target.x) <= 0.5 && abs(mouse.position.y - Self.target.y) <= 0.5)
     }
 

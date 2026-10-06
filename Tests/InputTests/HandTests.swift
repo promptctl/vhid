@@ -49,7 +49,7 @@ import Testing
         #expect(timed.log == ["\(rest / .milliseconds(1)) down", "\((rest + hold1) / .milliseconds(1)) up",
                               "\((rest + hold1 + gap) / .milliseconds(1)) down", "\((rest + hold1 + gap + hold2) / .milliseconds(1)) up"])
         #expect(timed.clock.now.offset == rest + hold1 + gap + hold2)
-        #expect(Self.ms(timed.pauses) == [149, 160, 143, 123])
+        #expect(Self.ms(timed.pauses) == [215, 113, 76, 86])
     }
 
     /// One seed draws one set of pauses, and another seed another.
