@@ -8,20 +8,25 @@ public enum Target: Hashable, Sendable, CustomStringConvertible {
     case point(ScreenPoint)
     case box(ScreenRect)
 
+    /// About a button's height or a line of text's, in points: the size taken for a target
+    /// vhid is not told the size of, and the room a path keeps from an edge.
+    static let button = 20.0
+
     /// Fitts' W, the target's width along the move: for a box, the smaller of its sides, as
     /// MacKenzie and Buxton's "smaller-of" model takes it for a two-dimensional target; for
-    /// a point, whose size vhid is not told, 20 points, about a button's height or a line of
-    /// text's.
+    /// a point, whose size vhid is not told, `button`.
     var width: Double {
         switch self {
-        case .point: 20
+        case .point: Self.button
         case .box(let box): min(box.width, box.height)
         }
     }
 
     /// How far inside a box's edge every drawn point stays, in points. eyes rounds a box out
     /// to whole points, up to a point bigger on each side than what it found, and the cursor
-    /// lands within half a point of where it is sent; two points is clear of both.
+    /// lands within half a point of where it is sent wherever one count moves it less than
+    /// that; two points is clear of both. A Mac whose tracking speed carries the cursor
+    /// further a count lands further off, which `Click.at` reports.
     public static let margin = 2.0
 
     /// How many standard deviations of a person's click spread fit across a target they

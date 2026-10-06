@@ -23,7 +23,7 @@ import Testing
         var generator = SeededGenerator(seed: 7)
         let path = Trajectory(from: Self.start, toward: .point(point), within: .vast, drawing: &generator)
         #expect(path.target == point)
-        #expect(path.width == 20)
+        #expect(path.toward.width == 20)
     }
 
     /// Every point drawn in a box is at least the margin inside its edge, and they differ:
@@ -65,7 +65,7 @@ import Testing
         _ = Target.box(Self.button).aim(drawing: &replay)
         let pace = Trajectory.pace.draw(using: &replay)
         let distance = hypot(path.target.x - Self.start.x, path.target.y - Self.start.y)
-        #expect(path.width == 24)
+        #expect(path.toward.width == 24)
         #expect(path.duration == (Duration.milliseconds(50) + .milliseconds(150) * log2(distance / 24 + 1)) * pace)
         let wide = ScreenRect(x: 700, y: 200, width: 280, height: 200)!
         let small = ScreenRect(x: 836, y: 296, width: 8, height: 8)!
@@ -79,7 +79,7 @@ import Testing
         #expect(ScreenRect(spelled: "800,290,80,24") == Self.button)
         #expect(ScreenRect(spelled: " -5 ,2.5,1,1") == ScreenRect(x: -5, y: 2.5, width: 1, height: 1))
         #expect(Self.button.description == "800,290,80,24")
-        for refused in ["", "1,2,3", "1,2,3,4,5", "1,2,0,4", "1,2,3,-4", "1,,3,4", "a,2,3,4", "1,2,inf,4", "1e308,0,1e308,1"] {
+        for refused in ["", "1,2,3", "1,2,3,4,5", "1,2,0,4", "1,2,3,-4", "1,2,0.5,4", "0,0,1e-320,10", "1,,3,4", "a,2,3,4", "1,2,inf,4", "1e308,0,1e308,1"] {
             #expect(ScreenRect(spelled: refused) == nil, "\(refused)")
         }
     }

@@ -188,8 +188,8 @@ enum Attribute: String, Sendable {
     /// moves and pauses and the typist's key timings again. Absent when the devices were never opened.
     case seed
     /// Each pointer move the verb made, in order, the one it stopped in too: the point it
-    /// aimed at (`aimed`, drawn inside a box it was given) and the target width its time was
-    /// read from (`fitts_width`), how long its trajectory was drawn to take, how many reports
+    /// aimed at (`aimed`), the box it was drawn inside (`box`, absent for a point, which is
+    /// `aimed` itself) and the target width its time was read from (`fitts_width`), how long its trajectory was drawn to take, how many reports
     /// steered it and then closed onto the aim, how many steered reports the cursor never
     /// showed, and where the cursor was read when it landed (`landed`, absent for a move that
     /// stopped first). Absent for a verb that made none.
@@ -338,6 +338,9 @@ extension Invocation {
                                     "closing_reports": .int(move.closing),
                                     "lost_reports": .int(move.lost)]
         path["landed"] = move.landed.map(point)
+        // The box the aim was drawn inside, which with the seed draws the path again; a point
+        // target is `aimed` itself.
+        if case .box(let box) = move.toward { path["box"] = .array([box.x, box.y, box.width, box.height].map(JSON.double)) }
         append(.object(path), to: .paths)
     }
 

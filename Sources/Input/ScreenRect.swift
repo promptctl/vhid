@@ -11,10 +11,11 @@ public struct ScreenRect: Hashable, Sendable, CustomStringConvertible {
 
     /// [LAW:parse-dont-validate] The one place four doubles become a box, and the one place
     /// four that are not one are refused: a coordinate that is not finite, for the reason
-    /// `ScreenPoint` refuses it, its far corners included, or a size that is not positive,
-    /// which holds no point to aim at.
+    /// `ScreenPoint` refuses it, its far corners included, or a side under a point: the
+    /// closing loop lands within half a point, so a narrower box is not one the cursor can be
+    /// put inside, and Fitts' law read off it would take a move without end.
     public init?(x: Double, y: Double, width: Double, height: Double) {
-        guard [x, y, width, height, x + width, y + height].allSatisfy(\.isFinite), width > 0, height > 0 else { return nil }
+        guard [x, y, width, height, x + width, y + height].allSatisfy(\.isFinite), width >= 1, height >= 1 else { return nil }
         self.x = x
         self.y = y
         self.width = width

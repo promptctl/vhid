@@ -9,8 +9,8 @@ public struct Trajectory: Sendable, Equatable {
     public let start: ScreenPoint
     /// The point drawn inside the target it was aimed at, where it ends.
     public let target: ScreenPoint
-    /// The target's width its time was read off by Fitts' law.
-    public let width: Double
+    /// The point or box it was aimed at, whose width its time was read off by Fitts' law.
+    public let toward: Target
     /// How long the whole movement takes, by Fitts' law and a drawn pace.
     public let duration: Duration
     /// How much of its drawn bow and aim off the line the path kept to stay on the
@@ -39,7 +39,7 @@ public struct Trajectory: Sendable, Equatable {
     /// How near the displays' edges a bow may carry the path, in points, where the straight
     /// line keeps further off: a button's height of room. The steering follows the path to
     /// within a few points, so the cursor stays clear of an edge it does not mean to touch.
-    static let margin = 20.0
+    static let margin = Target.button
     /// The shares of the drawn deviation tried, most first, until one keeps the path on the
     /// displays; none fitting leaves the straight line.
     static let shares = stride(from: 1.0, to: 0.05, by: -0.1).map { $0 }
@@ -89,7 +89,7 @@ public struct Trajectory: Sendable, Equatable {
         } ?? 0
         self.start = start
         self.target = target
-        width = aimed.width
+        toward = aimed
         self.duration = duration
         self.kept = kept
         (primary, correction) = path(keeping: kept)

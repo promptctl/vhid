@@ -27,7 +27,7 @@ func places(_ words: [String], count: Int) throws -> [Target] {
     while let word = rest.first {
         if word.contains(",") {
             guard let box = ScreenRect(spelled: word) else {
-                throw ValidationError("\(word) is not a box: a box is x,y,width,height in points, finite, with a positive size")
+                throw ValidationError("\(word) is not a box: a box is x,y,width,height in points, finite, each side at least a point")
             }
             read.append(.box(box))
             rest = rest.dropFirst()

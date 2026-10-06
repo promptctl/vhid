@@ -131,18 +131,18 @@ enum Help {
         inside a box the way click aims. The point it reports is read back from the cursor.
         """, commandLine: [negative(NegativeExample.move)])
 
-    static let scroll = VerbHelp(name: "scroll", abstract: "Roll the mouse wheel at a point on the screen.", discussion: """
+    static let scroll = VerbHelp(name: "scroll", abstract: "Roll the mouse wheel at a point on the screen, or inside a box on it.", discussion: """
         The pointer is moved to the point first, or into the box as click aims, because a wheel \
         scrolls whatever is under the pointer. The ticks are the device's own, and macOS decides how far each one scrolls.
 
-        The pointer rests on the point first, as a hand does. Each tick then goes out as a \
+        The pointer rests there first, as a hand does. Each tick then goes out as a \
         report of its own, \(Int(Hand.macOSDefault.notch.bounds.lowerBound)) to \
         \(Int(Hand.macOSDefault.notch.bounds.upperBound)) ms after the last, because macOS takes a report as one \
         notch whatever count it carries and speeds up notches that come faster. So N ticks \
         scroll N times as far as one, and take N times as long.
         """, commandLine: [negative(NegativeExample.scroll)])
 
-    static let drag = VerbHelp(name: "drag", abstract: "Drag from one point on the screen to another.", discussion: """
+    static let drag = VerbHelp(name: "drag", abstract: "Drag from one point or box on the screen to another.", discussion: """
         The pointer is moved to the first point and rests, the button goes down and is held a \
         moment, the pointer is moved to the second with it held and rests, and every button \
         comes up. Either end may be a box, aimed inside as click aims. Both points it reports are read \
@@ -153,7 +153,8 @@ enum Help {
     static let aim = """
         Given a point, it presses that point. Given a box - the one eyes prints beside each \
         point - it presses a point drawn inside it, spread about the centre as a person's clicks \
-        spread on a target and never within \(Int(Target.margin)) points of its edge, and the move \
+        spread on a target and never within \(Int(Target.margin)) points of its edge, or at its centre \
+        when a side is too narrow for that, and the move \
         takes as long as a hand's would to a target that size.
         """
 

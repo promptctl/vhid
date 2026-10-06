@@ -119,7 +119,7 @@ public struct Pointer: Sendable {
         public let moved: Moved
     }
 
-    /// A move: the point it aimed at and the target width its time was read from, how long
+    /// A move: the point it aimed at, drawn inside the target it was given, how long
     /// its trajectory was drawn to take, the displays it was kept on and how much of its
     /// drawn bow they let it keep, the motion reports that steered it along that and then
     /// homed it onto the aim, how many steered reports the cursor never showed, and where the
@@ -128,7 +128,7 @@ public struct Pointer: Sendable {
     /// `kept` below one; the seed and `displays` together draw the path again.
     public struct Moved: Equatable, Sendable {
         public let aimed: ScreenPoint
-        public let width: Double
+        public let toward: Target
         public let planned: Duration
         public let displays: Displays
         public let kept: Double
@@ -139,6 +139,8 @@ public struct Pointer: Sendable {
         public let landed: ScreenPoint?
 
         public var reports: Int { steered + closing }
+        /// The width its time was read off by Fitts' law.
+        public var width: Double { toward.width }
     }
 
     /// How far the OS carries the cursor per count, and for how fast a report that holds.
@@ -233,7 +235,7 @@ public struct Pointer: Sendable {
         var steered = 0, closing = 0
         var landed: ScreenPoint?
         var moved: Moved {
-            Moved(aimed: trajectory.target, width: trajectory.width, planned: trajectory.duration, displays: displays, kept: trajectory.kept,
+            Moved(aimed: trajectory.target, toward: trajectory.toward, planned: trajectory.duration, displays: displays, kept: trajectory.kept,
                   steered: steered, closing: closing, lost: tracking.lost, landed: landed)
         }
         defer { traced(.moved(moved)) }
@@ -263,7 +265,7 @@ public struct Pointer: Sendable {
         } catch let stop as WouldNotReach {
             // The move's reports, not the closing loop's alone: what the error says the move
             // sent is what the record counts. [LAW:one-source-of-truth]
-            throw WouldNotReach(target: stop.target, cursor: stop.cursor, reports: steered + stop.reports)
+            throw WouldNotReach(target: target, aimed: stop.aimed, cursor: stop.cursor, reports: steered + stop.reports)
         }
         return moved
     }
@@ -325,10 +327,10 @@ public struct Pointer: Sendable {
             // arrival it never made. [LAW:no-silent-failure]
             if !nearer, Self.isSmallest(step), landed != at { return (reports + 1, landed) }
             stalls = nearer ? 0 : stalls + 1
-            guard stalls < Self.stalls else { throw WouldNotReach(target: target, cursor: landed, reports: reports + 1) }
+            guard stalls < Self.stalls else { throw WouldNotReach(target: .point(target), aimed: target, cursor: landed, reports: reports + 1) }
             at = landed
         }
-        throw WouldNotReach(target: target, cursor: at, reports: Self.rounds)
+        throw WouldNotReach(target: .point(target), aimed: target, cursor: at, reports: Self.rounds)
     }
 
     /// The cursor once it has left `before`, or wherever it is when the settle time is up.
@@ -480,11 +482,20 @@ private extension ScreenPoint {
 /// The cursor did not reach the target: stalled, or still short after every report the
 /// move was allowed.
 public struct WouldNotReach: Error, CustomStringConvertible {
-    public let target: ScreenPoint
+    /// What the move was given, so a box names the box the caller passed and not only the
+    /// point drawn inside it.
+    public let target: Target
+    public let aimed: ScreenPoint
     public let cursor: ScreenPoint
     public let reports: Int
 
-    public var description: String { "the cursor would not reach \(target): it is at \(cursor) after \(reports) reports" }
+    public var description: String {
+        let sent = switch target {
+        case .point: "\(aimed)"
+        case .box: "\(aimed), drawn inside \(target)"
+        }
+        return "the cursor would not reach \(sent): it is at \(cursor) after \(reports) reports"
+    }
 }
 
 public struct CursorUnreadable: Error, CustomStringConvertible {
