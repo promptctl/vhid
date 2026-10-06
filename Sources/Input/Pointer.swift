@@ -81,8 +81,8 @@ public struct Pointer: Sendable {
     public let randomness: RandomSource
     /// How long the hand waits around a press, by kind of wait.
     public let hand: Hand
-    /// Where every move is handed once it has ended, however it ended, and every pause as
-    /// it begins: the record of the verb it is part of. [LAW:nothing-unseen] A move that
+    /// Where every move and every pause is handed once it has ended, however it ended: the
+    /// record of the verb it is part of. [LAW:nothing-unseen] A move that
     /// threw is the one most worth seeing, so the pointer hands it over, not the verb that
     /// may never get it back.
     public let traced: @Sendable (Traced) -> Void
