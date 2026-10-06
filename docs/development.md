@@ -64,7 +64,11 @@ answers it until launchd has a job for it. `make dev-daemon` builds, then regist
 `.build/debug/vhidd` under that name, replacing the job an earlier run registered; it
 asks for sudo. `make remove-dev-daemon` takes it out. Neither touches a job it did not
 register, the installed pkg's included. Launchd runs that binary as root, from a tree
-your own account can write to, until it is removed.
+your own account can write to, until it is removed. A rebuild does not restart it. It
+reads the cursor and the displays in a child of its own executable, and each child says
+which build it is: once the file there is another build, the next child it starts, when
+another session comes to the front or a reader fails, is refused, and the read with it,
+saying the file was replaced. `make dev-daemon` again restarts it on the new build.
 
 The first `make` on a Mac makes a self-signed certificate called `vhid Dev` and signs
 with it from then on. Nothing has to be run by hand first: a certificate that has to be

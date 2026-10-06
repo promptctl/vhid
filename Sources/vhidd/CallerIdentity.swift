@@ -57,15 +57,12 @@ struct CallerIdentity {
 
     /// The identity of whoever signed this process, as a requirement of its callers.
     static func sameSignerAsThisProcess() throws -> CallerIdentity {
-        var running: SecCode?
-        let found = SecCodeCopySelf([], &running)
-        guard found == errSecSuccess, let running else { throw Refused.unsigned(found) }
-        var code: SecStaticCode?
-        let pinned = SecCodeCopyStaticCode(running, [], &code)
-        guard pinned == errSecSuccess, let code else { throw Refused.unsigned(pinned) }
-        var information: CFDictionary?
-        let read = SecCodeCopySigningInformation(code, SecCSFlags(rawValue: kSecCSSigningInformation), &information)
-        guard read == errSecSuccess, let information = information as? [CFString: Any] else { throw Refused.unsigned(read) }
+        let information: [CFString: Any]
+        do {
+            information = try ownSigningInformation()
+        } catch {
+            throw Refused.unsigned(error.status)
+        }
         // An ad hoc signature has no certificate chain at all, so the leaf is absent
         // rather than empty. [LAW:no-silent-failure]
         guard let chain = information[kSecCodeInfoCertificates] as? [SecCertificate], let leaf = chain.first else { throw Refused.adHoc }
