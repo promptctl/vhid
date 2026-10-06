@@ -24,7 +24,7 @@ struct Probe<Element> {
     let same: (Element, Element) -> Bool
     /// Whether the time for checking a reading's boxes is spent, asked before every hit
     /// test: a busy app holds each one for the whole messaging timeout.
-    let spent: () -> Bool
+    let spent: () throws -> Bool
 
     /// The most parents climbed from an element: far more than a web page nests, and a
     /// bound on an app whose parents run in a loop, past which the check is unanswered.
@@ -72,7 +72,7 @@ private final class Check<Element> {
     init(probe: Probe<Element>) { self.probe = probe }
 
     private func ask<Value>(_ call: () throws -> Heard<Value>) throws -> Value {
-        guard !probe.spent() else { throw Stop(why: .overTime) }
+        guard try !probe.spent() else { throw Stop(why: .overTime) }
         calls += 1
         guard case .answered(let value) = try call() else { throw Stop(why: .unanswered) }
         return value

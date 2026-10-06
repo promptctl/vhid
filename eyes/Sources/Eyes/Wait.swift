@@ -95,8 +95,7 @@ public let waitInterval: Duration = .milliseconds(100)
 /// Every read after the first asks the same question of the region the first one
 /// resolved, as `Region.pinned` holds it. Each read is judged and its boxes left unchecked:
 /// whether text is there does not turn on them, and only the reading the wait ends on is
-/// printed, so only its boxes are checked - after the deadline is weighed, by at most the
-/// time a reader allows its checks.
+/// printed, so only its boxes are checked, in what is left of the timeout.
 ///
 /// Over a read and not a `Reader`, so any reader - or a server's serialised one - waits
 /// the same way. [LAW:composability]
@@ -126,7 +125,7 @@ public func waiting(
         // reading is the answer. Measured on studious, a whole-display read is most of a
         // second, so counting only the pause overshot a 2 s timeout by 0.6 s.
         if settled || clock.now + interval + (clock.now - began) - start > wait.timeout {
-            return Waited(reading: try await judged.pressed(), reads: reads, took: clock.now - start, settled: settled)
+            return Waited(reading: try await judged.pressed(until: min(clock.now + boxChecking, start + wait.timeout)), reads: reads, took: clock.now - start, settled: settled)
         }
         try await Task.sleep(for: interval)
     }

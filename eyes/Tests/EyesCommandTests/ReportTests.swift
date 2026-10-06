@@ -162,7 +162,9 @@ import Testing
         try await Telemetry.$export.withValue(events.export) {
             _ = try await Report.text(Query(match: .contains("OK"), region: .display(12)), source: .tree) { _, _ in .standing(near) }
             _ = try await Report.text(Query(match: .contains("OK"), region: .display(12)), source: .pixels,
-                                      wait: Wait(until: .present, seconds: 1)) { _, _ in .standing(hit) }
+                                      wait: Wait(until: .present, seconds: 1)) { _, _ in
+                Judged(hit) { reading, _ in try await Task.sleep(for: .milliseconds(20)); return reading }
+            }
             _ = try? await Report.text(Query(match: nil, region: .display(12)), source: .merged) { _, _ in throw PixelsError.noGrant }
             _ = try await Report.text(Query(match: .contains("OK"), region: .page(window: 7, frame: Self.display), near: .contains("Beta")),
                                       source: .tree) { _, _ in .standing(hit) }
@@ -174,11 +176,12 @@ import Testing
         #expect(seen.map { $0.facts["region"] } == ["display", "display", "display", "page"])
         #expect(seen.map { $0.facts["order"] } == ["reading", "reading", "reading", "near"])
         #expect(seen[0].counts == ["reads": 1, "examined": 5, "matched": 0, "nearest": 0, "boxes_narrowed": 0, "boxes_unchecked_unanswered": 0,
-                                   "boxes_unchecked_elsewhere": 0, "boxes_unchecked_over_time": 0, "box_calls": 0])
-        #expect(seen[1].counts == ["reads": 1, "examined": 9, "matched": 1, "nearest": 0, "boxes_narrowed": 1, "boxes_unchecked_unanswered": 0,
-                                   "boxes_unchecked_elsewhere": 2, "boxes_unchecked_over_time": 0, "box_calls": 41])
+                                   "boxes_unchecked_elsewhere": 0, "boxes_unchecked_over_time": 0, "box_calls": 0, "box_ms": 0])
+        #expect(seen[1].counts.filter { $0.key != "box_ms" } == ["reads": 1, "examined": 9, "matched": 1, "nearest": 0, "boxes_narrowed": 1,
+                                   "boxes_unchecked_unanswered": 0, "boxes_unchecked_elsewhere": 2, "boxes_unchecked_over_time": 0, "box_calls": 41])
+        #expect((seen[1].counts["box_ms"] ?? 0) >= 20)
         #expect(seen[1].facts["until"] == "present")
-        #expect(seen[2].error != nil && seen[2].counts == ["reads": 1])
+        #expect(seen[2].error != nil && seen[2].counts == ["reads": 1, "box_ms": 0])
     }
 
     /// Matches whose anchor is missing say which text was not found - the one the rows are
@@ -219,5 +222,5 @@ import Testing
 
 extension Judged {
     /// A reading whose boxes stand as its reader placed them, as a fake reader's do.
-    static func standing(_ reading: Reading) -> Judged { Judged(reading) { $0 } }
+    static func standing(_ reading: Reading) -> Judged { Judged(reading) { r, _ in r } }
 }

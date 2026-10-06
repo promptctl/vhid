@@ -43,7 +43,7 @@ in where a rounded button's corner presses the page. The checks get two seconds 
 the read. The scope line says how many boxes were cut, and how many were left as the app
 claimed them and why: the hit test did not answer, the row's own point lands on something
 else, or the time ran out. Text only the pixels reader saw keeps the box its text is drawn
-in. A wait checks only the boxes of the reading it ends on.
+in. A wait checks only the boxes of the reading it ends on, in what is left of its timeout.
 
 `--page <window id>` reads the web page a browser window shows, without the browser's
 toolbar and bookmarks. The accessibility tree finds the page, so it needs Accessibility

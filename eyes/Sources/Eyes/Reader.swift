@@ -30,21 +30,21 @@ public protocol Reader: Sendable {
     ///
     /// After judging, so the checks - calls into other processes - are spent on the rows a
     /// caller is shown and not on every element a walk read. A reader whose boxes are
-    /// already where a click lands answers the reading it was given.
-    func pressing(_ reading: Reading) async throws -> Reading
+    /// already where a click lands answers the reading it was given. Rows the checks have
+    /// not reached by `deadline` stand as placed, counted as over time.
+    func pressing(_ reading: Reading, until deadline: ContinuousClock.Instant) async throws -> Reading
 }
+
+/// How long checking a reading's boxes may take, on top of the read. A page's button costs a
+/// few dozen calls at 10-35 ms each; an app too busy to answer holds each for the messaging
+/// timeout, and the rows the time does not reach are counted unchecked as over time.
+public let boxChecking = Duration.seconds(2)
 
 public extension Reader {
     /// The query's rows: what the reader saw, judged by the one rule every reader shares,
     /// held with this reader to check their boxes.
     func judged(_ query: Query) async throws -> Judged {
-        Judged(Reading.judging(try await look(query), query: query)) { try await self.pressing($0) }
-    }
-
-    /// Answers the query: its rows judged, their boxes then checked by the reader that
-    /// placed them.
-    func read(_ query: Query) async throws -> Reading {
-        try await judged(query).pressed()
+        Judged(Reading.judging(try await look(query), query: query)) { try await self.pressing($0, until: $1) }
     }
 }
 
@@ -53,16 +53,20 @@ public extension Reader {
 /// reading and checks the boxes of the one it ends on. [LAW:types-are-the-program] Its own
 /// type, so a reading is printed only once pressed.
 public struct Judged: Sendable {
-    public let reading: Reading
-    private let press: @Sendable (Reading) async throws -> Reading
+    public typealias Press = @Sendable (Reading, ContinuousClock.Instant) async throws -> Reading
 
-    public init(_ reading: Reading, pressedBy press: @escaping @Sendable (Reading) async throws -> Reading) {
+    public let reading: Reading
+    private let press: Press
+
+    public init(_ reading: Reading, pressedBy press: @escaping Press) {
         self.reading = reading
         self.press = press
     }
 
-    /// The reading, each box checked by the reader that placed it.
-    public func pressed() async throws -> Reading { try await press(reading) }
+    /// The reading, each box checked by the reader that placed it by `deadline`.
+    public func pressed(until deadline: ContinuousClock.Instant = .now + boxChecking) async throws -> Reading {
+        try await press(reading, deadline)
+    }
 }
 
 /// What checking one row's box against where a click lands found.

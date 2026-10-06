@@ -349,7 +349,18 @@ extension Report {
             Telemetry.note("order", query.near == nil ? "reading" : "near")
             // Tallied as each read starts, so a look that fails says how many it spent.
             Telemetry.count("reads", 0)
-            func counted(_ query: Query) async throws -> Judged { Telemetry.tally("reads"); return try await read(source, query) }
+            Telemetry.count("box_ms", 0)
+            // The boxes' checks timed apart from the read, wherever they run - after a read,
+            // or at the end of a wait.
+            func counted(_ query: Query) async throws -> Judged {
+                Telemetry.tally("reads")
+                let judged = try await read(source, query)
+                return Judged(judged.reading) { _, deadline in
+                    let start = ContinuousClock.now
+                    defer { Telemetry.tally("box_ms", by: Int((ContinuousClock.now - start) / .milliseconds(1))) }
+                    return try await judged.pressed(until: deadline)
+                }
+            }
             guard let wait else {
                 let reading = try await counted(query).pressed()
                 Self.count(reading)

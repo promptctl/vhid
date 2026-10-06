@@ -22,7 +22,7 @@ import Testing
             return Candidates(found: found, region: region, examined: found.count, excluded: [], reach: reach)
         }
 
-        func pressing(_ reading: Reading) async throws -> Reading { reading.pressing { Checked(press($0), calls: calls) } }
+        func pressing(_ reading: Reading, until deadline: ContinuousClock.Instant) async throws -> Reading { reading.pressing { Checked(press($0), calls: calls) } }
     }
 
     static let role = Source.tree(role: Role(rawValue: "AXButton"))
@@ -36,7 +36,7 @@ import Testing
     static let here: Locate = { _ in region }
 
     private func read(_ a: any Reader, _ b: any Reader, _ match: Match? = nil) async throws -> Reading {
-        try await MergedReader(a, b, locate: Self.here).read(Query(match: match, region: .rect(Self.region)))
+        try await MergedReader(a, b, locate: Self.here).judged(Query(match: match, region: .rect(Self.region))).pressed()
     }
 
     private func all(_ reading: Reading) -> [Found] {
@@ -134,7 +134,7 @@ import Testing
             Fake(source: .tree, found: [at("a", 10, 10, Self.role)]),
             Fake(source: .pixels, found: [at("b", 10, 200, Self.seen)]),
             locate: Self.here
-        ).read(Query(match: nil, region: .rect(Self.region), limit: Limit(1)!))
+        ).judged(Query(match: nil, region: .rect(Self.region), limit: Limit(1)!)).pressed()
         #expect(all(r).map(\.text.value) == ["a"])
         #expect(r.scope.reach == .stopped(.resultLimit(Limit(1)!)))
         #expect(r.scope.excluded == [Exclusion(reason: .ranked, count: 1)])
@@ -207,11 +207,11 @@ import Testing
     struct Refusing: Reader {
         let source = SourceKind.tree
         func look(_ query: Query) async throws -> Candidates { throw NoGrant() }
-        func pressing(_ reading: Reading) async throws -> Reading { reading }
+        func pressing(_ reading: Reading, until deadline: ContinuousClock.Instant) async throws -> Reading { reading }
     }
 
     @Test func aBlindReadersMissingGrantIsCarriedInItsPart() async throws {
-        let r = try await MergedReader(Refusing(), Fake(source: .pixels, found: []), locate: Self.here).read(Query(match: nil, region: .rect(Self.region)))
+        let r = try await MergedReader(Refusing(), Fake(source: .pixels, found: []), locate: Self.here).judged(Query(match: nil, region: .rect(Self.region))).pressed()
         guard case .stopped(.merged(.blind(.tree, _, let grant), _)) = r.scope.reach else { Issue.record("\(r)"); return }
         #expect(grant)
     }
@@ -221,7 +221,7 @@ import Testing
     struct Gone: Reader {
         let source = SourceKind.pixels
         func look(_ query: Query) async throws -> Candidates { throw NoSuchPlace.window(7) }
-        func pressing(_ reading: Reading) async throws -> Reading { reading }
+        func pressing(_ reading: Reading, until deadline: ContinuousClock.Instant) async throws -> Reading { reading }
     }
 
     @Test func aPlaceGoneBeforeOneReaderLookedIsThatReadersBlindness() async throws {
@@ -236,7 +236,7 @@ import Testing
             Issue.record("the \(source) reader was asked about a region that names nowhere")
             return Candidates(found: [], region: MergedReaderTests.region, examined: 0, excluded: [], reach: .whole)
         }
-        func pressing(_ reading: Reading) async throws -> Reading { reading }
+        func pressing(_ reading: Reading, until deadline: ContinuousClock.Instant) async throws -> Reading { reading }
     }
 
     /// Refused as the merge's answer even with both readers blind, so a bad id is never
@@ -245,7 +245,7 @@ import Testing
         let nowhere = NoSuchPlace.display(4_000_000_000)
         for (a, b) in [(Unasked(source: .tree), Unasked(source: .pixels)) as (any Reader, any Reader), (Refusing(), Refusing())] {
             await #expect {
-                _ = try await MergedReader(a, b, locate: { _ in throw nowhere }).read(Query(match: nil, region: .display(4_000_000_000)))
+                _ = try await MergedReader(a, b, locate: { _ in throw nowhere }).judged(Query(match: nil, region: .display(4_000_000_000))).pressed()
             } throws: { "\($0)" == nowhere.description }
         }
     }

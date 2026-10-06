@@ -69,19 +69,13 @@ public struct TreeReader: Reader {
     /// The grant is not asked again: only rows this reader placed are checked, and it placed
     /// them only when granted, so the pixels' half of a merge the tree could not look in makes
     /// no call at all. A grant taken away since throws from the first read, as in `look`.
-    public func pressing(_ reading: Reading) async throws -> Reading {
-        let clock = ContinuousClock()
-        let start = clock.now
+    /// A caller that withdrew the look stops its checks at the next call rather than holding
+    /// the main actor for the rest of the time. [LAW:no-silent-failure]
+    public func pressing(_ reading: Reading, until deadline: ContinuousClock.Instant) async throws -> Reading {
         let probe = Probe<AXUIElement>(hit: Self.element(at:), lineage: Self.lineage, parent: Self.parent, same: { CFEqual($0, $1) },
-                                       spent: { clock.now - start > Self.pressingTime })
+                                       spent: { try Task.checkCancellation(); return ContinuousClock.now > deadline })
         return try reading.pressing(probe.press)
     }
-
-    /// How long checking a reading's boxes may take, on top of the walk's own bound. A
-    /// page's button costs a few dozen calls at 10-35 ms each; an app too busy to answer
-    /// holds each for the messaging timeout, and the rows the time does not reach are
-    /// counted unchecked as over time.
-    static let pressingTime = Duration.seconds(2)
 
     /// What window `id`'s tree says of the web pages in it, for `Paged.page` to make one
     /// region of. Throws when the window is not on screen. [LAW:no-silent-failure]

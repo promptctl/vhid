@@ -31,7 +31,7 @@ import Grants
     final class Asked { var hits = 0, parents = 0 }
 
     private func probe(_ asked: Asked = Asked(), hit: @escaping (ScreenPoint) throws -> Heard<Int?> = safari,
-                       lineages: [Int: Lineage<Int>] = lineages, spent: @escaping () -> Bool = { false }) -> Probe<Int> {
+                       lineages: [Int: Lineage<Int>] = lineages, spent: @escaping () throws -> Bool = { false }) -> Probe<Int> {
         Probe(hit: { asked.hits += 1; return try hit($0) },
               lineage: { lineages[$0].map(Heard.answered) ?? .unanswered },
               parent: { asked.parents += 1; return lineages[$0].map { .answered($0.parent) } ?? .unanswered },
@@ -157,7 +157,12 @@ import Grants
         let seen = Found(text: Text("OK")!, frame: Self.frame, source: .pixels(confidence: Confidence(0.9)!))
         let reading = Reading(outcome: .matched(Matches([seen])!), scope: Scope(region: Self.frame, examined: 1, reach: .whole))
         let tree = TreeReader(granted: { _ in Issue.record("the grant was asked"); return false })
-        #expect(try await tree.pressing(reading) == reading)
+        #expect(try await tree.pressing(reading, until: .now + .seconds(2)) == reading)
+    }
+
+    /// A look withdrawn mid-check stops at the next call, said as the cancellation it is.
+    @Test func aWithdrawnCheckThrowsAtTheNextCall() {
+        #expect(throws: CancellationError.self) { try probe(spent: { throw CancellationError() }).press(row()) }
     }
 
     struct Revoked: Error {}

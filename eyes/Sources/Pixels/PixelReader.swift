@@ -22,7 +22,7 @@ public struct PixelReader: Reader {
 
     /// A recognised run's box is where its text is drawn, and nothing this reader can ask
     /// says more about where a click on it lands.
-    public func pressing(_ reading: Reading) async throws -> Reading { reading }
+    public func pressing(_ reading: Reading, until deadline: ContinuousClock.Instant) async throws -> Reading { reading }
 
     public func look(_ query: Query) async throws -> Candidates {
         // [LAW:no-silent-failure] The grant is asked explicitly because capturing without

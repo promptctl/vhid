@@ -55,11 +55,24 @@ import Testing
         let marked = Reading(outcome: Self.present.outcome, scope: Scope(region: Self.region, examined: 1, reach: .whole, boxes: Boxes(narrowed: 1)))
         let script = Script([Self.present, Self.present, Self.absent])
         let waited = try await waiting(for: Wait(until: .absent, seconds: 5)!, on: Self.query, every: .milliseconds(1)) { query in
-            Judged(try script.read(query).reading) { pressed.readings.append($0); return marked }
+            Judged(try script.read(query).reading) { reading, _ in pressed.readings.append(reading); return marked }
         }
         #expect(waited.reads == 4)
         #expect(pressed.readings == [Self.absent])
         #expect(waited.reading == marked)
+    }
+
+    /// The boxes are checked in what is left of the timeout, so a wait that ran out of time
+    /// does not run past it checking them.
+    @Test func theBoxesAreCheckedWithinTheTimeout() async throws {
+        final class Given: @unchecked Sendable { var deadline: ContinuousClock.Instant? }
+        let given = Given()
+        let start = ContinuousClock.now
+        let script = Script([Self.present])
+        _ = try await waiting(for: Wait(until: .absent, seconds: 0.05)!, on: Self.query, every: .milliseconds(1)) { query in
+            Judged(try script.read(query).reading) { reading, deadline in given.deadline = deadline; return reading }
+        }
+        #expect(given.deadline.map { $0 <= start + .milliseconds(60) } == true)
     }
 
     /// Gone from the third read on, and believed on the fourth: an absence is read twice
@@ -172,5 +185,5 @@ import Testing
 
 extension Judged {
     /// A reading whose boxes stand as its reader placed them, as a fake reader's do.
-    static func standing(_ reading: Reading) -> Judged { Judged(reading) { $0 } }
+    static func standing(_ reading: Reading) -> Judged { Judged(reading) { r, _ in r } }
 }
