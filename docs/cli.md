@@ -101,7 +101,7 @@ pointer's are a
 carries the button, and a `notch` pause after each notch. `type`'s and `press`'s are named
 for the report each wait ends in: `modifier_down`, `key_down`, `key_up` (a key's hold) and
 `modifier_up`. Each is drawn from the seed too. `attributes.double_click_ms` is the double-click interval the click timings were
-fitted to, as this process read it, and `attributes.key_repeat_delay_ms` the delay until a
+fitted to, as the HID system holds it for the session in front, and `attributes.key_repeat_delay_ms` the delay until a
 held key repeats that key holds were fitted to. `attributes.keys_late_ms` is how far behind
 its drawn timing `type`'s or `press`'s last report went out: slow acknowledgements and late
 wakes move every key after them rather than shorten a hold. It is 0 for a run that sent

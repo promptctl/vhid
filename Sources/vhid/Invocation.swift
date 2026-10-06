@@ -158,11 +158,11 @@ enum Tally: String, CaseIterable, Sendable {
 
 /// A fact a verb decided that is not a count.
 enum Attribute: String, Sendable {
-    /// The double-click interval the pointer's hand was fitted to, as this process read it.
+    /// The double-click interval the pointer's hand was fitted to, as the HID system holds it.
     /// Absent when the devices were never opened.
     case doubleClickMilliseconds = "double_click_ms"
-    /// The delay until a held key repeats that the typist's key holds were fitted to, as
-    /// this process read it. Absent when the devices were never opened.
+    /// The delay until a held key repeats that the typist's key holds were fitted to, as the
+    /// HID system holds it. Absent when the devices were never opened.
     case keyRepeatDelayMilliseconds = "key_repeat_delay_ms"
     /// How far behind its drawn timing the typist's last report went out, in milliseconds:
     /// what slow acknowledgements and late wakes added to the run, every key after them

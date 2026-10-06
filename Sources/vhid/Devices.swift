@@ -61,12 +61,14 @@ struct Devices {
         let cursor = cursor(helper, on: queue)
         let randomness = RandomSource(seed: UInt64.random(in: .min ... .max))
         Invocation.set(.seed, .string(String(randomness.seed, radix: 16)))
-        // Read in this process, as the keyboard layout is: the root daemon would read its
-        // own default, not the user's setting. `Hand`.
+        // Both are IOHIDSystem's parameters, HIDClickTime and HIDInitialKeyRepeat: one per
+        // Mac, the values the HID system counts clicks and repeats keys by, so every process
+        // reads the ones governing the session in front, whoever's it is. Not the user's
+        // preferences, which only reach them through System Settings or a login. Measured on
+        // studious, 2026-10-06: set there, NSEvent answered them for bmf and for a user with
+        // no session alike; a user's `defaults write` left them alone. `Hand`, `Cadence`.
         let doubleClick = Duration.seconds(NSEvent.doubleClickInterval)
         Invocation.set(.doubleClickMilliseconds, .double(doubleClick / .milliseconds(1)))
-        // The same for the delay until a held key repeats, which caps how long a key is held.
-        // `Cadence`.
         let keyRepeatDelay = Duration.seconds(NSEvent.keyRepeatDelay)
         Invocation.set(.keyRepeatDelayMilliseconds, .double(keyRepeatDelay / .milliseconds(1)))
         let keyboard = TalliedKeyboard(keyboard: QueuedKeyboard(keyboard: helper.keyboard, queue: queue))
