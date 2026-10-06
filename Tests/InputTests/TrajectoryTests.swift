@@ -1,4 +1,5 @@
 import Foundation
+import OwnThread
 import Pointing
 import Synchronization
 import TestClock
@@ -103,8 +104,9 @@ import Testing
 }
 
 /// A trajectory kept on the displays: beside an edge it never runs nearer the edge than the
-/// straight line does, and away from every edge it keeps its whole bow. Over 500 seeds each.
-@Suite struct TrajectoryOnTheDisplaysTests {
+/// straight line does, and away from every edge it keeps its whole bow. Over 500 seeds each,
+/// seconds of work that would hold `make test`'s one-thread pool, hence its own thread.
+@Suite(.ownThread) struct TrajectoryOnTheDisplaysTests {
     static let screen = Displays(frames: [CGRect(x: 0, y: 0, width: 1920, height: 1080)])!
     /// Ten points above the bottom edge, where an auto-hidden Dock waits, and across it.
     static let alongTheEdge = (ScreenPoint(x: 100, y: 1070)!, ScreenPoint(x: 1800, y: 1070)!)
