@@ -7,8 +7,9 @@ import Testing
 @testable import Input
 
 /// The trajectory model of `docs/design/human.md`, on fixed seeds: how long a move takes,
-/// the shape of its path, and the draws behind both.
-@Suite struct TrajectoryTests {
+/// the shape of its path, and the draws behind both. Seconds of work over a thousand seeds,
+/// which would hold `make test`'s one-thread pool, hence its own thread.
+@Suite(.ownThread) struct TrajectoryTests {
     static let start = ScreenPoint(x: 100, y: 300)!
     static let across = ScreenPoint(x: 840, y: 300)!
 
