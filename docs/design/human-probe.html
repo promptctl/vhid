@@ -30,22 +30,24 @@ const pointer = e => {
   for (const c of all.length ? all : [e]) log.push({ type: e.type, t: t(c), x: c.clientX, y: c.clientY, buttons: e.buttons, target: e.target.id || e.target.tagName });
 };
 for (const type of ['pointermove', 'pointerdown', 'pointerup', 'click', 'dblclick']) document.addEventListener(type, pointer, true);
-document.addEventListener('wheel', e => log.push({ type: 'wheel', t: t(e), x: e.clientX, y: e.clientY, dy: e.deltaY }), true);
+document.addEventListener('wheel', e => log.push({ type: 'wheel', t: t(e), x: e.clientX, y: e.clientY, dx: e.deltaX, dy: e.deltaY, mode: e.deltaMode }), true);
 for (const type of ['keydown', 'keyup']) document.addEventListener(type, e => log.push({ type, t: t(e), code: e.code, key: e.key, repeat: e.repeat }), true);
 // A hover-intent menu: it opens while the pointer is over it, and an item takes a click
-// only once the pointer has rested on it for 100 ms. A click before that is ignored, as
-// such menus ignore a pointer that is only passing through.
+// only if the pointer had rested on it, not moving, for 100 ms when the button went down.
+// A click pressed sooner is ignored, as such menus ignore a pointer only passing through.
 const menu = document.getElementById('menu'), items = document.getElementById('items');
 menu.addEventListener('pointerenter', () => { items.hidden = false; });
 menu.addEventListener('pointerleave', () => { items.hidden = true; });
 for (const li of items.children) {
-  let timer;
-  li.addEventListener('pointerenter', () => { timer = setTimeout(() => li.classList.add('armed'), 100); });
+  let timer, pressedArmed = false;
+  const rest = () => { clearTimeout(timer); li.classList.remove('armed'); timer = setTimeout(() => li.classList.add('armed'), 100); };
+  li.addEventListener('pointerenter', rest);
+  li.addEventListener('pointermove', rest);
   li.addEventListener('pointerleave', () => { clearTimeout(timer); li.classList.remove('armed'); });
+  li.addEventListener('pointerdown', () => { pressedArmed = li.classList.contains('armed'); });
   li.addEventListener('click', e => {
-    const armed = li.classList.contains('armed');
-    log.push({ type: armed ? 'chosen' : 'ignored', t: t(e), item: li.textContent });
-    if (armed) document.getElementById('chosen').textContent = 'chosen: ' + li.textContent;
+    log.push({ type: pressedArmed ? 'chosen' : 'ignored', t: t(e), item: li.textContent });
+    if (pressedArmed) document.getElementById('chosen').textContent = 'chosen: ' + li.textContent;
   });
 }
 const page = crypto.randomUUID();
