@@ -9,14 +9,14 @@ Measured on studious on 2026-10-06: macOS 15.0.1, Safari 18.0.1, vhid 0.4.1, the
 - **A move takes as long as a person's would, by Fitts' law:** 50 ms + 150 ms × log2(D/20 + 1), D in points, varied by ±15% (one standard deviation). That is about 0.84 s across 740 points and 0.44 s across 100.
 - **The path is a person's:** a main movement with a bell-shaped speed profile (minimum jerk) that bows slightly to one side and stops short, then a short correction onto the target. Reports go out every 8 ms, the rate of a 125 Hz USB mouse.
 - **The path is steered by reading the cursor back once a tick**, not from a table calibrated beforehand. The cursor reflects a report about a millisecond after it is sent, so each report can be aimed from where the last one actually landed.
-- **The end point is exact.** The path ends with the closed loop `Pointer.move(to:)` runs now, with its reports paced at the same 8 ms, so a click lands where it lands today.
+- **The end point is today's.** The path ends with the closed loop `Pointer.move(to:)` runs now, with its reports paced at the same 8 ms, so a click lands where it lands today.
 - **A click rests, then holds:** a pause on the target before the button goes down (250 ± 80 ms), then the button held for 110 ± 30 ms. The clicks of a double or triple click are 120 ± 30 ms apart, one press at most 380 ms after the last, inside macOS's double-click interval.
-- **A scroll rests, then turns the wheel:** the same move and rest as a click, then notches 200 ± 25 ms apart, never closer than macOS's acceleration allows.
+- **A scroll rests, then turns the wheel:** the same move and rest as a click, then notches 230 ± 20 ms apart, never closer than today's 200 ms.
 - **Typing has a typist's rhythm:** 180 ± 60 ms from one key-down to the next (about 67 words a minute), each key held 95 ± 25 ms, and Shift and other modifiers down 30–80 ms before their key and up 20–60 ms after it, held through a run of keys that all need them and never down on a key that does not.
 - **Every pause is drawn from a seeded random number generator.** The CLI and the MCP server seed it from the system; a test passes a fixed seed and a test clock and checks exact times.
 - **This is how the verbs behave, with no option to turn it off.** The cost is time: a click now takes about a second, and 1,000 characters take about three minutes to type.
 
-All "± x" figures are a normal distribution's mean and standard deviation, cut off at the floors and ceilings below.
+All "± x" figures are a normal distribution's mean and standard deviation. A draw outside the floors and ceilings below is drawn again, never clamped: clamping would pile identical values at each bound, the uniform timing this design removes.
 
 ## vhid today
 
@@ -29,7 +29,7 @@ A probe page ([human-probe.html](human-probe.html), served by [human-probe.py](h
 | Key down to next key down | median 2 ms; 53 characters in 1.3 s | 180 ± 60 ms [1] |
 | Key held | median 1 ms, at most 17 | 80–120 ms (assumed; see below) |
 
-Every vhid click is a *teleport click* as the bot-detection literature defines it: a cursor jump of more than 100 px in under 50 ms within 100 ms before the click [1]. That signature, together with click durations under 10 ms, is how that paper separates automation from people.
+Every vhid click is a *teleport click* as the bot-detection literature defines it: a cursor jump of more than 100 px in under 50 ms within 100 ms before the click [1]. That paper finds two features enough to catch every agent it tested: the ratio of teleport clicks and the rate of mouse events a page sees. vhid's 8 ms reports reach a page as about one pointer event a frame, as a 125 Hz mouse's do; what gives it away today is that a move is three or four of them.
 
 ## The model
 
@@ -41,7 +41,7 @@ Fitts' law, with the constants [1] uses for its human-like generator: MT = 50 ms
 
 A person's aimed movement is a main movement that gets most of the way, then one or more small corrections [2]. Each movement's speed rises and falls in a bell shape, which is what minimising jerk produces [3]:
 
-- **Main movement:** 80% of MT, aimed at a point short of the target by N(5%, 3%) of D, cut off to 1–10%, and off the line by N(0, 2%) of D, cut off to ±4%. Its path bows to one side by N(0, 3%) of D at the middle, cut off to ±6%: that offset × sin(π s) at fraction s of the way along. Position along it is the minimum-jerk curve 10s³ − 15s⁴ + 6s⁵ of elapsed time.
+- **Main movement:** 80% of MT, aimed at a point short of the target by N(5%, 3%) of D, cut off to 1–10%, and off the line by N(0, 2%) of D, cut off to ±4%. Its path bows to one side by N(0, 3%) of D at the middle, cut off to ±6%. At fraction τ of its time it has covered u = 10τ³ − 15τ⁴ + 6τ⁵ of its distance (the minimum-jerk curve), and sits that bow × sin(π u) off the straight line.
 - **Correction:** the remaining 20% of MT, a minimum-jerk straight line from wherever the main movement ended to the target.
 - **Closing:** `Pointer.move(to:)`'s loop, its reports paced 8 ms apart, for the last fraction of a point the steered path leaves.
 
@@ -61,18 +61,19 @@ This works because the cursor moves soon after a report. [human-cursor-poll.swif
 
 - **Rest on the target before pressing:** N(250, 80) ms, cut off to 120–500 ms. People do pause before they press, and some web menus need hover: on 2026-10-03 a bare `vhid click` on an item in GitHub's repository picker selected nothing three times, while moving, waiting 0.8 s and clicking selected it first time. Whether 250 ms is enough for that picker is checked when the click ticket is built, not here.
 - **Hold the button:** N(110, 30) ms, cut off to 60–200 ms [1].
-- **Between the clicks of a double or triple click:** N(120, 30) ms from up to down, cut off to 60–180 ms. With holds of at most 200 ms, each press comes at most 380 ms after the one before, inside macOS's default double-click interval of 0.5 s, which both test Macs keep. On a Mac set shorter, read from `NSEvent.doubleClickInterval` at the click, the hold and the gap are scaled down together until each press comes within 80% of it.
-- **A drag** rests on the start point as a click does, holds the button for 100 ms before carrying it, and rests 100 ms on the end point before letting go.
+- **Between the clicks of a double or triple click:** N(120, 30) ms from up to down, cut off to 60–180 ms. With holds of at most 200 ms, each press comes at most 380 ms after the one before, inside macOS's default double-click interval of 0.5 s, which both test Macs keep. On a Mac set shorter, read from `NSEvent.doubleClickInterval` in the calling process as the keyboard layout is (the root daemon would read its own default), the hold and the gap are scaled down together until each press comes within 80% of it, but no lower than their 60 ms floors.
+- **A drag** rests on the start point as a click does, holds the button N(100, 25) ms, cut off to 50–200 ms, before carrying it, and rests the same on the end point before letting go.
 
 ### Scrolling
 
-`scroll` moves to its point by the path above and rests there as a click does, N(250, 80) ms, before the first notch. Notches keep `Pointer.notchRest`'s 200 ms on average, drawn from N(200, 25) ms and cut off to 170–300 ms, so they do not tick like a metronome. The floor stays clear of the 150 ms below which `notchRest`'s measurements show Safari and TextEdit accelerating notches, so `--vertical N` still scrolls N times as far as `--vertical 1`. No source here measures wheel timing; this keeps today's pace and varies it.
+`scroll` moves to its point by the path above and rests there as a click does, N(250, 80) ms, before the first notch. Notches are drawn from N(230, 20) ms and cut off to 200–300 ms, so they do not tick like a metronome. The floor is `Pointer.notchRest`'s 200 ms, chosen a third clear of the 150 ms below which its measurements show Safari and TextEdit accelerating notches, so `--vertical N` still scrolls N times as far as `--vertical 1`. No source here measures wheel timing; this keeps today's pace and varies it.
 
 ### Typing
 
 - **From one key-down to the next:** N(180, 60) ms, cut off to 70 ms at the low end [1]. That is about 67 words a minute, a practised typist's speed.
-- **Each key held:** N(95, 25) ms, cut off to 40 ms and to 20 ms short of the next keystroke's first event (its first modifier going down, or its key if it needs none), so keys never overlap; with no modifiers, the 70 ms floor on the gap leaves room for both. No source here measures key holds; 80–120 ms is the range commonly given for them, and it was not checked.
-- **Modifiers:** a Shift, Option, Control or Command a keystroke needs goes down 30–80 ms before the key and comes up 20–60 ms after it. One the next keystroke also needs stays down between them, as a person holds Shift through a capitalised word. One the next keystroke does not need is up before that keystroke's modifiers or key go down. When the drawn gap is too short for the hold, the lag and the lead together, it is lengthened until they fit, so a modifier is never down on a key that did not ask for it.
+- **Each key held:** N(95, 25) ms, cut off to 40 ms at the low end. The hold is drawn before the gap is placed and is never shortened to fit it. No source here measures key holds; 80–120 ms is the range commonly given for them, and it was not checked.
+- **Modifiers:** a Shift, Option, Control or Command a keystroke needs goes down 30–80 ms before the key and comes up 20–60 ms after it. One the next keystroke also needs stays down between them, as a person holds Shift through a capitalised word. One the next keystroke does not need is up before that keystroke's modifiers or key go down.
+- **Fitting it together:** the next keystroke's first event, its first new modifier going down or else its key, comes at least 20 ms after this key is up and after the modifiers it does not share are up. Its key goes down at the drawn gap or at that first event plus its drawn lead, whichever is later. So keys never overlap, and a modifier is never down on a key that did not ask for it.
 - **A chord** (`vhid press`) uses the same modifier lead and key hold.
 - **No typos.** Text that is typed wrong and then corrected is not what a caller asked for.
 
@@ -86,6 +87,6 @@ A character typed as a dead key and then a letter is two keystrokes, and each ge
 
 ## Repeating it
 
-**The page.** Copy `human-probe.html` and `human-probe.py` to the Mac, run `python3 human-probe.py` in a scratch directory, and open `http://localhost:8765/` in Safari. Find the buttons with `eyes find "Target A"`, then run the verbs against them. The page posts what it saw every half second, and the server appends it to `events.jsonl`, one event a line with the page's own millisecond timestamp. Split pointer events into moves at gaps of more than 300 ms. The page sees what the browser dispatches, about one pointer event a frame, so it understates the event rate of a move that runs longer than a frame.
+**The page.** Copy `human-probe.html` and `human-probe.py` to the Mac, run `python3 human-probe.py` in a scratch directory, and open `http://localhost:8765/` in Safari. Find the buttons with `eyes find "Target A"`, then run the verbs against them. The page posts what it saw every half second, and the server appends it to `events.jsonl`, one event a line with the page's own millisecond timestamp. Split pointer events into moves at gaps of more than 300 ms. A move's distance is in screen points from where the cursor rested to the button; the first event a page sees comes after the first jump, so it is not the start. The page sees what the browser dispatches, about one pointer event a frame, so it understates the event rate of a move that runs longer than a frame.
 
-**The cursor.** Build `human-cursor-poll.swift` with `swiftc -O`, start it for 4 seconds as the user logged in at the screen, and while it runs `vhid play` a script of `move` lines. Pair the n-th change it prints with the n-th report `vhid play` prints; each line of `vhid play` carries the report's `sent_us` and `acked_us` on the same clock.
+**The cursor.** Build `human-cursor-poll.swift` with `swiftc -O`, start it for 4 seconds as the user logged in at the screen, and while it runs `vhid play` a script of `move` lines whose start line is the cursor's current point, so play sends no approach reports before its clock starts. Pair the n-th change it prints with the n-th report `vhid play` prints; each line of `vhid play` carries the report's `sent_us` and `acked_us` on the same clock.

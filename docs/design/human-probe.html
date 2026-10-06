@@ -26,16 +26,18 @@ const pointer = e => {
 };
 for (const type of ['pointermove', 'pointerdown', 'pointerup', 'click', 'dblclick']) document.addEventListener(type, pointer, true);
 for (const type of ['keydown', 'keyup']) document.addEventListener(type, e => log.push({ type, t: t(e), code: e.code, key: e.key, repeat: e.repeat }), true);
-let sent = 0, posting = false;
-setInterval(() => {
-  document.getElementById('status').textContent = 'events: ' + log.length;
+const page = crypto.randomUUID();
+let sent = 0, posting = false, failed = '';
+const post = () => {
   if (posting || log.length === sent) return;
   posting = true;
   const end = log.length;
-  fetch('/log', { method: 'POST', body: JSON.stringify(log.slice(sent, end)) })
-    .then(r => { if (!r.ok) throw new Error('status ' + r.status); sent = Math.max(sent, end); })
-    .catch(err => { document.getElementById('status').textContent = 'NOT SAVED: ' + err; })
+  fetch('/log', { method: 'POST', body: JSON.stringify({ page, from: sent, events: log.slice(sent, end) }) })
+    .then(r => { if (!r.ok) throw new Error('status ' + r.status); sent = Math.max(sent, end); failed = ''; })
+    .catch(err => { failed = ' NOT SAVED: ' + err; })
     .finally(() => { posting = false; });
-}, 500);
+};
+setInterval(() => { post(); document.getElementById('status').textContent = 'events: ' + log.length + failed; }, 500);
+addEventListener('pagehide', () => navigator.sendBeacon('/log', JSON.stringify({ page, from: sent, events: log.slice(sent) })));
 </script>
 </body></html>

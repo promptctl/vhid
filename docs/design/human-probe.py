@@ -5,9 +5,12 @@ Run beside the page: python3 human-probe.py, then open http://localhost:8765/.
 import http.server
 import json
 import pathlib
+import threading
 
 here = pathlib.Path(__file__).parent
 out = pathlib.Path.cwd() / "events.jsonl"
+written = {}  # events written, by page load
+lock = threading.Lock()
 
 
 class Probe(http.server.BaseHTTPRequestHandler):
@@ -20,9 +23,12 @@ class Probe(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         batch = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-        with out.open("a") as f:
-            for event in batch:
-                f.write(json.dumps(event) + "\n")
+        with lock, out.open("a") as f:
+            # A batch resent after a lost response overlaps what is written; skip that part.
+            for i, event in enumerate(batch["events"], batch["from"]):
+                if i >= written.get(batch["page"], 0):
+                    f.write(json.dumps(event) + "\n")
+                    written[batch["page"]] = i + 1
         self.send_response(204)
         self.end_headers()
 
