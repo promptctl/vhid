@@ -4,7 +4,7 @@ import Eyes
 /// Where a piece of text is, as the point `vhid click` presses.
 struct Find: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Find text on screen and print the point vhid clicks to hit it.",
+        abstract: "Find text on screen and print the point vhid clicks to hit it, and the box around it.",
         discussion: "Case never matters. With nothing found, prints the nearest runs and how many edits off each is."
     )
 
@@ -85,7 +85,7 @@ struct Find: AsyncParsableCommand {
 /// Every piece of text in a region, each with its point, in reading order.
 struct Read: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Print the text in a region, one run per row, with the point vhid clicks to hit it."
+        abstract: "Print the text in a region, one run per row, with the point vhid clicks to hit it and the box around it."
     )
 
     @Option(help: "The most runs to print.")

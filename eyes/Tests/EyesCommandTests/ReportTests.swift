@@ -1,3 +1,4 @@
+import CoreGraphics
 @testable import Eyes
 import Pixels
 import Telemetry
@@ -24,8 +25,8 @@ import Testing
         )
         #expect(Report.lines(reading, query: query, source: .pixels) == [
             "\"Settings\" not found in display 12 -2400,-300 2400x1600 by pixels; 47 runs read; 3 duplicate;"
-                + " whole region read; nearest follow. Points are centres, vhid click coordinates.",
-            "-1880,-50\tSetlings\tpixels\t1 off",
+                + " whole region read; nearest follow. Each row's point is its centre and its box holds it, x,y,width,height, in vhid click coordinates.",
+            "-1880,-50\t-1900,-60,40,20\tSetlings\tpixels\t1 off",
         ])
     }
 
@@ -39,7 +40,30 @@ import Testing
             Found(text: Text("Settings")!, frame: frame, source: .merged(button, .pixels(confidence: Confidence(1)!))),
             Found(text: Text("Canvas")!, frame: frame, source: .pixels(confidence: Confidence(1)!)),
         ])!))
-        #expect(rows == ["20,10\tSettings\tAXLink", "20,10\tSettings\tAXButton", "20,10\tCanvas\tpixels"])
+        #expect(rows == ["20,10\t0,0,40,20\tSettings\tAXLink", "20,10\t0,0,40,20\tSettings\tAXButton", "20,10\t0,0,40,20\tCanvas\tpixels"])
+    }
+
+    /// A row's box covers its frame in whole points, takes the form `rect` takes, and holds
+    /// the centre printed beside it - fractional frames and negative coordinates included,
+    /// where rounding each number its own way would cut the frame or miss the centre, and
+    /// a frame narrower than a point, whose rounded centre falls on its right edge.
+    @Test(arguments: [
+        (ScreenRect(x: 10.4, y: 20.6, width: 80.3, height: 23.9), "10,20,81,25"),
+        (ScreenRect(x: -1900.7, y: -60.2, width: 40.5, height: 19.4), "-1901,-61,41,21"),
+        (ScreenRect(x: 0, y: 0, width: 40, height: 20), "0,0,40,20"),
+        (ScreenRect(x: 10.9, y: 20, width: 10, height: 10), "10,20,11,10"),
+        (ScreenRect(x: 10.5, y: 20, width: 0.4, height: 10), "10,20,2,10"),
+    ])
+    func aRowsBoxHoldsItsFrameAndItsCentre(frame: ScreenRect, box: String) throws {
+        let found = Found(text: Text("Save")!, frame: frame, source: .tree(role: Role(rawValue: "AXButton")))
+        let columns = try #require(Report.rows(.matched(Matches([found])!)).first).split(separator: "\t").map(String.init)
+        #expect(columns[1] == box)
+        let n = columns[1].split(separator: ",").compactMap { Double($0) }
+        let c = columns[0].split(separator: ",").compactMap { Double($0) }
+        let printed = CGRect(x: n[0], y: n[1], width: n[2], height: n[3])
+        #expect(printed.contains(frame.cgRect))
+        #expect(printed.contains(CGPoint(x: c[0], y: c[1])))
+        #expect(try Find.parse(["Save", "--rect", columns[1]]).place.rect == columns[1])
     }
 
     /// The scope says a match was ordered beside other text, and that a page was read.

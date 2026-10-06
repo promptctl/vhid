@@ -54,7 +54,7 @@ others reach around the devices.
    took that key instead. The search field opens empty or holding the last query,
    selected; your typing replaces it.
 5. **Read the results:** `read {"window": <id>}` the layer-101 window, by id each
-   time: it keeps its id and grows as results come in. Rows are point, text, role,
+   time: it keeps its id and grows as results come in. Rows are point, box, text, role,
    and you compare the text. No "Menu Items" or "Help Topics" heading yet, and no "No
    Results Found": the results are not in - read again. Down takes the first row under
    "Menu Items" (above "Help Topics"), whatever it is. That row must be the whole
@@ -118,22 +118,22 @@ escape until its window is gone - until one lists the item's menu or the item.
 ```
 eyes windows      -> ... Frontmost: TextEdit (pid N), its rows marked front.
 eyes find {"text": "Help", "rect": "0,0,800,30"}
-                  -> (a scope line, then) 422,14	Help	pixels
+                  -> (a scope line, then) 422,14	406,7,32,15	Help	pixels
 vhid click {"x": 422, "y": 14}
 eyes windows      -> no layer-101 window yet: look again
 eyes windows      -> 180	TextEdit	L101	395,25 360x59	front    a menu is open
 eyes read {"window": 180}
-                  -> 433,41	Search	pixels
-                     452,69	TextEdit Help	pixels           "Search": the Help menu
+                  -> 433,41	410,33,46,16	Search	pixels
+                     452,69	410,61,84,16	TextEdit Help	pixels           "Search": the Help menu
 vhid type {"text": "Export as PDF"}
 eyes read {"window": 180}
                   -> Search, TextEdit Help only, still 59 high, no heading:
                      not in yet
 eyes read {"window": 180}
-                  -> 457,40	Export as PDF	pixels
-                     444,73	Menu Items	pixels
-                     472,95	EJ Export as PDF...	pixels      first row, the whole name: this one
-                     445,116	Help Topics	pixels
+                  -> 457,40	410,32,94,16	Export as PDF	pixels
+                     444,73	410,66,68,14	Menu Items	pixels
+                     472,95	412,87,120,16	EJ Export as PDF...	pixels      first row, the whole name: this one
+                     445,116	410,109,70,14	Help Topics	pixels
 eyes windows      -> 180	TextEdit	L101	395,25 360x151	front   same id, grown
 vhid press {"chords": ["down"]}
 vhid press {"chords": ["return"]}
@@ -157,7 +157,7 @@ Nor this, asked for `Close`:
 
 ```
 eyes read {"window": 180}
-                  -> 472,95	Close All	pixels
+                  -> 472,95	440,87,64,16	Close All	pixels
 vhid press {"chords": ["down"]}         (the row starts with the name but is
 vhid press {"chords": ["return"]}        another item: every window closed)
 ```
