@@ -14,7 +14,7 @@ import Testing
 
     @Test func typeIntoTheAppInFrontTypesAndSaysWhere() async throws {
         let keyboard = RecordingKeyboard()
-        let said = try await TypeCommand.type("abc", on: VerbTests.us, into: .into("TextEdit"), with: Typist(keyboard: keyboard),
+        let said = try await TypeCommand.type("abc", on: VerbTests.us, into: .into("TextEdit"), with: Typist.onManualClock(keyboard),
                                               front: { Self.textEdit })
         #expect(said == "typed 3 characters on \(VerbTests.us.name) into TextEdit")
         #expect(keyboard.down.count >= 3)
@@ -23,7 +23,7 @@ import Testing
     @Test func typeIntoAnAppNotInFrontSendsNothingAndNamesTheOne() async {
         let keyboard = RecordingKeyboard()
         await #expect(throws: NotInFront(aimed: "TextEdit", front: Self.terminal)) {
-            try await TypeCommand.type("abc", on: VerbTests.us, into: .into("TextEdit"), with: Typist(keyboard: keyboard),
+            try await TypeCommand.type("abc", on: VerbTests.us, into: .into("TextEdit"), with: Typist.onManualClock(keyboard),
                                        front: { Self.terminal })
         }
         #expect(keyboard.down.isEmpty && keyboard.holds.isEmpty)
@@ -32,11 +32,11 @@ import Testing
     @Test func pressIntoAnAppNotInFrontPressesNothing() async throws {
         let keyboard = RecordingKeyboard()
         await #expect(throws: NotInFront(aimed: "TextEdit", front: Self.terminal)) {
-            try await PressCommand.press(["leftCommand+s"], on: VerbTests.us, into: .into("TextEdit"), with: Typist(keyboard: keyboard),
+            try await PressCommand.press(["leftCommand+s"], on: VerbTests.us, into: .into("TextEdit"), with: Typist.onManualClock(keyboard),
                                          front: { Self.terminal })
         }
         #expect(keyboard.down.isEmpty && keyboard.holds.isEmpty)
-        let said = try await PressCommand.press(["return"], on: VerbTests.us, into: .into("TextEdit"), with: Typist(keyboard: keyboard),
+        let said = try await PressCommand.press(["return"], on: VerbTests.us, into: .into("TextEdit"), with: Typist.onManualClock(keyboard),
                                                 front: { Self.textEdit })
         #expect(said.hasSuffix(" on \(VerbTests.us.name) into TextEdit"))
     }

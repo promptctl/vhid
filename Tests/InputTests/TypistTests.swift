@@ -9,16 +9,17 @@ import Testing
 
     @Test func textIsTypedCharacterByCharacterAndCounted() async throws {
         let keyboard = RefusingKeyboard()
-        let typist = Typist(keyboard: keyboard)
+        let typist = Typist.on(keyboard)
         let text = try typist.lower("aB", on: Self.us)
         #expect(text.count == 2)
         #expect(try await typist.type(text) == 2)
-        #expect(keyboard.log == ["down 4", "up", "down e1", "down 5", "up"])
+        // Shift down before B's key, up after it, and up at the end of the run.
+        #expect(keyboard.log == ["hold [4]", "hold []", "hold [e1]", "hold [5 e1]", "hold [e1]", "hold []"])
     }
 
     @Test func nothingIsTypedForNothing() async throws {
         let keyboard = RefusingKeyboard()
-        let typist = Typist(keyboard: keyboard)
+        let typist = Typist.on(keyboard)
         #expect(try await typist.type(try typist.lower("", on: Self.us)) == 0)
         #expect(keyboard.log.isEmpty)
     }
@@ -27,30 +28,30 @@ import Testing
     /// there is no count to carry.
     @Test func textTheLayoutCannotTypeIsRefusedWhole() {
         let keyboard = RefusingKeyboard()
-        let typist = Typist(keyboard: keyboard)
+        let typist = Typist.on(keyboard)
         #expect(throws: UntypeableCharacters.self) { try typist.lower("a\u{1F600}", on: Self.us) }
         #expect(keyboard.log.isEmpty)
     }
 
     @Test func aChordIsPressedAsOneKeystroke() async throws {
         let keyboard = RefusingKeyboard()
-        let typist = Typist(keyboard: keyboard)
-        try await typist.press(try typist.lower(KeyChord(key: Key(rawValue: 0x24))))
-        #expect(keyboard.log == ["down 28", "up"])
+        let typist = Typist.on(keyboard)
+        #expect(try await typist.press([try typist.lower(KeyChord(key: Key(rawValue: 0x24)))]) == 1)
+        #expect(keyboard.log == ["hold [28]", "hold []"])
     }
 
     /// A run that stops is reported with its count, and the keys are released on the way
     /// out: the modifiers of the keystroke it stopped inside would otherwise stay held.
     @Test func aStoppedRunReleasesTheKeysAndReportsTheCount() async throws {
         let keyboard = StuckKeyboard()
-        let typist = Typist(keyboard: keyboard)
+        let typist = Typist.on(keyboard)
         let text = try typist.lower("abc", on: Self.us)
         let stopped = try await #require(throws: TypingStopped.self) { try await typist.type(text) }
         #expect(stopped.typed == 0)
         #expect(stopped.of == 3)
         #expect(stopped.cause is Refused)
         #expect(stopped.unreleased == nil)
-        #expect(keyboard.log == ["down 4", "up"])
+        #expect(keyboard.log == ["hold [4]", "up"])
         #expect(!"\(stopped)".contains("not released"))
     }
 
@@ -71,8 +72,8 @@ import Testing
     /// reads once through either sentence.
     @Test func aFailedReleaseEndingInAFullStopIsNotGivenAnother() {
         struct Said: Error, CustomStringConvertible { let description: String }
-        let said = "\(ChordStopped(cause: Said(description: "refused."), unreleased: Said(description: "refused.")))"
-        #expect(said == "refused. The keyboard was not released afterwards: refused. A key may be left held")
+        let said = "\(ChordsStopped(pressed: 0, of: 1, cause: Said(description: "refused."), unreleased: Said(description: "refused.")))"
+        #expect(said == "refused. 0 of 1 chords had been pressed before this, and the rest were not sent. The keyboard was not released afterwards: refused. A key may be left held")
     }
 
     /// A release that fails after the stop is said beside the stop, not instead of it:
@@ -80,7 +81,7 @@ import Testing
     @Test func aReleaseThatFailsAfterTheStopIsReported() async throws {
         let keyboard = RefusingKeyboard()
         keyboard.allow = 2
-        let typist = Typist(keyboard: keyboard)
+        let typist = Typist.on(keyboard)
         let stopped = try await #require(throws: TypingStopped.self) { try await typist.type(try typist.lower("ab", on: Self.us)) }
         #expect(stopped.typed == 1)
         #expect(stopped.of == 2)
@@ -90,12 +91,13 @@ import Testing
 
     @Test func aStoppedChordReleasesTheKeysToo() async throws {
         let keyboard = StuckKeyboard()
-        let typist = Typist(keyboard: keyboard)
+        let typist = Typist.on(keyboard)
         let chord = try typist.lower(KeyChord(key: Key(rawValue: 0x00), modifiers: [.leftCommand]))
-        let stopped = try await #require(throws: ChordStopped.self) { try await typist.press(chord) }
+        let stopped = try await #require(throws: ChordsStopped.self) { try await typist.press([chord]) }
         #expect(stopped.cause is Refused)
+        #expect(stopped.pressed == 0)
         #expect(stopped.unreleased == nil)
-        #expect(keyboard.log == ["down e3", "up"])
+        #expect(keyboard.log == ["hold [e3]", "up"])
     }
 }
 
@@ -103,6 +105,13 @@ import Testing
 /// typed when a fragment was already in the document, once saying "the rest were not"
 /// about a run where there was no rest - so what it says is checked rather than read.
 @Suite struct TypingStoppedTests {
+    /// A list stopped after its last chord went down, letting go of its modifiers, does not
+    /// say any were left unsent.
+    @Test func chordsStoppedAfterTheLastSayAllWerePressed() {
+        let stopped = ChordsStopped(pressed: 2, of: 2, cause: WentQuiet())
+        #expect("\(stopped)" == "the daemon did not answer. all 2 chords had been pressed before this")
+    }
+
     @Test func aRunStoppedPartWaySaysHowMuchLandedAndThatTheRestDidNot() {
         let stopped = TypingStopped(typed: 34, of: 500, cause: WentQuiet())
         #expect("\(stopped)" == "the daemon did not answer. 34 of 500 characters had been posted and acknowledged before this, and the rest were not sent")

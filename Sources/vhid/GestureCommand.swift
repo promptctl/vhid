@@ -48,7 +48,7 @@ struct GestureCommand: AsyncParsableCommand {
 
     /// The verb itself, over a typist from anywhere. [LAW:decomposition]
     static func perform(_ chosen: GestureChord, with typist: Typist) async throws -> String {
-        try await typist.press(try typist.lower(chosen.chord))
+        try await typist.press([try typist.lower(chosen.chord)])
         return "\(chosen.gesture): pressed \(chosen.chord), \(chosen.chosen)"
     }
 

@@ -17,7 +17,7 @@ import Testing
 
     @Test func typeReportsTheCharactersItPosted() async throws {
         let keyboard = RecordingKeyboard()
-        let said = try await TypeCommand.type("abc", on: Self.us, into: .anywhere, with: Typist(keyboard: keyboard), front: { nil })
+        let said = try await TypeCommand.type("abc", on: Self.us, into: .anywhere, with: Typist.onManualClock(keyboard), front: { nil })
         #expect(said == "typed 3 characters on \(Self.us.name)")
         #expect(keyboard.down.count >= 3)
     }
@@ -25,7 +25,7 @@ import Testing
     /// One of something is one of it. The rule lives in `counted`, and this is the verb
     /// reading back what it did rather than `counted` being called directly.
     @Test func oneCharacterIsOneCharacter() async throws {
-        let said = try await TypeCommand.type("a", on: Self.us, into: .anywhere, with: Typist(keyboard: RecordingKeyboard()), front: { nil })
+        let said = try await TypeCommand.type("a", on: Self.us, into: .anywhere, with: Typist.onManualClock(RecordingKeyboard()), front: { nil })
         #expect(said == "typed 1 character on \(Self.us.name)")
     }
 
@@ -35,7 +35,7 @@ import Testing
     @Test func textTheLayoutCannotTypeMovesNothing() async throws {
         let keyboard = RecordingKeyboard()
         await #expect(throws: (any Error).self) {
-            try await TypeCommand.type("ab日", on: Self.us, into: .anywhere, with: Typist(keyboard: keyboard), front: { nil })
+            try await TypeCommand.type("ab日", on: Self.us, into: .anywhere, with: Typist.onManualClock(keyboard), front: { nil })
         }
         #expect(keyboard.down.isEmpty, "the refusal came after keys had already gone down")
     }
@@ -45,7 +45,7 @@ import Testing
     @Test func aStoppedRunSaysHowMuchWasTyped() async throws {
         let keyboard = RecordingKeyboard(failingAtKey: 2)
         let stopped = await #expect(throws: TypingStopped.self) {
-            try await TypeCommand.type("abcd", on: Self.us, into: .anywhere, with: Typist(keyboard: keyboard), front: { nil })
+            try await TypeCommand.type("abcd", on: Self.us, into: .anywhere, with: Typist.onManualClock(keyboard), front: { nil })
         }
         #expect(stopped?.of == 4)
         #expect((stopped?.typed ?? 4) < 4)
@@ -55,7 +55,7 @@ import Testing
 
     @Test func pressPressesEveryChordAndNamesThemBack() async throws {
         let keyboard = RecordingKeyboard()
-        let said = try await PressCommand.press(["leftCommand+s", "return"], on: Self.us, into: .anywhere, with: Typist(keyboard: keyboard), front: { nil })
+        let said = try await PressCommand.press(["leftCommand+s", "return"], on: Self.us, into: .anywhere, with: Typist.onManualClock(keyboard), front: { nil })
         #expect(said.hasSuffix(" on \(Self.us.name)"))
         // Reported in the spelling that reads back, not the one that was typed.
         #expect(said.contains("leftCommand+key 0x"))
@@ -71,7 +71,7 @@ import Testing
     @Test func aStoppedListOfChordsSaysHowManyWentDown() async throws {
         let keyboard = RecordingKeyboard(failingAtKey: 1)
         let stopped = await #expect(throws: ChordsStopped.self) {
-            try await PressCommand.press(["return", "tab", "delete"], on: Self.us, into: .anywhere, with: Typist(keyboard: keyboard), front: { nil })
+            try await PressCommand.press(["return", "tab", "delete"], on: Self.us, into: .anywhere, with: Typist.onManualClock(keyboard), front: { nil })
         }
         #expect(stopped?.pressed == 1)
         #expect(stopped?.of == 3)
@@ -84,7 +84,7 @@ import Testing
     @Test func aBadChordLateInTheListPressesNothing() async throws {
         let keyboard = RecordingKeyboard()
         await #expect(throws: (any Error).self) {
-            try await PressCommand.press(["leftCommand+s", "return", "nosuchkey"], on: Self.us, into: .anywhere, with: Typist(keyboard: keyboard), front: { nil })
+            try await PressCommand.press(["leftCommand+s", "return", "nosuchkey"], on: Self.us, into: .anywhere, with: Typist.onManualClock(keyboard), front: { nil })
         }
         #expect(keyboard.down.isEmpty, "a chord was pressed before the whole list had been proven")
     }
@@ -94,7 +94,7 @@ import Testing
     @Test func aChordOfModifiersAloneIsRefusedBeforeAnythingIsPressed() async throws {
         let keyboard = RecordingKeyboard()
         await #expect(throws: (any Error).self) {
-            try await PressCommand.press(["leftCommand"], on: Self.us, into: .anywhere, with: Typist(keyboard: keyboard), front: { nil })
+            try await PressCommand.press(["leftCommand"], on: Self.us, into: .anywhere, with: Typist.onManualClock(keyboard), front: { nil })
         }
         #expect(keyboard.down.isEmpty)
     }
@@ -207,7 +207,7 @@ import Testing
     static func performed(_ gesture: Gesture, on layout: KeyboardLayout = us, hotKeys: () -> [String: Any]? = none) async throws -> (said: String, down: [Usage]) {
         let keyboard = RecordingKeyboard()
         let chord = try GestureCommand.chord(for: gesture, on: layout, hotKeys: hotKeys)
-        let said = try await GestureCommand.perform(chord, with: Typist(keyboard: keyboard))
+        let said = try await GestureCommand.perform(chord, with: Typist.onManualClock(keyboard))
         return (said, keyboard.down)
     }
 

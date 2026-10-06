@@ -50,8 +50,15 @@ public struct Hand: Sendable, Equatable {
         notch = Normal(230, 20, within: 200 ... 300)
     }
 
-    /// The distribution a pause of `kind` is drawn from.
-    public func spread(of kind: Pause.Kind) -> Normal {
+    /// What a pointer waits for between its reports.
+    public enum Wait: String, Sendable {
+        case rest, hold, gap
+        case dragHold = "drag_hold"
+        case notch
+    }
+
+    /// The distribution a wait of `kind` is drawn from.
+    public func spread(of kind: Wait) -> Normal {
         switch kind {
         case .rest: rest
         case .hold: hold
@@ -62,13 +69,22 @@ public struct Hand: Sendable, Equatable {
     }
 }
 
-/// One pause a pointer made: what it was for and how long it slept, which is less than was
-/// drawn for a pause a cancel cut short.
+/// One pause a pointer or a typist made: what it was for and how long it slept, which is
+/// less than was drawn for a pause a cancel cut short.
 public struct Pause: Sendable, Equatable {
-    public enum Kind: String, Sendable {
-        case rest, hold, gap
-        case dragHold = "drag_hold"
-        case notch
+    /// [LAW:types-are-the-program] A pause is a pointer's or a typist's, and each draws its
+    /// own kinds from its own model: `Hand` for the one, `Cadence` for the other.
+    public enum Kind: Hashable, Sendable {
+        case hand(Hand.Wait)
+        case keys(Cadence.Wait)
+
+        /// The name a record totals this kind under.
+        public var name: String {
+            switch self {
+            case .hand(let wait): wait.rawValue
+            case .keys(let wait): wait.rawValue
+            }
+        }
     }
 
     public let kind: Kind
