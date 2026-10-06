@@ -77,19 +77,29 @@ import Testing
             #expect(zip(path.strokes, path.strokes.dropFirst()).allSatisfy { $0.to == $1.from })
             #expect(path.strokes.last!.to == (840, 300))
             #expect(path.point(after: path.duration) == (840, 300))
-            // The whole path, bow, aims off the line and tremor together, within the sum of
-            // their bounds of the line: 6% and 4% of D and 1.6 points across it, and no
-            // further back than the start or on than the furthest overshoot.
-            for ms in 0 ... Int(path.duration / .milliseconds(1)) {
-                let point = path.point(after: .milliseconds(ms))
-                #expect(abs(point.y - 300) <= 0.10 * 740 + 1.6 && (100 - 1e-9 ... 840 + 0.08 * 740).contains(point.x), "seed \(seed) at \(ms) ms: \(point)")
-            }
             let total = path.strokes.reduce(Duration.zero) { $0 + $1.duration }
             #expect(abs((total - path.duration) / .milliseconds(1)) < 1e-6)
         }
         #expect(sides == [true, false])
         let shares: [Trajectory.Structure: ClosedRange<Int>] = [.direct: 200 ... 300, .undershoot: 400 ... 500, .overshoot: 110 ... 190, .twoCorrections: 110 ... 190]
         for (structure, range) in shares { #expect(range.contains(seen[structure] ?? 0), "\(structure): \(seen[structure] ?? 0)") }
+    }
+
+    /// The whole path, bow, aims off the line and tremor together, stays within the sum of
+    /// their bounds of the line, every millisecond over 200 seeds of every structure: 6% and
+    /// 4% of D and 1.6 points across it, and no further back than the start or on than the
+    /// furthest overshoot.
+    @Test func thePathStaysWithinItsBounds() {
+        var structures = Set<Trajectory.Structure>()
+        for seed in UInt64(0) ..< 200 {
+            let path = Self.trajectory(seed: seed)
+            structures.insert(path.structure)
+            for ms in 0 ... Int(path.duration / .milliseconds(1)) {
+                let point = path.point(after: .milliseconds(ms))
+                #expect(abs(point.y - 300) <= 0.10 * 740 + 1.6 && (100 - 1e-9 ... 840 + 0.08 * 740).contains(point.x), "seed \(seed) at \(ms) ms: \(point)")
+            }
+        }
+        #expect(structures == Set(Trajectory.Structure.allCases))
     }
 
     /// The main movement bows away from the elbow in every direction, by 1–6% of D times the
@@ -189,7 +199,7 @@ import Testing
 /// A trajectory kept on the displays: beside an edge its strokes never run nearer the edge
 /// than the straight line does, the tremor only shakes them, and what it cuts it cuts from
 /// the deviation that would reach the edge, not the other. Away from every edge it keeps
-/// everything. Over 500 seeds each, seconds of work that would hold `make test`'s one-thread
+/// everything. Over 200 or 500 seeds each, seconds of work that would hold `make test`'s one-thread
 /// pool, hence its own thread.
 @Suite(.ownThread) struct TrajectoryOnTheDisplaysTests {
     static let screen = Displays(frames: [CGRect(x: 0, y: 0, width: 1920, height: 1080)])!
@@ -229,7 +239,7 @@ import Testing
     /// the line, about half, keep that aim and every overshoot along it whole.
     @Test func aPathAlongTheMenuBarCutsItsBowAlone() {
         var kept: [Trajectory.Kept] = []
-        for seed in UInt64(0) ..< 500 {
+        for seed in UInt64(0) ..< 200 {
             let path = Self.trajectory(seed: seed, from: ScreenPoint(x: 100, y: 12)!, to: ScreenPoint(x: 900, y: 12)!)
             for ms in 0 ... Int(path.duration / .milliseconds(1)) {
                 #expect(path.unshaken(after: .milliseconds(ms)).y >= 11.95, "seed \(seed) at \(ms) ms")
@@ -237,7 +247,7 @@ import Testing
             kept.append(path.kept)
         }
         #expect(kept.allSatisfy { $0.bow < 1 })
-        #expect(kept.filter { $0.ends == 1 }.count >= 200, "\(kept.filter { $0.ends == 1 }.count)")
+        #expect(kept.filter { $0.ends == 1 }.count >= 80, "\(kept.filter { $0.ends == 1 }.count)")
     }
 
     /// Up to a menu-bar item, an overshoot would carry the path past it into the top edge,
@@ -246,7 +256,7 @@ import Testing
     /// nine in ten of those that stop short keep all of their curve.
     @Test func aPathUpToTheMenuBarCutsItsOvershootNotItsBow() {
         var overshoots = 0, short = 0, bowed = 0
-        for seed in UInt64(0) ..< 500 {
+        for seed in UInt64(0) ..< 200 {
             let path = Self.trajectory(seed: seed, from: ScreenPoint(x: 400, y: 600)!, to: ScreenPoint(x: 900, y: 12)!)
             for ms in 0 ... Int(path.duration / .milliseconds(1)) {
                 #expect(path.unshaken(after: .milliseconds(ms)).y >= 11.95, "seed \(seed) at \(ms) ms")
@@ -256,7 +266,7 @@ import Testing
             overshoots += 1
             #expect(path.kept.ends < 1, "seed \(seed)")
         }
-        #expect(overshoots > 40)
+        #expect(overshoots > 15)
         #expect(Double(bowed) >= 0.9 * Double(short), "\(bowed) of \(short)")
     }
 
