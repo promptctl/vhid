@@ -33,8 +33,9 @@ public struct Typist {
     public enum Traced: Equatable, Sendable {
         case paused(Pause)
         /// A run's slip, once it ends: how far behind its drawn timing its last report went
-        /// out, which slow acknowledgements and late wakes add up to.
-        case ran(late: Duration)
+        /// out, which slow acknowledgements and late wakes add up to; and how many of its
+        /// keys went down while another was held.
+        case ran(late: Duration, rollovers: Int)
     }
 
     public init<C: Clock>(keyboard: any Keyboard, clock: C, randomness: RandomSource, cadence: Cadence = .typist,
@@ -48,7 +49,7 @@ public struct Typist {
 
     /// A scribe for one run, timed from now.
     private var scribe: Scribe {
-        Scribe(keyboard: keyboard, timeline: timeline, randomness: randomness, cadence: cadence, traced: { [traced] in traced(.paused($0)) })
+        Scribe(keyboard: keyboard, timeline: timeline, traced: { [traced] in traced(.paused($0)) })
     }
 
     /// Text proven typeable: every character has keys on the layout.
@@ -80,11 +81,11 @@ public struct Typist {
     /// with the count instead.
     @discardableResult
     public func type(_ text: Text, isolation: isolated (any Actor)? = #isolation) async throws -> Int {
+        let changes = randomness.draw { cadence.type(text.characters, drawing: &$0) }
         var scribe = scribe
-        defer { traced(.ran(late: scribe.slip)) }
+        defer { traced(.ran(late: scribe.slip, rollovers: scribe.rollovers)) }
         do {
-            for (character, keystrokes) in text.characters { try await scribe.type(character, keystrokes) }
-            try await scribe.finish()
+            try await scribe.run(changes)
         } catch {
             throw TypingStopped(typed: scribe.typed, of: text.count, halfTyped: scribe.halfTyped, cause: error, unreleased: await release())
         }
@@ -96,10 +97,11 @@ public struct Typist {
     /// throws `ChordsStopped` with the count instead.
     @discardableResult
     public func press(_ chords: [Chord], isolation: isolated (any Actor)? = #isolation) async throws -> Int {
+        let changes = randomness.draw { cadence.press(chords.map(\.keystroke), drawing: &$0) }
         var scribe = scribe
-        defer { traced(.ran(late: scribe.slip)) }
+        defer { traced(.ran(late: scribe.slip, rollovers: scribe.rollovers)) }
         do {
-            for chord in chords { try await scribe.press(chord.keystroke) }
+            try await scribe.run(changes)
         } catch {
             throw ChordsStopped(pressed: scribe.typed, of: chords.count, cause: error, unreleased: await release())
         }

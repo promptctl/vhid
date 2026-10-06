@@ -154,6 +154,8 @@ enum Tally: String, CaseIterable, Sendable {
     /// report as one notch whatever count it carries (`Pointer.scroll`).
     case verticalNotches = "scroll_notches_vertical"
     case horizontalNotches = "scroll_notches_horizontal"
+    /// Keys a typist put down while another key was still held.
+    case keyRollovers = "key_rollovers"
 }
 
 /// A fact a verb decided that is not a count.
@@ -296,12 +298,14 @@ extension Invocation {
     }
 
     /// Adds what a typist traced to the running invocation: a pause to its kind's total in
-    /// `pauses`, and how late its run went to `keys_late_ms`. `Devices` hands every typist
-    /// it opens this. [LAW:single-enforcer]
+    /// `pauses`, how late its run went to `keys_late_ms`, and its rollovers to
+    /// `key_rollovers`. `Devices` hands every typist it opens this. [LAW:single-enforcer]
     @Sendable static func typed(_ traced: Typist.Traced) {
         switch traced {
         case .paused(let pause): paused(pause)
-        case .ran(let late): set(.keysLateMilliseconds, .double(late / .milliseconds(1)))
+        case .ran(let late, let rollovers):
+            set(.keysLateMilliseconds, .double(late / .milliseconds(1)))
+            count(.keyRollovers, by: rollovers)
         }
     }
 

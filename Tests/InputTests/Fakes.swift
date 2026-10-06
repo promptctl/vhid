@@ -210,9 +210,15 @@ final class CancellingKeyboard: Keyboard {
 }
 
 extension Scribe {
-    /// A scribe on `keyboard` timed on `clock`, its timings drawn from seed 1.
+    /// A scribe on `keyboard` timed on `clock`.
     static func on(_ keyboard: any Keyboard, clock: ManualClock = ManualClock()) -> Scribe {
-        Scribe(keyboard: keyboard, timeline: Timeline(clock), randomness: RandomSource(seed: 1), cadence: .typist, traced: { _ in })
+        Scribe(keyboard: keyboard, timeline: Timeline(clock), traced: { _ in })
+    }
+
+    /// Types `text`, a typist's run of it planned from seed 1.
+    mutating func type(_ text: [(character: Character, keystrokes: [Keystroke])], isolation: isolated (any Actor)? = #isolation) async throws {
+        var generator = SeededGenerator(seed: 1)
+        try await run(Cadence.typist.type(text, drawing: &generator))
     }
 }
 

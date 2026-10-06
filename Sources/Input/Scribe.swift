@@ -1,6 +1,7 @@
 import Keystrokes
 
-/// Presses keystrokes and keeps the score a stopped run has to report.
+/// Makes a planned run's changes, each at its time, and keeps the score a stopped run has to
+/// report.
 ///
 /// A character is several keystrokes - a dead key and the letter it accents, a modifier
 /// and the key under it - so a run can stop *inside* one, and which keystrokes had been
@@ -14,27 +15,23 @@ import Keystrokes
 /// started typing. [LAW:no-shared-mutable-globals]
 public struct Scribe {
     public let keyboard: any Keyboard
-    /// What every key is timed on, and what its waits are drawn from.
+    /// What every key is timed on.
     public let timeline: Timeline
-    public let randomness: RandomSource
-    public let cadence: Cadence
     /// Where every wait is handed once it ends, however it ends. [LAW:nothing-unseen]
     public let traced: @Sendable (Pause) -> Void
 
-    /// What the last keystroke left held, and when its key went down and came up.
-    private var last: Cadence.Stroke
+    /// When the run started, which every change's time is measured from.
+    private let start: Duration
     /// How far behind its plan this run is: every report that went out late, behind a slow
     /// acknowledgement of the one before or a sleep that woke late, moves every report
     /// after it by as much, so a hold or a settle is never shortened to make up the time.
     public private(set) var slip: Duration = .zero
 
-    public init(keyboard: any Keyboard, timeline: Timeline, randomness: RandomSource, cadence: Cadence, traced: @escaping @Sendable (Pause) -> Void) {
+    public init(keyboard: any Keyboard, timeline: Timeline, traced: @escaping @Sendable (Pause) -> Void) {
         self.keyboard = keyboard
         self.timeline = timeline
-        self.randomness = randomness
-        self.cadence = cadence
         self.traced = traced
-        last = .idle(at: timeline.now(), settle: cadence.settle)
+        start = timeline.now()
     }
 
     /// Characters and chords posted and acknowledged. "Posted and acknowledged", not
@@ -48,6 +45,14 @@ public struct Scribe {
     /// own hands - will combine with into some other character. Nothing here can undo a
     /// posted keystroke, so this is said rather than fixed.
     public private(set) var halfTyped: Character?
+
+    /// Keys that went down, acknowledged, while another key was still held.
+    public private(set) var rollovers = 0
+
+    /// Makes every change of a planned run, in order, each at its time.
+    public mutating func run(_ changes: [Cadence.Change], isolation: isolated (any Actor)? = #isolation) async throws {
+        for change in changes { try await make(change) }
+    }
 
     /// One change of the keys held, at its time, and the one place this run can be stopped
     /// between reports.
@@ -65,13 +70,8 @@ public struct Scribe {
     /// `releaseAll`, on the way out of a stopped run, is deliberately not asked this way. A
     /// release that refuses to run leaves a key down for macOS to repeat into whatever
     /// comes forward next, which is worse than what stopping prevents.
-    ///
-    /// `composing` is the character a key-down leaves pending in the app - the dead key of
-    /// an accented letter, and nothing else. It travels with the call rather than being set
-    /// beside it, so the one line that can record a pending accent is the one line that is
-    /// ambiguous about whether it happened. [LAW:dataflow-not-control-flow]
-    private mutating func make(_ change: Cadence.Change, composing pending: Character?, isolation: isolated (any Actor)? = #isolation) async throws {
-        let due = change.at + slip
+    private mutating func make(_ change: Cadence.Change, isolation: isolated (any Actor)? = #isolation) async throws {
+        let due = start + change.at + slip
         try await timeline.pause(until: due) { traced(Pause(kind: .keys(change.wait), length: $0)) }
         try Task.checkCancellation()
         slip += max(timeline.now() - due, .zero)
@@ -81,56 +81,21 @@ public struct Scribe {
         // driver, so its accent is assumed pending rather than assumed away, while a
         // cancellation is a local decision that sent nothing, and reporting an accent for it
         // would tell the operator to clear a composition that is not there.
-        if let pending { halfTyped = pending }
+        if case .pending(let character) = change.lands { halfTyped = character }
         try await keyboard.hold(change.held)
-    }
-
-    /// One keystroke: the modifiers the last one held that this one does not need up, this
-    /// one's modifiers down, its key down under them and up again, each at its time.
-    private mutating func press(_ keystroke: Keystroke, composing: Character?, isolation: isolated (any Actor)? = #isolation) async throws {
-        let (changes, left) = randomness.draw { [last] in cadence.press(keystroke, after: last, drawing: &$0) }
-        last = left
-        for change in changes {
-            let keyDown = change.wait == .keyDown
-            try await make(change, composing: keyDown ? composing : nil)
-            // Counted on the key-down the daemon has acknowledged, not after the release: a
-            // failure between the two still put the character on screen, and a count taken
-            // after the release would report one fewer than is really there. It is the LAST
-            // key-down of the character - the one composing nothing - because a character
-            // typed as a dead key and then the letter it accents is not on screen until the
-            // second of them.
-            //
-            // The opposite bias to `halfTyped` above, and deliberately: this count says
-            // "posted and acknowledged", which a throw means did not happen, while that says
-            // "may be pending", which a throw means it might be.
-            if keyDown && composing == nil {
-                typed += 1
-                halfTyped = nil
-            }
+        // Counted on the key-down the daemon has acknowledged, not after the release: a
+        // failure between the two still put the character on screen, and a count taken
+        // after the release would report one fewer than is really there. It is the LAST
+        // key-down of the character, because a character typed as a dead key and then the
+        // letter it accents is not on screen until the second of them.
+        //
+        // The opposite bias to `halfTyped` above, and deliberately: this count says
+        // "posted and acknowledged", which a throw means did not happen, while that says
+        // "may be pending", which a throw means it might be.
+        if change.lands == .typed {
+            typed += 1
+            halfTyped = nil
         }
-    }
-
-    /// A chord: one keystroke that is a whole act, so it composes nothing, counts as one
-    /// when its key has gone down, and lets go of its modifiers before whatever follows it.
-    /// `leftCommand+tab` twice is two app switches, not a Command held through both.
-    public mutating func press(_ keystroke: Keystroke, isolation: isolated (any Actor)? = #isolation) async throws {
-        try await press(keystroke, composing: nil)
-        try await finish()
-    }
-
-    /// A character, as the keystrokes the layout says it costs. Every keystroke but the
-    /// last leaves the character pending in the app.
-    public mutating func type(_ character: Character, _ keystrokes: [Keystroke], isolation: isolated (any Actor)? = #isolation) async throws {
-        for (index, keystroke) in keystrokes.enumerated() {
-            try await press(keystroke, composing: index == keystrokes.count - 1 ? nil : character)
-        }
-    }
-
-    /// Every modifier the last keystroke left down comes up, each at its trail: the end of a
-    /// run that was not stopped, and of every chord.
-    public mutating func finish(isolation: isolated (any Actor)? = #isolation) async throws {
-        let changes = randomness.draw { [last] in cadence.finish(after: last, drawing: &$0) }
-        last = Cadence.Stroke(modifiers: [], down: last.down, up: changes.last?.at ?? last.up)
-        for change in changes { try await make(change, composing: nil) }
+        if change.rollsOver { rollovers += 1 }
     }
 }
