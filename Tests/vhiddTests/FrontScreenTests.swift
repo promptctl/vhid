@@ -37,7 +37,7 @@ import Testing
     /// The displays are asked of the same child as the cursor: one reader per session.
     @Test func theDisplaysAreReadByTheFrontSessionsChild() throws {
         let log = Log()
-        let screen = FrontScreen(front: { bmf }, start: { log.add("start \($0.audit)"); return Reader($0, log) })
+        let screen = FrontScreen(front: { bmf }, start: { log.add("start \($0.audit)"); return Reader($0, log) }, failed: log.add)
         #expect(try screen.cursor() == (100003, 1))
         #expect(try screen.displays() == [CGRect(x: 0, y: 0, width: 100003, height: 1)])
         #expect(log.all == ["start 100003", "read in 100003", "displays in 100003"])
@@ -46,7 +46,7 @@ import Testing
     @Test func aSessionComingToTheFrontIsReadByAChildOfItsOwn() throws {
         let log = Log()
         var front = bmf
-        let cursor = FrontScreen(front: { front }, start: { log.add("start \($0.audit)"); return Reader($0, log) })
+        let cursor = FrontScreen(front: { front }, start: { log.add("start \($0.audit)"); return Reader($0, log) }, failed: log.add)
         #expect(try cursor.cursor() == (100003, 1))
         #expect(try cursor.cursor() == (100003, 1))
         front = loginWindow
@@ -57,29 +57,30 @@ import Testing
     @Test func aReaderThatFailsIsStoppedAndTheNextReadStartsAnother() throws {
         let log = Log()
         var readers: [Reader] = []
-        let cursor = FrontScreen(front: { bmf }, start: { let reader = Reader($0, log); readers.append(reader); return reader })
+        let cursor = FrontScreen(front: { bmf }, start: { let reader = Reader($0, log); readers.append(reader); return reader }, failed: log.add)
         _ = try cursor.cursor()
         readers[0].fails = true
         #expect(throws: FrontScreen.NobodyInFront.self) { try cursor.cursor() }
         #expect(try cursor.cursor() == (100003, 1))
         #expect(readers.count == 2)
-        #expect(log.all == ["read in 100003", "read in 100003", "stop 100003", "read in 100003"])
+        #expect(log.all == ["read in 100003", "read in 100003", "stop 100003",
+                            "the screen reader in bmf's session 100003 failed: no session is in front to read the screen in",
+                            "read in 100003"])
     }
 
     /// A reader that could not start is the daemon's failure as much as one that failed a
-    /// read: kept for a client that asks after the fact, and the next read tries again.
-    @Test func aReaderThatCouldNotStartIsTheLastFailure() throws {
-        let replaced = RunningBuild.Replaced(path: "/\(UUID())/vhidd")
-        var starts = 0
-        let cursor = FrontScreen(front: { bmf }, start: { _ in starts += 1; throw replaced })
-        #expect(throws: RunningBuild.Replaced.self) { try cursor.cursor() }
-        #expect(lastFailure.current?.text == "the screen reader in bmf's session 100003 failed: \(replaced)")
-        #expect(throws: RunningBuild.Replaced.self) { try cursor.cursor() }
-        #expect(starts == 2)
+    /// read, and the next read tries again.
+    @Test func aReaderThatCouldNotStartIsAFailure() throws {
+        let log = Log()
+        let cursor = FrontScreen(front: { bmf }, start: { log.add("start \($0.audit)"); throw FrontScreen.NobodyInFront() }, failed: log.add)
+        #expect(throws: FrontScreen.NobodyInFront.self) { try cursor.cursor() }
+        #expect(throws: FrontScreen.NobodyInFront.self) { try cursor.cursor() }
+        let failure = "the screen reader in bmf's session 100003 failed: no session is in front to read the screen in"
+        #expect(log.all == ["start 100003", failure, "start 100003", failure])
     }
 
     @Test func nobodyInFrontIsSaidAndStartsNothing() {
-        let cursor = FrontScreen(front: { throw FrontScreen.NobodyInFront() }, start: { _ in Issue.record("started a reader"); throw FrontScreen.NobodyInFront() })
+        let cursor = FrontScreen(front: { throw FrontScreen.NobodyInFront() }, start: { _ in Issue.record("started a reader"); throw FrontScreen.NobodyInFront() }, failed: { _ in })
         #expect(throws: FrontScreen.NobodyInFront.self) { try cursor.cursor() }
     }
 
@@ -101,15 +102,18 @@ import Testing
     /// [LAW:no-ambient-temporal-coupling] a test's verdict does not turn on how fast `sh` is.
     private static let unhurried: Duration = .seconds(30)
 
+    /// The build the daemon is, in every test that starts a child.
+    private let build = Build(cdhash: "c0de")
+
     /// A real child over real pipes, played by `sh`: what it says is what the read says.
-    /// Each wait is unhurried but in the test of that wait. The script says `joined` itself,
-    /// after whatever the test needs to be so by the time the reader is handed back.
+    /// Each wait is unhurried but in the test of that wait. The script says `joined c0de`
+    /// itself, after whatever the test needs to be so by the time the reader is handed back.
     private func child(_ script: String, joinWithin: Duration = unhurried, patience: Duration = unhurried) throws -> ChildReader {
-        try ChildReader(in: bmf, executable: "/bin/sh", arguments: ["-c", script], joinWithin: joinWithin, patience: patience)
+        try ChildReader(in: bmf, executable: "/bin/sh", arguments: ["-c", script], build: build, joinWithin: joinWithin, patience: patience)
     }
 
     @Test func aChildAnswersEachLineWithTheCursor() throws {
-        let reader = try child("echo joined; while read _; do echo '12.5 40'; done")
+        let reader = try child("echo joined c0de; while read _; do echo '12.5 40'; done")
         defer { reader.stop() }
         #expect(try reader.cursor() == (12.5, 40))
         #expect(try reader.cursor() == (12.5, 40))
@@ -119,19 +123,19 @@ import Testing
     /// rectangle; an answer that is not one is the reader failing, saying what it heard.
     @Test func aChildAnswersEachQuestionByName() throws {
         let reader = try child("""
-        echo joined; while read q; do case $q in cursor) echo '12.5 40';; displays) echo '0 0 1920 1080;1920 -200 1280 800';; *) echo nonsense;; esac; done
+        echo joined c0de; while read q; do case $q in cursor) echo '12.5 40';; displays) echo '0 0 1920 1080;1920 -200 1280 800';; *) echo nonsense;; esac; done
         """)
         defer { reader.stop() }
         #expect(try reader.displays() == [CGRect(x: 0, y: 0, width: 1920, height: 1080), CGRect(x: 1920, y: -200, width: 1280, height: 800)])
         #expect(try reader.cursor() == (12.5, 40))
-        let garbled = try child("echo joined; while read _; do echo '0 0 1920'; done")
+        let garbled = try child("echo joined c0de; while read _; do echo '0 0 1920'; done")
         defer { garbled.stop() }
         #expect { try garbled.displays() } throws: { "\($0)".contains("answered '0 0 1920'") }
     }
 
     /// `refused` is the window server declining, whichever question it answers.
     @Test func aChildSaysTheWindowServerRefused() throws {
-        let reader = try child("echo joined; while read _; do echo refused; done")
+        let reader = try child("echo joined c0de; while read _; do echo refused; done")
         defer { reader.stop() }
         #expect { try reader.displays() } throws: { ($0 as? WindowServerRefused)?.question == .displays }
         #expect { try reader.cursor() } throws: { ($0 as? WindowServerRefused)?.question == .cursor }
@@ -141,6 +145,18 @@ import Testing
         #expect {
             try child("echo 'could not join audit session 100003: errno 1'; exit 1")
         } throws: { "\($0)".contains("answered 'could not join audit session 100003: errno 1'") }
+    }
+
+    /// A child of another build is refused at the join, saying the file it was started from
+    /// was replaced: not asked anything, since the two need not speak one protocol.
+    @Test func aChildOfAnotherBuildIsRefusedSayingTheFileWasReplaced() {
+        let refusal = #expect(throws: ChildReader.AnotherBuild.self) { try child("echo joined f00d; while read _; do echo '12.5 40'; done") }
+        #expect(refusal.map { "\($0)" } == "the reader in bmf's session 100003 said 'joined f00d', and this vhidd is build c0de: /bin/sh has been replaced by another build since vhidd started, and every reader started from it is that build: restart vhidd")
+    }
+
+    /// A build from before readers said their build says only `joined`, and is another build.
+    @Test func aChildThatJoinsWithoutABuildIsAnotherBuild() {
+        #expect(throws: ChildReader.AnotherBuild.self) { try child("echo joined; while read _; do echo '12.5 40'; done") }
     }
 
     @Test func aChildThatNeverSaysItJoinedIsGivenUpOnAndEnded() {
@@ -156,7 +172,7 @@ import Testing
         // The child closes its stdin before it says it joined, so the read is the write to
         // a closed pipe. Hearing the child end would not say so: a process that ends closes
         // its descriptors from the highest down, its stdout before its stdin.
-        let reader = try child("exec 0<&-; echo joined")
+        let reader = try child("exec 0<&-; echo joined c0de")
         defer { reader.stop() }
         // The pipe is closed once nothing else holds its reading end, and a child being
         // started holds every descriptor its parent has until it has become its program:
@@ -176,14 +192,14 @@ import Testing
     /// Stopping returns only once the child is reaped, even one that ignores SIGTERM and
     /// never reads its stdin.
     @Test func stoppingEndsEvenAChildThatWillNotListen() throws {
-        let reader = try child("trap '' TERM; exec 0<&-; echo joined; sleep 30")
+        let reader = try child("trap '' TERM; exec 0<&-; echo joined c0de; sleep 30")
         let began = ContinuousClock.now
         reader.stop()
         #expect(began.duration(to: .now) < .seconds(2))
     }
 
     @Test func aChildThatDoesNotAnswerIsGivenUpOnInTime() throws {
-        let reader = try child("echo joined; sleep 30", patience: .milliseconds(300))
+        let reader = try child("echo joined c0de; sleep 30", patience: .milliseconds(300))
         defer { reader.stop() }
         let began = ContinuousClock.now
         #expect { try reader.cursor() } throws: { "\($0)".contains("did not answer within 0.3 seconds") }

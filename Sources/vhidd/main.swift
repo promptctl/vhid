@@ -73,6 +73,10 @@ func logFailure(_ message: String) {
 do {
     let callers = try CallerIdentity.sameSignerAsThisProcess()
     log("callers must satisfy: \(callers.text)")
+    // At the start, while the file this daemon was started from is still the build
+    // running: a rebuild may replace it at any time after. See `Build`. [LAW:no-ambient-temporal-coupling]
+    let build = try Build.ofThisProcess()
+    log("this is build \(build), started from \(Bundle.main.executablePath!)")
 
     // Before the devices come up, and that ordering is the whole point: macOS raises
     // Keyboard Setup Assistant when the keyboard ENUMERATES, so an answer filed after
@@ -103,7 +107,7 @@ do {
     let driver: @Sendable () throws -> DriverState = { try DriverState(DriverProbe.facts(by: .within(Readiness.driverReadLimit, or: .never))) }
     let readiness = Readiness(driver: driver)
     let listener = NSXPCListener(machServiceName: installation.service)
-    let delegate = Listener(readiness: readiness, callers: callers, screen: FrontScreen.real)
+    let delegate = Listener(readiness: readiness, callers: callers, screen: FrontScreen.real(build))
     listener.delegate = delegate
     listener.resume()
     log("listening on \(installation.service)")

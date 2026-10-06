@@ -19,8 +19,8 @@ enum ScreenQuestion: String {
 /// from a garbled answer so the daemon's log names the window server.
 let refusedAnswer = "refused"
 
-/// The child `FrontScreen` starts: joins `session` and says so, then answers each question
-/// on stdin on a line of stdout, until stdin closes.
+/// The child `FrontScreen` starts: joins `session` and says so, and which build it is,
+/// then answers each question on stdin on a line of stdout, until stdin closes.
 ///
 /// The join comes before the first read, because the first read is what ties a process to
 /// a session (see `FrontScreen`). A join that fails says so instead, with the reason, on stdout,
@@ -33,7 +33,12 @@ func readScreen(in session: au_asid_t) -> Never {
         print("could not join audit session \(session): errno \(errno)")
         exit(1)
     }
-    print(joinedAnswer)
+    do {
+        print("\(joinedAnswer) \(try Build.ofThisProcess())")
+    } catch {
+        print("could not say which build it is: \(error)")
+        exit(1)
+    }
     while let line = readLine() {
         switch ScreenQuestion(rawValue: line) {
         case .cursor: print(CGEvent(source: nil).map { "\($0.location.x) \($0.location.y)" } ?? refusedAnswer)

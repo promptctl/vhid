@@ -43,19 +43,25 @@ final class FrontScreen: ScreenSource, @unchecked Sendable {
 
     private let front: () throws -> Session
     private let start: (Session) throws -> any Reader
+    private let failed: (String) -> Void
     private let lock = NSLock()
     private var reading: (session: Session, reader: any Reader)?
 
-    /// `front` says which session is in front; `start` makes a reader in one.
-    /// [LAW:effects-at-boundaries] Both are handed in, so which child answers which read
-    /// is a test and not a session switch on a real Mac.
-    init(front: @escaping () throws -> Session, start: @escaping (Session) throws -> any Reader) {
+    /// `front` says which session is in front; `start` makes a reader in one; `failed` is
+    /// told each reader that could not start or could not answer.
+    /// [LAW:effects-at-boundaries] All three are handed in, so which child answers which
+    /// read is a test and not a session switch on a real Mac.
+    init(front: @escaping () throws -> Session, start: @escaping (Session) throws -> any Reader, failed: @escaping (String) -> Void) {
         self.front = front
         self.start = start
+        self.failed = failed
     }
 
-    /// Over the console this Mac has, with children of this very executable.
-    static let real = FrontScreen(front: { try frontSession(consoleUsers()) }, start: { try ChildReader(in: $0) })
+    /// Over the console this Mac has, with children of this very executable that are
+    /// `build`, kept as the daemon's failures.
+    static func real(_ build: Build) -> FrontScreen {
+        FrontScreen(front: { try frontSession(consoleUsers()) }, start: { try ChildReader(in: $0, build: build) }, failed: logFailure)
+    }
 
     func cursor() throws -> (x: Double, y: Double) { try read { try $0.cursor() } }
 
@@ -80,7 +86,7 @@ final class FrontScreen: ScreenSource, @unchecked Sendable {
                 throw error
             }
         } catch {
-            logFailure("the screen reader in \(session) failed: \(error)")
+            failed("the screen reader in \(session) failed: \(error)")
             throw error
         }
     }
@@ -156,12 +162,14 @@ final class ChildReader: FrontScreen.Reader {
     /// child stuck in the window server is ended and replaced while the client is still
     /// listening, and the lock `FrontScreen` holds across the read is never held forever.
     ///
-    /// Waits for the child's first line, which says whether it joined `session`: read
-    /// before anything is written to it, so a child that could not join and ended is heard
-    /// saying why, and not taken for a broken pipe. [LAW:no-ambient-temporal-coupling]
+    /// Waits for the child's first line, which says whether it joined `session` and, when it
+    /// did, which build it is: one that is not `build` is refused, since the two need not
+    /// speak one protocol (see `Build`). The line is read before anything is written to the
+    /// child, so a child that could not join and ended is heard saying why, and not taken
+    /// for a broken pipe. [LAW:no-ambient-temporal-coupling]
     /// `joinWithin` is how long that first line may take. It is a limit of its own because
     /// it covers the child being started, which an answer does not.
-    init(in session: FrontScreen.Session, executable: String, arguments: [String], joinWithin: Duration = .seconds(1), patience: Duration = .seconds(1)) throws {
+    init(in session: FrontScreen.Session, executable: String, arguments: [String], build: Build, joinWithin: Duration = .seconds(1), patience: Duration = .seconds(1)) throws {
         self.session = session
         self.patience = patience
         var stdin: [Int32] = [0, 0], stdout: [Int32] = [0, 0]
@@ -184,16 +192,29 @@ final class ChildReader: FrontScreen.Reader {
         }
         do {
             let joined = try answerLine(within: joinWithin, to: "say it joined")
-            guard joined == joinedAnswer else { throw Failed(session: session, what: "answered '\(joined)'") }
+            guard joined.split(separator: " ").first == Substring(joinedAnswer) else { throw Failed(session: session, what: "answered '\(joined)'") }
+            guard joined == "\(joinedAnswer) \(build)" else { throw AnotherBuild(session: session, joined: joined, build: build, executable: executable) }
         } catch {
             stop()
             throw error
         }
     }
 
-    /// This very executable, reading in `session`: this build, or none.
-    convenience init(in session: FrontScreen.Session) throws {
-        try self.init(in: session, executable: RunningBuild.executable(), arguments: [screenReaderFlag, String(session.audit)])
+    /// This very executable, reading in `session`, when it is still `build`.
+    convenience init(in session: FrontScreen.Session, build: Build) throws {
+        try self.init(in: session, executable: Bundle.main.executablePath!, arguments: [screenReaderFlag, String(session.audit)], build: build)
+    }
+
+    /// A child that joined as another build than this daemon's: the file it was started
+    /// from has been replaced since the daemon was.
+    struct AnotherBuild: Error, CustomStringConvertible {
+        let session: FrontScreen.Session
+        let joined: String
+        let build: Build
+        let executable: String
+        var description: String {
+            "the reader in \(session) said '\(joined)', and this vhidd is build \(build): \(executable) has been replaced by another build since vhidd started, and every reader started from it is that build: restart vhidd"
+        }
     }
 
     struct Failed: Error, CustomStringConvertible {
@@ -270,7 +291,8 @@ final class ChildReader: FrontScreen.Reader {
     }
 }
 
-/// What a reader says first when it has joined its session.
+/// What a reader says first when it has joined its session, followed by a space and its
+/// build.
 let joinedAnswer = "joined"
 
 /// The flag that makes this executable a screen reader rather than the daemon.
