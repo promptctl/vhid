@@ -10,4 +10,13 @@ public struct Timeline: Sendable {
         now = { origin.duration(to: clock.now) }
         sleep = { try await clock.sleep(until: origin.advanced(by: $0), tolerance: .zero) }
     }
+
+    /// A sleep until `due` that hands `slept` how long it slept once it ends, however it
+    /// ends: one a cancel cut short says how long it got. [LAW:single-enforcer] Every wait a
+    /// pointer or a typist makes between its reports is one of these, so every one is traced.
+    func pause(until due: Duration, slept: (Duration) -> Void) async throws {
+        let began = now()
+        defer { slept(max(now() - began, .zero)) }
+        try await sleep(due)
+    }
 }

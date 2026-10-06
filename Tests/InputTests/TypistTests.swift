@@ -105,6 +105,13 @@ import Testing
 /// typed when a fragment was already in the document, once saying "the rest were not"
 /// about a run where there was no rest - so what it says is checked rather than read.
 @Suite struct TypingStoppedTests {
+    /// A list stopped after its last chord went down, letting go of its modifiers, does not
+    /// say any were left unsent.
+    @Test func chordsStoppedAfterTheLastSayAllWerePressed() {
+        let stopped = ChordsStopped(pressed: 2, of: 2, cause: WentQuiet())
+        #expect("\(stopped)" == "the daemon did not answer. all 2 chords had been pressed before this")
+    }
+
     @Test func aRunStoppedPartWaySaysHowMuchLandedAndThatTheRestDidNot() {
         let stopped = TypingStopped(typed: 34, of: 500, cause: WentQuiet())
         #expect("\(stopped)" == "the daemon did not answer. 34 of 500 characters had been posted and acknowledged before this, and the rest were not sent")

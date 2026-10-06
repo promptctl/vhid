@@ -17,10 +17,12 @@ import Testing
         let acknowledgingKeys: Duration
 
         init(acknowledgingKeys: Duration = .zero) { self.acknowledgingKeys = acknowledgingKeys }
-        private let state = Mutex<(log: [(ms: Double, held: Set<Usage>)], pauses: [Pause])>(([], []))
+        private let state = Mutex<(log: [(ms: Double, held: Set<Usage>)], pauses: [Pause], late: [Duration])>(([], [], []))
 
         var log: [(ms: Double, held: Set<Usage>)] { state.withLock { $0.log } }
         var pauses: [Pause] { state.withLock { $0.pauses } }
+        /// Each run's slip, as traced when it ended.
+        var late: [Duration] { state.withLock { $0.late } }
 
         func down(_ usage: Usage) throws { Issue.record("a typist pressed \(usage) by down rather than hold") }
         func releaseAll() throws { state.withLock { $0.log.append((clock.now.offset / .milliseconds(1), [])) } }
@@ -30,7 +32,14 @@ import Testing
         }
 
         func typist(seed: UInt64 = 1) -> Typist {
-            Typist.on(self, clock: clock, seed: seed, traced: { [self] pause in state.withLock { $0.pauses.append(pause) } })
+            Typist.on(self, clock: clock, seed: seed, traced: { [self] traced in
+                state.withLock {
+                    switch traced {
+                    case .paused(let pause): $0.pauses.append(pause)
+                    case .ran(let late): $0.late.append(late)
+                    }
+                }
+            })
         }
 
         /// Each key that went down, with its modifiers held at that moment, when it went
@@ -102,6 +111,17 @@ import Testing
         let strokes = keyboard.strokes
         #expect(strokes.count == text.count)
         for (previous, next) in zip(strokes, strokes.dropFirst()) { #expect(next.down - previous.up >= 20) }
+        // How late the run went is traced once it ends, and here it went late.
+        try #require(keyboard.late.count == 1)
+        #expect(keyboard.late[0] > .zero)
+    }
+
+    /// A run on time traces a slip of nothing: zero, not absent.
+    @Test func aRunOnTimeTracesNoSlip() async throws {
+        let keyboard = Timed()
+        let typist = keyboard.typist()
+        try await typist.type(try typist.lower("on time", on: Self.us))
+        #expect(keyboard.late == [.zero])
     }
 
     /// The seed draws the run again exactly, and another seed draws another run.
@@ -158,6 +178,31 @@ import Testing
         #expect(strokes[1].modifiers == [])
         #expect(strokes[1].down - strokes[0].down >= 70)
         #expect(keyboard.log.last?.held == [])
+    }
+
+    /// Each chord lets go of its modifiers before the next: Command comes up between two
+    /// Command-Tabs, so the second is a second app switch rather than one held Command.
+    @Test func eachChordLetsGoOfItsModifiersBeforeTheNext() async throws {
+        let keyboard = Timed()
+        let typist = keyboard.typist()
+        let tab = try typist.lower(KeyChord(key: Key(rawValue: 0x30), modifiers: [.leftCommand]))
+        #expect(try await typist.press([tab, tab]) == 2)
+        let strokes = keyboard.strokes
+        try #require(strokes.count == 2)
+        let between = keyboard.log.filter { $0.ms > strokes[0].up && $0.ms < strokes[1].down }
+        #expect(between.contains { $0.held.isEmpty }, "Command held from one Command-Tab into the next")
+        #expect(keyboard.log.last?.held == [])
+    }
+
+    /// The dwell is cut off under the delay until a held key repeats: uncut at 250 ms and
+    /// longer, at 80% of it below that, and shrunk whole on a Mac set far shorter.
+    @Test(arguments: [(250.0, 200.0), (1000, 200), (225, 180), (150, 120), (15, 12)])
+    func theDwellStaysUnderTheDelayUntilRepeat(delay: Double, longest: Double) {
+        let dwell = Cadence(keyRepeatDelay: .milliseconds(delay)).dwell
+        #expect(abs(dwell.bounds.upperBound - longest) < 1e-9)
+        #expect(dwell.bounds.contains(dwell.mean))
+        var generator = SeededGenerator(seed: 5)
+        for _ in 0 ..< 200 { #expect(dwell.draw(using: &generator) < delay) }
     }
 
     /// A cancel that lands inside a wait stops the run there: no key after it goes down, the

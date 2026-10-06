@@ -218,7 +218,7 @@ extension Scribe {
 
 extension Typist {
     /// A typist on `keyboard` timed on `clock`, its timings drawn from `seed`.
-    static func on(_ keyboard: any Keyboard, clock: ManualClock = ManualClock(), seed: UInt64 = 1, traced: @escaping @Sendable (Pause) -> Void = { _ in }) -> Typist {
+    static func on(_ keyboard: any Keyboard, clock: ManualClock = ManualClock(), seed: UInt64 = 1, traced: @escaping @Sendable (Typist.Traced) -> Void = { _ in }) -> Typist {
         Typist(keyboard: keyboard, clock: clock, randomness: RandomSource(seed: seed), traced: traced)
     }
 }

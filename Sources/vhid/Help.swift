@@ -72,7 +72,8 @@ enum Help {
         is typing on. \
         Text it has no keys for is refused whole, before any key goes down.
 
-        \(cadence) 1,000 characters take about three minutes.
+        \(cadence) A modifier stays down through the keys that all need it. 1,000 characters take \
+        about \(Int((Cadence.typist.latency.mean * 1000 / 60_000).rounded())) minutes.
         """, commandLine: ["Text starting with - follows --, as in: vhid type -- \"-5 degrees\"."])
 
     static let press = VerbHelp(name: "press", abstract: "Press chords on the virtual keyboard, one after another.", discussion: """
@@ -88,7 +89,8 @@ enum Help {
         Every chord is proven pressable before the first one goes down. Named an application to \
         go into, it refuses unless that one is in front.
 
-        \(cadence)
+        \(cadence) Each chord lets go of its modifiers before the next, so leftCommand+tab twice is \
+        two app switches.
         """)
 
     /// How `type` and `press` time their keys, read off the one model they follow.
@@ -97,7 +99,7 @@ enum Help {
         Keys are timed as a typist's: each held about \(Int(Cadence.typist.dwell.mean)) ms, one key-down \
         about \(Int(Cadence.typist.latency.mean)) ms after the last, and a modifier down \
         \(Int(Cadence.typist.lead.lowerBound)) to \(Int(Cadence.typist.lead.upperBound)) ms before its key and \
-        up after it, held through the keys that all need it.
+        up after it. No key is held as long as this Mac's delay until a held key repeats.
         """
 
     static let click = VerbHelp(name: "click", abstract: "Click at a point on the screen.", discussion: """

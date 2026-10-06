@@ -23,10 +23,10 @@ public struct Scribe {
 
     /// What the last keystroke left held, and when its key went down and came up.
     private var last: Cadence.Stroke
-    /// How far behind its plan this run is: every report that went out late, after a slow
-    /// acknowledgement of the one before, moves every report after it by as much, so a
-    /// hold or a settle is never shortened to make up the time.
-    private var slip: Duration = .zero
+    /// How far behind its plan this run is: every report that went out late, behind a slow
+    /// acknowledgement of the one before or a sleep that woke late, moves every report
+    /// after it by as much, so a hold or a settle is never shortened to make up the time.
+    public private(set) var slip: Duration = .zero
 
     public init(keyboard: any Keyboard, timeline: Timeline, randomness: RandomSource, cadence: Cadence, traced: @escaping @Sendable (Pause) -> Void) {
         self.keyboard = keyboard
@@ -72,7 +72,7 @@ public struct Scribe {
     /// ambiguous about whether it happened. [LAW:dataflow-not-control-flow]
     private mutating func make(_ change: Cadence.Change, composing pending: Character?, isolation: isolated (any Actor)? = #isolation) async throws {
         let due = change.at + slip
-        try await wait(until: due, for: change.wait)
+        try await timeline.pause(until: due) { traced(Pause(kind: .keys(change.wait), length: $0)) }
         try Task.checkCancellation()
         slip += max(timeline.now() - due, .zero)
         // Recorded between the cancellation check and the report, and cleared after the
@@ -83,13 +83,6 @@ public struct Scribe {
         // would tell the operator to clear a composition that is not there.
         if let pending { halfTyped = pending }
         try await keyboard.hold(change.held)
-    }
-
-    /// The wait until `due`, handed to `traced` once it ends, however it ends.
-    private func wait(until due: Duration, for kind: Cadence.Wait) async throws {
-        let began = timeline.now()
-        defer { traced(Pause(kind: .keys(kind), length: max(timeline.now() - began, .zero))) }
-        try await timeline.sleep(due)
     }
 
     /// One keystroke: the modifiers the last one held that this one does not need up, this
@@ -117,10 +110,12 @@ public struct Scribe {
         }
     }
 
-    /// A chord: one keystroke that is a whole act, so it composes nothing and counts as
-    /// one when its key has gone down.
+    /// A chord: one keystroke that is a whole act, so it composes nothing, counts as one
+    /// when its key has gone down, and lets go of its modifiers before whatever follows it.
+    /// `leftCommand+tab` twice is two app switches, not a Command held through both.
     public mutating func press(_ keystroke: Keystroke, isolation: isolated (any Actor)? = #isolation) async throws {
         try await press(keystroke, composing: nil)
+        try await finish()
     }
 
     /// A character, as the keystrokes the layout says it costs. Every keystroke but the
@@ -132,7 +127,7 @@ public struct Scribe {
     }
 
     /// Every modifier the last keystroke left down comes up, each at its trail: the end of a
-    /// run that was not stopped.
+    /// run that was not stopped, and of every chord.
     public mutating func finish(isolation: isolated (any Actor)? = #isolation) async throws {
         let changes = randomness.draw { [last] in cadence.finish(after: last, drawing: &$0) }
         last = Cadence.Stroke(modifiers: [], down: last.down, up: changes.last?.at ?? last.up)

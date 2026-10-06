@@ -50,7 +50,7 @@ final class Invocation: Sendable {
     let signals: FirstSignal?
     /// W3C trace ID: 16 random bytes as 32 lowercase hex digits.
     let traceID = (0..<16).map { _ in String(format: "%02x", UInt8.random(in: .min ... .max)) }.joined()
-    private let state: Mutex<(event: String, counts: [Tally: Int], attributes: [Attribute: JSON], lists: [Attribute: [JSON]], pauses: [String: (count: Int, slept: Duration)], typesText: Bool)>
+    private let state: Mutex<(event: String, counts: [Tally: Int], attributes: [Attribute: JSON], lists: [Attribute: [JSON]], pauses: [Pause.Kind: (count: Int, slept: Duration)], typesText: Bool)>
 
     private init(_ event: String, via entry: Entry, stoppedBy signals: FirstSignal?) {
         self.entry = entry
@@ -116,7 +116,7 @@ final class Invocation: Sendable {
         let (event, counts, decided, lists, pauses, typesText) = state.withLock { ($0.event, $0.counts, $0.attributes, $0.lists, $0.pauses, $0.typesText) }
         var attributes = decided.merging(lists.mapValues(JSON.array)) { $1 }
         attributes[.pauses] = pauses.isEmpty ? nil : .object(Dictionary(uniqueKeysWithValues: pauses.map { kind, total in
-            (kind, .object(["count": .int(total.count), "ms": .double(total.slept / .milliseconds(1))]))
+            (kind.name, .object(["count": .int(total.count), "ms": .double(total.slept / .milliseconds(1))]))
         }))
         attributes[.signal] = signals?.taken.map { .string(Attribute.name(ofSignal: $0)) }
         func told(_ failure: any Error) -> String? {
@@ -161,6 +161,13 @@ enum Attribute: String, Sendable {
     /// The double-click interval the pointer's hand was fitted to, as this process read it.
     /// Absent when the devices were never opened.
     case doubleClickMilliseconds = "double_click_ms"
+    /// The delay until a held key repeats that the typist's key holds were fitted to, as
+    /// this process read it. Absent when the devices were never opened.
+    case keyRepeatDelayMilliseconds = "key_repeat_delay_ms"
+    /// How far behind its drawn timing the typist's last report went out, in milliseconds:
+    /// what slow acknowledgements and late wakes added to the run, every key after them
+    /// moved rather than shortened. Absent for a verb that pressed no keys.
+    case keysLateMilliseconds = "keys_late_ms"
     /// The pauses the pointer and the typist made between reports, the one it stopped in
     /// too, by kind - the pointer's `rest`, `hold`, `gap`, `drag_hold`, `notch`, and the
     /// typist's waits named for the report they end in, `modifier_down`, `key_down`,
@@ -287,12 +294,21 @@ extension Invocation {
         }
     }
 
-    /// Adds a pause to its kind's total in `pauses`: a pointer's, through `traced`, and a
-    /// typist's, which `Devices` hands every typist it opens.
-    @Sendable static func paused(_ pause: Pause) {
+    /// Adds what a typist traced to the running invocation: a pause to its kind's total in
+    /// `pauses`, and how late its run went to `keys_late_ms`. `Devices` hands every typist
+    /// it opens this. [LAW:single-enforcer]
+    @Sendable static func typed(_ traced: Typist.Traced) {
+        switch traced {
+        case .paused(let pause): paused(pause)
+        case .ran(let late): set(.keysLateMilliseconds, .double(late / .milliseconds(1)))
+        }
+    }
+
+    /// Adds a pause to its kind's total in `pauses`, a pointer's or a typist's.
+    private static func paused(_ pause: Pause) {
         current?.state.withLock {
-            let total = $0.pauses[pause.kind.name, default: (0, .zero)]
-            $0.pauses[pause.kind.name] = (total.count + 1, total.slept + pause.length)
+            let total = $0.pauses[pause.kind, default: (0, .zero)]
+            $0.pauses[pause.kind] = (total.count + 1, total.slept + pause.length)
         }
     }
 

@@ -74,6 +74,7 @@ import Testing
         #expect(pauses["notch"]?["count"] as? Int == 3)
         #expect((pauses["notch"]?["ms"] as? Double).map { (600 ... 900).contains($0) } == true)
         #expect(attributes["double_click_ms"] is Double)
+        #expect(attributes["key_repeat_delay_ms"] is Double)
         #expect(attributes["seed"] is String)
         // The pointer was already on its point, so the move there drew a path of no length.
         let paths = try #require(attributes["paths"] as? [[String: Any]])
@@ -90,7 +91,7 @@ import Testing
         _ = try await Invocation.record("type", via: .mcp, to: export.export) { _ in
             try await Self.against { devices in
                 try await TypeCommand.type("Ab", on: VerbTests.us, into: .anywhere,
-                                           with: Typist(keyboard: devices.keyboard, clock: ManualClock(), randomness: RandomSource(seed: 1), traced: Invocation.paused),
+                                           with: Typist(keyboard: devices.keyboard, clock: ManualClock(), randomness: RandomSource(seed: 1), traced: Invocation.typed),
                                            front: { nil })
             }
         }
@@ -99,6 +100,8 @@ import Testing
         let pauses = try #require((record["attributes"] as? [String: Any])?["pauses"] as? [String: [String: Any]])
         #expect(pauses.mapValues { $0["count"] as? Int } == ["modifier_down": 1, "key_down": 2, "key_up": 2, "modifier_up": 1])
         #expect((pauses["key_up"]?["ms"] as? Double).map { (80 ... 400).contains($0) } == true)
+        // Every report went out on time on a fake clock, and the record says so.
+        #expect((record["attributes"] as? [String: Any])?["keys_late_ms"] as? Double == 0)
     }
 
     /// A move the cursor never follows throws, and its record still carries the move: every

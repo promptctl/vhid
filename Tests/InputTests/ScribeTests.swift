@@ -44,12 +44,16 @@ import Input
         #expect(keyboard.log.count == 6)
     }
 
-    /// A chord is one keystroke pressed the same way a character's is, and it composes
-    /// nothing: pressed, it counts, and nothing is pending.
+    /// A chord is one keystroke pressed the same way a character's is, and a whole act: it
+    /// composes nothing, counts once pressed, and lets go of its modifiers.
     @Test func aChordIsPressedLikeAKeystrokeAndLeavesNothingPending() async throws {
         var (scribe, keyboard) = scribe()
         try await scribe.press(Keystroke(Usage(rawValue: 0x04), [.leftCommand, .leftShift]))
-        #expect(Array(keyboard.log.dropFirst()) == ["hold [e1 e3]", "hold [4 e1 e3]", "hold [e1 e3]"])
+        #expect(Array(keyboard.log.dropFirst().prefix(3)) == ["hold [e1 e3]", "hold [4 e1 e3]", "hold [e1 e3]"])
+        // Which modifier comes up first is the draw of their trails.
+        #expect(["hold [e1]", "hold [e3]"].contains(keyboard.log[4]))
+        #expect(keyboard.log.last == "hold []")
+        #expect(keyboard.log.count == 6)
         #expect(scribe.typed == 1)
         #expect(scribe.halfTyped == nil)
     }

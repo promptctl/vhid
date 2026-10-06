@@ -10,8 +10,7 @@ import Keystrokes
 public struct Cadence: Sendable, Equatable {
     /// From one key-down to the next.
     public let latency: Normal
-    /// A key held down: its dwell time. Capped at 200 ms, under macOS's shortest delay
-    /// until a held key repeats, 225 ms, so a long draw never types a character twice.
+    /// A key held down: its dwell time.
     public let dwell: Normal
     /// How long before its key a modifier goes down, in milliseconds, drawn evenly.
     public let lead: ClosedRange<Double>
@@ -20,9 +19,34 @@ public struct Cadence: Sendable, Equatable {
     /// The least time from a keystroke's last key up to the next keystroke's first key down.
     public let settle: Duration
 
-    /// A practised typist, at about 67 words a minute.
-    public static let typist = Cadence(latency: Normal(180, 60, within: 70 ... .infinity), dwell: Normal(95, 25, within: 40 ... 200),
-                                       lead: 30 ... 80, trail: 20 ... 60, settle: .milliseconds(20))
+    /// The share of the delay until a held key repeats that a key may be held for.
+    static let withinRepeat = 0.8
+
+    /// A practised typist, at about 67 words a minute, on a Mac whose delay until a held key
+    /// repeats is 250 ms or longer, which leaves the dwell uncut.
+    public static let typist = Cadence(keyRepeatDelay: .milliseconds(250))
+
+    /// A practised typist on a Mac whose held key repeats after `keyRepeatDelay`.
+    ///
+    /// The dwell is cut off at 200 ms, and lower, at 80% of the delay, on a Mac set shorter
+    /// than 250 ms, as `defaults write -g InitialKeyRepeat` can: a long draw, or a key-up
+    /// sent late behind a slow acknowledgement, never holds a key long enough to type its
+    /// character twice. Below that the whole distribution shrinks with it, as `Hand`'s does.
+    public init(keyRepeatDelay: Duration) {
+        let dwell = Normal(95, 25, within: 40 ... 200)
+        let longest = Self.withinRepeat * (keyRepeatDelay / .milliseconds(1))
+        let scale = min(1, longest / dwell.bounds.upperBound)
+        self.init(latency: Normal(180, 60, within: 70 ... .infinity), dwell: dwell.scaled(by: scale, floor: 0),
+                  lead: 30 ... 80, trail: 20 ... 60, settle: .milliseconds(20))
+    }
+
+    init(latency: Normal, dwell: Normal, lead: ClosedRange<Double>, trail: ClosedRange<Double>, settle: Duration) {
+        self.latency = latency
+        self.dwell = dwell
+        self.lead = lead
+        self.trail = trail
+        self.settle = settle
+    }
 
     /// What a typist waits for: the report a wait ends in.
     public enum Wait: String, Sendable {

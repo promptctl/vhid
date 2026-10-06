@@ -65,11 +65,16 @@ struct Devices {
         // own default, not the user's setting. `Hand`.
         let doubleClick = Duration.seconds(NSEvent.doubleClickInterval)
         Invocation.set(.doubleClickMilliseconds, .double(doubleClick / .milliseconds(1)))
+        // The same for the delay until a held key repeats, which caps how long a key is held.
+        // `Cadence`.
+        let keyRepeatDelay = Duration.seconds(NSEvent.keyRepeatDelay)
+        Invocation.set(.keyRepeatDelayMilliseconds, .double(keyRepeatDelay / .milliseconds(1)))
         let keyboard = TalliedKeyboard(keyboard: QueuedKeyboard(keyboard: helper.keyboard, queue: queue))
         let devices = Devices(keyboard: keyboard, mouse: mouse, cursor: cursor, front: front(helper, on: queue),
                               pointer: Pointer(mouse: mouse, cursor: cursor, displays: displays(helper, on: queue), clock: ContinuousClock(),
                                                randomness: randomness, hand: Hand(doubleClickInterval: doubleClick), traced: Invocation.traced),
-                              typist: Typist(keyboard: keyboard, clock: ContinuousClock(), randomness: randomness, traced: Invocation.paused))
+                              typist: Typist(keyboard: keyboard, clock: ContinuousClock(), randomness: randomness,
+                                             cadence: Cadence(keyRepeatDelay: keyRepeatDelay), traced: Invocation.typed))
         let done: T
         do {
             done = try await body(devices)

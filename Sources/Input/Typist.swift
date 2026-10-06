@@ -25,11 +25,20 @@ public struct Typist {
     /// moves draw again from the one seed on its record.
     public let randomness: RandomSource
     public let cadence: Cadence
-    /// Where every wait between keys is handed once it ends. [LAW:nothing-unseen]
-    public let traced: @Sendable (Pause) -> Void
+    /// Where every wait between keys is handed once it ends, and how late a run went once
+    /// it ends, however it ends. [LAW:nothing-unseen]
+    public let traced: @Sendable (Traced) -> Void
+
+    /// What a typist hands `traced`, in the order it happened.
+    public enum Traced: Equatable, Sendable {
+        case paused(Pause)
+        /// A run's slip, once it ends: how far behind its drawn timing its last report went
+        /// out, which slow acknowledgements and late wakes add up to.
+        case ran(late: Duration)
+    }
 
     public init<C: Clock>(keyboard: any Keyboard, clock: C, randomness: RandomSource, cadence: Cadence = .typist,
-                          traced: @escaping @Sendable (Pause) -> Void) where C.Duration == Duration {
+                          traced: @escaping @Sendable (Traced) -> Void) where C.Duration == Duration {
         self.keyboard = keyboard
         timeline = Timeline(clock)
         self.randomness = randomness
@@ -39,7 +48,7 @@ public struct Typist {
 
     /// A scribe for one run, timed from now.
     private var scribe: Scribe {
-        Scribe(keyboard: keyboard, timeline: timeline, randomness: randomness, cadence: cadence, traced: traced)
+        Scribe(keyboard: keyboard, timeline: timeline, randomness: randomness, cadence: cadence, traced: { [traced] in traced(.paused($0)) })
     }
 
     /// Text proven typeable: every character has keys on the layout.
@@ -72,6 +81,7 @@ public struct Typist {
     @discardableResult
     public func type(_ text: Text, isolation: isolated (any Actor)? = #isolation) async throws -> Int {
         var scribe = scribe
+        defer { traced(.ran(late: scribe.slip)) }
         do {
             for (character, keystrokes) in text.characters { try await scribe.type(character, keystrokes) }
             try await scribe.finish()
@@ -87,9 +97,9 @@ public struct Typist {
     @discardableResult
     public func press(_ chords: [Chord], isolation: isolated (any Actor)? = #isolation) async throws -> Int {
         var scribe = scribe
+        defer { traced(.ran(late: scribe.slip)) }
         do {
             for chord in chords { try await scribe.press(chord.keystroke) }
-            try await scribe.finish()
         } catch {
             throw ChordsStopped(pressed: scribe.typed, of: chords.count, cause: error, unreleased: await release())
         }
@@ -175,6 +185,9 @@ public struct ChordsStopped: StoppedPartWay, CustomStringConvertible {
     }
 
     public var description: String {
-        TypingStopped.unreleased(unreleased, after: cause.reported.then("\(pressed) of \(of) chords had been pressed before this, and the rest were not sent"))
+        let progress = pressed < of
+            ? "\(pressed) of \(of) chords had been pressed before this, and the rest were not sent"
+            : "all \(of) chords had been pressed before this"
+        return TypingStopped.unreleased(unreleased, after: cause.reported.then(progress))
     }
 }
