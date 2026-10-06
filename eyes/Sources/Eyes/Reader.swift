@@ -86,14 +86,14 @@ public enum Unchecked: String, Sendable, Hashable, CaseIterable {
     case overTime = "over_time"
 }
 
-/// One row's check, and the hit tests it spent.
+/// One row's check, and the calls into the app - hit tests and reads - it made.
 public struct Checked: Sendable, Hashable {
     public let pressed: Pressed
-    public let hitTests: Int
+    public let calls: Int
 
-    public init(_ pressed: Pressed, hitTests: Int) {
+    public init(_ pressed: Pressed, calls: Int) {
         self.pressed = pressed
-        self.hitTests = hitTests
+        self.calls = calls
     }
 }
 

@@ -78,7 +78,7 @@ public struct TreeReader: Reader {
     }
 
     /// How long checking a reading's boxes may take, on top of the walk's own bound. A
-    /// page's button costs a few dozen hit tests at 10-35 ms each; an app too busy to answer
+    /// page's button costs a few dozen calls at 10-35 ms each; an app too busy to answer
     /// holds each for the messaging timeout, and the rows the time does not reach are
     /// counted unchecked as over time.
     static let pressingTime = Duration.seconds(2)

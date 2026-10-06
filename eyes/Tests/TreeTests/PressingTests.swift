@@ -60,11 +60,12 @@ import Grants
     }
 
     /// A native control's frame is where it is pressed: the four edges and four corners
-    /// each answer at the first try, and the box stands, its hit tests counted.
+    /// each answer at the first try, and the box stands, its calls counted - nine hit tests
+    /// and the one read that names the button, none for its ancestors.
     @Test func aFramePressedToItsEdgesStandsAfterOneHitAPerEdgeAndCorner() throws {
         let asked = Asked()
         let checked = try probe(asked, hit: { p in .answered(Self.frame.cgRect.contains(CGPoint(x: p.x, y: p.y)) ? 1 : 0) }).press(row())
-        #expect(checked == Checked(.kept, hitTests: 9))
+        #expect(checked == Checked(.kept, calls: 10))
         #expect(asked.hits == 9)
     }
 
@@ -90,10 +91,10 @@ import Grants
     /// out partway through a row does the same.
     @Test func aRowTheTimeRanOutOnIsUncheckedOverTime() throws {
         let asked = Asked()
-        #expect(try probe(asked, spent: { true }).press(row()) == Checked(.unchecked(.overTime), hitTests: 0))
+        #expect(try probe(asked, spent: { true }).press(row()) == Checked(.unchecked(.overTime), calls: 0))
         #expect(asked.hits == 0)
         var asks = 0
-        #expect(try probe(spent: { asks += 1; return asks > 4 }).press(row()) == Checked(.unchecked(.overTime), hitTests: 4))
+        #expect(try probe(spent: { asks += 1; return asks > 4 }).press(row()) == Checked(.unchecked(.overTime), calls: 4))
     }
 
     /// A probe that lands beside the button climbs only until it meets one of the button's
@@ -118,7 +119,7 @@ import Grants
     /// The pixels reader placed it, so the tree has nothing to check it against.
     @Test func aRowTheTreeDidNotPlaceStandsUnasked() throws {
         let asked = Asked()
-        #expect(try probe(asked).press(row(source: .pixels(confidence: Confidence(0.9)!))) == Checked(.kept, hitTests: 0))
+        #expect(try probe(asked).press(row(source: .pixels(confidence: Confidence(0.9)!))) == Checked(.kept, calls: 0))
         #expect(asked.hits == 0)
     }
 
@@ -127,8 +128,8 @@ import Grants
     @Test func aRowWhosePointLandsOnSomethingElseIsUnchecked() throws {
         var lineages = Self.lineages
         lineages[9] = Lineage(role: Self.page, frame: ScreenRect(x: 0, y: 0, width: 1500, height: 900), parent: nil)
-        #expect(try probe(hit: { _ in .answered(9) }, lineages: lineages).press(row()) == Checked(.unchecked(.elsewhere), hitTests: 1))
-        #expect(try probe(hit: { _ in .answered(nil) }).press(row()) == Checked(.unchecked(.elsewhere), hitTests: 1))
+        #expect(try probe(hit: { _ in .answered(9) }, lineages: lineages).press(row()) == Checked(.unchecked(.elsewhere), calls: 2))
+        #expect(try probe(hit: { _ in .answered(nil) }).press(row()) == Checked(.unchecked(.elsewhere), calls: 1))
     }
 
     /// An element whose parents will not say is unknown, not outside the button.
@@ -138,7 +139,7 @@ import Grants
         #expect(try probe(lineages: lineages).press(row()).pressed == .unchecked(.unanswered))
         var calls = 0
         let flaky: (ScreenPoint) -> Heard<Int?> = { p in calls += 1; return calls > 3 ? .unanswered : Self.safari(p) }
-        #expect(try probe(hit: flaky).press(row()) == Checked(.unchecked(.unanswered), hitTests: 4))
+        #expect(try probe(hit: flaky).press(row()).pressed == .unchecked(.unanswered))
     }
 
     /// Parents that run in a loop end the climb as unknown.

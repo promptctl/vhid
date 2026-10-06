@@ -34,9 +34,6 @@ struct Probe<Element> {
     /// prints in.
     static var resolution: Double { 0.5 }
 
-    /// Why a row's check stopped short, thrown from wherever it did.
-    private struct Stop: Error { let why: Unchecked }
-
     /// A row's box, checked against where a click lands on the element the row names.
     ///
     /// A frame is the app's claim, and the hit test is where the click goes: Safari gives a
@@ -54,43 +51,65 @@ struct Probe<Element> {
     /// time ran out on leave the box unchecked rather than guessed, and say which.
     /// [LAW:no-silent-failure]
     func press(_ found: Found) throws -> Checked {
-        guard let role = found.source.role else { return Checked(.kept, hitTests: 0) }
-        var hitTests = 0
+        guard let role = found.source.role else { return Checked(.kept, calls: 0) }
+        let check = Check(probe: self)
         do {
-            let pressed = try box(found.frame, role: role) { point in
-                guard !spent() else { throw Stop(why: .overTime) }
-                hitTests += 1
-                return try heard(hit(point))
-            }
-            return Checked(pressed, hitTests: hitTests)
-        } catch let stop as Stop {
-            return Checked(.unchecked(stop.why), hitTests: hitTests)
+            return Checked(try check.box(found.frame, role: role), calls: check.calls)
+        } catch let stop as Check<Element>.Stop {
+            return Checked(.unchecked(stop.why), calls: check.calls)
         }
     }
+}
 
-    private func box(_ frame: ScreenRect, role: Role, landing: (ScreenPoint) throws -> Element?) throws -> Pressed {
+/// One row's check: every call it makes timed and counted in the one place.
+private final class Check<Element> {
+    /// Why a row's check stopped short, thrown from wherever it did.
+    struct Stop: Error { let why: Unchecked }
+
+    let probe: Probe<Element>
+    private(set) var calls = 0
+
+    init(probe: Probe<Element>) { self.probe = probe }
+
+    private func ask<Value>(_ call: () throws -> Heard<Value>) throws -> Value {
+        guard !probe.spent() else { throw Stop(why: .overTime) }
+        calls += 1
+        guard case .answered(let value) = try call() else { throw Stop(why: .unanswered) }
+        return value
+    }
+
+    private func hit(_ point: ScreenPoint) throws -> Element? { try ask { try probe.hit(point) } }
+    private func parent(_ element: Element) throws -> Element? { try ask { try probe.parent(element) } }
+
+    func box(_ frame: ScreenRect, role: Role) throws -> Pressed {
         let centre = frame.centre
-        guard let at = try landing(centre), let element = try named(from: at, role: role, frame: frame) else {
+        guard let at = try hit(centre), let element = try named(from: at, role: role, frame: frame) else {
             throw Stop(why: .elsewhere)
         }
-        let above = try ancestors(of: element)
+        // Read the first time a click lands beside the element: a native control's every
+        // probe lands on it or inside it, and never needs them.
+        var above: [Element]?
         // Climbs from what a click landed on until it meets the element - inside it - or one
         // of the element's own ancestors or the top - beside it.
         func presses(_ point: ScreenPoint) throws -> Bool {
-            var current = try landing(point)
-            for _ in 0..<Self.depth {
-                guard let at = current, !above.contains(where: { same($0, at) }) else { return false }
-                if same(at, element) { return true }
-                current = try heard(parent(at))
+            var current = try hit(point)
+            for _ in 0..<Probe<Element>.depth {
+                guard let at = current else { return false }
+                if probe.same(at, element) { return true }
+                let ancestors = try above ?? self.ancestors(of: element)
+                above = ancestors
+                if ancestors.contains(where: { probe.same($0, at) }) { return false }
+                current = try parent(at)
             }
             throw Stop(why: .unanswered)
         }
+        let resolution = Probe<Element>.resolution
         // How far from the centre along a line of length `span` a click still presses the
         // element: all of it, or the last point found by halving.
         func reach(_ span: Double, _ along: (Double) -> ScreenPoint) throws -> Double {
-            guard span > Self.resolution, !(try presses(along(span - Self.resolution))) else { return span }
-            var (inside, outside) = (0.0, span - Self.resolution)
-            while outside - inside > Self.resolution {
+            guard span > resolution, !(try presses(along(span - resolution))) else { return span }
+            var (inside, outside) = (0.0, span - resolution)
+            while outside - inside > resolution {
                 let middle = (inside + outside) / 2
                 if try presses(along(middle)) { inside = middle } else { outside = middle }
             }
@@ -121,9 +140,9 @@ struct Probe<Element> {
     /// ancestor is it.
     private func named(from hit: Element, role: Role, frame: ScreenRect) throws -> Element? {
         var element: Element? = hit
-        for _ in 0..<Self.depth {
+        for _ in 0..<Probe<Element>.depth {
             guard let current = element else { return nil }
-            let said = try heard(lineage(current))
+            let said = try ask { try probe.lineage(current) }
             if said.role == role, let placed = said.frame, placed.same(as: frame) { return current }
             element = said.parent
         }
@@ -133,18 +152,13 @@ struct Probe<Element> {
     /// The element's parents up to the top of its tree, nearest first.
     private func ancestors(of element: Element) throws -> [Element] {
         var above: [Element] = []
-        var current = try heard(parent(element))
-        for _ in 0..<Self.depth {
+        var current = try parent(element)
+        for _ in 0..<Probe<Element>.depth {
             guard let at = current else { return above }
             above.append(at)
-            current = try heard(parent(at))
+            current = try parent(at)
         }
         throw Stop(why: .unanswered)
-    }
-
-    private func heard<Value>(_ heard: Heard<Value>) throws -> Value {
-        guard case .answered(let value) = heard else { throw Stop(why: .unanswered) }
-        return value
     }
 }
 

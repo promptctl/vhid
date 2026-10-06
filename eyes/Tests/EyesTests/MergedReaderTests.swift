@@ -13,7 +13,7 @@ import Testing
         var region = MergedReaderTests.region
         /// What this reader's check of a row's box finds.
         var press: @Sendable (Found) -> Pressed = { _ in .kept }
-        var hitTests = 0
+        var calls = 0
 
         struct Blind: Error, CustomStringConvertible { var description: String { "no grant" } }
 
@@ -22,7 +22,7 @@ import Testing
             return Candidates(found: found, region: region, examined: found.count, excluded: [], reach: reach)
         }
 
-        func pressing(_ reading: Reading) async throws -> Reading { reading.pressing { Checked(press($0), hitTests: hitTests) } }
+        func pressing(_ reading: Reading) async throws -> Reading { reading.pressing { Checked(press($0), calls: calls) } }
     }
 
     static let role = Source.tree(role: Role(rawValue: "AXButton"))
@@ -255,11 +255,11 @@ import Testing
     @Test func eachReaderChecksTheBoxesOfTheRowsItPlaced() async throws {
         let cut = ScreenRect(x: 17, y: 15, width: 40, height: 12)
         let tree = Fake(source: .tree, found: [at("Allow", 10, 10, Self.role), at("Deny", 100, 10, Self.role)],
-                        press: { $0.text.value == "Allow" ? .narrowed(cut) : .unchecked(.elsewhere) }, hitTests: 4)
+                        press: { $0.text.value == "Allow" ? .narrowed(cut) : .unchecked(.elsewhere) }, calls: 4)
         let pixels = Fake(source: .pixels, found: [at("Allow", 12, 11, Self.seen)],
                           press: { $0.source.role == nil ? .unchecked(.unanswered) : .kept })
         let r = try await read(tree, pixels)
         #expect(all(r).map(\.frame) == [cut, ScreenRect(x: 100, y: 10, width: 60, height: 20)])
-        #expect(r.scope.boxes == Boxes(narrowed: 1, unchecked: [.elsewhere: 1], hitTests: 8))
+        #expect(r.scope.boxes == Boxes(narrowed: 1, unchecked: [.elsewhere: 1], calls: 8))
     }
 }

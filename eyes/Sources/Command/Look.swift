@@ -370,7 +370,7 @@ extension Report {
         Telemetry.count("examined", reading.scope.examined)
         Telemetry.count("boxes_narrowed", reading.scope.boxes.narrowed)
         for (why, count) in reading.scope.boxes.unchecked { Telemetry.count("boxes_unchecked_\(why.rawValue)", count) }
-        Telemetry.count("hit_tests", reading.scope.boxes.hitTests)
+        Telemetry.count("box_calls", reading.scope.boxes.calls)
         switch reading.outcome {
         case .matched(let m): Telemetry.count("matched", m.count); Telemetry.count("nearest", 0)
         case .nearest(let n), .unanchored(let n): Telemetry.count("matched", 0); Telemetry.count("nearest", n.count)

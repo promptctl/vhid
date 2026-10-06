@@ -39,7 +39,7 @@ import Testing
                          query: query, source: .tree)
         }
         #expect(scope(Boxes()).contains("4 runs read; whole region read."))
-        #expect(scope(Boxes(narrowed: 1, hitTests: 30)).contains("4 runs read; 1 box cut to where a click presses it; whole region read."))
+        #expect(scope(Boxes(narrowed: 1, calls: 30)).contains("4 runs read; 1 box cut to where a click presses it; whole region read."))
         #expect(scope(Boxes(narrowed: 2, unchecked: [.unanswered: 1, .overTime: 2])).contains(
             "4 runs read; 2 boxes cut to where a click presses it, 3 boxes unchecked (1 unanswered, 2 out of time); whole"))
         #expect(scope(Boxes(unchecked: [.elsewhere: 1])).contains("4 runs read; 1 box unchecked (1 its point on something else); whole"))
@@ -158,7 +158,7 @@ import Testing
         let events = Collected()
         let near = Reading(outcome: .nearest([]), scope: Scope(region: Self.display, examined: 5, reach: .whole))
         let hit = Reading(outcome: .matched(Matches([found("OK", x: -100)])!),
-                          scope: Scope(region: Self.display, examined: 9, reach: .whole, boxes: Boxes(narrowed: 1, unchecked: [.elsewhere: 2], hitTests: 41)))
+                          scope: Scope(region: Self.display, examined: 9, reach: .whole, boxes: Boxes(narrowed: 1, unchecked: [.elsewhere: 2], calls: 41)))
         try await Telemetry.$export.withValue(events.export) {
             _ = try await Report.text(Query(match: .contains("OK"), region: .display(12)), source: .tree) { _, _ in .standing(near) }
             _ = try await Report.text(Query(match: .contains("OK"), region: .display(12)), source: .pixels,
@@ -174,9 +174,9 @@ import Testing
         #expect(seen.map { $0.facts["region"] } == ["display", "display", "display", "page"])
         #expect(seen.map { $0.facts["order"] } == ["reading", "reading", "reading", "near"])
         #expect(seen[0].counts == ["reads": 1, "examined": 5, "matched": 0, "nearest": 0, "boxes_narrowed": 0, "boxes_unchecked_unanswered": 0,
-                                   "boxes_unchecked_elsewhere": 0, "boxes_unchecked_over_time": 0, "hit_tests": 0])
+                                   "boxes_unchecked_elsewhere": 0, "boxes_unchecked_over_time": 0, "box_calls": 0])
         #expect(seen[1].counts == ["reads": 1, "examined": 9, "matched": 1, "nearest": 0, "boxes_narrowed": 1, "boxes_unchecked_unanswered": 0,
-                                   "boxes_unchecked_elsewhere": 2, "boxes_unchecked_over_time": 0, "hit_tests": 41])
+                                   "boxes_unchecked_elsewhere": 2, "boxes_unchecked_over_time": 0, "box_calls": 41])
         #expect(seen[1].facts["until"] == "present")
         #expect(seen[2].error != nil && seen[2].counts == ["reads": 1])
     }

@@ -185,8 +185,8 @@ import Testing
     @Test func pressingChecksEveryPrintedRowAndCountsWhatItFound() {
         let cut = ScreenRect(x: 12, y: 22, width: 20, height: 30)
         let press: (Found) -> Checked = {
-            switch $0.text.value { case "Allow": Checked(.narrowed(cut), hitTests: 9); case "Deny": Checked(.unchecked(.overTime), hitTests: 0)
-            default: Checked(.kept, hitTests: 5) }
+            switch $0.text.value { case "Allow": Checked(.narrowed(cut), calls: 9); case "Deny": Checked(.unchecked(.overTime), calls: 0)
+            default: Checked(.kept, calls: 5) }
         }
         let near = reading(outcome: .nearest([Near(found: found("Allow"), distance: 1), Near(found: found("Deny"), distance: 2),
                                               Near(found: found("Help"), distance: 3)]), examined: 3, reach: .whole).pressing(press)
@@ -194,10 +194,10 @@ import Testing
         #expect(rows.map(\.found.frame) == [cut, found("Deny").frame, found("Help").frame])
         #expect(rows.map(\.distance) == [1, 2, 3])
         #expect(rows[2].found == found("Help"))
-        #expect(near.scope.boxes == Boxes(narrowed: 1, unchecked: [.overTime: 1], hitTests: 14))
+        #expect(near.scope.boxes == Boxes(narrowed: 1, unchecked: [.overTime: 1], calls: 14))
         #expect(near.scope.boxes.unchecked == [.unanswered: 0, .elsewhere: 0, .overTime: 1])
         let matched = reading(outcome: .matched(Matches([found("Allow")])!), examined: 1, reach: .whole).pressing(press)
         #expect(matched.outcome == .matched(Matches([Found(text: Text("Allow")!, frame: cut, source: found("Allow").source)])!))
-        #expect(matched.scope.boxes == Boxes(narrowed: 1, hitTests: 9))
+        #expect(matched.scope.boxes == Boxes(narrowed: 1, calls: 9))
     }
 }

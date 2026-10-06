@@ -241,7 +241,7 @@ public struct Scope: Sendable, Hashable {
 }
 
 /// How many of a reading's rows had their box cut to where a click presses the element
-/// they name, how many could not be checked and why, and the hit tests the checks spent.
+/// they name, how many could not be checked and why, and the calls into apps the checks made.
 ///
 /// The accessibility tree reports an element's frame, and a frame is the app's claim, not
 /// where a click lands: measured on studious, Safari gives a page's `<button>` a frame 7
@@ -254,14 +254,14 @@ public struct Boxes: Sendable, Hashable {
     public let narrowed: Int
     /// Rows whose box was not checked, by why. Every reason is present, zeros included.
     public let unchecked: [Unchecked: Int]
-    /// Hit tests asked across every row: the cost of the checks, which a busy app makes
-    /// each as slow as the messaging timeout.
-    public let hitTests: Int
+    /// Calls into apps across every row, hit tests and reads alike: the cost of the checks,
+    /// which a busy app makes each as slow as the messaging timeout.
+    public let calls: Int
 
-    public init(narrowed: Int = 0, unchecked: [Unchecked: Int] = [:], hitTests: Int = 0) {
+    public init(narrowed: Int = 0, unchecked: [Unchecked: Int] = [:], calls: Int = 0) {
         self.narrowed = narrowed
         self.unchecked = Dictionary(uniqueKeysWithValues: Unchecked.allCases.map { ($0, unchecked[$0, default: 0]) })
-        self.hitTests = hitTests
+        self.calls = calls
     }
 
     /// Every row whose box was not checked, whatever the reason.
@@ -369,10 +369,10 @@ public extension Reading {
     /// through `press`, and the boxes' counts it reports. The one way a reader's
     /// `pressing` rewrites rows, so no row printed escapes it. [LAW:single-enforcer]
     func pressing(_ press: (Found) throws -> Checked) rethrows -> Reading {
-        var narrowed = scope.boxes.narrowed, unchecked = scope.boxes.unchecked, hitTests = scope.boxes.hitTests
+        var narrowed = scope.boxes.narrowed, unchecked = scope.boxes.unchecked, calls = scope.boxes.calls
         func pressed(_ found: Found) throws -> Found {
             let checked = try press(found)
-            hitTests += checked.hitTests
+            calls += checked.calls
             switch checked.pressed {
             case .kept: return found
             case .narrowed(let frame): narrowed += 1; return Found(text: found.text, frame: frame, source: found.source)
@@ -387,7 +387,7 @@ public extension Reading {
         }
         let s = scope
         return Reading(outcome: outcome, scope: Scope(region: s.region, examined: s.examined, excluded: s.excluded, reach: s.reach,
-                                                      boxes: Boxes(narrowed: narrowed, unchecked: unchecked, hitTests: hitTests)))
+                                                      boxes: Boxes(narrowed: narrowed, unchecked: unchecked, calls: calls)))
     }
 
     /// Whether "it is not there" is a fact about the screen rather than about the read.
