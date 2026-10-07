@@ -15,7 +15,7 @@ import Testing
         #expect(try printedRects(Displays.report(Self.desk)) == Self.desk.map(\.frame))
         #expect(Displays.report(Self.desk) == """
             2 displays, main first. Active only: a sleeping display was never looked at. \
-            Bounds are the screen points vhid click takes, negative left of or above the main display.
+            Bounds are x,y,width,height in the screen points vhid click takes, negative left of or above the main display.
             1\tmain\t0,0,1512,982\t2x
             3\tsecondary\t-1920,-98,1920,1080\t1x
             """)

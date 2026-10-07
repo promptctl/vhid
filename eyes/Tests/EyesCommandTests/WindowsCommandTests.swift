@@ -20,7 +20,7 @@ import Testing
         let line = Windows.scope(shown: 2, listing: listing, frontmost: nil)
         #expect(line == "2 windows, front to back."
             + " On screen only: minimized, hidden and other-Space windows were never looked at."
-            + " Owner, layer and bounds; titles need Screen Recording."
+            + " Owner, layer and bounds as x,y,width,height; titles need Screen Recording."
             + " No application is frontmost."
             + " A panel of another process over it (Spotlight, a Save dialog) can hold the keys instead.")
     }

@@ -157,8 +157,11 @@ public extension ScreenRect {
 /// and the one `rect` reads, so anything printed as a rectangle can be read back as one.
 /// [LAW:one-source-of-truth]
 extension ScreenRect: CustomStringConvertible {
+    /// The farthest from the origin any edge or size may be, in points.
+    static let limit = 1_000_000.0
+
     /// What a refusal names as the form wanted.
-    public static let spelling = "x,y,width,height in points - a positive size, nothing past a million"
+    public static let spelling = "x,y,width,height in points - a positive size, nothing past \(Int(limit))"
 
     /// The smallest whole-point rectangle covering this one: rounded outward, as
     /// `CGRect.integral` rounds, so what is printed still holds every point of what was
@@ -173,7 +176,7 @@ extension ScreenRect: CustomStringConvertible {
         let parts = spelled.split(separator: ",", omittingEmptySubsequences: false)
             .map { Double($0.trimmingCharacters(in: .whitespaces)) }
         guard parts.count == 4, let x = parts[0], let y = parts[1], let w = parts[2], let h = parts[3],
-              [x, y, w, h].allSatisfy({ abs($0) <= 1_000_000 }), w > 0, h > 0
+              [x, y, w, h].allSatisfy({ abs($0) <= Self.limit }), w > 0, h > 0
         else { return nil }
         self.init(x: x, y: y, width: w, height: h)
     }
