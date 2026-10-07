@@ -22,7 +22,7 @@ enum Help {
     static let edits = "Match a run within this many single-character edits of the text, for recogniser slips."
     static let display = "Read this display, by its window-server id, which `eyes displays` lists and every scope line names. Defaults to the main display."
     static let window = "Read this window's bounds, by the id `eyes windows` prints."
-    static let rect = "Read this rectangle: x,y,width,height in the points vhid clicks, the form each row's box prints in."
+    static let rect = "Read this rectangle: x,y,width,height in the points vhid clicks, the form every rectangle eyes prints is in: a row's box, a window's or display's bounds, a scope line's region."
     static let page = "Read the web page this window shows, by the id `eyes windows` prints: the page alone,"
         + " not the browser's toolbar and bookmarks around it. Needs Accessibility, which finds the page."
     static let near = "Order the matches by how close each sits to a run containing this text, nearest first:"
@@ -148,11 +148,8 @@ struct Where: ParsableArguments {
     }
 
     private static func parsedRect(_ spelled: String, as s: Spelling) throws -> ScreenRect {
-        let parts = spelled.split(separator: ",").map { Double($0.trimmingCharacters(in: .whitespaces)) }
-        guard parts.count == 4, let x = parts[0], let y = parts[1], let w = parts[2], let h = parts[3],
-              [x, y, w, h].allSatisfy({ abs($0) <= 1_000_000 }), w > 0, h > 0
-        else { throw ValidationError("\(s("rect")) wants x,y,width,height in points - a positive size, nothing past a million - got \(spelled)") }
-        return ScreenRect(x: x, y: y, width: w, height: h)
+        guard let rect = ScreenRect(spelled: spelled) else { throw ValidationError("\(s("rect")) wants \(ScreenRect.spelling) - got \(spelled)") }
+        return rect
     }
 }
 
@@ -228,14 +225,11 @@ enum Report {
     /// The whole point a click is sent to: the frame's centre, rounded.
     private static func clickPoint(_ p: ScreenPoint) -> CGPoint { CGPoint(x: p.x.rounded(), y: p.y.rounded()) }
 
-    /// A frame in the form `rect` takes: the smallest whole-point box covering both the
-    /// frame and the cell of the point printed beside it. The rounded point can fall past
-    /// the frame's right or bottom edge, which half-open containment counts as outside,
-    /// so the point is covered by construction rather than by luck of the rounding.
-    /// [LAW:one-source-of-truth] outward rounding is CGRect.integral, as the pixel reader's.
-    private static func box(_ frame: ScreenRect, holding at: CGPoint) -> String {
-        let b = frame.cgRect.union(CGRect(origin: at, size: CGSize(width: 1, height: 1))).integral
-        return "\(Int(b.minX)),\(Int(b.minY)),\(Int(b.width)),\(Int(b.height))"
+    /// The frame grown to cover the cell of the point printed beside it. The rounded point
+    /// can fall past the frame's right or bottom edge, which half-open containment counts as
+    /// outside, so the point is covered by construction rather than by luck of the rounding.
+    private static func box(_ frame: ScreenRect, holding at: CGPoint) -> ScreenRect {
+        ScreenRect(frame.cgRect.union(CGRect(origin: at, size: CGSize(width: 1, height: 1))))
     }
 
     private static func wanted(_ match: Match) -> String {

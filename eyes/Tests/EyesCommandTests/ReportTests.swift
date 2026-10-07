@@ -24,7 +24,7 @@ import Testing
             scope: Scope(region: Self.display, examined: 47, excluded: [Exclusion(reason: .duplicate, count: 3)], reach: .whole)
         )
         #expect(Report.lines(reading, query: query, source: .pixels) == [
-            "\"Settings\" not found in display 12 -2400,-300 2400x1600 by pixels; 47 runs read; 3 duplicate;"
+            "\"Settings\" not found in display 12 -2400,-300,2400,1600 by pixels; 47 runs read; 3 duplicate;"
                 + " whole region read; nearest follow. Each row's point is its centre and its box holds it, x,y,width,height, in vhid click coordinates.",
             "-1880,-50\t-1900,-60,40,20\tSetlings\tpixels\t1 off",
         ])
@@ -73,9 +73,8 @@ import Testing
         let found = Found(text: Text("Save")!, frame: frame, source: .tree(role: Role(rawValue: "AXButton")))
         let columns = try #require(Report.rows(.matched(Matches([found])!)).first).split(separator: "\t").map(String.init)
         #expect(columns[1] == box)
-        let n = columns[1].split(separator: ",").compactMap { Double($0) }
         let c = columns[0].split(separator: ",").compactMap { Double($0) }
-        let printed = CGRect(x: n[0], y: n[1], width: n[2], height: n[3])
+        let printed = try #require(try printedRects(columns.joined(separator: "\t")).first).cgRect
         #expect(printed.contains(frame.cgRect))
         #expect(printed.contains(CGPoint(x: c[0], y: c[1])))
         #expect(try Find.parse(["Save", "--rect", columns[1]]).place.rect == columns[1])
@@ -87,7 +86,7 @@ import Testing
         let reading = Reading(outcome: .matched(Matches([found("Remove", x: 100)])!), scope: Scope(region: page, examined: 9, reach: .whole))
         let query = Query(match: .contains("Remove"), region: .page(window: 219, frame: page), near: .contains("Beta"))
         #expect(Report.scope(reading, query: query, source: .tree)
-            .hasPrefix("1 matched \"Remove\" near \"Beta\" in the page in window 219 22,190 1200x688 by the tree;"))
+            .hasPrefix("1 matched \"Remove\" near \"Beta\" in the page in window 219 22,190,1200,688 by the tree;"))
     }
 
     /// A blank region promises no rows it does not print.
@@ -127,10 +126,11 @@ import Testing
 
     /// The scope line names which reader looked, for every reader there is.
     @Test(arguments: [(SourceKind.tree, "by the tree"), (.pixels, "by pixels"), (.merged, "by tree and pixels, merged")])
-    func theScopeNamesWhoLooked(source: SourceKind, named: String) {
+    func theScopeNamesWhoLooked(source: SourceKind, named: String) throws {
         let reading = Reading(outcome: .nearest([]), scope: Scope(region: Self.display, examined: 0, reach: .whole))
         let line = Report.scope(reading, query: Query(match: nil, region: .display(12)), source: source)
-        #expect(line.hasPrefix("no text in display 12 -2400,-300 2400x1600 \(named);"))
+        #expect(line.hasPrefix("no text in display 12 -2400,-300,2400,1600 \(named);"))
+        #expect(try printedRects(line) == [Self.display])
     }
 
     /// Both verbs take every source by name, merged when none is given, and refuse any other.

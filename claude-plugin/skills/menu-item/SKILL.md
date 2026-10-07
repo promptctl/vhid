@@ -121,7 +121,7 @@ eyes find {"text": "Help", "rect": "0,0,800,30"}
                   -> (a scope line, then) 422,14	406,7,32,15	Help	pixels
 vhid click {"x": 422, "y": 14}
 eyes windows      -> no layer-101 window yet: look again
-eyes windows      -> 180	TextEdit	L101	395,25 360x59	front    a menu is open
+eyes windows      -> 180	TextEdit	L101	395,25,360,59	front    a menu is open
 eyes read {"window": 180}
                   -> 433,41	410,33,46,16	Search	pixels
                      452,69	410,61,84,16	TextEdit Help	pixels           "Search": the Help menu
@@ -134,11 +134,11 @@ eyes read {"window": 180}
                      444,73	410,66,68,14	Menu Items	pixels
                      472,95	412,87,120,16	EJ Export as PDF...	pixels      first row, the whole name: this one
                      445,116	410,109,70,14	Help Topics	pixels
-eyes windows      -> 180	TextEdit	L101	395,25 360x151	front   same id, grown
+eyes windows      -> 180	TextEdit	L101	395,25,360,151	front   same id, grown
 vhid press {"chords": ["down"]}
 vhid press {"chords": ["return"]}
 eyes windows      -> leftover layer-101 menus, no new window: look again
-eyes windows      -> 189	TextEdit	L0	501,125 800x448	front    a new window
+eyes windows      -> 189	TextEdit	L0	501,125,800,448	front    a new window
 eyes find {"text": "Show Details", "window": 189, "until": "present", "timeout": 5}
                   -> a Show Details row at 816,543, which a plain Save sheet
                      lacks: the export sheet: invoked

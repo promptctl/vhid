@@ -31,7 +31,8 @@ accessibility tree gives the element (`AXButton`, `AXLink`, `AXTextField`, ...),
 is what tells a page's Settings button from a browser bookmark of the same name, or a
 field from its label. The box is `x,y,width,height` in the same points, the form `--rect`
 takes, rounded outward to whole points so it covers the run and holds the point printed
-beside it.
+beside it. Every rectangle eyes prints is in that form, a window's or display's bounds and
+a scope line's region too, so any of them can be passed back as `--rect`.
 
 A row the accessibility tree found has its box checked against where a click lands. An
 element's frame is its app's claim: Safari gives a page's native-looking button a frame

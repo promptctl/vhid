@@ -153,13 +153,32 @@ public extension ScreenRect {
     }
 }
 
-/// `x,y WxH` in whole points, the one spelling every line `eyes` prints uses, so one
-/// rectangle cannot print as two places. Rounded rather than truncated: truncation moves
-/// a negative coordinate toward zero, a whole point off on a display left of the main one.
+/// `x,y,width,height` in whole points: the one spelling every rectangle `eyes` prints in
+/// and the one `rect` reads, so anything printed as a rectangle can be read back as one.
 /// [LAW:one-source-of-truth]
 extension ScreenRect: CustomStringConvertible {
+    /// The farthest from the origin any edge or size may be, in points.
+    static let limit = 1_000_000.0
+
+    /// What a refusal names as the form wanted.
+    public static let spelling = "x,y,width,height in points - a positive size, nothing past \(Int(limit))"
+
+    /// The smallest whole-point rectangle covering this one: rounded outward, as
+    /// `CGRect.integral` rounds, so what is printed still holds every point of what was
+    /// found, and a negative coordinate is not moved toward zero.
     public var description: String {
-        "\(Int(x.rounded())),\(Int(y.rounded())) \(Int(width.rounded()))x\(Int(height.rounded()))"
+        let r = cgRect.integral
+        return "\(Int(r.minX)),\(Int(r.minY)),\(Int(r.width)),\(Int(r.height))"
+    }
+
+    /// A rectangle as `description` spells it, or none for anything that is not one.
+    public init?(spelled: String) {
+        let parts = spelled.split(separator: ",", omittingEmptySubsequences: false)
+            .map { Double($0.trimmingCharacters(in: .whitespaces)) }
+        guard parts.count == 4, let x = parts[0], let y = parts[1], let w = parts[2], let h = parts[3],
+              [x, y, w, h].allSatisfy({ abs($0) <= Self.limit }), w > 0, h > 0
+        else { return nil }
+        self.init(x: x, y: y, width: w, height: h)
     }
 }
 

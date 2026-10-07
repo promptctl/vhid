@@ -26,7 +26,7 @@ struct Displays: AsyncParsableCommand {
     /// space the bounds are in. [LAW:no-silent-failure]
     static func scope(_ count: Int) -> String {
         "\(count) display\(count == 1 ? "" : "s"), main first. Active only: a sleeping display was never looked at."
-            + " Bounds are the screen points vhid click takes, negative left of or above the main display."
+            + " Bounds are x,y,width,height in the screen points vhid click takes, negative left of or above the main display."
     }
 
     /// One display as a row: the id `--display` takes, main or not, the rectangle, and the

@@ -95,7 +95,7 @@ struct Windows: AsyncParsableCommand {
         ]
         return clauses.compactMap { $0 }.joined(separator: "; ")
             + ". On screen only: minimized, hidden and other-Space windows were never looked at."
-            + " Owner, layer and bounds; titles need Screen Recording."
+            + " Owner, layer and bounds as x,y,width,height; titles need Screen Recording."
             + (frontmost.map { " Frontmost: \($0.app), \($0.rows.rawValue)." }
                 ?? " No application is frontmost.")
             // Frontmost is not the same as holding the keys, and the line says so rather

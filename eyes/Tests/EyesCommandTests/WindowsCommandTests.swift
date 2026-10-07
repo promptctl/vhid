@@ -20,7 +20,7 @@ import Testing
         let line = Windows.scope(shown: 2, listing: listing, frontmost: nil)
         #expect(line == "2 windows, front to back."
             + " On screen only: minimized, hidden and other-Space windows were never looked at."
-            + " Owner, layer and bounds; titles need Screen Recording."
+            + " Owner, layer and bounds as x,y,width,height; titles need Screen Recording."
             + " No application is frontmost."
             + " A panel of another process over it (Spotlight, a Save dialog) can hold the keys instead.")
     }
@@ -117,15 +117,11 @@ import Testing
 
     /// The layer is on every row, because it is the one fact that tells an open menu from
     /// an ordinary window and the tool no longer decides which of those a caller meant.
-    @Test func theRowCarriesTheLayerAndTheCoordinatesVhidClicks() {
-        let row = Windows.row(Window(
-            id: 104,
-            owner: "System Settings",
-            pid: 400,
-            frame: ScreenRect(x: 160, y: 33, width: 723, height: 949),
-            layer: 101
-        ))
-        #expect(row == "104\tSystem Settings\tL101\t160,33 723x949")
+    @Test func theRowCarriesTheLayerAndTheCoordinatesVhidClicks() throws {
+        let frame = ScreenRect(x: 160, y: 33, width: 723, height: 949)
+        let row = Windows.row(Window(id: 104, owner: "System Settings", pid: 400, frame: frame, layer: 101))
+        #expect(row == "104\tSystem Settings\tL101\t160,33,723,949")
+        #expect(try printedRects(row) == [frame])
     }
 
     /// `kCGWindowOwnerName` is an optional key, so a window can be visible and clickable
@@ -139,7 +135,7 @@ import Testing
             frame: ScreenRect(x: 0, y: 0, width: 100, height: 50),
             layer: 0
         ))
-        #expect(row == "7\t(unnamed)\tL0\t0,0 100x50")
+        #expect(row == "7\t(unnamed)\tL0\t0,0,100,50")
     }
 
     /// [LAW:no-silent-failure] An empty `--owner` matches nothing at all, because

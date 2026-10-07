@@ -236,7 +236,7 @@ import Testing
             ("read", ["display": 1, "window": 2], "give at most one of display, window, page, rect"),
             ("read", ["display": -1], "display is -1, which is not a window-server id (0 to 4294967295)"),
             ("read", ["window": 4_294_967_296], "window is 4294967296, which is not a window-server id (0 to 4294967295)"),
-            ("read", ["rect": "1,2,3"], "rect wants x,y,width,height in points - a positive size, nothing past a million - got 1,2,3"),
+            ("read", ["rect": "1,2,3"], "rect wants x,y,width,height in points - a positive size, nothing past 1000000 - got 1,2,3"),
             ("read", ["text": "a"], "text is not an argument this tool takes: it takes display, window, page, rect, limit, source"),
             ("read", ["source": "ocr"], "source is ocr, and it takes one of tree, pixels, merged"),
             ("read", ["page": 2, "rect": "1,2,3,4"], "give at most one of display, window, page, rect"),

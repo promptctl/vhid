@@ -110,8 +110,19 @@ import Testing
         expect(back.height, piece.height, "height")
     }
 
-    /// Rounded, not truncated: truncation moves a negative coordinate toward zero.
-    @Test func aRectangleIsSpelledInWholePointsRounded() {
-        #expect(ScreenRect(x: -0.6, y: 10.5, width: 99.6, height: 20).description == "-1,11 100x20")
+    /// Rounded outward, so the whole points printed still cover what was found, and a
+    /// negative coordinate is not moved toward zero as truncation would move it.
+    @Test func aRectangleIsSpelledInWholePointsRoundedOutward() {
+        #expect(ScreenRect(x: -0.6, y: 10.5, width: 99.6, height: 20).description == "-1,10,100,21")
+    }
+
+    /// What is printed reads back as the rectangle it names, and anything else reads as none.
+    @Test func theSpellingReadsBack() {
+        let r = ScreenRect(x: -1920, y: -98, width: 1920, height: 1080)
+        #expect(ScreenRect(spelled: r.description) == r)
+        #expect(ScreenRect(spelled: " 1.5, 2 ,3,4") == ScreenRect(x: 1.5, y: 2, width: 3, height: 4))
+        for refused in ["1,2,3", "1,2,3,4,5", "1,2,3,4,", "1,,3,4", "1,2,0,4", "1,2,3,-4", "2000000,0,1,1", "0,0 10x10", ""] {
+            #expect(ScreenRect(spelled: refused) == nil, "\(refused)")
+        }
     }
 }

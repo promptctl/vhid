@@ -275,7 +275,7 @@ enum EyesTools {
         tool: Tool(
             name: "displays",
             description: Displays.configuration.abstract
-                + " Bounds are the screen points vhid click takes. Needs no grant.",
+                + " Bounds are x,y,width,height in the screen points vhid click takes. Needs no grant.",
             inputSchema: .object([
                 "type": "object",
                 "properties": .object([:]),

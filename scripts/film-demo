@@ -63,10 +63,10 @@ stage
 
 # The view is centred on the front window, on the main display; eyes gives both in the
 # points vhid clicks, and the display's scale in pixels per point.
-read -r screen_width screen_height scale < <(eyes displays | awk -F'\t' '$2 == "main" { split($3, b, " "); split(b[2], s, "x"); print s[1], s[2], $4 + 0 }')
-read -r wx wy ww wh < <(eyes windows | awk -F'\t' '$3 == "L0" && $5 == "front" { split($4, b, " "); split(b[1], p, ","); split(b[2], s, "x"); print p[1], p[2], s[1], s[2]; exit }')
+read -r screen_width screen_height scale < <(eyes displays | awk -F'\t' '$2 == "main" { split($3, b, ","); print b[3], b[4], $4 + 0 }')
+read -r wx wy ww wh < <(eyes windows | awk -F'\t' '$3 == "L0" && $5 == "front" { split($4, b, ","); print b[1], b[2], b[3], b[4]; exit }')
 (( wx >= 0 && wy >= 0 && wx + ww <= screen_width && wy + wh <= screen_height && screen_width >= view[0] && screen_height >= view[1] )) || {
-    echo "film-demo: the front window ($wx,$wy ${ww}x$wh) must lie on the main display (${screen_width}x$screen_height), and the display must hold the ${view[0]}x${view[1]} view" >&2
+    echo "film-demo: the front window ($wx,$wy,$ww,$wh) must lie on the main display (${screen_width}x$screen_height), and the display must hold the ${view[0]}x${view[1]} view" >&2
     exit 1
 }
 clamp() { echo $(( $1 < 0 ? 0 : ($1 > $2 ? $2 : $1) )); }
