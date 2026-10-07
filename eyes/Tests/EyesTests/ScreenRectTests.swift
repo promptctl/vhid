@@ -121,7 +121,7 @@ import Testing
         let r = ScreenRect(x: -1920, y: -98, width: 1920, height: 1080)
         #expect(ScreenRect(spelled: r.description) == r)
         #expect(ScreenRect(spelled: " 1.5, 2 ,3,4") == ScreenRect(x: 1.5, y: 2, width: 3, height: 4))
-        for refused in ["1,2,3", "1,2,3,4,5", "1,,3,4", "1,2,0,4", "1,2,3,-4", "2000000,0,1,1", "0,0 10x10", ""] {
+        for refused in ["1,2,3", "1,2,3,4,5", "1,2,3,4,", "1,,3,4", "1,2,0,4", "1,2,3,-4", "2000000,0,1,1", "0,0 10x10", ""] {
             #expect(ScreenRect(spelled: refused) == nil, "\(refused)")
         }
     }
