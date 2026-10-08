@@ -131,7 +131,7 @@ public struct Trajectory: Sendable, Equatable {
     /// it swings toward every edge it runs beside, and checking it would cut every other
     /// deviation with it.
     public init(from start: ScreenPoint, toward aimed: Target, within displays: Displays, drawing generator: inout some RandomNumberGenerator) {
-        let target = aimed.aim(drawing: &generator)
+        let target = aimed.aim(from: start, drawing: &generator)
         let pace = Self.pace.draw(using: &generator)
         let structure = Structure.draw(using: &generator)
         let (short, over) = (Self.short.draw(using: &generator), Self.over.draw(using: &generator))

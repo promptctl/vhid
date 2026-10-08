@@ -119,14 +119,16 @@ public struct Pointer: Sendable {
         public let moved: Moved
     }
 
-    /// A move: the point it aimed at, drawn inside the target it was given, how long
+    /// A move: where the cursor was when it began, the point it aimed at, drawn inside the
+    /// target it was given from there, how long
     /// its trajectory was drawn to take, the displays it was kept on and how much of its
     /// drawn deviation from the straight line they let it keep, the motion reports that steered it along that and then
     /// homed it onto the aim, how many steered reports the cursor never showed, and where the
     /// cursor was read when it landed. [LAW:nothing-unseen] How well the steering landed is
     /// the closing count; how well it was tracked is `lost`; how near an edge it ran is
-    /// `kept` below one; the seed and `displays` together draw the path again.
+    /// `kept` below one; the seed, `from` and `displays` together draw the path again.
     public struct Moved: Equatable, Sendable {
+        public let from: ScreenPoint
         public let aimed: ScreenPoint
         public let toward: Target
         public let planned: Duration
@@ -236,7 +238,7 @@ public struct Pointer: Sendable {
         var steered = 0, closing = 0
         var landed: ScreenPoint?
         var moved: Moved {
-            Moved(aimed: trajectory.target, toward: trajectory.toward, planned: trajectory.duration, structure: trajectory.structure, displays: displays, kept: trajectory.kept,
+            Moved(from: trajectory.start, aimed: trajectory.target, toward: trajectory.toward, planned: trajectory.duration, structure: trajectory.structure, displays: displays, kept: trajectory.kept,
                   steered: steered, closing: closing, lost: tracking.lost, landed: landed)
         }
         defer { traced(.moved(moved)) }

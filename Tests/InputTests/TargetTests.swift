@@ -4,16 +4,22 @@ import Testing
 @testable import Input
 
 /// Where a click lands, `docs/design/human.md`: a point exactly, and a box at a point drawn
-/// inside it, spread about its centre and clear of its edge, the move timed by its size.
+/// inside it and clear of its edge, spread about its centre and held to the line the hand
+/// sets out on, the move timed by its size.
 @Suite struct TargetTests {
     static let start = ScreenPoint(x: 100, y: 300)!
     static let button = ScreenRect(x: 800, y: 290, width: 80, height: 24)!
 
-    static func aims(at target: Target, seeds: Range<UInt64> = 0 ..< 2000) -> [ScreenPoint] {
+    static func aims(at target: Target, from start: ScreenPoint = start, seeds: Range<UInt64> = 0 ..< 2000) -> [ScreenPoint] {
         seeds.map { seed in
             var generator = SeededGenerator(seed: seed)
-            return target.aim(drawing: &generator)
+            return target.aim(from: start, drawing: &generator)
         }
+    }
+
+    static func spread(_ values: [Double]) -> (mean: Double, deviation: Double) {
+        let mean = values.reduce(0, +) / Double(values.count)
+        return (mean, (values.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / Double(values.count)).squareRoot())
     }
 
     /// A point is pressed where it is, and its move timed as today's, by W = 20.
@@ -35,17 +41,58 @@ import Testing
         #expect(Set(aims).count == aims.count)
     }
 
-    /// Spread about the centre as a person's clicks are, each axis's deviation its aimable
-    /// width over 4.133, a little less for the redraws past the edge.
-    @Test func theAimsSpreadAboutTheCentreByTheEffectiveWidth() {
+    /// Along the line of travel, spread about the centre as a person's clicks are, the
+    /// deviation the aimable width over 4.133, a little less for the redraws past the edge:
+    /// from straight above or beside, on either axis, and from over the box, its margin
+    /// included, where there is no line to keep to, on both. So a drag whose drop box holds
+    /// the point it pressed still carries the button somewhere inside it.
+    @Test func alongTheTravelTheAimsSpreadAboutTheCentreByTheEffectiveWidth() {
         let box = Self.button
-        let aims = Self.aims(at: .box(box))
-        for (values, centre, aimable) in [(aims.map(\.x), 840.0, 76.0), (aims.map(\.y), 302.0, 20.0)] {
-            let mean = values.reduce(0, +) / Double(values.count)
-            let deviation = (values.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / Double(values.count)).squareRoot()
-            #expect(abs(mean - centre) < aimable * 0.02, "mean \(mean)")
-            #expect((aimable / 4.133 * 0.85 ... aimable / 4.133).contains(deviation), "deviation \(deviation)")
+        let beside = Self.aims(at: .box(box), from: ScreenPoint(x: 100, y: 302)!)
+        let above = Self.aims(at: .box(box), from: ScreenPoint(x: 840, y: 0)!)
+        let over = Self.aims(at: .box(box), from: ScreenPoint(x: 801, y: 291)!)
+        for (values, centre, aimable) in [(beside.map(\.x), 840.0, 76.0), (above.map(\.y), 302.0, 20.0), (over.map(\.x), 840.0, 76.0), (over.map(\.y), 302.0, 20.0)] {
+            let measured = Self.spread(values)
+            #expect(abs(measured.mean - centre) < aimable * 0.02, "mean \(measured.mean)")
+            #expect((aimable / 4.133 * 0.85 ... aimable / 4.133).contains(measured.deviation), "deviation \(measured.deviation)")
         }
+    }
+
+    /// A hand moving down onto a wide menu row comes straight down: across its travel the
+    /// aims keep to the start's line by its directional error, 5% of the distance, not
+    /// over the row to its centre. The row and start are the probe page's Bravo, under Menu.
+    @Test func acrossTheTravelTheAimsKeepToTheStartsLine() {
+        let row = ScreenRect(x: 1101, y: 305, width: 238, height: 40)!
+        let start = ScreenPoint(x: 1118, y: 252)!
+        let aims = Self.aims(at: .box(row), from: start)
+        let (mean, deviation) = Self.spread(aims.map(\.x))
+        // 55 down to the nearest aimable point, the hand strays 2.75 across; the row's spread
+        // of 56.6 pulls the mean 0.24 toward its centre and the deviation down to 2.747.
+        #expect(abs(mean - 1118.24) < 0.2, "mean \(mean)")
+        #expect((2.6 ... 2.9).contains(deviation), "deviation \(deviation)")
+        #expect(Self.spread(aims.map(\.y)).mean > 320)
+    }
+
+    /// Coming in at a slant, onto the button's corner, the aims still keep near the line the
+    /// hand set out on, within its directional error, and lie past the corner along it.
+    @Test func atASlantTheAimsKeepNearTheStartsLine() {
+        let start = ScreenPoint(x: 700, y: 200)!
+        let aims = Self.aims(at: .box(Self.button), from: start)
+        // The line runs to the nearest aimable point, the corner (802, 292), 137 off.
+        let (dx, dy) = (102.0, 92.0), distance = hypot(102.0, 92.0)
+        let off = Self.spread(aims.map { (($0.x - start.x) * dy - ($0.y - start.y) * dx) / distance })
+        let along = Self.spread(aims.map { (($0.x - start.x) * dx + ($0.y - start.y) * dy) / distance })
+        #expect(abs(off.mean) < 0.05 * distance && off.deviation < 0.05 * distance, "across \(off)")
+        #expect(along.mean > distance + 10, "along \(along)")
+    }
+
+    /// A long move to a small button holds no line: the hand's error is wider than the
+    /// button, so the aims spread about its centre as from straight beside it.
+    @Test func fromFarTheAimsSpreadAboutTheCentre() {
+        let aims = Self.aims(at: .box(Self.button), from: ScreenPoint(x: 100, y: 280)!)
+        let measured = Self.spread(aims.map(\.y))
+        #expect(abs(measured.mean - 302) < 0.6, "mean \(measured.mean)")
+        #expect(measured.deviation > 20 / 4.133 * 0.85, "deviation \(measured.deviation)")
     }
 
     /// A box no wider than twice the margin on an axis is aimed at its centre on that axis.
@@ -62,7 +109,7 @@ import Testing
         var generator = SeededGenerator(seed: 7)
         let path = Trajectory(from: Self.start, toward: .box(Self.button), within: .vast, drawing: &generator)
         var replay = SeededGenerator(seed: 7)
-        _ = Target.box(Self.button).aim(drawing: &replay)
+        _ = Target.box(Self.button).aim(from: Self.start, drawing: &replay)
         let pace = Trajectory.pace.draw(using: &replay)
         let distance = hypot(path.target.x - Self.start.x, path.target.y - Self.start.y)
         #expect(path.toward.width == 24)

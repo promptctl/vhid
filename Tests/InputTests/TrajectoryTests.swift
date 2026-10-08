@@ -22,7 +22,7 @@ import Testing
     /// 0.84 s across 740 points before the pace.
     @Test func aMoveTakesFittsTimeTimesItsDrawnPace() {
         var generator = SeededGenerator(seed: 7)
-        _ = Target.point(Self.across).aim(drawing: &generator)
+        _ = Target.point(Self.across).aim(from: Self.start, drawing: &generator)
         let pace = Trajectory.pace.draw(using: &generator)
         let fitts = Duration.milliseconds(50) + .milliseconds(150) * log2(740.0 / 20 + 1)
         #expect(Self.trajectory(seed: 7).duration == fitts * pace)
