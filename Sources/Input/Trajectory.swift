@@ -23,8 +23,9 @@ public struct Trajectory: Sendable, Equatable {
     /// The main movement's bow as drawn, a signed fraction of D, positive away from the
     /// elbow, before the forearm and the displays scale it.
     public let bow: Double
-    /// The share of its time at which each of its movements has covered half its distance.
-    public let halfway: Double
+    /// The share of its time at which each of its movements has covered half its distance,
+    /// drawn once and held by every stroke. [LAW:one-source-of-truth]
+    public var halfway: Double { chain.strokes[0].halfway }
     /// The movements in order, with when each begins.
     private let chain: Chain
     /// The sideways shake laid over them, always whole.
@@ -62,8 +63,8 @@ public struct Trajectory: Sendable, Equatable {
     static let offLine = Normal(0, 0.02, within: -0.04 ... 0.04)
     /// How far the main movement bows at its middle, as a fraction of D, before it is scaled
     /// by how much of the stroke lies across the forearm: away from the elbow by 2.5% on
-    /// average, but spread down through zero, so about one move in eight runs straight and a
-    /// few bow slightly toward it.
+    /// average, but spread down through zero, so some moves run straight and a few bow
+    /// slightly toward it.
     static let bow = Normal(0.025, 0.02, within: -0.01 ... 0.06)
     /// The share of its time at which a movement has covered half its distance, drawn once
     /// for the whole move: most slow down for longer than they speed up, by more or less,
@@ -196,7 +197,6 @@ public struct Trajectory: Sendable, Equatable {
         kept = Kept(ends: ends, bow: bowKept)
         self.structure = structure
         self.bow = bowing
-        self.halfway = halfway
         self.chain = chosen
         self.tremor = tremor
     }

@@ -115,9 +115,10 @@ import Testing
             for seed in UInt64(0) ..< 40 {
                 let path = Self.trajectory(seed: seed, from: centre, to: end)
                 let main = path.strokes[0]
-                // How much of the move, from the centre to the target, lies across the forearm.
-                let across = abs(cos(angle) * forearm.y - sin(angle) * forearm.x)
-                #expect(abs(main.bow) <= 0.06 * 740 * across + 1e-9, "\(degrees)° seed \(seed): \(main.bow)")
+                // How much of the move, from the centre to the target, lies across the forearm, signed.
+                let across = cos(angle) * forearm.y - sin(angle) * forearm.x
+                #expect((-0.01 ... 0.06).contains(path.bow), "seed \(seed): \(path.bow)")
+                #expect(abs(main.bow + path.bow * 740 * across * path.kept.bow) < 1e-6, "\(degrees)° seed \(seed): \(main.bow) for \(path.bow)")
                 // The middle of the stroke, against the middle of its chord, is on the drawn side of it.
                 let middle = main.point(after: main.duration * main.halfway)
                 let bulge = (middle.x - (main.from.x + main.to.x) / 2, middle.y - (main.from.y + main.to.y) / 2)
@@ -283,9 +284,9 @@ import Testing
     }
 
     /// Up to a menu-bar item, an overshoot would carry the path past it into the top edge,
-    /// and every one is cut where it ends. The bow, bulging up and left, is cut only where
-    /// the main movement ends on the target, at its depth, or a correction carries it past:
-    /// nine in ten of those that stop short keep all of their curve.
+    /// and every one is cut where it ends. A bow away from the elbow, bulging up and left, is
+    /// cut only where the main movement ends on the target, at its depth, or a correction
+    /// carries it past: nine in ten of those that stop short keep all of their curve.
     @Test func aPathUpToTheMenuBarCutsItsOvershootNotItsBow() {
         var overshoots = 0, short = 0, bowed = 0
         for seed in UInt64(0) ..< 200 {
@@ -293,7 +294,7 @@ import Testing
             for ms in 0 ... Int(path.duration / .milliseconds(1)) {
                 #expect(path.unshaken(after: .milliseconds(ms)).y >= 11.95, "seed \(seed) at \(ms) ms")
             }
-            if [.undershoot, .twoCorrections].contains(path.structure) { (short, bowed) = (short + 1, bowed + (path.kept.bow == 1 ? 1 : 0)) }
+            if [.undershoot, .twoCorrections].contains(path.structure), path.bow > 0 { (short, bowed) = (short + 1, bowed + (path.kept.bow == 1 ? 1 : 0)) }
             guard path.structure == .overshoot else { continue }
             overshoots += 1
             #expect(path.kept.ends < 1, "seed \(seed)")

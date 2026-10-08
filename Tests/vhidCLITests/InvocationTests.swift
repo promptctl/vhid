@@ -81,9 +81,11 @@ import Testing
         let paths = try #require(attributes["paths"] as? [[String: Any]])
         try #require(paths.count == 1)
         #expect(paths[0].filter { !["bow", "halfway"].contains($0.key) }.compactMapValues { $0 as? Double } == ["fitts_width": 20, "planned_ms": 0, "ends_kept": 1, "bow_kept": 1, "steered_reports": 0, "closing_reports": 0, "lost_reports": 0])
-        // The bow and speed profile it drew, inside their bounds.
-        #expect((paths[0]["bow"] as? Double).map { (-0.01 ... 0.06).contains($0) } == true)
-        #expect((paths[0]["halfway"] as? Double).map { (0.37 ... 0.49).contains($0) } == true)
+        // The bow and speed profile it drew: the pointer's randomness is seed 1, and the move is its first draw.
+        var generator = SeededGenerator(seed: 1)
+        let drawn = Trajectory(from: Self.at, toward: .point(Self.at), within: .vast, drawing: &generator)
+        #expect(paths[0]["bow"] as? Double == drawn.bow)
+        #expect(paths[0]["halfway"] as? Double == drawn.halfway)
         // A point is aimed at exactly, from where the cursor was, and read back there when it landed.
         #expect(paths[0]["from"] as? [Double] == [40, 30])
         #expect(paths[0]["aimed"] as? [Double] == [40, 30])
