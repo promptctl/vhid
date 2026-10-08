@@ -165,6 +165,7 @@ import Testing
         #expect(paths[0]["closing_reports"] == Double(Pointer.stalls))
         #expect(paths[0]["fitts_width"] == 10)
         #expect(recorded[0]["box"] as? [Double] == [30, -5, 20, 10])
+        #expect(recorded[0]["from"] as? [Double] == [0, 0])
         #expect(Set(["direct", "undershoot", "overshoot", "two_corrections"]).contains(recorded[0]["structure"] as? String ?? ""))
         let aimed = try #require(recorded[0]["aimed"] as? [Double])
         #expect((32 ... 48).contains(aimed[0]) && (-3 ... 3).contains(aimed[1]), "\(aimed)")
