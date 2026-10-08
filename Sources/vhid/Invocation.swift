@@ -329,7 +329,8 @@ extension Invocation {
     }
 
     private static func moved(_ move: Pointer.Moved) {
-        var path: [String: JSON] = ["aimed": point(move.aimed),
+        var path: [String: JSON] = ["from": point(move.from),
+                                    "aimed": point(move.aimed),
                                     "fitts_width": .double(move.width),
                                     "planned_ms": .double(move.planned / .milliseconds(1)),
                                     "structure": .string(move.structure.rawValue),
@@ -340,8 +341,8 @@ extension Invocation {
                                     "closing_reports": .int(move.closing),
                                     "lost_reports": .int(move.lost)]
         path["landed"] = move.landed.map(point)
-        // The box the aim was drawn inside, which with the seed draws the path again; a point
-        // target is `aimed` itself.
+        // The box the aim was drawn inside, which with the seed and `from` draws the path
+        // again; a point target is `aimed` itself.
         if case .box(let box) = move.toward { path["box"] = .array([box.x, box.y, box.width, box.height].map(JSON.double)) }
         append(.object(path), to: .paths)
     }

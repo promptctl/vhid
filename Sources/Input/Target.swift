@@ -1,3 +1,5 @@
+import Foundation
+
 /// What a pointer verb is aimed at: a point, pressed exactly, or a box, pressed at a point
 /// drawn inside it. `docs/design/human.md`, "Where a click lands".
 ///
@@ -33,15 +35,37 @@ public enum Target: Hashable, Sendable, CustomStringConvertible {
     /// hit 96% of the time: the effective width W_e = 4.133 σ (MacKenzie 1992; ISO 9241-9).
     static let spreads = 4.133
 
-    /// Where on the screen the click is aimed: a point inside the box, each axis drawn from a
-    /// normal around the centre whose spread is that axis's aimable width over `spreads`,
-    /// redrawn outside it; the point itself, whose aimable width is zero. One code path for
-    /// both, so a point is the box the hand cannot stray in. [LAW:dataflow-not-control-flow]
-    func aim(drawing generator: inout some RandomNumberGenerator) -> ScreenPoint {
+    /// The standard deviation of where a hand ends up across its line of travel, as a share
+    /// of the distance travelled: about 3° of directional error. Directional error stays
+    /// near constant in angle whatever the movement's extent (Gordon, Ghilardi and Ghez
+    /// 1994); the figure itself is this design's own.
+    static let directionalError = 0.05
+
+    /// Where on the screen a click from `start` is aimed: a point inside the box, redrawn
+    /// outside its aimable part, each axis weighted by how much of the line of travel lies
+    /// along it, the line running from `start` to the nearest aimable point. Along the line
+    /// of travel, the axis is drawn about the box's centre with a spread of its aimable width
+    /// over `spreads`, as a person's clicks scatter over a target they move toward. Across it,
+    /// the axis is drawn about the start, kept inside the box, with the hand's directional
+    /// error over the distance, so a hand moving down onto a wide menu row comes straight
+    /// down rather than swinging across to the row's middle. A point has no aimable width
+    /// and is aimed at exactly; so is a box the start is already inside, which is no
+    /// distance from it. One code path for all of them. [LAW:dataflow-not-control-flow]
+    func aim(from start: ScreenPoint, drawing generator: inout some RandomNumberGenerator) -> ScreenPoint {
         let (centre, half) = aimable
-        let x = Normal(centre.x, 2 * half.x / Self.spreads, within: centre.x - half.x ... centre.x + half.x).draw(using: &generator)
-        let y = Normal(centre.y, 2 * half.y / Self.spreads, within: centre.y - half.y ... centre.y + half.y).draw(using: &generator)
-        return ScreenPoint(x: x, y: y)!
+        let nearest = (x: min(max(start.x, centre.x - half.x), centre.x + half.x), y: min(max(start.y, centre.y - half.y), centre.y + half.y))
+        let (dx, dy) = (nearest.x - start.x, nearest.y - start.y)
+        let distance = hypot(dx, dy)
+        // The share of the line of travel along each axis; no travel at all is all across.
+        let along = distance > 0 ? (x: dx * dx / (distance * distance), y: dy * dy / (distance * distance)) : (x: 0, y: 0)
+        func axis(along: Double, centre: Double, half: Double, nearest: Double) -> Double {
+            let spread = 2 * half / Self.spreads
+            return Normal(nearest + along * (centre - nearest),
+                          along * spread + (1 - along) * min(spread, Self.directionalError * distance),
+                          within: centre - half ... centre + half).draw(using: &generator)
+        }
+        return ScreenPoint(x: axis(along: along.x, centre: centre.x, half: half.x, nearest: nearest.x),
+                           y: axis(along: along.y, centre: centre.y, half: half.y, nearest: nearest.y))!
     }
 
     /// The centre aimed about, and how far either side of it on each axis a click may land:
