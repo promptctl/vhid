@@ -334,6 +334,8 @@ extension Invocation {
                                     "fitts_width": .double(move.width),
                                     "planned_ms": .double(move.planned / .milliseconds(1)),
                                     "structure": .string(move.structure.rawValue),
+                                    "bow": .double(move.bow),
+                                    "halfway": .double(move.halfway),
                                     "displays": .array(move.displays.frames.map { frame in .array([frame.minX, frame.minY, frame.width, frame.height].map { .double(Double($0)) }) }),
                                     "ends_kept": .double(move.kept.ends),
                                     "bow_kept": .double(move.kept.bow),

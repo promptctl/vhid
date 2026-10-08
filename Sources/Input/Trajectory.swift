@@ -3,8 +3,9 @@ import Pointing
 
 /// Where a person's aimed pointer movement is, moment by moment, from one point to another:
 /// a main movement that lands on the target, stops short, or overshoots, then as many
-/// corrections onto it as its structure has, each slowing down for longer than it speeds
-/// up, the main one bowing the way the forearm swings, and a faint tremor over the whole.
+/// corrections onto it as its structure has, each with the speed profile drawn for the
+/// move, the main one bowing by a drawn amount the way the forearm swings, and a faint
+/// tremor over the whole.
 /// Pure: every draw is taken when it is made. `docs/design/human.md`, "The path".
 public struct Trajectory: Sendable, Equatable {
     public let start: ScreenPoint
@@ -19,6 +20,12 @@ public struct Trajectory: Sendable, Equatable {
     public let kept: Kept
     /// Which corrections follow the main movement.
     public let structure: Structure
+    /// The main movement's bow as drawn, a signed fraction of D, positive away from the
+    /// elbow, before the forearm and the displays scale it.
+    public let bow: Double
+    /// The share of its time at which each of its movements has covered half its distance,
+    /// drawn once and held by every stroke. [LAW:one-source-of-truth]
+    public var halfway: Double { chain.strokes[0].halfway }
     /// The movements in order, with when each begins.
     private let chain: Chain
     /// The sideways shake laid over them, always whole.
@@ -55,8 +62,14 @@ public struct Trajectory: Sendable, Equatable {
     /// How far off the line a movement that does not end on the target ends, as a fraction of D.
     static let offLine = Normal(0, 0.02, within: -0.04 ... 0.04)
     /// How far the main movement bows at its middle, as a fraction of D, before it is scaled
-    /// by how much of the stroke lies across the forearm.
-    static let bow = Normal(0.03, 0.01, within: 0.01 ... 0.06)
+    /// by how much of the stroke lies across the forearm: away from the elbow by 2.5% on
+    /// average, but spread down through zero, so some moves run straight and a few bow
+    /// slightly toward it.
+    static let bow = Normal(0.025, 0.02, within: -0.01 ... 0.06)
+    /// The share of its time at which a movement has covered half its distance, drawn once
+    /// for the whole move: most slow down for longer than they speed up, by more or less,
+    /// and a few nearly as long.
+    static let halfway = Normal(0.44, 0.04, within: 0.37 ... 0.49)
     /// The forearm, from the hand toward the elbow, as a unit vector in screen space, y
     /// down: 30° right of straight down, a right hand's on a mouse beside a keyboard.
     static let forearm = (x: sin(Double.pi / 6), y: cos(Double.pi / 6))
@@ -137,6 +150,7 @@ public struct Trajectory: Sendable, Equatable {
         let (short, over) = (Self.short.draw(using: &generator), Self.over.draw(using: &generator))
         let miss = Self.miss.draw(using: &generator) * (Bool.random(using: &generator) ? 1 : -1)
         let (offLine, bowing) = (Self.offLine.draw(using: &generator), Self.bow.draw(using: &generator))
+        let halfway = Self.halfway.draw(using: &generator)
         let (dx, dy) = (target.x - start.x, target.y - start.y)
         let distance = hypot(dx, dy)
         let fitts = Self.intercept + Self.slope * log2(distance / aimed.width + 1)
@@ -160,7 +174,7 @@ public struct Trajectory: Sendable, Equatable {
             let froms = [(start.x, start.y)] + ends.dropLast()
             let begins = [0] + legs.dropLast().map(\.until)
             return Chain(zip(zip(froms, ends), zip(legs, begins)).map { stroke, timed in
-                Submovement(from: stroke.0, to: stroke.1, bow: bow * timed.0.bow * bowKept, duration: duration * timed.0.until - duration * timed.1)
+                Submovement(from: stroke.0, to: stroke.1, bow: bow * timed.0.bow * bowKept, halfway: halfway, duration: duration * timed.0.until - duration * timed.1)
             })
         }
         let moments = (0 ... Self.checks).map { duration * (Double($0) / Double(Self.checks)) }
@@ -182,6 +196,7 @@ public struct Trajectory: Sendable, Equatable {
         self.duration = duration
         kept = Kept(ends: ends, bow: bowKept)
         self.structure = structure
+        self.bow = bowing
         self.chain = chosen
         self.tremor = tremor
     }
@@ -216,31 +231,29 @@ public struct Trajectory: Sendable, Equatable {
 }
 
 /// One submovement: a stroke from one point to another on the minimum-jerk curve with its
-/// time warped so it slows down for longer than it speeds up, bowing to one side by `bow`
-/// points at its middle, along (−dy, dx) of its direction when positive and the other way
+/// time warped so it has covered half its distance at `halfway` of its time, bowing to one
+/// side by `bow` points at its middle, along (−dy, dx) of its direction when positive and the other way
 /// when negative.
 public struct Submovement: Sendable, Equatable {
     public let from: Point
     public let to: Point
     public let bow: Double
+    /// The fraction of its time at which it has covered half its distance.
+    public let halfway: Double
     public let duration: Duration
 
     public typealias Point = (x: Double, y: Double)
 
-    /// The fraction of its time at which a stroke has covered half its distance.
-    static let halfway = 0.45
-    /// The warp τ = t^k that puts the minimum-jerk curve's middle at `halfway`.
-    static let warp = log(0.5) / log(halfway)
-
     public static func == (a: Submovement, b: Submovement) -> Bool {
-        a.from == b.from && a.to == b.to && a.bow == b.bow && a.duration == b.duration
+        a.from == b.from && a.to == b.to && a.bow == b.bow && a.halfway == b.halfway && a.duration == b.duration
     }
 
     /// The fraction of the distance covered at fraction `t` of the stroke's time: the
-    /// minimum-jerk curve 10τ³ − 15τ⁴ + 6τ⁵ (Flash and Hogan) at τ = t^`warp`. Its speed
-    /// rises and falls once, peaking at 43% of the time rather than the middle.
-    static func covered(_ t: Double) -> Double {
-        let tau = pow(t, warp)
+    /// minimum-jerk curve 10τ³ − 15τ⁴ + 6τ⁵ (Flash and Hogan) at τ = t^k, the warp that puts
+    /// the curve's middle at `halfway`. Its speed rises and falls once, peaking a little
+    /// before `halfway`: at 43% of the time for a halfway of 45%.
+    func covered(_ t: Double) -> Double {
+        let tau = pow(t, log(0.5) / log(halfway))
         return tau * tau * tau * (10 - 15 * tau + 6 * tau * tau)
     }
 
@@ -248,7 +261,7 @@ public struct Submovement: Sendable, Equatable {
     /// a stroke that takes no time. Measured back from `to`, so the end is exact.
     func point(after elapsed: Duration) -> Point {
         let t = duration > .zero ? min(1, max(0, elapsed / duration)) : 1
-        let u = Self.covered(t)
+        let u = covered(t)
         let (dx, dy) = (to.x - from.x, to.y - from.y)
         let length = hypot(dx, dy)
         let off = length > 0 ? bow * sin(.pi * u) / length : 0
