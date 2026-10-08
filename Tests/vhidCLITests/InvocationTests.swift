@@ -580,12 +580,14 @@ import Testing
         }
         func pid() -> pid_t? { (try? String(contentsOf: pidFile, encoding: .utf8)).flatMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) } }
         while pid() == nil { try await Task.sleep(for: .milliseconds(10)) }
+        // Timed from the cancel: how long the child took to start is the runner's load, not the claim.
+        let cancelled = ContinuousClock.now
         verb.cancel()
         await #expect(throws: CancellationError.self) { try await verb.value }
+        #expect(ContinuousClock.now - cancelled < .seconds(10))
         let record = try Self.only(export)
         #expect(record["event"] as? String == "driver state")
         #expect(record["outcome"] as? String == "cancelled")
-        #expect(try #require(record["duration_ms"] as? Double) < 10_000)
         let stopped = try #require((record["attributes"] as? [String: Any])?["stopped"] as? [String])
         #expect(stopped == ["sh -c echo $$ > \(pidFile.path); exec sleep 600"])
         let child = try #require(pid())
