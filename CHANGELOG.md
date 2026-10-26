@@ -4,6 +4,8 @@ Each release's section is its GitHub Release notes, which keep line breaks, so e
 
 ## [Unreleased]
 
+## [0.5.0]
+
 - The Claude Code plugin is installed and updated from the newest release, not from `master`: its skills and session-start check are that release's, written for the binaries it ships. Until this release, a plugin installed after a change on `master` could describe tool arguments no released vhid took, such as `click`'s `box` under 0.4.1.
 - The Claude Code plugin's session-start check says when the installed `vhid` or `eyes` is not the version the plugin was written for, naming each and the version it reported, with the step for each case: `brew upgrade --cask vhid` for older binaries, `claude plugin marketplace update vhid` and `claude plugin update vhid@vhid` for newer ones, and `brew reinstall --cask vhid` for a pre-release or development build, which no plugin release is written for. The version lives in `claude-plugin/VERSION`, where `VERSION` was, so the installed plugin carries it.
 - `vhid mcp` and `eyes mcp` end the instructions they answer a client's initialize with by naming themselves and their version, `This is vhid 0.5.0.`, the version `--version` prints, so an agent reads which release it is driving; the instructions say boxes arrived in 0.5.0.
@@ -71,7 +73,8 @@ The first release: a virtual keyboard and mouse that macOS sees as hardware, dri
 - One signed, notarized pkg installs both CLIs, the root daemon that owns the devices, the menu bar item, the `vhid record` tap, an uninstaller, and the pinned Karabiner-DriverKit-VirtualHIDDevice package.
 - After installing, turn on `org.pqrs.Karabiner-DriverKit-VirtualHIDDevice` under System Settings > General > Login Items & Extensions > Driver Extensions; no installer can do this for you. `vhid doctor` prints `ready` once everything vhid needs is met.
 
-[Unreleased]: https://github.com/promptctl/vhid/compare/v0.4.1...master
+[Unreleased]: https://github.com/promptctl/vhid/compare/v0.5.0...master
+[0.5.0]: https://github.com/promptctl/vhid/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/promptctl/vhid/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/promptctl/vhid/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/promptctl/vhid/compare/v0.2.0...v0.3.0
