@@ -123,15 +123,13 @@ struct Windows: AsyncParsableCommand {
     }
 }
 
-/// The frontmost application: usually where keystrokes go, and nothing eyes chooses.
-struct Frontmost: Sendable, Hashable, CustomStringConvertible {
-    let pid: Int32
-    let name: String?
+/// The frontmost application: usually where keystrokes go, and nothing eyes chooses. The
+/// app a front look reads, by one reading of it. [LAW:one-source-of-truth]
+typealias Frontmost = Front.App
 
-    var description: String { "\(name ?? "(unnamed)") (pid \(pid))" }
-
+extension Front.App {
     @MainActor
-    static func now() -> Frontmost? {
-        NSWorkspace.shared.frontmostApplication.map { Frontmost(pid: $0.processIdentifier, name: $0.localizedName) }
+    static func now() -> Front.App? {
+        NSWorkspace.shared.frontmostApplication.map { Front.App(pid: $0.processIdentifier, name: $0.localizedName) }
     }
 }

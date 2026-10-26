@@ -128,11 +128,12 @@ enum EyesTools {
         displays: @escaping DisplayList = { Geometry.displays() },
         reading look: @escaping Look = { source, query in try await source.reader.judged(query) },
         grants: @escaping GrantsLook = { try await GrantsVerb.look() },
-        pages: @escaping Where.Place.Pages = Where.Place.tree
+        pages: @escaping Where.Place.Pages = Where.Place.tree,
+        front: @escaping Where.Place.Fronts = Where.Place.live
     ) -> [EyesTool] {
         let serial = OneAtATime(look)
         let read: Look = { try await serial.read($0, $1) }
-        return [windows(listing, frontmost: frontmost), Self.displays(displays), find(read, pages), Self.read(read, pages), Self.grants(grants)]
+        return [windows(listing, frontmost: frontmost), Self.displays(displays), find(read, pages, front), Self.read(read, pages, front), Self.grants(grants)]
     }
 
     /// Where `find` and `read` look, as `--display`, `--window` and `--rect` take it.
@@ -154,7 +155,7 @@ enum EyesTools {
     /// Where a missing grant is held, for a server: the app hosting it, not eyes.
     static let grantNote = " Under eyes mcp the grant is the app's that runs this server, not eyes'."
 
-    static func find(_ look: @escaping Look, _ pages: @escaping Where.Place.Pages) -> EyesTool { EyesTool(
+    static func find(_ look: @escaping Look, _ pages: @escaping Where.Place.Pages, _ front: @escaping Where.Place.Fronts) -> EyesTool { EyesTool(
         tool: Tool(
             name: "find",
             description: Find.configuration.abstract + " " + (Find.configuration.discussion) + grant,
@@ -190,10 +191,10 @@ enum EyesTools {
             let wait = try Find.wait(until, timeout: try argument("timeout", in: given, { Double($0) }, "a number"),
                                      as: .argument)
             let near = try Find.near(try argument("near", in: given, \.stringValue, "a string"))
-            return try await answer(try await query(match, given, near: near, pages: pages), try source(given), look, wait: wait)
+            return try await answer(try await query(match, given, near: near, pages: pages, front: front), try source(given), look, wait: wait)
         }) }
 
-    static func read(_ look: @escaping Look, _ pages: @escaping Where.Place.Pages) -> EyesTool { EyesTool(
+    static func read(_ look: @escaping Look, _ pages: @escaping Where.Place.Pages, _ front: @escaping Where.Place.Fronts) -> EyesTool { EyesTool(
         tool: Tool(
             name: "read",
             description: Read.configuration.abstract + grant,
@@ -205,12 +206,12 @@ enum EyesTools {
             annotations: .init(readOnlyHint: true, openWorldHint: true)),
         call: { given in
             try refuseStray(given, taken: ["display", "window", "page", "rect", "limit", "source"])
-            return try await answer(try await query(nil, given, pages: pages), try source(given), look)
+            return try await answer(try await query(nil, given, pages: pages, front: front), try source(given), look)
         }) }
 
     /// The region and limit `find` and `read` share, through the verbs' own rules.
     @MainActor private static func query(
-        _ match: Match?, _ given: [String: Value], near: Match? = nil, pages: Where.Place.Pages
+        _ match: Match?, _ given: [String: Value], near: Match? = nil, pages: Where.Place.Pages, front: Where.Place.Fronts
     ) async throws -> Query {
         let id = { (name: String) throws -> UInt32? in
             try argument(name, in: given, \.intValue, "an integer").map { n in
@@ -226,7 +227,7 @@ enum EyesTools {
         // Finding a page reads the tree, so a missing grant names the app holding it, as a
         // reading's does.
         let region: Region
-        do { region = try await place.region(pages: pages) } catch let error as ReaderError where error.missingGrant {
+        do { region = try await place.region(pages: pages, front: front) } catch let error as ReaderError where error.missingGrant {
             throw ArgumentRefused(description: served(error))
         }
         return Query(match: match, region: region, limit: limit, near: near)

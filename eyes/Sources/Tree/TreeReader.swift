@@ -41,11 +41,13 @@ public struct TreeReader: Reader {
         // walk that counted them as unanswered would report a looked-at, empty screen.
         guard try await granted(Self.grant) else { throw TreeError.noGrant }
         let region = try query.region.bounds()
-        let windows = try Geometry.onScreen().windows
+        let listing = try Geometry.onScreen()
+        let owners = query.region.owners(in: listing)
         // Started before the windows are matched, because matching is reads too.
         let clock = ContinuousClock()
         let start = clock.now
-        let visible = seen(windows, in: region, hit: Self.hit)
+        // Every window's visibility is decided against all of them; only the owners' are walked.
+        let visible = seen(listing.windows, in: region, hit: Self.hit).filter { owners.hold($0.window.pid) }
         let (roots, unwalked) = plan(visible, matched: try Self.match(visible.map(\.window)))
         let walked = try walk(
             from: roots,
@@ -59,7 +61,8 @@ public struct TreeReader: Reader {
             region: region,
             examined: walked.examined,
             excluded: walked.excluded,
-            reach: walked.reach
+            reach: walked.reach,
+            owners: owners
         )
     }
 
@@ -147,7 +150,7 @@ public struct TreeReader: Reader {
     /// there is unanswered, not empty: a front window whose app exposes none still draws.
     /// No grant reads as unanswered too, because the walk's next read throws it by name.
     /// [LAW:single-enforcer]
-    static func hit(_ point: ScreenPoint) -> Heard<Int32> {
+    public static func hit(_ point: ScreenPoint) -> Heard<Int32> {
         var element: AXUIElement?
         let call = AXUIElementCopyElementAtPosition(systemWide, Float(point.x), Float(point.y), &element)
         switch try? Answer(call, for: .structure) {

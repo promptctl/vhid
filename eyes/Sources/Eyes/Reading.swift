@@ -112,6 +112,9 @@ public enum Region: Sendable, Hashable {
     /// is the only reader that knows where a page is, and this package links none, so the
     /// frame is found by the caller and carried here with the window it is in.
     case page(window: UInt32, frame: ScreenRect)
+    /// What is in front, when a look names no place: the app an agent is working in, read on
+    /// the display holding its front window. `Front` says which app, and why.
+    case front(Front)
 
     /// Where a wait looks after its first read resolved this region to `resolved`.
     /// A window or a page is held to that rectangle, so one that closes is its region with
@@ -122,7 +125,8 @@ public enum Region: Sendable, Hashable {
     func pinned(to resolved: ScreenRect) -> Region {
         switch self {
         case .window, .page: .rect(resolved)
-        case .display, .rect: self
+        // The front keeps its app and display: which windows it takes in is read afresh.
+        case .display, .rect, .front: self
         }
     }
 }
@@ -230,13 +234,16 @@ public struct Scope: Sendable, Hashable {
     public let reach: Reach
     /// How the rows' boxes stand against where a click presses what each row names.
     public let boxes: Boxes
+    /// Whose windows were read: every process's, unless the region was the front.
+    public let owners: Owners
 
-    public init(region: ScreenRect, examined: Int, excluded: [Exclusion] = [], reach: Reach, boxes: Boxes = Boxes()) {
+    public init(region: ScreenRect, examined: Int, excluded: [Exclusion] = [], reach: Reach, boxes: Boxes = Boxes(), owners: Owners = .every) {
         self.region = region
         self.examined = examined
         self.excluded = excluded
         self.reach = reach
         self.boxes = boxes
+        self.owners = owners
     }
 }
 
@@ -278,7 +285,7 @@ public struct Exclusion: Sendable, Hashable {
         self.count = count
     }
 
-    public enum Reason: String, Sendable, Hashable {
+    public enum Reason: String, Sendable, Hashable, CaseIterable {
         /// No text on it at all.
         case wordless
         /// Zero-sized, offscreen, outside the region asked for, or outside what holds it - a
@@ -387,7 +394,7 @@ public extension Reading {
         }
         let s = scope
         return Reading(outcome: outcome, scope: Scope(region: s.region, examined: s.examined, excluded: s.excluded, reach: s.reach,
-                                                      boxes: Boxes(narrowed: narrowed, unchecked: unchecked, calls: calls)))
+                                                      boxes: Boxes(narrowed: narrowed, unchecked: unchecked, calls: calls), owners: s.owners))
     }
 
     /// Whether "it is not there" is a fact about the screen rather than about the read.

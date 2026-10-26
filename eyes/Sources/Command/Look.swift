@@ -1,3 +1,4 @@
+import AppKit
 import ArgumentParser
 import CoreGraphics
 import Eyes
@@ -20,7 +21,9 @@ enum Help {
     static let text = "The text to look for. Matches any run that contains it."
     static let exact = "Match only a run that is exactly this text."
     static let edits = "Match a run within this many single-character edits of the text, for recogniser slips."
-    static let display = "Read this display, by its window-server id, which `eyes displays` lists and every scope line names. Defaults to the main display."
+    static let display = "Read this whole display, every app on it, by its window-server id, which `eyes displays` lists and every scope line names."
+        + " With no display, window, rect or page, eyes reads what is in front: the frontmost app's windows and what is stacked in front of them,"
+        + " or the app behind when the frontmost is the one eyes answers to, such as the terminal running it."
     static let window = "Read this window's bounds, by the id `eyes windows` prints."
     static let rect = "Read this rectangle: x,y,width,height in the points vhid clicks, the form every rectangle eyes prints is in: a row's box, a window's or display's bounds, a scope line's region."
     static let page = "Read the web page this window shows, by the id `eyes windows` prints: the page alone,"
@@ -47,8 +50,8 @@ extension SourceKind: ExpressibleByArgument {
     @MainActor var reader: any Reader {
         switch self {
         case .tree: TreeReader(granted: Self.granted)
-        case .pixels: PixelReader(granted: Self.granted)
-        case .merged: MergedReader(TreeReader(granted: Self.granted), PixelReader(granted: Self.granted), locate: { try $0.bounds() })
+        case .pixels: PixelReader(granted: Self.granted, hit: TreeReader.hit)
+        case .merged: MergedReader(TreeReader(granted: Self.granted), PixelReader(granted: Self.granted, hit: TreeReader.hit), locate: { try $0.bounds() })
         }
     }
 
@@ -96,34 +99,67 @@ struct Where: ParsableArguments {
     /// MCP tools alike, each naming an argument the way its caller spells it.
     /// [LAW:single-enforcer]
     ///
-    /// The main display is the default rather than every display, because `Region` has no
-    /// word for everywhere; the scope line names which display was read, so the default is
-    /// never mistaken for the whole desk.
+    /// Naming no place reads what is in front: what a caller that did not say where means is
+    /// the app it is working in, not every window on the desk. The scope line names the app.
     static func place(display: UInt32?, window: UInt32?, page: UInt32?, rect: String?, as s: Spelling) throws -> Place {
         guard [display != nil, window != nil, page != nil, rect != nil].filter({ $0 }).count <= 1 else {
             throw ValidationError("give at most one of \(s("display")), \(s("window")), \(s("page")), \(s("rect"))")
         }
-        return try page.map(Place.page) ?? .region(
-            rect.map { .rect(try parsedRect($0, as: s)) }
-                ?? window.map(Region.window)
-                ?? .display(display ?? CGMainDisplayID()))
+        return try page.map(Place.page)
+            ?? rect.map { .region(.rect(try parsedRect($0, as: s))) }
+            ?? window.map { .region(.window($0)) }
+            ?? display.map { .region(.display($0)) }
+            ?? .front
     }
 
-    /// Where a verb was told to look: a region as spelled, or a window's web page, whose
-    /// frame only the tree can find - so it is found when the look is made, not when the
-    /// arguments are parsed.
+    /// Where a verb was told to look: a region as spelled, a window's web page, whose frame
+    /// only the tree can find, or what is in front - each found when the look is made, not
+    /// when the arguments are parsed.
     enum Place {
         case region(Region)
         case page(UInt32)
+        case front
 
         /// What a window's tree says of its pages: the tree in the process, a fake in a test.
         typealias Pages = @Sendable @MainActor (UInt32) async throws -> Paged
         static let tree: Pages = { try await TreeReader(granted: SourceKind.granted).pages(in: $0) }
 
-        @MainActor func region(pages: Pages = tree) async throws -> Region {
+        /// What is in front now: AppKit and the responsibility call in the process, a fake in a test.
+        typealias Fronts = @Sendable @MainActor () async throws -> Front
+        static let live: Fronts = {
+            // The app eyes answers to is matched to processes by where it runs from, never
+            // by name: two apps can share one.
+            let holder = try await Holder.current()
+            let running = NSWorkspace.shared.runningApplications
+            let path = { (url: URL?) in url?.resolvingSymlinksInPath().path }
+            let own = running.filter { path($0.bundleURL ?? $0.executableURL) == path(URL(fileURLWithPath: holder.path)) }
+            return try Front.choose(
+                frontmost: Front.App.now(),
+                own: Front.Passed(pids: Set(own.map(\.processIdentifier)), name: holder.name),
+                regular: Set(running.filter { $0.activationPolicy == .regular }.map(\.processIdentifier)),
+                names: Dictionary(running.compactMap { app in app.localizedName.map { (app.processIdentifier, $0) } }, uniquingKeysWith: { a, _ in a }),
+                listing: try Geometry.onScreen(),
+                displays: Geometry.displays())
+        }
+
+        @MainActor func region(pages: Pages = tree, front: Fronts = live) async throws -> Region {
             switch self {
             case .region(let region): region
             case .page(let id): try await Self.page(id, pages: pages)
+            case .front: try await Self.front(front)
+            }
+        }
+
+        /// [LAW:nothing-unseen] Choosing what is in front is a decision of its own, before any
+        /// look starts: which app, on which display, and which app it passed over.
+        @MainActor private static func front(_ fronts: Fronts) async throws -> Region {
+            try await Telemetry.unit("front") {
+                let front = try await fronts()
+                Telemetry.note("front_app", front.app.name ?? "")
+                Telemetry.count("front_pid", Int(front.app.pid))
+                Telemetry.count("display", Int(front.display))
+                Telemetry.note("passed_over", front.passedOver?.name ?? "")
+                return .front(front)
             }
         }
 
@@ -247,6 +283,8 @@ enum Report {
         case .window(let id): "what is on top over window \(id)"
         case .rect: "rect"
         case .page(let id, _): "the page in window \(id)"
+        case .front(let f):
+            "\(f.app) and what is in front of it\(f.passedOver.map { ", passing over \($0.name), which eyes answers to," } ?? "") on display \(f.display)"
         }
     }
 
@@ -298,6 +336,7 @@ private extension Region {
         case .window: "window"
         case .page: "page"
         case .rect: "rect"
+        case .front: "front"
         }
     }
 }
@@ -376,6 +415,8 @@ extension Report {
         Telemetry.count("boxes_narrowed", reading.scope.boxes.narrowed)
         for (why, count) in reading.scope.boxes.unchecked { Telemetry.count("boxes_unchecked_\(why.rawValue)", count) }
         Telemetry.count("box_calls", reading.scope.boxes.calls)
+        // How many processes' windows a front look took in; every other region reads them all.
+        if case .only(let pids) = reading.scope.owners { Telemetry.count("owners", pids.count) }
         switch reading.outcome {
         case .matched(let m): Telemetry.count("matched", m.count); Telemetry.count("nearest", 0)
         case .nearest(let n), .unanchored(let n): Telemetry.count("matched", 0); Telemetry.count("nearest", n.count)

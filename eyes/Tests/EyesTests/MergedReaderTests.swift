@@ -19,7 +19,7 @@ import Testing
 
         func look(_ query: Query) async throws -> Candidates {
             if fails { throw Blind() }
-            return Candidates(found: found, region: region, examined: found.count, excluded: [], reach: reach)
+            return Candidates(found: found, region: region, examined: found.count, excluded: [], reach: reach, owners: .every)
         }
 
         func pressing(_ reading: Reading, until deadline: ContinuousClock.Instant) async throws -> Reading { reading.pressing { Checked(press($0), calls: calls) } }
@@ -234,7 +234,7 @@ import Testing
         let source: SourceKind
         func look(_ query: Query) async throws -> Candidates {
             Issue.record("the \(source) reader was asked about a region that names nowhere")
-            return Candidates(found: [], region: MergedReaderTests.region, examined: 0, excluded: [], reach: .whole)
+            return Candidates(found: [], region: MergedReaderTests.region, examined: 0, excluded: [], reach: .whole, owners: .every)
         }
         func pressing(_ reading: Reading, until deadline: ContinuousClock.Instant) async throws -> Reading { reading }
     }

@@ -184,6 +184,51 @@ import Testing
         #expect(seen[2].error != nil && seen[2].counts == ["reads": 1, "box_ms": 0])
     }
 
+    /// A look at what is in front names the app it read and the one it passed over, and its
+    /// event counts the processes whose windows it took in.
+    @Test func aFrontLookNamesItsAppAndCountsItsOwners() async throws {
+        let events = Collected()
+        let front = Front(app: Front.App(pid: 300, name: "System Settings"), display: 2, passedOver: Front.Passed(pids: [80], name: "iTerm2"))
+        let reading = Reading(outcome: .nearest([]), scope: Scope(region: Self.display, examined: 3, reach: .whole, owners: .only([300, 900])))
+        let text = try await Telemetry.$export.withValue(events.export) {
+            try await Report.text(Query(match: .contains("Add"), region: .front(front)), source: .tree) { _, _ in .standing(reading) }
+        }
+        #expect(text.hasPrefix("\"Add\" not found in System Settings (pid 300) and what is in front of it, passing over iTerm2,"
+            + " which eyes answers to, on display 2 -2400,-300,2400,1600 by the tree; 3 runs read;"))
+        #expect(events.all.first?.facts["region"] == "front")
+        #expect(events.all.first?.counts["owners"] == 2)
+        // A display read takes in every process, which no count stands for.
+        let display = Reading(outcome: .nearest([]), scope: Scope(region: Self.display, examined: 3, reach: .whole))
+        _ = try await Telemetry.$export.withValue(events.export) {
+            try await Report.text(Query(match: .contains("Add"), region: .display(2)), source: .tree) { _, _ in .standing(display) }
+        }
+        #expect(events.all.last?.counts["owners"] == nil)
+    }
+
+    /// Choosing what is in front is its own event: the app, its pid, the display, and the
+    /// app passed over.
+    @Test func choosingWhatIsInFrontIsOneEvent() async throws {
+        let events = Collected()
+        let front = Front(app: Front.App(pid: 300, name: "System Settings"), display: 2, passedOver: Front.Passed(pids: [80], name: "iTerm2"))
+        let region = try await Telemetry.$export.withValue(events.export) {
+            try await Where.Place.front.region(front: { front })
+        }
+        #expect(region == .front(front))
+        let event = try #require(events.all.first)
+        #expect(event.event == "front")
+        #expect(event.facts["front_app"] == "System Settings" && event.facts["passed_over"] == "iTerm2")
+        #expect(event.counts["front_pid"] == 300 && event.counts["display"] == 2)
+    }
+
+    @Test func namingNoPlaceReadsWhatIsInFront() throws {
+        guard case .front = try Where.place(display: nil, window: nil, page: nil, rect: nil, as: .flag) else {
+            Issue.record("no place named is not the front"); return
+        }
+        guard case .region(.display(4)) = try Where.place(display: 4, window: nil, page: nil, rect: nil, as: .flag) else {
+            Issue.record("a display named is not that display"); return
+        }
+    }
+
     /// Matches whose anchor is missing say which text was not found - the one the rows are
     /// near misses of - and their look ends unanchored, apart from not matched.
     @Test func anUnanchoredLookNamesTheAnchorAndSaysSo() async throws {

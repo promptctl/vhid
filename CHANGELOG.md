@@ -4,6 +4,8 @@ Each release's section is its GitHub Release notes, which keep line breaks, so e
 
 ## [Unreleased]
 
+- `eyes find` and `eyes read`, and their MCP tools, named no place, read what is in front: the frontmost app's windows and whatever is over its front window, such as an Open panel, where they read the main display, every app on it. When the frontmost app is the terminal or app eyes runs in, which shows the very text an agent asks eyes to find, they read the app behind it and the scope line says it passed over. `--display` reads every app on a display, as before. Each choice is a `front` record naming the app, its pid, the display and the app passed over, and each look's record counts the processes it read as `owners`.
+
 ## [0.5.0]
 
 - The Claude Code plugin is installed and updated from the newest release, not from `master`: its skills and session-start check are that release's, written for the binaries it ships. Until this release, a plugin installed after a change on `master` could describe tool arguments no released vhid took, such as `click`'s `box` under 0.4.1.
