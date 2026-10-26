@@ -104,10 +104,11 @@ import Testing
         await server.stop()
         #expect(result.serverInfo.name == "eyes")
         #expect(result.serverInfo.version == Version.current)
-        // The pairing with vhid, as docs/mcp-instructions.txt words it for both servers.
+        // The pairing with vhid, as docs/mcp-instructions.txt words it for both servers, then
+        // the version, which the model reads in the instructions and not in serverInfo.
         let root = URL(filePath: #filePath).deletingLastPathComponent().appending(path: "../../..").standardized
         let pairing = try String(contentsOf: root.appending(path: "docs/mcp-instructions.txt"), encoding: .utf8)
-        #expect(result.instructions == pairing.trimmingCharacters(in: .newlines))
+        #expect(result.instructions == pairing.trimmingCharacters(in: .newlines) + "\n\nThis is eyes \(Version.current).")
     }
 
     @Test func theToolsAreListedAndReadOnly() async throws {

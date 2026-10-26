@@ -208,7 +208,7 @@ whether another program is holding the devices, and the keyboard type macOS aske
 when the virtual keyboard first appeared. Any line with a problem names the step that
 fixes it. The menu bar item shows the same lines, and clicking one copies it.
 
-In releases after 0.4.1, every `vhid` command, and every tool call an agent makes, appends one line to
+From 0.5.0, every `vhid` command, and every tool call an agent makes, appends one line to
 `~/Library/Logs/vhid/events.jsonl`: which command it was, whether it worked, how long it
 took and how many key and pointer reports it sent. `eyes` keeps its own in
 `~/Library/Logs/eyes/events.jsonl`. Neither records the text you typed. If you run an

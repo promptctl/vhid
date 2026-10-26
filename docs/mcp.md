@@ -20,7 +20,9 @@ separate servers, and a client runs both.
 
 Each server's answer to a client's initialize carries the same instructions,
 [mcp-instructions.txt](mcp-instructions.txt): the other server's name, the one screen-point
-space, and the loop below. Any MCP client learns the pairing from that, with or without the
+space, and the loop below. Each ends them with its own name and version, as
+`This is vhid 0.5.0.`, the version its `--version` prints, so an agent reads which release
+it is driving. Any MCP client learns the pairing from that, with or without the
 Claude Code plugin, whose look-click-look skill opens with the same text; tests hold both
 servers' copies and the skill's to that file.
 

@@ -64,9 +64,10 @@ import Version
         await server.stop()
         #expect(result.serverInfo.name == "vhid")
         #expect(result.serverInfo.version == Version.current)
-        // The pairing with eyes, as docs/mcp-instructions.txt words it for both servers.
+        // The pairing with eyes, as docs/mcp-instructions.txt words it for both servers, then
+        // the version, which the model reads in the instructions and not in serverInfo.
         let pairing = try String(contentsOf: Self.root.appending(path: "docs/mcp-instructions.txt"), encoding: .utf8)
-        #expect(result.instructions == pairing.trimmingCharacters(in: .newlines))
+        #expect(result.instructions == pairing.trimmingCharacters(in: .newlines) + "\n\nThis is vhid \(Version.current).")
     }
 
     /// Where scripts/version reads the version in `repo`.
