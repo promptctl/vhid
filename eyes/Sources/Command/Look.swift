@@ -132,7 +132,8 @@ struct Where: ParsableArguments {
             let holder = try await Holder.current()
             let running = NSWorkspace.shared.runningApplications
             let path = { (url: URL?) in url?.resolvingSymlinksInPath().path }
-            let own = running.filter { path($0.bundleURL ?? $0.executableURL) == path(URL(fileURLWithPath: holder.path)) }
+            let holderPath = path(URL(fileURLWithPath: holder.path))
+            let own = running.filter { path($0.bundleURL ?? $0.executableURL) == holderPath }
             return try Front.choose(
                 frontmost: Front.App.now(),
                 own: Front.Passed(pids: Set(own.map(\.processIdentifier)), name: holder.name),
@@ -158,7 +159,7 @@ struct Where: ParsableArguments {
                 Telemetry.note("front_app", front.app.name ?? "")
                 Telemetry.count("front_pid", Int(front.app.pid))
                 Telemetry.count("display", Int(front.display))
-                Telemetry.note("passed_over", front.passedOver?.name ?? "")
+                Telemetry.note("passed_over", front.passedOver ? front.own.name : "")
                 return .front(front)
             }
         }
@@ -284,7 +285,7 @@ enum Report {
         case .rect: "rect"
         case .page(let id, _): "the page in window \(id)"
         case .front(let f):
-            "\(f.app) and what is in front of it\(f.passedOver.map { ", passing over \($0.name), which eyes answers to," } ?? "") on display \(f.display)"
+            "\(f.app) and what is in front of it\(f.passedOver ? ", passing over \(f.own.name), which eyes answers to," : "") on display \(f.display)"
         }
     }
 

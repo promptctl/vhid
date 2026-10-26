@@ -63,7 +63,7 @@ import Testing
 
     /// What is in front: System Settings, with the agent's own terminal passed over.
     static let systemSettings = Front(app: Front.App(pid: 300, name: "System Settings"), display: 1,
-                                      passedOver: Front.Passed(pids: [80], name: "iTerm2"))
+                                      own: Front.Passed(pids: [80], name: "iTerm2"), passedOver: true)
     private static let fronts: Where.Place.Fronts = { Self.systemSettings }
 
     /// A client connected to a server over `listing`, both torn down before this returns.

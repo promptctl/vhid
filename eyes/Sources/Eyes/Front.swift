@@ -13,13 +13,16 @@ public struct Front: Sendable, Hashable {
     public let app: App
     /// The display holding the app's front window, read whole and cut to the owners' windows.
     public let display: CGDirectDisplayID
-    /// The app eyes answers to, when it was in front and passed over: its windows are never
-    /// read, wherever they are stacked.
-    public let passedOver: Passed?
+    /// The app eyes answers to: its windows are never read, wherever they are stacked - in
+    /// front and passed over, or a window over the front app's.
+    public let own: Passed
+    /// Whether the app eyes answers to was in front, and passed over for the app behind it.
+    public let passedOver: Bool
 
-    public init(app: App, display: CGDirectDisplayID, passedOver: Passed?) {
+    public init(app: App, display: CGDirectDisplayID, own: Passed, passedOver: Bool) {
         self.app = app
         self.display = display
+        self.own = own
         self.passedOver = passedOver
     }
 
@@ -65,7 +68,7 @@ public struct Front: Sendable, Hashable {
                 return !shared.isNull && !shared.isEmpty && hit(ScreenRect(shared).centre) == .answered(window.pid)
             }
         } ?? []
-        return Set(over.map(\.pid)).union([app.pid]).subtracting(passedOver?.pids ?? [])
+        return Set(over.map(\.pid)).union([app.pid]).subtracting(own.pids)
     }
 
     /// The app a look with no place named reads, from facts the caller gathered.
@@ -85,18 +88,18 @@ public struct Front: Sendable, Hashable {
             throw NoFront(own: own.name)
         }
         let chosen: App
-        let passed: Passed?
-        if !own.pids.contains(first.pid) {
-            (chosen, passed) = (first, nil)
+        let passed = own.pids.contains(first.pid)
+        if !passed {
+            chosen = first
         } else if let behind = listing.front(where: { ordinary($0) && !own.pids.contains($0) }) {
-            (chosen, passed) = (app(listing.windows[behind]), own)
+            chosen = app(listing.windows[behind])
         } else {
             throw NoFront(own: own.name)
         }
         let window = listing.front(of: chosen.pid).map { listing.windows[$0] }
         let display = window.flatMap { w in displays.first { $0.frame.contains(w.frame.centre) } } ?? displays.first { $0.isMain }
         guard let display else { throw NoFront(own: own.name) }
-        return Front(app: chosen, display: display.id, passedOver: passed)
+        return Front(app: chosen, display: display.id, own: own, passedOver: passed)
     }
 }
 

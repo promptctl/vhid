@@ -417,8 +417,7 @@ func walk<Element>(
 
     // Ordered by the reason's spelling so one screen always reports the same way.
     let excluded = counts.map { Exclusion(reason: $0.key, count: $0.value) }.sorted { $0.reason.rawValue < $1.reason.rawValue }
-    let unread = counts[.unanswered] != nil || counts[.unwalked] != nil || counts[.overlaid] != nil
-    let reach: Reach = stop.map(Reach.stopped) ?? (unread ? .stopped(.unread) : .whole)
+    let reach = stop.map(Reach.stopped) ?? Reach(excluded)
     return Walked(found: found, examined: examined, excluded: excluded, reach: reach)
 }
 

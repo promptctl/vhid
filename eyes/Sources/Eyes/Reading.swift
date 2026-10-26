@@ -319,11 +319,26 @@ public struct Exclusion: Sendable, Hashable {
         /// front one, or beside it. Only a reader that sees what is on top meets these; the
         /// tree never walks another app's windows.
         case outside
+
+        /// Whether a part set aside for this reason went unread, rather than being read and
+        /// left out: then the region was not read whole, and an absence in it proves nothing.
+        /// [LAW:single-enforcer] Every reader's reach is decided here.
+        public var leavesUnread: Bool {
+            switch self {
+            case .unanswered, .unwalked, .overlaid: true
+            case .wordless, .unplaced, .area, .covered, .duplicate, .ranked, .outside: false
+            }
+        }
     }
 }
 
 /// Whether the reader got through the region, or stopped short of it.
 public enum Reach: Sendable, Hashable {
+    /// How far a reader that did not stop got: whole, unless something it set aside went unread.
+    public init(_ excluded: [Exclusion]) {
+        self = excluded.contains { $0.reason.leavesUnread && $0.count > 0 } ? .stopped(.unread) : .whole
+    }
+
     /// Everything in the region was examined. Only this one makes an absence a fact
     /// about the screen rather than a fact about the read.
     case whole
@@ -340,8 +355,9 @@ public enum Stop: Sendable, Hashable {
     /// `Limit` rather than a loose `Int`, so the cap that was hit and the cap that was
     /// asked for are one value. [LAW:one-source-of-truth]
     case resultLimit(Limit)
-    /// Parts of the region went unread: elements that did not answer, or windows with
-    /// nothing to walk. How many is the scope's `unanswered` and `unwalked` exclusions; this
+    /// Parts of the region went unread: elements that did not answer, windows with nothing
+    /// to walk, or parts under a window the hit test would not settle. How many is the
+    /// scope's `unanswered`, `unwalked` and `overlaid` exclusions; this
     /// says only that the region was not read whole, which is what keeps a busy app or an
     /// open menu from proving an absence.
     case unread

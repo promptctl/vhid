@@ -64,7 +64,7 @@ public struct PixelReader: Reader {
             region: region,
             examined: runs.count,
             excluded: excluded,
-            reach: .whole,
+            reach: Reach(excluded),
             owners: owners
         )
     }

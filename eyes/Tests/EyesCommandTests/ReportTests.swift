@@ -192,7 +192,7 @@ import Testing
     /// event counts the processes whose windows it took in.
     @Test func aFrontLookNamesItsAppAndCountsItsOwners() async throws {
         let events = Collected()
-        let front = Front(app: Front.App(pid: 300, name: "System Settings"), display: 2, passedOver: Front.Passed(pids: [80], name: "iTerm2"))
+        let front = Front(app: Front.App(pid: 300, name: "System Settings"), display: 2, own: Front.Passed(pids: [80], name: "iTerm2"), passedOver: true)
         let reading = Reading(outcome: .nearest([]), scope: Scope(region: Self.display, examined: 3, reach: .whole, owners: .only([300, 900])))
         let text = try await Telemetry.$export.withValue(events.export) {
             try await Report.text(Query(match: .contains("Add"), region: .front(front)), source: .tree) { _, _ in .standing(reading) }
@@ -213,7 +213,7 @@ import Testing
     /// app passed over.
     @Test func choosingWhatIsInFrontIsOneEvent() async throws {
         let events = Collected()
-        let front = Front(app: Front.App(pid: 300, name: "System Settings"), display: 2, passedOver: Front.Passed(pids: [80], name: "iTerm2"))
+        let front = Front(app: Front.App(pid: 300, name: "System Settings"), display: 2, own: Front.Passed(pids: [80], name: "iTerm2"), passedOver: true)
         let region = try await Telemetry.$export.withValue(events.export) {
             try await Where.Place.front.region(front: { front })
         }

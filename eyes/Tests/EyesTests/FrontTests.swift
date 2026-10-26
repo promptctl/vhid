@@ -29,7 +29,7 @@ import Testing
 
     @Test func theFrontmostAppIsReadWhenItIsNotTheOneEyesAnswersTo() throws {
         let front = try Self.choose(frontmost: Front.App(pid: 400, name: "Safari"))
-        #expect(front == Front(app: Front.App(pid: 400, name: "Safari"), display: 1, passedOver: nil))
+        #expect(front == Front(app: Front.App(pid: 400, name: "Safari"), display: 1, own: Self.terminal, passedOver: false))
     }
 
     /// The agent's own terminal echoes what it searches for, so with it in front the app of
@@ -37,7 +37,7 @@ import Testing
     @Test func theAgentsOwnTerminalInFrontIsPassedOverForTheAppBehindIt() throws {
         let front = try Self.choose(frontmost: Front.App(pid: 81, name: "iTerm2"))
         #expect(front.app == Front.App(pid: 300, name: "System Settings"))
-        #expect(front.passedOver == Self.terminal)
+        #expect(front.passedOver)
         // Its front window's centre is on the display left of the main one.
         #expect(front.display == 2)
     }
@@ -47,10 +47,10 @@ import Testing
     @Test func noFrontmostAppReadsTheAppOfTheFrontmostOrdinaryWindow() throws {
         let terminalFirst = try Self.choose(frontmost: nil)
         #expect(terminalFirst.app.pid == 300)
-        #expect(terminalFirst.passedOver == Self.terminal)
+        #expect(terminalFirst.passedOver)
         let safariFirst = WindowListing(windows: [Self.menuBar, Self.window(4, "Safari", pid: 400), Self.window(2, "iTerm2", pid: 80)], excluded: [])
         let safari = try Self.choose(frontmost: nil, listing: safariFirst)
-        #expect(safari == Front(app: Front.App(pid: 400, name: "Safari"), display: 1, passedOver: nil))
+        #expect(safari == Front(app: Front.App(pid: 400, name: "Safari"), display: 1, own: Self.terminal, passedOver: false))
     }
 
     /// A status item in the menu bar is listed above every ordinary window, so an app with
@@ -79,7 +79,7 @@ import Testing
     /// The app, and whatever is in front of its front window that a click there lands in - a
     /// remote Open panel over it - but never what is behind it or the agent's own terminal.
     @Test func theOwnersAreTheAppAndWhatIsOverItLessTheAppPassedOver() {
-        let front = Front(app: Front.App(pid: 300, name: "System Settings"), display: 1, passedOver: Self.terminal)
+        let front = Front(app: Front.App(pid: 300, name: "System Settings"), display: 1, own: Self.terminal, passedOver: true)
         let panel = WindowListing(windows: [Self.window(9, "Open and Save Panel Service", pid: 900, x: -900)] + Self.desk.windows, excluded: [])
         let landsInPanel: (ScreenPoint) -> Heard<Int32> = { _ in .answered(900) }
         #expect(front.owners(in: Self.desk, hit: landsInPanel) == [300])
@@ -91,7 +91,7 @@ import Testing
     /// Center's covers the whole screen and draws nothing there; the menu bar shows the front
     /// app's menus. A click there landing elsewhere, or not answering, takes neither in.
     @Test func aWindowOverTheFrontOneIsTakenInOnlyWhereAClickLandsInIt() {
-        let front = Front(app: Front.App(pid: 300, name: "System Settings"), display: 1, passedOver: nil)
+        let front = Front(app: Front.App(pid: 300, name: "System Settings"), display: 1, own: Self.terminal, passedOver: false)
         let center = Window(id: 6, owner: "Notification Center", pid: 700, frame: ScreenRect(x: -1920, y: 0, width: 3432, height: 1080), layer: 23)
         let listing = WindowListing(windows: [center, Self.menuBar, Self.window(3, "System Settings", pid: 300, x: -1000)], excluded: [])
         var asked: [ScreenPoint] = []
@@ -100,6 +100,14 @@ import Testing
         #expect(asked == [ScreenPoint(x: -700, y: 240)])
         #expect(front.owners(in: listing) { _ in .unanswered } == [300])
         #expect(front.owners(in: listing) { _ in .answered(700) } == [700, 300])
+    }
+
+    /// The agent's own terminal over the front app's window is never read, though it was not
+    /// the app in front: it echoes what the agent searches for.
+    @Test func theAppEyesAnswersToOverTheFrontAppIsNotReadEither() {
+        let front = Front(app: Front.App(pid: 400, name: "Safari"), display: 1, own: Self.terminal, passedOver: false)
+        let floating = WindowListing(windows: [Self.window(2, "iTerm2", pid: 81, layer: 3), Self.window(4, "Safari", pid: 400)], excluded: [])
+        #expect(front.owners(in: floating) { _ in .answered(81) } == [400])
     }
 
     @Test func everyOtherRegionReadsEveryProcess() {
