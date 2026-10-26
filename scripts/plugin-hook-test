@@ -30,7 +30,7 @@ versions 0.5.0 0.5.0
 # else, runs the script lines given.
 stub() {
   local binary=$1; shift
-  { printf '#!/bin/sh\n[ "$1" = --version ] && exec cat %s\n' "$SCRATCH/$(basename "$binary").version"
+  { printf '#!/bin/sh\n[ "$1" = --version ] && exec cat "%s"\n' "$SCRATCH/$(basename "$binary").version"
     printf '%s\n' "$@"; } >"$binary"
   chmod +x "$binary"
 }
@@ -116,7 +116,7 @@ skew "newer" "$VHID is 0.6.0; $EYES is 0.6.0"
 versions 0.5.0-dev+abc123 0.5.0-dev+abc123
 skew "dev build" "$VHID is 0.5.0-dev+abc123; $EYES is 0.5.0-dev+abc123"
 versions 0.5.0 0.4.1
-skew "eyes alone" "binaries are not that version: $EYES is 0.4.1."
+skew "eyes alone" "not every installed binary is that version: $EYES is 0.4.1."
 echo "$out" | grep -qF "$VHID is" && fail "eyes alone: named vhid: '$out'"
 # The skew is said and the doctor is still asked.
 vhid_doctor "not ready" "awaiting approval" 1
@@ -126,6 +126,12 @@ vhid_doctor ready running 0; versions 0.5.0 0.5.0
 printf '#!/bin/sh\necho "unknown option" >&2\nexit 64\n' >"$EYES"
 skew "eyes --version failed" "$EYES --version failed with exit status 64 and printed: unknown option"
 versions 0.5.0 0.5.0; eyes_present
+# Both failing are both said, one after the other; one that exits 0 having printed no
+# version is said as a failure, with what it printed.
+printf '#!/bin/sh\necho "unknown option" >&2\nexit 64\n' >"$VHID"
+printf '#!/bin/sh\n[ "$1" = --version ] || exit 0\necho "no version here" >&2\n' >"$EYES"
+skew "both --version failed" "$VHID --version failed with exit status 64 and printed: unknown option; $EYES --version failed with exit status 0 and printed: no version here."
+vhid_doctor ready running 0; eyes_present
 
 # A --version that succeeds and also warns on stderr still reports its version: a match.
 printf '#!/bin/sh\n[ "$1" = --version ] || exit 0\necho "dyld: a warning" >&2\nexec cat %s\n' "$SCRATCH/eyes.version" >"$EYES"

@@ -45,7 +45,7 @@ EOF
 # are said, not ordered: which is newer is for the agent to read off them, so the hook
 # keeps no second rule for it beside scripts/newest-release. The version is stdout alone, so
 # a diagnostic on stderr cannot make a match a mismatch; a --version that failed is asked
-# again for everything it printed, to say it.
+# again for everything it printed, to say it, and so is one that printed no version.
 differ=
 for binary in "$vhid" "$eyes"; do
   [ -x "$binary" ] || continue
@@ -53,12 +53,12 @@ for binary in "$vhid" "$eyes"; do
   status=$?
   case "$status:$reported" in
     "0:$written_for") continue ;;
-    0:*) differ="${differ:+$differ; }$binary is $reported" ;;
+    0:?*) differ="${differ:+$differ; }$binary is $reported" ;;
     *) differ="${differ:+$differ; }$binary --version failed with exit status $status and printed: $("$binary" --version 2>&1)" ;;
   esac
 done
 [ -z "$differ" ] || cat <<EOF
-This vhid plugin was written for vhid $written_for, and the installed binaries are not that version: $differ. The plugin's skills describe the tools of $written_for, so a tool may refuse arguments a skill gives it. If a binary is older than $written_for, the step is \`brew upgrade --cask vhid\` (or the pkg from https://github.com/promptctl/vhid/releases/latest), then a new Claude Code session. If it is newer, the step is \`claude plugin marketplace update vhid\` and \`claude plugin update vhid@vhid\`, then a new session. A version with a tag after its number, such as -rc.1 or -dev+<commit>, is a pre-release or a development build, which no plugin release is written for, so updating the plugin does not clear this, and its tools may take other arguments than the skills describe; \`brew reinstall --cask vhid\` (or the pkg from https://github.com/promptctl/vhid/releases/latest) puts the release back. If a tool refuses what a skill told you to pass, tell the user this and the step.
+This vhid plugin was written for vhid $written_for, and not every installed binary is that version: $differ. The plugin's skills describe the tools of $written_for, so a tool may refuse arguments a skill gives it. If a binary is older than $written_for, the step is \`brew upgrade --cask vhid\` (or the pkg from https://github.com/promptctl/vhid/releases/latest), then a new Claude Code session. If it is newer, the step is \`claude plugin marketplace update vhid\` and \`claude plugin update vhid@vhid\`, then a new session. A version with a tag after its number, such as -rc.1 or -dev+<commit>, is a pre-release or a development build, which no plugin release is written for, so updating the plugin does not clear this, and its tools may take other arguments than the skills describe; \`brew reinstall --cask vhid\` (or the pkg from https://github.com/promptctl/vhid/releases/latest) puts the release back. If a tool refuses what a skill told you to pass, tell the user this and the step.
 
 EOF
 # Without vhid there is no doctor to ask. With it, the doctor is asked even when eyes is
