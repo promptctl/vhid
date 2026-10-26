@@ -108,7 +108,7 @@ skew "dev build" "$VHID is 0.5.0-dev+abc123; $EYES is 0.5.0-dev+abc123"
 versions 0.5.0 0.4.1
 skew "eyes alone" "binaries are not that version: $EYES is 0.4.1."
 echo "$out" | grep -qF "$VHID is" && fail "eyes alone: named vhid: '$out'"
-# The skew is said before the doctor's verdict, which is still asked.
+# The skew is said and the doctor is still asked.
 vhid_doctor "not ready" "awaiting approval" 1
 skew "older, not ready" "$EYES is 0.4.1" "Driver extension: awaiting approval"
 # A --version that fails is said with its status and output, not taken for a match.
@@ -116,6 +116,12 @@ vhid_doctor ready running 0; versions 0.5.0 0.5.0
 printf '#!/bin/sh\necho "unknown option" >&2\nexit 64\n' >"$EYES"
 skew "eyes --version failed" "$EYES --version failed with exit status 64 and printed: unknown option"
 versions 0.5.0 0.5.0; eyes_present
+
+# A --version that succeeds and also warns on stderr still reports its version: a match.
+printf '#!/bin/sh\n[ "$1" = --version ] || exit 0\necho "dyld: a warning" >&2\nexec cat %s\n' "$SCRATCH/eyes.version" >"$EYES"
+run
+[ "$status" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ] || fail "--version warns: exited $status, said '$out', '$err'; should say nothing"
+eyes_present
 
 # A plugin root with no VERSION is the plugin's own fault, said loudly.
 mv "$SCRATCH/VERSION" "$SCRATCH/VERSION.away"
@@ -140,8 +146,6 @@ done
 # claude-plugin/ alone, and it is the version every build of this tree is stamped from.
 [ -f claude-plugin/VERSION ] && [ ! -L claude-plugin/VERSION ] \
   || fail "claude-plugin/VERSION is not a regular file inside the plugin"
-[ "$(tr -d '[:space:]' <claude-plugin/VERSION)" = "$(scripts/version --base)" ] \
-  || fail "claude-plugin/VERSION is not scripts/version --base"
 
 [ "$failed" -eq 0 ] && echo "plugin-hook-test: ok"
 exit "$failed"

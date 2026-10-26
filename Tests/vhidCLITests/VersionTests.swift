@@ -35,7 +35,7 @@ import Version
         return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Read against VERSION rather than against the tree's git state now, which can have
+    /// Read against claude-plugin/VERSION rather than against the tree's git state now, which can have
     /// moved on since the build stamped it.
     @Test func theBuildReportsVersionsValueOrADevBuildOfIt() throws {
         let base = try Self.run(Self.root.appending(path: "scripts/version").path(), ["--base"], in: Self.root)

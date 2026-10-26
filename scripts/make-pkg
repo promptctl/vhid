@@ -2,7 +2,7 @@
 # Builds the installer: one signed distribution pkg carrying vhid, eyes, vhid's daemon, the
 # daemon's launchd job, and the pinned Karabiner-DriverKit-VirtualHIDDevice package.
 #
-#   scripts/make-pkg <output directory>    # prints <output directory>/vhid-<version>.pkg, <version> from VERSION
+#   scripts/make-pkg <output directory>    # prints <output directory>/vhid-<version>.pkg, <version> from claude-plugin/VERSION
 #   scripts/make-pkg --team    # prints the team whose Developer ID signs a release
 #   scripts/make-pkg --identifier    # prints the pkg's receipt identifier
 #   scripts/make-pkg --unsigned <output directory>
@@ -62,7 +62,7 @@ fail() { echo "make-pkg: $*" >&2; exit 1; }
 
 signed=true
 [ "${1:-}" = --unsigned ] && { signed=false; shift; }
-[ $# -eq 1 ] || fail "usage: scripts/make-pkg [--unsigned] <output directory>; the version is VERSION's"
+[ $# -eq 1 ] || fail "usage: scripts/make-pkg [--unsigned] <output directory>; the version is claude-plugin/VERSION's"
 out=$1
 
 mkdir -p "$out"
@@ -70,7 +70,7 @@ out=$(cd "$out" && pwd)
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$root"
 
-# [LAW:one-source-of-truth] The version is VERSION's, as scripts/version reads and checks
+# [LAW:one-source-of-truth] The version is claude-plugin/VERSION's, as scripts/version reads and checks
 # it. A tree the binaries would stamp with anything else - untagged, or changed since the
 # tag - is refused here, before minutes of building; the packed binary is asked again below.
 if $signed; then

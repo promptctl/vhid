@@ -8,7 +8,7 @@
 # installs claude-plugin/ alone, and the plugin's session-start hook reads it there as the
 # version the plugin was written for.
 #
-#   scripts/version [--base] [repo]     --base: VERSION's value alone; repo defaults to this one
+#   scripts/version [--base] [repo]     --base: claude-plugin/VERSION's value alone; repo defaults to this one
 set -eu
 base=false
 [ "${1:-}" = --base ] && { base=true; shift; }

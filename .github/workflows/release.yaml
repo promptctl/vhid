@@ -54,7 +54,7 @@ jobs:
       # binaries contradict. make-pkg asks again, of the tree and of the packed CLI. A
       # version scripts/newest-release does not call a release is a pre-release, decided
       # here alone: the steps below read PRERELEASE.
-      - name: The tag is VERSION's
+      - name: The tag is claude-plugin/VERSION's
         run: |
           version=$(scripts/version --base)
           [ "$TAG" = "v$version" ] || { echo "::error::tag $TAG is not v$version, the version in claude-plugin/VERSION"; exit 1; }

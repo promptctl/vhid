@@ -28,7 +28,8 @@ command_of() {
 vhid=$(command_of vhid) || exit 1
 eyes=$(command_of eyes) || exit 1
 # [LAW:one-source-of-truth] The version the plugin was written for is the one its release's
-# binaries were built as: scripts/version reads this same file, the same way, for every build.
+# binaries were built as: scripts/version reads this same file for every build, and refuses
+# to build from one that is not a version, so the release that shipped it has checked it.
 written_for=$(tr -d '[:space:]' <"$root/VERSION") \
   || { echo "vhid plugin: $root/VERSION does not say the version the plugin was written for" >&2; exit 1; }
 
@@ -43,15 +44,19 @@ EOF
 # Each installed binary that is not the plugin's version, with what it said. The versions
 # are said, not ordered: which is newer is for the agent to read off them, so the hook
 # keeps no second rule for it beside scripts/newest-release.
+# The version is stdout alone, so a diagnostic on stderr cannot make a match a mismatch;
+# stderr is said only when --version failed.
+said=$(mktemp) || exit 1
+trap 'rm -f "$said"' EXIT
 differ=
 for binary in "$vhid" "$eyes"; do
   [ -x "$binary" ] || continue
-  reported=$("$binary" --version 2>&1)
+  reported=$("$binary" --version 2>"$said")
   status=$?
   case "$status:$reported" in
     "0:$written_for") continue ;;
     0:*) differ="${differ:+$differ; }$binary is $reported" ;;
-    *) differ="${differ:+$differ; }$binary --version failed with exit status $status and printed: $reported" ;;
+    *) differ="${differ:+$differ; }$binary --version failed with exit status $status and printed: $(cat "$said")${reported:+ $reported}" ;;
   esac
 done
 [ -z "$differ" ] || cat <<EOF
