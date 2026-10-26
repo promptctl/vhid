@@ -23,7 +23,9 @@ and roles; needs Accessibility), `pixels` recognises text on-device with Vision 
 drawn; needs Screen Recording), and `merged`, the default, asks both and reports a thing
 both saw once. A merge with one grant missing still answers from the other and says which
 reader could not look. Each prints a scope line first — where it looked, which reader
-looked, how many runs it read, what it set aside, whether it read the whole region. A `find` that matches nothing prints the nearest runs
+looked, how many runs it read, what it set aside, whether it read the whole region. A read
+that stopped short says so in its first words, `"Add" not found in the part read of …`,
+so neither a match nor an absence from part of the region is taken for a whole read's. A `find` that matches nothing prints the nearest runs
 and how many edits off each is, so a misread one edit away is not taken for an absence.
 
 Named no place, `find` and `read` read what is in front: the frontmost app's windows

@@ -206,7 +206,9 @@ enum Report {
             "\(query.near.map(wanted) ?? "") not found to place \(query.match.map(wanted) ?? "the text")\(role) near"
         }
         let clauses: [String?] = [
-            "\(head) in \(place(query.region)) \(s.region) \(looked(source, s.reach))",
+            // A partial read says so in the words a caller acts on, not only in the last clause:
+            // what it matched or missed may be the wrong thing, or not all there is.
+            "\(head) in \(s.reach.readWhole ? "" : "the part read of ")\(place(query.region)) \(s.region) \(looked(source, s.reach))",
             "\(s.examined) run\(s.examined == 1 ? "" : "s") read",
             s.excluded.isEmpty ? nil : s.excluded.map { "\($0.count) \($0.reason.rawValue)" }.joined(separator: ", "),
             boxes(s.boxes),
@@ -345,6 +347,21 @@ private extension Paged.Stop {
     }
 }
 
+private extension Reach {
+    /// How far a look read, for its event: the page event's spelling, and `merged` for a merge
+    /// whose readers did not both read whole.
+    var kind: String {
+        switch self {
+        case .whole: "whole"
+        case .stopped(.resultLimit): "result_limit"
+        case .stopped(.elementLimit): "element_limit"
+        case .stopped(.timeBudget): "time_budget"
+        case .stopped(.unread): "unread"
+        case .stopped(.merged): "merged"
+        }
+    }
+}
+
 private extension Region {
     /// Which kind of place was read, for the look's event.
     var kind: String {
@@ -438,6 +455,7 @@ extension Report {
         }
         // How many processes' windows a front look took in; every other region reads them all.
         if case .only(let pids) = reading.scope.owners { Telemetry.count("owners", pids.count) }
+        Telemetry.note("reach", reading.scope.reach.kind)
         switch reading.outcome {
         case .matched(let m):
             Telemetry.count("matched", m.count)

@@ -352,6 +352,16 @@ public enum Reach: Sendable, Hashable {
     /// about the screen rather than a fact about the read.
     case whole
     case stopped(Stop)
+
+    /// Whether every part of the region was read: the result limit cuts the answer, not the
+    /// read. [LAW:single-enforcer] Whether an absence is proved and whether a scope line
+    /// says it read only part are both decided here.
+    public var readWhole: Bool {
+        switch self {
+        case .whole, .stopped(.resultLimit): true
+        case .stopped: false
+        }
+    }
 }
 
 public enum Stop: Sendable, Hashable {
@@ -443,7 +453,7 @@ public extension Reading {
     /// the two disagreed exactly where it mattered.
     var provesAbsence: Bool {
         guard case .nearest = outcome else { return false }
-        return scope.reach == .whole
+        return scope.reach.readWhole
     }
 }
 
