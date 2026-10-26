@@ -30,6 +30,8 @@ Done means a look after the act showed the change. An act's answer says the act 
    button drawn "+". `find` matches those words too, and `role` keeps one kind of
    element: `{"text": "Add", "role": "AXButton"}` is the Add button, not a label
    reading Add. `read` with a `role` lists every button and what each is called.
+   A first line that says `in the part read of` stopped short of the place: its match
+   may not be the one meant and its not found proves nothing, so narrow the place and look again.
    In a browser, pass `page` with the window's id instead of `window`: it reads the
    web page alone, so a bookmark or toolbar button with the same name is not a match.
    When the same label appears several times, such as a Remove button on every row,
