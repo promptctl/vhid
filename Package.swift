@@ -44,8 +44,8 @@ let package = Package(
         // nothing, so neither the layout nor the device has to link the other to speak.
         // [LAW:one-way-deps]
         .target(name: "Keystrokes"),
-        // The version the binaries report, stamped at build time from VERSION and git by
-        // the plugin, so no copy of the number is written down anywhere but VERSION.
+        // The version the binaries report, stamped at build time from claude-plugin/VERSION
+        // and git by the plugin, so no copy of the number is written down anywhere else.
         // [LAW:one-source-of-truth]
         .target(name: "Version", plugins: ["VersionStamp"]),
         .plugin(name: "VersionStamp", capability: .buildTool()),
