@@ -162,7 +162,7 @@ struct Where: ParsableArguments {
                 let paged = try await pages(id)
                 Telemetry.count("examined", paged.examined)
                 Telemetry.count("pages", paged.pages.count)
-                Telemetry.note("reach", paged.stop?.kind ?? "whole")
+                Telemetry.note("reach", (paged.stop?.reach ?? .whole).kind)
                 return .page(window: id, frame: try paged.page(in: id))
             }
         }
@@ -337,19 +337,21 @@ enum Report {
 }
 
 private extension Paged.Stop {
-    /// Why a page search stopped short, for the page's event.
-    var kind: String {
+    /// Why a page search stopped short, as the reach a look reports, so a page's event and a
+    /// look's spell it the one way. [LAW:one-source-of-truth]
+    var reach: Reach {
         switch self {
-        case .elementLimit: "element_limit"
-        case .timeBudget: "time_budget"
-        case .unread: "unread"
+        case .elementLimit(let l): .stopped(.elementLimit(l))
+        case .timeBudget(let d): .stopped(.timeBudget(d))
+        case .unread: .stopped(.unread)
         }
     }
 }
 
 private extension Reach {
-    /// How far a look read, for its event: the page event's spelling, and `merged` for a merge
-    /// whose readers did not both read whole.
+    /// How far a look read, for its event. A merge that did not read whole names each
+    /// reader's reach, `tree_blind+pixels_whole`, since merged is the default source and a
+    /// missing grant and a time budget are different causes.
     var kind: String {
         switch self {
         case .whole: "whole"
@@ -357,7 +359,17 @@ private extension Reach {
         case .stopped(.elementLimit): "element_limit"
         case .stopped(.timeBudget): "time_budget"
         case .stopped(.unread): "unread"
-        case .stopped(.merged): "merged"
+        case .stopped(.merged(let a, let b)): "\(a.reachKind)+\(b.reachKind)"
+        }
+    }
+}
+
+private extension Part {
+    /// One reader's reach in a merge, for the look's event.
+    var reachKind: String {
+        switch self {
+        case .read(let source, let reach): "\(source.rawValue)_\(reach.kind)"
+        case .blind(let source, _, _): "\(source.rawValue)_blind"
         }
     }
 }

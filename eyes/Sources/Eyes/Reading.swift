@@ -348,14 +348,14 @@ public enum Reach: Sendable, Hashable {
         self = excluded.contains { $0.reason.leavesUnread && $0.count > 0 } ? .stopped(.unread) : .whole
     }
 
-    /// Everything in the region was examined. Only this one makes an absence a fact
-    /// about the screen rather than a fact about the read.
+    /// Everything in the region was examined.
     case whole
     case stopped(Stop)
 
     /// Whether every part of the region was read: the result limit cuts the answer, not the
-    /// read. [LAW:single-enforcer] Whether an absence is proved and whether a scope line
-    /// says it read only part are both decided here.
+    /// read. Only a read whole makes an absence a fact about the screen rather than a fact
+    /// about the read. [LAW:single-enforcer] Whether an absence is proved, whether a merge
+    /// read whole, and whether a scope line says it read only part are all decided here.
     public var readWhole: Bool {
         switch self {
         case .whole, .stopped(.resultLimit): true
@@ -392,7 +392,7 @@ public enum Part: Sendable, Hashable {
     /// grant the process lacks - which a caller can act on. [LAW:no-silent-failure]
     case blind(SourceKind, String, missingGrant: Bool)
 
-    var isWhole: Bool { if case .read(_, .whole) = self { true } else { false } }
+    var isWhole: Bool { if case .read(_, let reach) = self { reach.readWhole } else { false } }
 
     public var kind: SourceKind {
         switch self {

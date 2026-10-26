@@ -229,6 +229,8 @@ import Testing
                                                                reach: .stopped(.timeBudget(.seconds(5)))))
         let hit = Reading(outcome: .matched(Matches([found("OK", x: -100)])!),
                           scope: Scope(region: Self.display, examined: 9, reach: .whole, boxes: Boxes(narrowed: 1, unchecked: [.elsewhere: 2], calls: 41)))
+        let halfBlind = Reading(outcome: hit.outcome, scope: Scope(region: Self.display, examined: 9, reach: .stopped(.merged(
+            .blind(.tree, "no grant", missingGrant: true), .read(.pixels, .stopped(.timeBudget(.seconds(5))))))))
         try await Telemetry.$export.withValue(events.export) {
             _ = try await Report.text(Query(match: .contains("OK"), region: .display(12)), source: .tree) { _, _ in .standing(near) }
             _ = try await Report.text(Query(match: .contains("OK"), region: .display(12)), source: .pixels,
@@ -237,16 +239,17 @@ import Testing
             }
             _ = try? await Report.text(Query(match: nil, region: .display(12)), source: .merged) { _, _ in throw PixelsError.noGrant }
             _ = try await Report.text(Query(match: .contains("OK"), region: .page(window: 7, frame: Self.display), near: .contains("Beta")),
-                                      source: .tree) { _, _ in .standing(hit) }
+                                      source: .merged) { _, _ in .standing(halfBlind) }
         }
         let seen = events.all
         #expect(seen.map(\.event) == ["look", "look", "look", "look"])
         #expect(seen.map(\.outcome) == ["not_matched", "settled", "error", "matched"])
-        #expect(seen.map { $0.facts["source"] } == ["tree", "pixels", "merged", "tree"])
+        #expect(seen.map { $0.facts["source"] } == ["tree", "pixels", "merged", "merged"])
         #expect(seen.map { $0.facts["region"] } == ["display", "display", "display", "page"])
         #expect(seen.map { $0.facts["order"] } == ["reading", "reading", "reading", "near"])
         #expect(seen.map { $0.facts["role"] } == ["none", "none", "none", "none"])
-        #expect(seen.map { $0.facts["reach"] } == ["time_budget", "whole", nil, "whole"])
+        // A merge names each reader's reach, so a missing grant is told apart from a time budget.
+        #expect(seen.map { $0.facts["reach"] } == ["time_budget", "whole", nil, "tree_blind+pixels_time_budget"])
         // Every reason an exclusion can have, zeros included.
         let none = Dictionary(uniqueKeysWithValues: Exclusion.Reason.allCases.map { ("excluded_\($0.rawValue)", 0) })
         #expect(seen[0].counts == none.merging(["excluded_outside": 3]) { $1 }.merging(
