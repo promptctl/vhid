@@ -4,6 +4,8 @@ Each release's section is its GitHub Release notes, which keep line breaks, so e
 
 ## [Unreleased]
 
+## [0.6.0]
+
 - `eyes find` and `eyes read`, and their MCP tools, say a read that stopped short in the scope line's first words, `1 matched "Add" in the part read of rect …` and `"Add" not found in the part read of …`, where only its last clause said it, `stopped after 5s` or `parts left unread`: a match from part of the region may not be the one meant, and an absence from it proves nothing. A cut answer, `stopped at the limit of N`, read the whole region and is not said so. Each look's record notes its `reach`: `whole`, `result_limit`, `element_limit`, `time_budget`, `unread` or `merged`.
 - `eyes find` matches an element by everything it says in words, its value, title and description, where it matched only the first: a button drawn "+" and described "Add", the one an agent could not find in System Settings, is found by `find Add`. Each row from the accessibility tree prints those other words after its role, each after the attribute that says it, `description Add`, so `read` shows what each control is called; the row's text is still the first, the one drawn. A checkbox's 0 or 1 and a link's address are not words to find it by. `eyes hit` reads an element's texts through the same conversion as `find`, and prints each after its attribute, `value 1`, `description Add`, the state and address among them. Each look's record counts the matches made by those other words as `matched_also`. Every text on a row is printed on one line and cut past 120 characters, as `eyes hit` prints them, and a near miss's edits off follow its role.
 - `eyes find` and `eyes read`, and their MCP tools, take `--role` (`role`), which keeps only rows of that role, such as `AXButton`. A match of another role is counted `other_role`, and one only the pixels reader saw, whose role nobody knows, `role_unknown`, which leaves the region not read whole, so a role find under the default merged source does not prove an absence where pixels saw the text; with `--source tree` it can. `--source pixels` refuses a role. Each look's record notes the `role` asked, or `none`.
@@ -82,7 +84,8 @@ The first release: a virtual keyboard and mouse that macOS sees as hardware, dri
 - One signed, notarized pkg installs both CLIs, the root daemon that owns the devices, the menu bar item, the `vhid record` tap, an uninstaller, and the pinned Karabiner-DriverKit-VirtualHIDDevice package.
 - After installing, turn on `org.pqrs.Karabiner-DriverKit-VirtualHIDDevice` under System Settings > General > Login Items & Extensions > Driver Extensions; no installer can do this for you. `vhid doctor` prints `ready` once everything vhid needs is met.
 
-[Unreleased]: https://github.com/promptctl/vhid/compare/v0.5.0...master
+[Unreleased]: https://github.com/promptctl/vhid/compare/v0.6.0...master
+[0.6.0]: https://github.com/promptctl/vhid/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/promptctl/vhid/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/promptctl/vhid/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/promptctl/vhid/compare/v0.3.0...v0.4.0
