@@ -83,18 +83,19 @@ plugin's directory from the branch its entry names, `latest-release`, not from m
 a Mac that installs or updates the plugin gets the skills and hook of the newest release,
 and a change to `claude-plugin/` reaches nobody until it ships. Once a release is
 published, `release.yaml` runs `scripts/update-plugin`, which commits that release's
-`claude-plugin/` onto the branch, with the branch as it was for parent and a `Release:`
-trailer naming the version, and pushes it. A pre-release leaves it where it is, and so
-does a release older than the one the branch names. Each commit holds `claude-plugin/`
+`claude-plugin/` onto the branch, with the branch as origin has it for parent and a
+`Release:` trailer naming the version, and pushes it, fetching and deciding again when
+another release's job pushed first. A pre-release leaves the branch where it is, and so
+does a release older than the one it names. Each commit holds `claude-plugin/`
 and nothing else, so a push never changes a workflow file: GitHub refuses that from the
 release job's token. A repository ruleset on the branch refuses deletion and force-pushes
 from anyone. When the step fails, the Release is public by then, so the branch is moved
-by hand, from a checkout of master, rather than by re-running the job:
+by hand, from a checkout of master holding the release's tag, rather than by re-running
+the job:
 
 ```sh
-git fetch origin latest-release:latest-release --tags
-scripts/update-plugin . latest-release <version>
-git push origin latest-release
+git fetch origin --tags
+scripts/update-plugin . <version>
 ```
 
 ## The cask
