@@ -125,7 +125,7 @@ public func waiting(
         // reading is the answer. Measured on studious, a whole-display read is most of a
         // second, so counting only the pause overshot a 2 s timeout by 0.6 s.
         if settled || clock.now + interval + (clock.now - began) - start > wait.timeout {
-            return Waited(reading: try await judged.pressed(until: min(clock.now + boxChecking, start + wait.timeout)), reads: reads, took: clock.now - start, settled: settled)
+            return Waited(reading: try await judged.pressed(until: min(clock.now + hitTesting, start + wait.timeout)), reads: reads, took: clock.now - start, settled: settled)
         }
         try await Task.sleep(for: interval)
     }

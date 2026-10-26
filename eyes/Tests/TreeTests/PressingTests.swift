@@ -172,4 +172,77 @@ import Grants
     @Test func aThrowFromTheHitTestIsThrown() {
         #expect(throws: Revoked.self) { try probe(hit: { _ in throw Revoked() }).press(row()) }
     }
+
+    /// A climb as the elements it listed, how it ended and its calls; nil for any other answer.
+    private func climbed(_ c: Climbed<Int>) -> (hit: Int, elements: [Landing.Element], end: Landing.End, calls: Int)? {
+        guard case .hit(let hit, let said, let end, let calls) = c else { return nil }
+        return (hit, said.map(\.element), end, calls)
+    }
+
+    /// The case the ticket is for: a click on a button's label lands on the label, and the climb
+    /// says it sits in the button, then stops at the page holding both - one hit test and a read
+    /// per element.
+    @Test func aClimbFromALabelNamesItsControlAndStopsAtTheArea() throws {
+        let c = try #require(climbed(try probe().climb(from: Self.text.centre)))
+        #expect(c.hit == 2)
+        #expect(c.elements.map(\.role) == [Self.label, Self.button, Self.page])
+        #expect(c.end == .area)
+        #expect(c.calls == 4)
+    }
+
+    /// What each element says is listed as it answered: blank and absent texts are not, and a
+    /// text that would not say is counted, not dropped unseen.
+    @Test func aClimbListsTheTextsThatAnsweredAndCountsTheRest() throws {
+        var lineages = Self.lineages
+        lineages[1] = Lineage(role: Self.button, frame: Self.frame, parent: 0,
+                              texts: [.answered(nil), .answered("Add"), .unanswered])
+        lineages[2] = Lineage(role: Self.label, frame: Self.text, parent: 1, texts: [.answered("+"), .answered("  "), .answered(nil)])
+        let c = try #require(climbed(try probe(lineages: lineages).climb(from: Self.text.centre)))
+        #expect(c.elements[0] == Landing.Element(role: Self.label, texts: ["+"], unanswered: 0, frame: Self.text))
+        #expect(c.elements[1] == Landing.Element(role: Self.button, texts: ["Add"], unanswered: 1, frame: Self.frame))
+    }
+
+    /// With no area above it, the climb reads to the top of the tree and says so.
+    @Test func aClimbWithNoAreaEndsAtTheTop() throws {
+        let lineages: [Int: Lineage<Int>] = [
+            1: Lineage(role: Self.button, frame: Self.frame, parent: 2),
+            2: Lineage(role: Self.label, frame: nil, parent: nil),
+        ]
+        let c = try #require(climbed(try probe(hit: { _ in .answered(1) }, lineages: lineages).climb(from: Self.frame.centre)))
+        #expect(c.elements.map(\.role) == [Self.button, Self.label])
+        #expect(c.end == .top)
+    }
+
+    /// A hit test that answers nothing is there is an answer; one that does not answer, or the
+    /// time spent before it is asked, leaves nothing to climb from, and says which.
+    @Test func aClimbWithNothingToStartFromSaysWhy() throws {
+        guard case .nothing = try probe(hit: { _ in .answered(nil) }).climb(from: Self.frame.centre) else { Issue.record("not nothing"); return }
+        guard case .unheard(.unanswered) = try probe(hit: { _ in .unanswered }).climb(from: Self.frame.centre) else { Issue.record("not unanswered"); return }
+        let asked = Asked()
+        guard case .unheard(.overTime) = try probe(asked, spent: { true }).climb(from: Self.frame.centre) else { Issue.record("not over time"); return }
+        #expect(asked.hits == 0)
+    }
+
+    /// A read that does not answer, the time running out, or parents in a loop end the climb
+    /// short, keeping what was read before and saying why.
+    @Test func aClimbStoppedPartWayKeepsWhatItReadAndSaysWhy() throws {
+        var lineages = Self.lineages
+        lineages[0] = nil
+        let unanswered = try #require(climbed(try probe(lineages: lineages).climb(from: Self.text.centre)))
+        #expect(unanswered.elements.map(\.role) == [Self.label, Self.button])
+        #expect(unanswered.end == .short(.unanswered))
+
+        var asks = 0
+        let overTime = try #require(climbed(try probe(spent: { asks += 1; return asks > 2 }).climb(from: Self.text.centre)))
+        #expect(overTime.elements.map(\.role) == [Self.label])
+        #expect(overTime.end == .short(.overTime))
+
+        let loop: [Int: Lineage<Int>] = [
+            1: Lineage(role: Self.label, frame: Self.text, parent: 2),
+            2: Lineage(role: Self.label, frame: Self.text, parent: 1),
+        ]
+        let looped = try #require(climbed(try probe(hit: { _ in .answered(1) }, lineages: loop).climb(from: Self.text.centre)))
+        #expect(looped.elements.count == Probe<Int>.depth)
+        #expect(looped.end == .short(.unanswered))
+    }
 }

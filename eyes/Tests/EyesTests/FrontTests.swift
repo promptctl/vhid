@@ -116,6 +116,25 @@ import Testing
         }
     }
 
+    /// Where an app a click lands in stands is the front look's own rule: the app it reads, a
+    /// window over that app's it reads too - the remote Open panel - the agent's own terminal,
+    /// or behind. The terminal in front, passed over, is the terminal, not the front app.
+    @Test func whereAHitAppStandsIsDecidedByTheFrontLooksRule() {
+        let settings = Front.App(pid: 300, name: "System Settings")
+        let front = Front(app: settings, display: 1, own: Self.terminal, passedOver: true)
+        let panel = WindowListing(windows: [Self.window(9, "Open and Save Panel Service", pid: 900, x: -900)] + Self.desk.windows, excluded: [])
+        let landsInPanel: (ScreenPoint) -> Heard<Int32> = { _ in .answered(900) }
+        let standing = { (pid: Int32, front: Front?) in Front.standing(of: pid, own: Self.terminal, front: front, in: panel, hit: landsInPanel) }
+        #expect(standing(300, front) == .front(settings))
+        #expect(standing(900, front) == .overFront(settings))
+        #expect(standing(80, front) == .own("iTerm2"))
+        #expect(standing(81, front) == .own("iTerm2"))
+        #expect(standing(400, front) == .behind(settings))
+        // With nothing but the terminal on screen there is no front to read.
+        #expect(standing(80, nil) == .own("iTerm2"))
+        #expect(standing(400, nil) == .behind(nil))
+    }
+
     @Test func twoReadersOwnersAreTheirUnion() {
         #expect(Owners.only([1]).union(.only([2])) == .only([1, 2]))
         #expect(Owners.only([1]).union(.every) == .every)

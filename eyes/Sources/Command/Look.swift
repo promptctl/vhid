@@ -126,22 +126,7 @@ struct Where: ParsableArguments {
 
         /// What is in front now: AppKit and the responsibility call in the process, a fake in a test.
         typealias Fronts = @Sendable @MainActor () async throws -> Front
-        static let live: Fronts = {
-            // The app eyes answers to is matched to processes by where it runs from, never
-            // by name: two apps can share one.
-            let holder = try await Holder.current()
-            let running = NSWorkspace.shared.runningApplications
-            let path = { (url: URL?) in url?.resolvingSymlinksInPath().path }
-            let holderPath = path(URL(fileURLWithPath: holder.path))
-            let own = running.filter { path($0.bundleURL ?? $0.executableURL) == holderPath }
-            return try Front.choose(
-                frontmost: Front.App.now(),
-                own: Front.Passed(pids: Set(own.map(\.processIdentifier)), name: holder.name),
-                regular: Set(running.filter { $0.activationPolicy == .regular }.map(\.processIdentifier)),
-                names: Dictionary(running.compactMap { app in app.localizedName.map { (app.processIdentifier, $0) } }, uniquingKeysWith: { a, _ in a }),
-                listing: try Geometry.onScreen(),
-                displays: Geometry.displays())
-        }
+        static let live: Fronts = { try Front.now(own: try await .current(), listing: try Geometry.onScreen()) }
 
         @MainActor func region(pages: Pages = tree, front: Fronts = live) async throws -> Region {
             switch self {
@@ -446,3 +431,33 @@ extension Report {
 }
 
 extension Until: ExpressibleByArgument {}
+
+extension Front.Passed {
+    /// The app eyes answers to: every running process of the app responsible for this one,
+    /// matched by where it runs from, never by name - two apps can share one. The one place
+    /// it is derived, for a front look and a hit alike. [LAW:one-source-of-truth]
+    @MainActor
+    static func current() async throws -> Front.Passed {
+        let holder = try await Holder.current()
+        let path = { (url: URL?) in url?.resolvingSymlinksInPath().path }
+        let holderPath = path(URL(fileURLWithPath: holder.path))
+        let own = NSWorkspace.shared.runningApplications.filter { path($0.bundleURL ?? $0.executableURL) == holderPath }
+        return Front.Passed(pids: Set(own.map(\.processIdentifier)), name: holder.name)
+    }
+}
+
+extension Front {
+    /// What a look with no place named reads now, with the app eyes answers to and the window
+    /// listing the caller already holds, so a hit judges the listing it found the window in.
+    @MainActor
+    static func now(own: Passed, listing: WindowListing) throws(NoFront) -> Front {
+        let running = NSWorkspace.shared.runningApplications
+        return try choose(
+            frontmost: App.now(),
+            own: own,
+            regular: Set(running.filter { $0.activationPolicy == .regular }.map(\.processIdentifier)),
+            names: Dictionary(running.compactMap { app in app.localizedName.map { (app.processIdentifier, $0) } }, uniquingKeysWith: { a, _ in a }),
+            listing: listing,
+            displays: Geometry.displays())
+    }
+}

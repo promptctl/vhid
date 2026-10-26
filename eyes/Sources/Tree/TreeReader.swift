@@ -75,9 +75,29 @@ public struct TreeReader: Reader {
     /// A caller that withdrew the look stops its checks at the next call rather than holding
     /// the main actor for the rest of the time. [LAW:no-silent-failure]
     public func pressing(_ reading: Reading, until deadline: ContinuousClock.Instant) async throws -> Reading {
-        let probe = Probe<AXUIElement>(hit: Self.element(at:), lineage: Self.lineage, parent: Self.parent, same: { CFEqual($0, $1) },
-                                       spent: { try Task.checkCancellation(); return ContinuousClock.now > deadline })
-        return try reading.pressing(probe.press)
+        try reading.pressing(Self.probe(until: deadline).press)
+    }
+
+    /// What a click at `point` lands on, climbed to the area holding it: nil when the hit test
+    /// answers that nothing is there. `Probe.climb` decides; this is its reads, and the process
+    /// of the element hit. Throws when there is nothing to climb from, by name. [LAW:no-silent-failure]
+    public func climb(from point: ScreenPoint, until deadline: ContinuousClock.Instant) async throws -> Landing.Climb? {
+        guard try await granted(Self.grant) else { throw TreeError.noGrant }
+        switch try Self.probe(until: deadline).climb(from: point) {
+        case .unheard(let why): throw HitUnheard(point: point, why: why)
+        case .nothing: return nil
+        case .hit(let element, let said, let end, let calls):
+            var pid: pid_t = 0
+            guard AXUIElementGetPid(element, &pid) == .success else { throw HitUnheard(point: point, why: .unanswered) }
+            return Landing.Climb(pid: pid, elements: said.map(\.element), end: end, calls: calls)
+        }
+    }
+
+    /// The one probe a look's box checks and a climb both ask through, stopping at `deadline`
+    /// or when the caller withdrew. [LAW:single-enforcer]
+    private static func probe(until deadline: ContinuousClock.Instant) -> Probe<AXUIElement> {
+        Probe(hit: element(at:), lineage: lineage, parent: parent, same: { CFEqual($0, $1) },
+              spent: { try Task.checkCancellation(); return ContinuousClock.now > deadline })
     }
 
     /// What window `id`'s tree says of the web pages in it, for `Paged.page` to make one
@@ -173,16 +193,20 @@ public struct TreeReader: Reader {
         }
     }
 
-    /// An element's role, frame and parent, in one round trip.
+    /// An element's role, frame, parent and texts, in one round trip. A text that does not
+    /// answer leaves the element answered: its texts are listed, never what decides a box.
     static func lineage(_ element: AXUIElement) throws(TreeError) -> Heard<Lineage<AXUIElement>> {
-        let names = [kAXRoleAttribute, kAXPositionAttribute, kAXSizeAttribute, kAXParentAttribute]
-        let reads = try read(names, of: element, as: [.structure, .structure, .structure, .structure])
+        let names = [kAXRoleAttribute, kAXPositionAttribute, kAXSizeAttribute, kAXParentAttribute,
+                     kAXValueAttribute, kAXTitleAttribute, kAXDescriptionAttribute]
+        let reads = try read(names, of: element, as: [.structure, .structure, .structure, .structure, .text, .text, .text])
         guard case .answered(let role) = reads[0], case .answered(let position) = reads[1],
               case .answered(let size) = reads[2], case .answered(let parent) = reads[3]
         else { return .unanswered }
+        let texts = reads[4...].map { $0.map { $0 as? String } }
         return .answered(Lineage(role: Role(rawValue: role as? String ?? kAXUnknownRole),
                                  frame: frame(position, size),
-                                 parent: parent.flatMap(Self.element).map(bounded)))
+                                 parent: parent.flatMap(Self.element).map(bounded),
+                                 texts: texts))
     }
 
     /// An element's parent, nil at the top of its tree.

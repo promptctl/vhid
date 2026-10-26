@@ -71,6 +71,17 @@ public struct Front: Sendable, Hashable {
         return Set(over.map(\.pid)).union([app.pid]).subtracting(own.pids)
     }
 
+    /// Where an app a click lands in stands to a look with no place named, by the rule that
+    /// look reads by: `owners` and `own`. [LAW:single-enforcer] `front` is nil when nothing but
+    /// the app eyes answers to has a window on screen, which is `NoFront`.
+    public static func standing(of pid: Int32, own: Passed, front: Front?, in listing: WindowListing,
+                                hit: (ScreenPoint) -> Heard<Int32>) -> Standing {
+        if own.pids.contains(pid) { return .own(own.name) }
+        guard let front else { return .behind(nil) }
+        if pid == front.app.pid { return .front(front.app) }
+        return front.owners(in: listing, hit: hit).contains(pid) ? .overFront(front.app) : .behind(front.app)
+    }
+
     /// The app a look with no place named reads, from facts the caller gathered.
     ///
     /// - frontmost: the app AppKit names frontmost, when any is; when none is, the app of the
@@ -100,6 +111,28 @@ public struct Front: Sendable, Hashable {
         let display = window.flatMap { w in displays.first { $0.frame.contains(w.frame.centre) } } ?? displays.first { $0.isMain }
         guard let display else { throw NoFront(own: own.name) }
         return Front(app: chosen, display: display.id, own: own, passedOver: passed)
+    }
+}
+
+/// Where an app stands to a look with no place named.
+public enum Standing: Sendable, Hashable {
+    /// The app that look reads.
+    case front(Front.App)
+    /// An app with a window over that app's front window where a click lands in it - an Open
+    /// panel another process draws - which that look reads too.
+    case overFront(Front.App)
+    /// The app eyes answers to, named: the agent's own terminal or Claude app, never read.
+    case own(String)
+    /// An app that look does not read, with the app it reads, nil when there is none.
+    case behind(Front.App?)
+
+    public var said: String {
+        switch self {
+        case .front: "front"
+        case .overFront: "over_front"
+        case .own: "own"
+        case .behind: "behind"
+        }
     }
 }
 

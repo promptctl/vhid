@@ -12,9 +12,10 @@ eyes find OK --source tree        # only the accessibility tree: exact text, no 
 eyes find Saving --window 4127 --until absent --timeout 30   # returns once the text is gone
 eyes find Settings --page 219     # only the web page in browser window 219, not its toolbar or bookmarks
 eyes find Remove --near Beta      # every "Remove", the one beside "Beta" first
+eyes hit 169 426                  # what a click at 169,426 lands on: the app, its window, the element
 eyes grants                       # Screen Recording and Accessibility: held or not, and the app they are charged to
 eyes grants --ask                 # raise macOS's dialog for each missing grant (once per app); run eyes grants again once answered
-eyes mcp                          # the verbs as MCP tools over stdio: windows, displays, find, read, grants
+eyes mcp                          # the verbs as MCP tools over stdio: windows, displays, find, read, hit, grants
 ```
 
 `find` and `read` read with `--source`: `tree` walks the accessibility tree (exact text
@@ -70,6 +71,17 @@ on the same line first: of three "Remove" buttons, the one in Beta's row comes f
 is answered, since which one was meant is unknown: the scope line names that text as not
 found, the rows are its near misses, and a wait settles neither present nor absent on it.
 
+`hit X Y` asks the system's hit test what a click at that point, as `vhid click X Y` takes
+it, would land on, and says so before anything is pressed. Its first line names the app,
+whether a look with no place named reads it - the front app, a window over it such as an
+Open panel, the app eyes answers to, or an app behind - and its window by the id `--window`
+takes. Then a row per element: the one hit, then each holding it, up to the area that holds
+them, such as a window, a list, a toolbar or a web page, each with its role, its frame and
+what it says. A click on a button's label lands on the label; the row under it is the
+button. It needs Accessibility, and decides nothing: `vhid click` presses what is there
+whatever it said. The hit tests get the same two seconds as a look's box checks, and a
+climb they do not finish says where it stopped and why.
+
 `find --until present|absent` re-reads the same rectangle until the text appears or is
 gone, then answers once, its scope line led by how many reads it took and how long. A
 window that closes counts as gone. Absent needs two whole reads running without a match.
@@ -78,7 +90,7 @@ When `--timeout` runs out, the answer is the last reading, marked as timed out.
 
 ## Events
 
-Every look (`find`, `read`, and each wait), every grant check a reader makes, and every
+Every look (`find`, `read`, and each wait), every `hit`, every grant check a reader makes, and every
 grants reading taken from a child emits one JSON event, from the verbs and the tools alike. Events go to the OTLP collector that
 `OTEL_EXPORTER_OTLP_ENDPOINT` names. With no collector set, or one that can't take them,
 they're appended to `~/Library/Logs/eyes/events.jsonl`. An event appended because the

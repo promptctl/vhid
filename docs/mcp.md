@@ -15,7 +15,8 @@ nothing between calls and a `vhid click` from a shell still gets through. Stdout
 only JSON-RPC; diagnostics go to stderr. An argument a tool will not act on comes back as
 a tool error naming it, before anything is connected.
 
-`eyes mcp` serves `windows`, `displays`, `find`, `read` and `grants` the same way. The two are
+`eyes mcp` serves `windows`, `displays`, `find`, `read`, `hit` and `grants` the same way;
+`hit` takes `x` and `y` as vhid's `click` does. The two are
 separate servers, and a client runs both.
 
 Each server's answer to a client's initialize carries the same instructions,
@@ -59,8 +60,8 @@ already there), then quit and reopen it:
 ```
 
 vhid's tools need what `vhid doctor` checks and no grant of the client's. eyes'
-`windows` and `displays` need nothing. `find` and `read` need Accessibility for the tree
-and Screen Recording for pixels, held by
+`windows` and `displays` need nothing. `hit` needs Accessibility. `find` and `read` need
+Accessibility for the tree and Screen Recording for pixels, held by
 the app macOS counts as responsible for the server: Claude Desktop, or the terminal app
 running `claude` - under tmux, SSH or an editor's terminal, whichever app started that.
 The `grants` tool says whether each is held and names that app, read fresh on every call

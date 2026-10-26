@@ -8,7 +8,7 @@ downloads and installs the same pkg. It installs:
 | path | what it is |
 |---|---|
 | `/usr/local/bin/vhid` | the CLI |
-| `/usr/local/bin/eyes` | the screen reader: `windows` and `displays` need no grant; `find` and `read` need Accessibility for the tree and Screen Recording for pixels, merged either ([mcp.md](mcp.md) says whose) |
+| `/usr/local/bin/eyes` | the screen reader: `windows` and `displays` need no grant; `hit` needs Accessibility; `find` and `read` need Accessibility for the tree and Screen Recording for pixels, merged either ([mcp.md](mcp.md) says whose) |
 | `/usr/local/libexec/vhidd` | the root daemon that owns the devices |
 | `/Library/LaunchDaemons/ai.promptctl.vhid.vhidd.plist` | the daemon's launchd job, loaded as the install finishes |
 | `/usr/local/libexec/vhid-menubar` | the menu bar item |

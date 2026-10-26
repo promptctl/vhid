@@ -86,10 +86,12 @@ public enum NoSuchPlace: Error, CustomStringConvertible {
     case display(CGDirectDisplayID)
     case window(UInt32)
     case offScreen(ScreenRect)
+    case pointOffScreen(ScreenPoint)
 
     public var description: String {
         switch self {
         case .offScreen(let r): "\(r) is on no display, so there is nothing there to read"
+        case .pointOffScreen(let p): "\(p) is on no display, so a click there hits nothing"
         case .display(let id): "no display with id \(id) is attached"
         case .window(let id): "no on-screen window has id \(id); `eyes windows` lists the ones that do"
         }

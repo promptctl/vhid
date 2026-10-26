@@ -104,6 +104,13 @@ public struct ScreenPoint: Sendable, Hashable {
     }
 }
 
+/// `x,y`, each as given: the form a row's point is printed in.
+extension ScreenPoint: CustomStringConvertible {
+    public var description: String { "\(Self.spelled(x)),\(Self.spelled(y))" }
+
+    private static func spelled(_ v: Double) -> String { v == v.rounded() ? String(Int(v)) : String(v) }
+}
+
 public extension ScreenRect {
     /// The one conversion from image space into screen space, and the only place the flip
     /// and the display origin are applied. [LAW:single-enforcer] One implementation to
