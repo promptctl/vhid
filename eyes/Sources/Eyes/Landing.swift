@@ -89,16 +89,26 @@ public struct Landing: Sendable, Equatable {
     }
 }
 
+/// What the hit test at a point answered, when it answered: nothing there, with the calls that
+/// took, or what a click there lands on.
+public enum Landed<On: Sendable & Equatable>: Sendable, Equatable {
+    case nothing(calls: Int)
+    case on(On)
+}
+
 /// The hit test at a point gave no element to climb from: it did not answer, or the time ran
 /// out before it could be asked. An error, not an empty landing: nothing is known about what
 /// is there. [LAW:no-silent-failure]
 public struct HitUnheard: Error, Equatable, CustomStringConvertible {
     public let point: ScreenPoint
     public let why: Landing.Short
+    /// The calls made before it gave up.
+    public let calls: Int
 
-    public init(point: ScreenPoint, why: Landing.Short) {
+    public init(point: ScreenPoint, why: Landing.Short, calls: Int) {
         self.point = point
         self.why = why
+        self.calls = calls
     }
 
     public var description: String {

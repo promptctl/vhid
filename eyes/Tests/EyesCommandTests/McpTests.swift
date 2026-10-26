@@ -96,7 +96,7 @@ import Testing
     @Test func noAppInFrontIsARefusalNamingTheAppEyesAnswersTo() async throws {
         let events = Collected()
         let (said, isError) = try await Telemetry.$export.withValue(events.export) {
-            try await call(["text": "Save"], tool: "find", front: { throw NoFront(own: "iTerm2") })
+            try await call(["text": "Save"], tool: "find", front: { throw NoFront(own: "iTerm2", why: .onlyOwn) })
         }
         #expect(isError == true)
         #expect(said.contains("no app but iTerm2, which eyes answers to, has a window on screen"))
@@ -186,7 +186,7 @@ import Testing
         #expect(blind == "\(TreeError.noGrant)" + EyesTools.grantNote)
         let (unheard, unheardError) = try await call(["x": 4, "y": 4], tool: "hit")
         #expect(unheardError == true)
-        #expect(unheard == "\(HitUnheard(point: ScreenPoint(x: 4, y: 4), why: .unanswered))")
+        #expect(unheard == "\(HitUnheard(point: ScreenPoint(x: 4, y: 4), why: .unanswered, calls: 1))")
     }
 
     @Test func displaysAnswersWithTheVerbsReportAndTakesNoArguments() async throws {

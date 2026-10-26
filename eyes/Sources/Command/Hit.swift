@@ -33,19 +33,28 @@ struct Hit: AsyncParsableCommand {
         return ScreenPoint(x: x, y: y)
     }
 
-    /// Where a click at a point lands, nil when nothing is there: the process in it, a fake in
+    /// Where a click at a point lands, or that nothing is there: the process in it, a fake in
     /// a test. [LAW:effects-at-boundaries]
-    typealias Landings = @Sendable (ScreenPoint) async throws -> Landing?
+    typealias Landings = @Sendable (ScreenPoint) async throws -> Landed<Landing>
 
     /// The report a verb prints and a tool answers, from the one unit of work both go through.
     /// [LAW:one-source-of-truth] [LAW:nothing-unseen] One `hit` event per question: the app and
     /// where it stands, the window, how far the climb read and how it ended.
     static func answer(at point: ScreenPoint, landing: Landings) async throws -> String {
-        try await Telemetry.unit("hit", outcome: { $0.0 == nil ? "nothing" : "landed" }) {
+        try await Telemetry.unit("hit", outcome: { $0.0 }) {
             Telemetry.count("rows", 0)
-            Telemetry.count("calls", 0)
-            let landed = try await landing(point)
-            if let landed {
+            let landed: Landed<Landing>
+            do { landed = try await landing(point) } catch let unheard as HitUnheard {
+                Telemetry.note("end", unheard.why.rawValue)
+                Telemetry.count("calls", unheard.calls)
+                throw unheard
+            }
+            switch landed {
+            case .nothing(let calls):
+                Telemetry.note("end", "nothing")
+                Telemetry.count("calls", calls)
+                return ("nothing", report(at: point, nil))
+            case .on(let landed):
                 Telemetry.note("app", landed.app.name ?? "")
                 Telemetry.note("standing", landed.standing.said)
                 Telemetry.note("end", landed.end.said)
@@ -53,10 +62,8 @@ struct Hit: AsyncParsableCommand {
                 Telemetry.count("window", Int(landed.window?.id ?? 0))
                 Telemetry.count("rows", landed.elements.count)
                 Telemetry.count("calls", landed.calls)
-            } else {
-                Telemetry.note("end", "nothing")
+                return ("landed", report(at: point, landed))
             }
-            return (landed, report(at: point, landed))
         }.1
     }
 
@@ -79,6 +86,8 @@ struct Hit: AsyncParsableCommand {
         case .front: "the front app, which a look with no place named reads"
         case .overFront(let front): "a window over the front app \(front), which a look with no place named reads too"
         case .own: "the app eyes answers to, whose windows a look never reads: the agent's own terminal or app"
+        case .otherDisplay(let front, let display):
+            "on a display a look with no place named does not read: it reads \(front) on display \(display)"
         case .behind(let front?): "not in front: a look with no place named reads \(front)"
         case .behind(nil): "not in front: nothing but the app eyes answers to has a window on screen"
         }
@@ -118,19 +127,33 @@ struct Hit: AsyncParsableCommand {
     /// The hit test and the window server, in the process. The window is looked for in the
     /// listing read before the climb, so it and the front look it is judged by are one moment.
     @MainActor
-    static func land(at point: ScreenPoint) async throws -> Landing? {
-        guard Geometry.displays().contains(where: { $0.frame.contains(point) }) else { throw NoSuchPlace.pointOffScreen(point) }
+    static func land(at point: ScreenPoint) async throws -> Landed<Landing> {
+        let displays = Geometry.displays()
+        guard displays.contains(where: { $0.frame.contains(point) }) else { throw NoSuchPlace.pointOffScreen(point) }
         let listing = try Geometry.onScreen()
-        guard let climb = try await TreeReader(granted: SourceKind.granted).climb(from: point, until: .now + hitTesting) else { return nil }
+        let climb: Landing.Climb
+        switch try await TreeReader(granted: SourceKind.granted).climb(from: point, until: .now + hitTesting) {
+        case .nothing(let calls): return .nothing(calls: calls)
+        case .on(let climbed): climb = climbed
+        }
         let own = try await Front.Passed.current()
-        // No front is an answer here, not a refusal: a hit on the app eyes answers to, with
-        // nothing else on screen, is the case most worth saying.
+        // Nothing but the app eyes answers to on screen is an answer here, not a refusal: a hit on
+        // that app, with nothing else on screen, is the case most worth saying.
         let front: Front?
-        do { front = try Front.now(own: own, listing: listing) } catch { front = nil }
+        do { front = try Front.now(own: own, listing: listing) } catch {
+            guard error.why == .onlyOwn else { throw error }
+            front = nil
+        }
         let window = listing.windows.first { $0.pid == climb.pid && $0.frame.contains(point) }
         let name = NSRunningApplication(processIdentifier: climb.pid)?.localizedName ?? window?.owner
-        return Landing(point: point, app: Front.App(pid: climb.pid, name: name),
-                       standing: Front.standing(of: climb.pid, own: own, front: front, in: listing, hit: { TreeReader.hit($0) }),
-                       window: window, elements: climb.elements, end: climb.end, calls: climb.calls)
+        // The front look's own hit tests, unbounded as that look's are: one cut off by time would
+        // say behind of an app that is over the front one. Counted with the climb's.
+        var tests = 0
+        let standing = Front.standing(of: climb.pid, at: point, own: own, front: front, in: listing, displays: displays) {
+            tests += 1
+            return TreeReader.hit($0)
+        }
+        return .on(Landing(point: point, app: Front.App(pid: climb.pid, name: name), standing: standing,
+                           window: window, elements: climb.elements, end: climb.end, calls: climb.calls + tests))
     }
 }

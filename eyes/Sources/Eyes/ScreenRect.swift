@@ -108,7 +108,7 @@ public struct ScreenPoint: Sendable, Hashable {
 extension ScreenPoint: CustomStringConvertible {
     public var description: String { "\(Self.spelled(x)),\(Self.spelled(y))" }
 
-    private static func spelled(_ v: Double) -> String { v == v.rounded() ? String(Int(v)) : String(v) }
+    private static func spelled(_ v: Double) -> String { Int(exactly: v).map(String.init) ?? String(v) }
 }
 
 public extension ScreenRect {
@@ -167,6 +167,11 @@ extension ScreenRect: CustomStringConvertible {
     /// The farthest from the origin any edge or size may be, in points.
     static let limit = 1_000_000.0
 
+    /// Whether every edge and size is a number no farther than `limit`: what a rectangle on
+    /// a screen is, and what an app's claimed frame must be to be taken as one.
+    /// [LAW:single-enforcer] The one rule `rect` and the tree's frames are both read by.
+    public var isWithinLimit: Bool { [x, y, width, height].allSatisfy { abs($0) <= Self.limit } }
+
     /// What a refusal names as the form wanted.
     public static let spelling = "x,y,width,height in points - a positive size, nothing past \(Int(limit))"
 
@@ -182,10 +187,10 @@ extension ScreenRect: CustomStringConvertible {
     public init?(spelled: String) {
         let parts = spelled.split(separator: ",", omittingEmptySubsequences: false)
             .map { Double($0.trimmingCharacters(in: .whitespaces)) }
-        guard parts.count == 4, let x = parts[0], let y = parts[1], let w = parts[2], let h = parts[3],
-              [x, y, w, h].allSatisfy({ abs($0) <= Self.limit }), w > 0, h > 0
+        guard parts.count == 4, let x = parts[0], let y = parts[1], let w = parts[2], let h = parts[3], w > 0, h > 0
         else { return nil }
         self.init(x: x, y: y, width: w, height: h)
+        guard isWithinLimit else { return nil }
     }
 }
 

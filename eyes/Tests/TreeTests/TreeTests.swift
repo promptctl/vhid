@@ -708,3 +708,30 @@ extension Covers {
         }
     }
 }
+
+/// What one element's own reads give: its frame and its texts, as an app answered them.
+@Suite @MainActor struct ElementReadTests {
+    private func boxed(_ x: Double, _ y: Double, _ w: Double, _ h: Double) -> (CFTypeRef, CFTypeRef) {
+        var origin = CGPoint(x: x, y: y), size = CGSize(width: w, height: h)
+        return (AXValueCreate(.cgPoint, &origin)!, AXValueCreate(.cgSize, &size)!)
+    }
+
+    /// An app can claim a frame no screen holds; it is no frame, never a number a row prints.
+    @Test func aFrameNoScreenHoldsIsNoFrame() {
+        let placed = boxed(10, 20, 30, 40)
+        #expect(TreeReader.frame(placed.0, placed.1) == ScreenRect(x: 10, y: 20, width: 30, height: 40))
+        for (x, w) in [(Double.nan, 30.0), (10, .infinity), (1e20, 30)] {
+            let claimed = boxed(x, 20, w, 40)
+            #expect(TreeReader.frame(claimed.0, claimed.1) == nil)
+        }
+    }
+
+    /// A checkbox's value is a number, said in figures; a value that is no text is counted
+    /// with the ones that would not say, never dropped unseen.
+    @Test func aNumberIsSaidAndAnyOtherKindCounted() {
+        #expect(TreeReader.spoken("Add" as CFString) == .answered("Add"))
+        #expect(TreeReader.spoken(kCFBooleanTrue) == .answered("1"))
+        #expect(TreeReader.spoken(NSNumber(value: 0.5)) == .answered("0.5"))
+        #expect(TreeReader.spoken(boxed(1, 2, 3, 4).0) == .unanswered)
+    }
+}

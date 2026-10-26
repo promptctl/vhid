@@ -20,10 +20,10 @@ import Testing
     /// grant at 3,3 and a hit test that did not answer at 4,4.
     static let landings: Hit.Landings = { point in
         switch (point.x, point.y) {
-        case (2, 2): return nil
+        case (2, 2): return .nothing(calls: 1)
         case (3, 3): throw TreeError.noGrant
-        case (4, 4): throw HitUnheard(point: point, why: .unanswered)
-        default: return Landing(point: point, app: settings, standing: .front(settings), window: window, elements: [add, list], end: .area, calls: 3)
+        case (4, 4): throw HitUnheard(point: point, why: .unanswered, calls: 1)
+        default: return .on(Landing(point: point, app: settings, standing: .front(settings), window: window, elements: [add, list], end: .area, calls: 3))
         }
     }
 
@@ -52,6 +52,8 @@ import Testing
         #expect(said(.own("iTerm2")).contains("the app eyes answers to, whose windows a look never reads: the agent's own terminal or app"))
         #expect(said(.behind(panel)).contains("not in front: a look with no place named reads Open and Save Panel Service (pid 900)"))
         #expect(said(.behind(nil)).contains("not in front: nothing but the app eyes answers to has a window on screen"))
+        #expect(said(.otherDisplay(Self.settings, 1)).contains(
+            "on a display a look with no place named does not read: it reads System Settings (pid 300) on display 1"))
         #expect(Hit.report(at: ScreenPoint(x: 1, y: 1), landing(.front(Self.settings), window: nil)).contains("in none of its listed windows"))
     }
 
@@ -82,6 +84,8 @@ import Testing
         #expect(throws: (any Error).self) { try Hit.point(.infinity, 1) }
         #expect(throws: (any Error).self) { try Hit.point(1, .nan) }
         #expect(try Hit.point(-5, 10) == ScreenPoint(x: -5, y: 10))
+        // A finite point past any screen is a number, said as one: it is refused off screen.
+        #expect(ScreenPoint(x: 1e19, y: 0).description == "1e+19,0")
     }
 
     /// One `hit` event per question, with the app, where it stands, the window, the rows and
@@ -99,7 +103,9 @@ import Testing
         #expect(hits[0].facts == ["app": "System Settings", "standing": "front", "end": "area"])
         #expect(hits[0].counts == ["pid": 300, "window": 4127, "rows": 2, "calls": 3])
         #expect(hits[1].facts == ["end": "nothing"])
-        #expect(hits[1].counts == ["rows": 0, "calls": 0])
+        #expect(hits[1].counts == ["rows": 0, "calls": 1])
         #expect(hits[2].error?.contains("did not answer at 4,4") == true)
+        #expect(hits[2].facts == ["end": "unanswered"])
+        #expect(hits[2].counts == ["rows": 0, "calls": 1])
     }
 }

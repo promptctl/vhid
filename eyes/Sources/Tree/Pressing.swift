@@ -7,38 +7,28 @@ struct Lineage<Element> {
     let frame: ScreenRect?
     /// Nil at the top of its tree.
     let parent: Element?
-    /// Its value, title and description, each as it came back: read in the same round trip,
-    /// so a climb lists what each element says without a read of its own.
-    let texts: [Heard<String?>]
-
-    init(role: Role, frame: ScreenRect?, parent: Element?, texts: [Heard<String?>] = []) {
-        self.role = role
-        self.frame = frame
-        self.parent = parent
-        self.texts = texts
-    }
 }
 
 /// What a climb from a point found.
 enum Climbed<Element> {
-    /// The hit test gave nothing to climb from, and why.
-    case unheard(Landing.Short)
+    /// The hit test gave nothing to climb from, why, and the calls it took.
+    case unheard(Landing.Short, calls: Int)
     /// The hit test answered: no element is there.
-    case nothing
+    case nothing(calls: Int)
     /// The element hit; what it and each parent said, nearest first; how the climb ended; and
     /// the calls it made.
-    case hit(Element, [Lineage<Element>], Landing.End, calls: Int)
+    case hit(Element, [Landing.Element], Landing.End, calls: Int)
 }
 
 extension Lineage: Sendable where Element: Sendable {}
 
-extension Lineage {
-    /// What a climb lists of it: the texts that are not blank, and how many would not say.
-    var element: Landing.Element {
-        Landing.Element(role: role,
-                        texts: texts.compactMap { $0.answer ?? nil }.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty },
-                        unanswered: texts.filter { $0 == .unanswered }.count,
-                        frame: frame)
+extension Landing.Element {
+    /// An element as a climb lists it: its texts that are not blank, and how many would not say.
+    init<E>(_ lineage: Lineage<E>, texts: [Heard<String?>]) {
+        self.init(role: lineage.role,
+                  texts: texts.compactMap { $0.answer ?? nil }.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty },
+                  unanswered: texts.filter { $0 == .unanswered }.count,
+                  frame: lineage.frame)
     }
 }
 
@@ -50,6 +40,9 @@ struct Probe<Element> {
     /// by; nil when there is none.
     let hit: (ScreenPoint) throws -> Heard<Element?>
     let lineage: (Element) throws -> Heard<Lineage<Element>>
+    /// An element's value, title and description, each as it came back: a read of its own, so a
+    /// box's check never copies a text area's whole contents. [LAW:effects-at-boundaries]
+    let texts: (Element) throws -> [Heard<String?>]
     /// An element's parent alone, nil at the top: all a climb from a hit needs.
     let parent: (Element) throws -> Heard<Element?>
     let same: (Element, Element) -> Bool
@@ -100,18 +93,18 @@ struct Probe<Element> {
         let check = Check(probe: self)
         let start: Element?
         do { start = try check.hit(point) } catch let stop as Check<Element>.Stop {
-            return .unheard(stop.short)
+            return .unheard(stop.short, calls: check.calls)
         }
-        guard let start else { return .nothing }
-        var said: [Lineage<Element>] = []
-        var current: Element? = start
+        guard let start else { return .nothing(calls: check.calls) }
+        var said: [Landing.Element] = []
+        var at = start
         do {
             for _ in 0..<Self.depth {
-                guard let at = current else { return .hit(start, said, .top, calls: check.calls) }
                 let lineage = try check.lineage(at)
-                said.append(lineage)
+                said.append(Landing.Element(lineage, texts: try check.texts(at)))
                 if areas.contains(lineage.role) { return .hit(start, said, .area, calls: check.calls) }
-                current = lineage.parent
+                guard let parent = lineage.parent else { return .hit(start, said, .top, calls: check.calls) }
+                at = parent
             }
             return .hit(start, said, .short(.unanswered), calls: check.calls)
         } catch let stop as Check<Element>.Stop {
@@ -144,6 +137,8 @@ private final class Check<Element> {
 
     func hit(_ point: ScreenPoint) throws -> Element? { try ask { try probe.hit(point) } }
     func lineage(_ element: Element) throws -> Lineage<Element> { try ask { try probe.lineage(element) } }
+    /// Each text answers or not on its own, so the read as a whole always does.
+    func texts(_ element: Element) throws -> [Heard<String?>] { try ask { .answered(try probe.texts(element)) } }
     private func parent(_ element: Element) throws -> Element? { try ask { try probe.parent(element) } }
 
     func box(_ frame: ScreenRect, role: Role) throws -> Pressed {

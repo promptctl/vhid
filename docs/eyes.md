@@ -74,13 +74,14 @@ found, the rows are its near misses, and a wait settles neither present nor abse
 `hit X Y` asks the system's hit test what a click at that point, as `vhid click X Y` takes
 it, would land on, and says so before anything is pressed. Its first line names the app,
 whether a look with no place named reads it - the front app, a window over it such as an
-Open panel, the app eyes answers to, or an app behind - and its window by the id `--window`
+Open panel, the app eyes answers to, an app behind, or a point on a display other than the
+one that look reads - and its window by the id `--window`
 takes. Then a row per element: the one hit, then each holding it, up to the area that holds
 them, such as a window, a list, a toolbar or a web page, each with its role, its frame and
 what it says. A click on a button's label lands on the label; the row under it is the
 button. It needs Accessibility, and decides nothing: `vhid click` presses what is there
-whatever it said. The hit tests get the same two seconds as a look's box checks, and a
-climb they do not finish says where it stopped and why.
+whatever it said. The climb's hit tests get the same two seconds as a look's box checks, and
+a climb they do not finish says where it stopped and why.
 
 `find --until present|absent` re-reads the same rectangle until the text appears or is
 gone, then answers once, its scope line led by how many reads it took and how long. A

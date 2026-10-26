@@ -78,25 +78,25 @@ public struct TreeReader: Reader {
         try reading.pressing(Self.probe(until: deadline).press)
     }
 
-    /// What a click at `point` lands on, climbed to the area holding it: nil when the hit test
-    /// answers that nothing is there. `Probe.climb` decides; this is its reads, and the process
-    /// of the element hit. Throws when there is nothing to climb from, by name. [LAW:no-silent-failure]
-    public func climb(from point: ScreenPoint, until deadline: ContinuousClock.Instant) async throws -> Landing.Climb? {
+    /// What a click at `point` lands on, climbed to the area holding it, or that nothing is
+    /// there. `Probe.climb` decides; this is its reads, and the process of the element hit.
+    /// Throws when there is nothing to climb from, by name. [LAW:no-silent-failure]
+    public func climb(from point: ScreenPoint, until deadline: ContinuousClock.Instant) async throws -> Landed<Landing.Climb> {
         guard try await granted(Self.grant) else { throw TreeError.noGrant }
         switch try Self.probe(until: deadline).climb(from: point) {
-        case .unheard(let why): throw HitUnheard(point: point, why: why)
-        case .nothing: return nil
+        case .unheard(let why, let calls): throw HitUnheard(point: point, why: why, calls: calls)
+        case .nothing(let calls): return .nothing(calls: calls)
         case .hit(let element, let said, let end, let calls):
             var pid: pid_t = 0
-            guard AXUIElementGetPid(element, &pid) == .success else { throw HitUnheard(point: point, why: .unanswered) }
-            return Landing.Climb(pid: pid, elements: said.map(\.element), end: end, calls: calls)
+            guard AXUIElementGetPid(element, &pid) == .success else { throw HitUnheard(point: point, why: .unanswered, calls: calls) }
+            return .on(Landing.Climb(pid: pid, elements: said, end: end, calls: calls))
         }
     }
 
     /// The one probe a look's box checks and a climb both ask through, stopping at `deadline`
     /// or when the caller withdrew. [LAW:single-enforcer]
     private static func probe(until deadline: ContinuousClock.Instant) -> Probe<AXUIElement> {
-        Probe(hit: element(at:), lineage: lineage, parent: parent, same: { CFEqual($0, $1) },
+        Probe(hit: element(at:), lineage: lineage, texts: texts, parent: parent, same: { CFEqual($0, $1) },
               spent: { try Task.checkCancellation(); return ContinuousClock.now > deadline })
     }
 
@@ -193,20 +193,37 @@ public struct TreeReader: Reader {
         }
     }
 
-    /// An element's role, frame, parent and texts, in one round trip. A text that does not
-    /// answer leaves the element answered: its texts are listed, never what decides a box.
+    /// An element's role, frame and parent, in one round trip.
     static func lineage(_ element: AXUIElement) throws(TreeError) -> Heard<Lineage<AXUIElement>> {
-        let names = [kAXRoleAttribute, kAXPositionAttribute, kAXSizeAttribute, kAXParentAttribute,
-                     kAXValueAttribute, kAXTitleAttribute, kAXDescriptionAttribute]
-        let reads = try read(names, of: element, as: [.structure, .structure, .structure, .structure, .text, .text, .text])
+        let names = [kAXRoleAttribute, kAXPositionAttribute, kAXSizeAttribute, kAXParentAttribute]
+        let reads = try read(names, of: element, as: [.structure, .structure, .structure, .structure])
         guard case .answered(let role) = reads[0], case .answered(let position) = reads[1],
               case .answered(let size) = reads[2], case .answered(let parent) = reads[3]
         else { return .unanswered }
-        let texts = reads[4...].map { $0.map { $0 as? String } }
         return .answered(Lineage(role: Role(rawValue: role as? String ?? kAXUnknownRole),
                                  frame: frame(position, size),
-                                 parent: parent.flatMap(Self.element).map(bounded),
-                                 texts: texts))
+                                 parent: parent.flatMap(Self.element).map(bounded)))
+    }
+
+    /// An element's value, title and description, in one round trip of their own: a text area's
+    /// value is its whole contents, which no read of its place should wait on.
+    static func texts(_ element: AXUIElement) throws(TreeError) -> [Heard<String?>] {
+        try read([kAXValueAttribute, kAXTitleAttribute, kAXDescriptionAttribute], of: element, as: [.text, .text, .text]).map { heard in
+            switch heard {
+            case .answered(let value?): spoken(value)
+            case .answered(nil): .answered(nil)
+            case .unanswered: .unanswered
+            }
+        }
+    }
+
+    /// A value as text: a string, or a number in figures - a checkbox's 0 or 1, a slider's
+    /// position. Any other kind is no text, and counted with the ones that would not say.
+    /// [LAW:no-silent-failure]
+    static func spoken(_ value: CFTypeRef) -> Heard<String?> {
+        if let text = value as? String { return .answered(text) }
+        if let number = value as? NSNumber { return .answered(number.stringValue) }
+        return .unanswered
     }
 
     /// An element's parent, nil at the top of its tree.
@@ -270,10 +287,12 @@ public struct TreeReader: Reader {
         return AXValueGetValue(value as! AXValue, .axError, &error) ? error : nil
     }
 
+    /// Nil as well for a frame no screen holds - NaN, infinite, or past `ScreenRect.limit` - which
+    /// an app can claim, and no row or climb prints. [LAW:parse-dont-validate]
     static func frame(_ position: CFTypeRef?, _ size: CFTypeRef?) -> ScreenRect? {
         unboxed(position, as: .cgPoint, CGPoint.zero).flatMap { origin in
             unboxed(size, as: .cgSize, CGSize.zero).map { ScreenRect(CGRect(origin: origin, size: $0)) }
-        }
+        }.flatMap { $0.isWithinLimit ? $0 : nil }
     }
 
     private static func bounded(_ element: AXUIElement) -> AXUIElement {
