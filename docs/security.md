@@ -57,7 +57,7 @@ go. A caller that holds a key down past a time limit has the key released for it
 
 ## What it writes down
 
-In vhid releases after 0.4.1, every `vhid` run appends one line to `~/Library/Logs/vhid/events.jsonl`, in the home
+From vhid 0.5.0, every `vhid` run appends one line to `~/Library/Logs/vhid/events.jsonl`, in the home
 folder of the account that ran it. The line holds the command's name, whether it
 worked, how long it took and how many reports it sent. It never holds the text typed. It
 doesn't quote arguments it refused, either, because those could hold a password. `eyes`
