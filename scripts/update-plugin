@@ -1,10 +1,10 @@
 #!/bin/bash
-# Moves the branch the Claude Code marketplace installs the plugin from to a release, in a
-# checkout of vhid holding that release's tag: commits the release's claude-plugin/ onto
-# the branch as origin has it, and pushes. The commit's tree is claude-plugin/ as of the
-# tag and nothing else, its parent is the branch as it was, and its Release trailer is the
-# version. release.yaml runs it once a release is published, and a person runs it, from a
-# checkout of master, when that step failed (docs/releasing.md).
+# Moves the branch the Claude Code marketplace installs the plugin from to a release, from
+# a checkout of vhid's master holding that release's tag: commits the release's
+# claude-plugin/ onto the branch as the plugin's repository has it, and pushes. The
+# commit's tree is claude-plugin/ as of the tag and nothing else, its parent is the branch
+# as it was, and its Release trailer is the version. release.yaml runs it once a release is
+# published, and a person runs it when that step failed (docs/releasing.md).
 #
 #   scripts/update-plugin <checkout> <version>
 #
@@ -17,7 +17,6 @@ set -euo pipefail
 [ $# -eq 2 ] || { echo "usage: scripts/update-plugin <checkout> <version>" >&2; exit 2; }
 checkout=$1 version=$2
 newest=$(dirname "$0")/newest-release
-marketplace=$checkout/.claude-plugin/marketplace.json
 
 # [LAW:parse-dont-validate] The plugin goes to everyone who installs it, so it takes a
 # release, never a pre-release, as the cask does.
@@ -25,25 +24,34 @@ marketplace=$checkout/.claude-plugin/marketplace.json
   echo "update-plugin: '$version' is not a release version, as scripts/newest-release decides" >&2
   exit 2
 }
-# [LAW:one-source-of-truth] The branch is the ref marketplace.json gives the vhid plugin,
-# the one place it is named.
-branch=
-plugins=$(plutil -extract plugins raw -o - "$marketplace")
-for ((i = 0; i < plugins; i++)); do
-  [ "$(plutil -extract "plugins.$i.name" raw -o - "$marketplace")" = vhid ] || continue
-  branch=$(plutil -extract "plugins.$i.source.ref" raw -o - "$marketplace")
-  break
-done
-[ -n "$branch" ] || { echo "update-plugin: $marketplace has no plugin named vhid" >&2; exit 1; }
-plugin=$(git -C "$checkout" rev-parse --verify --quiet "refs/tags/v$version^{commit}:claude-plugin") \
-  || { echo "update-plugin: $checkout has no tag v$version holding claude-plugin/" >&2; exit 1; }
+# [LAW:one-source-of-truth] The repository and branch are the ones marketplace.json gives
+# the vhid plugin, which is where every install fetches it from.
+source=$(jq -er '[.plugins[] | select(.name == "vhid")]
+  | if length != 1 then error("names no one plugin vhid") else .[0].source end
+  | if type == "object" and .url and .ref then "\(.url) \(.ref)"
+    else error("gives the vhid plugin no url and ref to install it from") end' \
+  "$checkout/.claude-plugin/marketplace.json") || {
+  echo "update-plugin: $checkout/.claude-plugin/marketplace.json is not one the plugin can be moved by" >&2
+  exit 1
+}
+read -r url branch <<<"$source"
+# The tag is the one the repository has: once pushed the branch never goes back, so a tag
+# made or moved in this checkout alone is refused rather than shipped to everyone.
+release=$(git -C "$checkout" rev-parse --verify --quiet "refs/tags/v$version^{commit}") \
+  || { echo "update-plugin: $checkout has no tag v$version" >&2; exit 1; }
+# An annotated tag's commit is listed after it, as its ^{}; a lightweight tag is the commit.
+published=$(git -C "$checkout" ls-remote "$url" "refs/tags/v$version" "refs/tags/v$version^{}" | tail -n 1 | cut -f1)
+[ "$published" = "$release" ] \
+  || { echo "update-plugin: v$version is $release here but '${published:-nothing}' at $url" >&2; exit 1; }
+plugin=$(git -C "$checkout" rev-parse --verify --quiet "$release:claude-plugin") \
+  || { echo "update-plugin: v$version holds no claude-plugin/" >&2; exit 1; }
 tree=$(printf '040000 tree %s\tclaude-plugin\n' "$plugin" | git -C "$checkout" mktree)
 
 # Release jobs of two tags run side by side, so a push can lose to the other's: the
 # branch is fetched again and the move decided again from where the other left it.
 for attempt in 1 2 3; do
-  git -C "$checkout" fetch --quiet origin "+refs/heads/$branch:refs/heads/$branch"
-  tip=$(git -C "$checkout" rev-parse "refs/heads/$branch^{commit}")
+  git -C "$checkout" fetch --quiet "$url" "refs/heads/$branch"
+  tip=$(git -C "$checkout" rev-parse FETCH_HEAD)
   # The branch's tip names the release it holds, once, and nothing else records it.
   was=$(git -C "$checkout" log -1 --format='%(trailers:key=Release,valueonly)' "$tip" | sed '/^$/d')
   case $was in *$'\n'*) was= ;; esac
@@ -57,8 +65,7 @@ for attempt in 1 2 3; do
   fi
   commit=$(git -C "$checkout" commit-tree "$tree" -p "$tip" \
     -m "vhid $version: claude-plugin/ as of v$version" -m "Release: $version")
-  if git -C "$checkout" push --quiet origin "$commit:refs/heads/$branch"; then
-    git -C "$checkout" update-ref "refs/heads/$branch" "$commit" "$tip"
+  if git -C "$checkout" push --quiet "$url" "$commit:refs/heads/$branch"; then
     echo "update-plugin: $branch vhid $was -> $version, commit $commit, push $attempt"
     exit 0
   fi

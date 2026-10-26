@@ -39,6 +39,7 @@ release() {
   git -C "$REPO" add -A
   git -C "$REPO" commit --quiet -m "$1"
   git -C "$REPO" tag -a "v$1" -m "$1"
+  git -C "$REPO" push --quiet origin "v$1"
 }
 # Puts a commit of <tree> naming <trailer> on origin's branch, as another hand would.
 put() {
@@ -53,6 +54,8 @@ git -C "$REPO" push --quiet origin \
 release 0.2.0
 release 0.3.0
 git -C "$REPO" tag -a v0.4.0-rc1 -m rc
+# A release tagged in this checkout alone.
+git -C "$REPO" tag -a v0.6.0 -m local "v0.3.0^{commit}"
 
 run() { out=$(scripts/update-plugin "$REPO" "$@" 2>&1); status=$?; }
 # A run that should be refused, or find the branch at or past it, leaves origin's branch
@@ -86,6 +89,7 @@ unmoved 0 "holds vhid 0.2.0, at 0.2.0 or past it" 0.2.0
 unmoved 0 "holds vhid 0.2.0, at 0.1.0 or past it" 0.1.0
 unmoved 2 "'0.4.0-rc1' is not a release version" 0.4.0-rc1
 unmoved 1 "no tag v0.5.0" 0.5.0
+unmoved 1 "v0.6.0 is $(git -C "$REPO" rev-parse "v0.6.0^{commit}") here but 'nothing' at $ORIGIN" 0.6.0
 
 # A push that loses to another job's is tried again from where that job left the branch.
 cat >"$ORIGIN/hooks/update" <<H
@@ -102,17 +106,44 @@ moved "$before" 0.3.0
 case $out in *"vhid 0.2.0 -> 0.3.0"*"push 2"*) ;; *) fail "update-plugin 0.3.0 after a lost push said \"$out\"" ;; esac
 rm "$ORIGIN/hooks/update"
 
+# A push that loses to a newer release's job is not tried again: the branch it finds on
+# the second fetch is past it. pre-receive runs before the push takes the branch's lock,
+# so, outside the push's quarantine, it can move the branch as that job would.
+newer=$(git -C "$REPO" commit-tree "$(git -C "$REPO" rev-parse "v0.3.0:claude-plugin" | xargs printf '040000 tree %s\tclaude-plugin\n' | git -C "$REPO" mktree)" \
+  -p "$(origin_tip)" -m newer -m "Release: 8.0.0")
+git -C "$REPO" push --quiet origin "$newer:refs/heads/newer"
+cat >"$ORIGIN/hooks/pre-receive" <<H
+#!/bin/sh
+[ -f "$SCRATCH/lose" ] || exit 0
+rm "$SCRATCH/lose"
+unset GIT_QUARANTINE_PATH GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
+git update-ref refs/heads/$BRANCH $newer
+exit 1
+H
+chmod +x "$ORIGIN/hooks/pre-receive"
+# Lightweight, as vhid's release tags are.
+git -C "$REPO" tag v0.3.1 "v0.3.0^{commit}"
+git -C "$REPO" push --quiet origin v0.3.1
+touch "$SCRATCH/lose"
+run 0.3.1
+[ "$status" -eq 0 ] || fail "update-plugin 0.3.1 after losing to 8.0.0 exited $status: $out"
+case $out in *"holds vhid 8.0.0, at 0.3.1 or past it"*) ;; *) fail "update-plugin 0.3.1 after losing to 8.0.0 said \"$out\"" ;; esac
+[ "$(origin_tip)" = "$newer" ] || fail "update-plugin 0.3.1 moved $BRANCH past the newer release's commit"
+rm "$ORIGIN/hooks/pre-receive"
+
 # A newer release's job that got there first leaves this checkout's copy behind origin;
 # the move is decided from origin's.
-put "$(git -C "$REPO" rev-parse "$BRANCH^{tree}")" "Release: 9.0.0"
+put "$(git -C "$ORIGIN" rev-parse "$BRANCH^{tree}")" "Release: 9.0.0"
 unmoved 0 "holds vhid 9.0.0, at 0.3.0 or past it" 0.3.0
 
-put "$(git -C "$REPO" rev-parse "$BRANCH^{tree}")" "$(printf 'Release: 9.1.0\nRelease: 0.1.0')"
+put "$(git -C "$ORIGIN" rev-parse "$BRANCH^{tree}")" "$(printf 'Release: 9.1.0\nRelease: 0.1.0')"
 unmoved 1 "names no one release" 0.3.0
-put "$(git -C "$REPO" rev-parse "$BRANCH^{tree}")" "no trailer"
+put "$(git -C "$ORIGIN" rev-parse "$BRANCH^{tree}")" "no trailer"
 unmoved 1 "names no one release" 0.3.0
 
 printf '{"plugins": [{"name": "other", "source": "./other"}]}\n' >"$REPO/.claude-plugin/marketplace.json"
-unmoved 1 "has no plugin named vhid" 0.3.0
+unmoved 1 "is not one the plugin can be moved by" 0.3.0
+printf '{"plugins": [{"name": "vhid", "source": "./claude-plugin"}]}\n' >"$REPO/.claude-plugin/marketplace.json"
+unmoved 1 "is not one the plugin can be moved by" 0.3.0
 
 exit $failed
