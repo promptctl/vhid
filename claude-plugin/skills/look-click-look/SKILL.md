@@ -7,7 +7,7 @@ description: Operate apps on this Mac through its real screen, keyboard and mous
 
 vhid and eyes are two MCP servers that work as a pair. eyes reads the screen: what is in front, and where text is. vhid drives a virtual keyboard and mouse that macOS takes for hardware. A client with only one of them is half the pair; both come with vhid, served by `vhid mcp` and `eyes mcp`.
 
-Every point either server prints or takes is the same screen point. The point eyes `find` prints is the point vhid `click` takes, as printed: no scaling, no offset, negative on a display left of or above the main one.
+Every point either server prints or takes is the same screen point. The point eyes `find` prints is the point vhid `click` takes, as printed: no scaling, no offset, negative on a display left of or above the main one. From 0.5.0, beside each point, eyes prints a box around the text that holds the point, as x,y,width,height in the same points: the form eyes' `rect` takes, and vhid `click`, `move` and `scroll` take it too, as `box`, and `drag` as `from` or `to`, pressing a point drawn inside it as a hand lands somewhere on a button rather than on its exact centre.
 
 Neither server decides anything. `click` presses whatever is at the point it is given, `type` types into whatever has keyboard focus, and `find` reports what is on screen, not whether an act did what was meant. So work in a loop:
 
@@ -23,14 +23,15 @@ Done means a look after the act showed the change. An act's answer says the act 
    the text you want says where it is - `{"text": "Save"}`, narrowed with `window` or
    `display` when the text could be in more than one place. `read` gives every run of
    text in a window in reading order, for when you do not yet know what to look for.
-   Each row is the point, the text, and what it is: the element's role, such as
-   `AXButton` or `AXLink`, or `pixels` for text drawn with no element behind it.
+   Each row is the point, the box around the run, the text, and what it is: the
+   element's role, such as `AXButton` or `AXLink`, or `pixels` for text drawn with no
+   element behind it.
    In a browser, pass `page` with the window's id instead of `window`: it reads the
    web page alone, so a bookmark or toolbar button with the same name is not a match.
    When the same label appears several times, such as a Remove button on every row,
    `near` orders the matches by the text beside each, so `{"text": "Remove", "near":
    "Beta"}` puts the Remove in Beta's row first.
-2. **Act** on what you saw: `click` the point `find` printed; `type` or `press` once
+2. **Act** on what you saw: `click` the box `find` printed, as `box`, or its point; `type` or `press` once
    the field or window that should receive the keys is in front.
 3. **Look again** at the same place. `find` the result you expected - the dialog's
    title, the new text, the button gone. To wait for it, pass `until` (`present` or
@@ -67,8 +68,8 @@ do not route around it.
   Code, or whichever app started it. Tell the user to switch that app on under System
   Settings > Privacy & Security; a grant switched on counts from the next call.
 - A tool says an argument is not one it takes: the installed vhid is older than this
-  skill, which follows vhid's `master`. Tell the user; `brew upgrade --cask
-  promptctl/tap/vhid` brings the latest release.
+  skill, which comes from vhid's newest release. Tell the user; `brew upgrade --cask
+  promptctl/tap/vhid` brings that release.
 - `find` matched nothing: it lists the nearest runs and how many edits off each is.
   A misread one edit away is still the thing you were looking for.
 
@@ -84,7 +85,7 @@ its step.
 ```
 eyes windows                         -> 4521  TextEdit  L0  ...  front: a save sheet on it
 eyes find {"text": "Save", "exact": true, "window": 4521}
-                                     -> 812,604	Save	AXButton
+                                     -> 812,604	790,594,44,20	Save	AXButton
 vhid click {"x": 812, "y": 604}      -> clicked left once at (812, 604) after 1 motion report
 eyes find {"text": "Save", "exact": true, "window": 4521,
            "until": "absent", "timeout": 5}
