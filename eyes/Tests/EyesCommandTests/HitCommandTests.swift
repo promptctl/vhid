@@ -81,9 +81,9 @@ import Testing
     /// A row is one line: a text area's value - a terminal's whole scrollback - is one line,
     /// cut, saying how long it was.
     @Test func aLongOrManyLinedTextIsOneLineAndSaysItWasCut() {
-        #expect(Hit.spelled("Save\tas…\n  PDF") == "Save as… PDF")
+        #expect(Report.spelled("Save\tas…\n  PDF") == "Save as… PDF")
         let scrollback = String(repeating: "line\n", count: 100)
-        let cut = Hit.spelled(scrollback)
+        let cut = Report.spelled(scrollback)
         #expect(cut == String(repeating: "line ", count: 24) + "... (500 characters)")
         #expect(!cut.contains("\n"))
     }

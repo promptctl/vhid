@@ -203,7 +203,7 @@ enum Report {
         case .unanchored:
             // The near misses that follow are the anchor's, so the anchor is what is named
             // not found. [LAW:no-silent-failure]
-            "\(query.near.map(wanted) ?? "") not found to place \(query.match.map(wanted) ?? "the text") near"
+            "\(query.near.map(wanted) ?? "") not found to place \(query.match.map(wanted) ?? "the text")\(role) near"
         }
         let clauses: [String?] = [
             "\(head) in \(place(query.region)) \(s.region) \(looked(source, s.reach))",
@@ -238,19 +238,41 @@ enum Report {
     /// One run per row: the centre a click lands on, the box around the run, the text,
     /// and what it is - the role the tree gave it, or `pixels` for text only the pixels
     /// reader saw, which has none - then what else its element says in words, each after the
-    /// attribute that says it: a "+" button's `description Add`. The nearest rows add how many
-    /// edits off they were.
+    /// attribute that says it: a "+" button's `description Add`. The nearest rows add, before those,
+    /// how many edits off they were. Every text is spelled on one line.
     static func rows(_ outcome: Outcome) -> [String] {
         switch outcome {
-        case .matched(let m): m.all.map(row)
-        case .nearest(let near), .unanchored(let near): near.map { "\(row($0.found))\t\($0.distance) off" }
+        case .matched(let m): m.all.map { row($0) }
+        case .nearest(let near), .unanchored(let near): near.map { row($0.found, then: ["\($0.distance) off"]) }
         }
     }
 
-    private static func row(_ found: Found) -> String {
+    /// The columns every row has in the same place - `then`, a near miss's distance, among
+    /// them - before the element's other words, however many it says.
+    private static func row(_ found: Found, then: [String] = []) -> String {
         let at = clickPoint(found.frame.centre)
-        return (["\(Int(at.x)),\(Int(at.y))", "\(box(found.frame, holding: at))", "\(found.text)", found.source.role?.rawValue ?? "pixels"]
-            + found.source.also.map { "\($0.attribute.rawValue) \($0.text)" }).joined(separator: "\t")
+        return (["\(Int(at.x)),\(Int(at.y))", "\(box(found.frame, holding: at))", spelled(found.text.value), found.source.role?.rawValue ?? "pixels"]
+            + then + found.source.also.map { "\($0.attribute.rawValue) \(spelled($0.text.value))" }).joined(separator: "\t")
+    }
+
+    /// The most of one text a row prints: a control's name whole, never a terminal's or a
+    /// document's whole contents, which is a text area's value.
+    static let longest = 120
+
+    /// A text on one line - a row is one element - its whitespace runs, newlines and tabs
+    /// among them, as one space, and cut past `longest` saying how long it was, so a cut text
+    /// is never taken for a whole one. [LAW:no-silent-failure] Stops reading at the cut: a text
+    /// area's value is a whole document.
+    static func spelled(_ text: String) -> String {
+        var line = "", length = 0, gap = false
+        for character in text {
+            if character.isWhitespace { gap = length > 0; continue }
+            if gap { line.append(" "); length += 1; gap = false }
+            guard length < longest else { return "\(line.prefix(longest))... (\(text.count) characters)" }
+            line.append(character)
+            length += 1
+        }
+        return line
     }
 
     /// The whole point a click is sent to: the frame's centre, rounded.

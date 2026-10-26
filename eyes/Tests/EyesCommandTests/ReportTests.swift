@@ -69,6 +69,33 @@ import Testing
             .hasPrefix("1 matched \"Add\" as AXButton in rect"))
         #expect(Report.scope(reading, query: Query(match: nil, region: .rect(frame), role: Role(rawValue: "AXButton")), source: .tree)
             .hasPrefix("1 run as AXButton in rect"))
+        let unanchored = Reading(outcome: .unanchored([]), scope: Scope(region: frame, examined: 1, reach: .whole))
+        #expect(Report.scope(unanchored, query: Query(match: .contains("Add"), region: .rect(frame), near: .contains("Row7"), role: Role(rawValue: "AXButton")),
+                             source: .tree).hasPrefix("\"Row7\" not found to place \"Add\" as AXButton near"))
+    }
+
+    /// Every text a row prints is on one line, so a row is one element; a near miss says how
+    /// far off it was in the column after its role, whatever else its element says.
+    @Test func aRowsTextsAreSpelledOnOneLineAndItsDistanceStaysPut() {
+        let frame = ScreenRect(x: 160, y: 417, width: 18, height: 18)
+        let close = Found(text: Text("x")!, frame: frame, source: .tree(role: Role(rawValue: "AXImage"), also: [Words(.description, Text("Close\n(Esc)")!)]))
+        #expect(Report.rows(.nearest([Near(found: close, distance: 2)])) == ["169,426\t160,417,18,18\tx\tAXImage\t2 off\tdescription Close (Esc)"])
+    }
+
+    /// A look notes the role it asked for and counts the rows matched by another of their
+    /// element's words than the one they show.
+    @Test func aLookNotesItsRoleAndCountsMatchesByOtherWords() async throws {
+        let events = Collected()
+        let frame = ScreenRect(x: 160, y: 417, width: 18, height: 18)
+        let plus = Found(text: Text("+")!, frame: frame, source: .tree(role: Role(rawValue: "AXButton"), also: [Words(.description, Text("Add")!)]))
+        let add = Found(text: Text("Add")!, frame: ScreenRect(x: 0, y: 0, width: 30, height: 18), source: .tree(role: Role(rawValue: "AXButton"), also: []))
+        let reading = Reading(outcome: .matched(Matches([plus, add])!), scope: Scope(region: frame, examined: 2, reach: .whole))
+        _ = try await Telemetry.$export.withValue(events.export) {
+            try await Report.text(Query(match: .contains("Add"), region: .rect(frame), role: Role(rawValue: "AXButton")), source: .tree) { _, _ in .standing(reading) }
+        }
+        #expect(events.all.first?.facts["role"] == "AXButton")
+        #expect(events.all.first?.counts["matched"] == 2)
+        #expect(events.all.first?.counts["matched_also"] == 1)
     }
 
     /// The verbs refuse a blank role, and a role asked of pixels, which read none.

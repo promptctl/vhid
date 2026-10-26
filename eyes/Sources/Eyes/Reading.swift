@@ -446,3 +446,16 @@ public extension Reading {
         return scope.reach == .whole
     }
 }
+
+extension Array where Element == Exclusion {
+    /// One entry per reason, in the order reasons first appear, with no zero counts.
+    var summed: [Exclusion] {
+        var order: [Exclusion.Reason] = []
+        var counts: [Exclusion.Reason: Int] = [:]
+        for e in self where e.count > 0 {
+            if counts[e.reason] == nil { order.append(e.reason) }
+            counts[e.reason, default: 0] += e.count
+        }
+        return order.map { Exclusion(reason: $0, count: counts[$0]!) }
+    }
+}

@@ -54,6 +54,8 @@ attribute that says it: a button drawn "+" and described "Add" prints
 `169,426  160,417,18,18  +  AXButton  description Add`. `find` matches those words too, so
 `find Add` finds that button, and its row still reads "+". A checkbox's 0 or 1 and a link's
 address are its state and where it goes, never its row's text or a word it is found by.
+A near miss's edits off follow its role, before those words. Every text on a row is on one
+line, its runs of whitespace one space, and cut past 120 characters, saying how long it was.
 
 `--role <role>` keeps only rows of that role, as rows print it: `find Add --role AXButton`
 answers the button and not a label of the same text, and `read --role AXButton` lists every

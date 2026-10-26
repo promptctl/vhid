@@ -87,13 +87,16 @@ public extension Reading {
 
         let outcome: Outcome = unanchored ? .unanchored(misses(query.near, among: candidates))
             : Matches(kept).map(Outcome.matched) ?? .nearest(misses(query.match, among: candidates.filter { query.role.cast($0) == .admitted }))
-        let unknown = cast[.unknown]?.count ?? 0
-        let counts: [(Exclusion.Reason, Int)] = [(.duplicate, admitted.dropped), (.otherRole, cast[.other]?.count ?? 0), (.roleUnknown, unknown), (.ranked, cut)]
-        let set = counts.filter { $0.1 > 0 }.map { Exclusion(reason: $0.0, count: $0.1) }
+        // Rows set aside for their role are things on screen too, each counted once.
+        let unknown = distinct(cast[.unknown] ?? [], by: \.found).kept.count
+        let set: [Exclusion] = [Exclusion(reason: .duplicate, count: admitted.dropped),
+                                Exclusion(reason: .otherRole, count: distinct(cast[.other] ?? [], by: \.found).kept.count),
+                                Exclusion(reason: .roleUnknown, count: unknown), Exclusion(reason: .ranked, count: cut)]
         let scope = Scope(
             region: region,
             examined: examined,
-            excluded: excluded + set,
+            // A reader's own duplicates and the judge's are one count. [LAW:one-source-of-truth]
+            excluded: (excluded + set).summed,
             reach: reach != .whole ? reach : unknown > 0 ? .stopped(.unread) : cut > 0 ? .stopped(.resultLimit(query.limit)) : reach,
             owners: owners
         )

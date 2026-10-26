@@ -213,9 +213,9 @@ import Testing
         Found(text: Text(text)!, frame: frame, source: .pixels(confidence: Confidence(0.9)!))
     }
 
-    private func judged(_ seen: [Found], _ match: Match?, role: Role? = nil, near: Match? = nil) -> Reading {
+    private func judged(_ seen: [Found], _ match: Match?, role: Role? = nil, near: Match? = nil, excluded: [Exclusion] = []) -> Reading {
         Reading.judging(seen, query: Query(match: match, region: .rect(Self.region), near: near, role: role),
-                        region: Self.region, examined: seen.count, excluded: [], reach: .whole, owners: .every)
+                        region: Self.region, examined: seen.count, excluded: excluded, reach: .whole, owners: .every)
     }
 
     /// The incident's button: drawn "+", described "Add". Found by what it is called, it
@@ -278,6 +278,15 @@ import Testing
         guard case .matched(let m) = any.outcome else { Issue.record("not found"); return }
         #expect(m.all == [cell])
         #expect(any.scope.excluded == [Exclusion(reason: .duplicate, count: 1)])
+    }
+
+    /// What a role sets aside is counted a place at a time, as rows are: a cell and its own
+    /// label are one other_role. A reader's duplicates and the judge's are one count.
+    @Test func whatIsSetAsideIsCountedOncePerPlace() {
+        let r = judged([tree("Inbox", "AXCell"), tree("Inbox", "AXStaticText"), tree("Inbox", at: ScreenRect(x: 0, y: 100, width: 40, height: 18)),
+                        tree("Inbox", at: ScreenRect(x: 0, y: 100, width: 40, height: 18))],
+                       .exact("Inbox"), role: Self.button, excluded: [Exclusion(reason: .duplicate, count: 2), Exclusion(reason: .wordless, count: 0)])
+        #expect(r.scope.excluded == [Exclusion(reason: .duplicate, count: 3), Exclusion(reason: .otherRole, count: 1)])
     }
 
     /// A miss shows one place once: a cell and its own label are one near miss, not two of three.
