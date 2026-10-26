@@ -175,6 +175,11 @@ import Testing
             == "\"Beta\" not found to place \"Add\" near" + partial)
         #expect(head(.nearest([]), .stopped(.merged(.read(.tree, .whole), .read(.pixels, .stopped(.unread)))))
             .hasPrefix("\"Add\" not found in the part read of display 12"))
+        // A merge with one reader blind read the place whole by the other, but not what only
+        // the blind one sees: its match or absence is not complete, as provesAbsence says.
+        let halfBlind = Report.scope(Reading(outcome: matched, scope: Scope(region: Self.display, examined: 3, reach: .stopped(.merged(
+            .read(.tree, .whole), .blind(.pixels, "no grant", missingGrant: true))))), query: query, source: .merged)
+        #expect(halfBlind.hasPrefix("1 matched \"Add\" in the part read of display 12 -2400,-300,2400,1600 by tree alone;"))
         #expect(head(matched, .stopped(.resultLimit(Limit(1)!))) == "1 matched \"Add\" in display 12 -2400,-300,2400,1600 by the tree")
         #expect(head(.nearest([]), .whole) == "\"Add\" not found in display 12 -2400,-300,2400,1600 by the tree")
     }

@@ -31,9 +31,11 @@ Done means a look after the act showed the change. An act's answer says the act 
    element: `{"text": "Add", "role": "AXButton"}` is the Add button, not a label
    reading Add. `read` with a `role` lists every button and what each is called.
    A first line that says `in the part read of` stopped short of the place: its match
-   may not be the one meant and its not found proves nothing. The line ends with why: a
-   smaller place gets past `stopped after` or `stopped at … elements`, `source: tree` past
-   `role_unknown`, and a reader that `could not look` needs its grant.
+   may not be the one meant and its not found proves nothing. The rest of the line says
+   why. A smaller place gets past `stopped after` or `stopped at … elements`, `source: tree`
+   past `role_unknown`, and a reader that `could not look` needs its grant. `unanswered` is
+   an app too busy to answer and `unwalked` a window with nothing to read, such as an open
+   menu: look again once it has settled or closed.
    In a browser, pass `page` with the window's id instead of `window`: it reads the
    web page alone, so a bookmark or toolbar button with the same name is not a match.
    When the same label appears several times, such as a Remove button on every row,
