@@ -20,7 +20,7 @@ import Testing
             Window(id: 2, owner: "Finder", pid: 401, frame: ScreenRect(x: -800, y: 0, width: 800, height: 600), layer: 0),
         ],
         excluded: [])
-    private static let front = Frontmost(pid: 401, name: "Finder")
+    private static let front = Front.App(pid: 401, name: "Finder")
     private static let grantReading = GrantReading { $0 == .accessibility }
     private static let holder = Holder(executable: "/Applications/Claude.app/Contents/MacOS/Claude")
 

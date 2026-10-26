@@ -221,7 +221,7 @@ import Testing
         let event = try #require(events.all.first)
         #expect(event.event == "front")
         #expect(event.facts["front_app"] == "System Settings" && event.facts["passed_over"] == "iTerm2")
-        #expect(event.counts["front_pid"] == 300 && event.counts["display"] == 2)
+        #expect(event.counts["front_pid"] == 300 && event.counts["display"] == 2 && event.counts["own_pids"] == 1)
     }
 
     @Test func namingNoPlaceReadsWhatIsInFront() throws {

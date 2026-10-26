@@ -42,10 +42,10 @@ public struct TreeReader: Reader {
         guard try await granted(Self.grant) else { throw TreeError.noGrant }
         let region = try query.region.bounds()
         let listing = try Geometry.onScreen()
-        let owners = query.region.owners(in: listing, hit: Self.hit)
-        // Started before the windows are matched, because matching is reads too.
+        // Started before the owners are settled and the windows matched: both are reads too.
         let clock = ContinuousClock()
         let start = clock.now
+        let owners = query.region.owners(in: listing, hit: Self.hit)
         // The owners' windows are seen against every window in front of them.
         let visible = seen(listing.windows, of: owners, in: region, hit: Self.hit)
         let (roots, unwalked) = plan(visible, matched: try Self.match(visible.map(\.window)))

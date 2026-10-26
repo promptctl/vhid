@@ -160,6 +160,9 @@ struct Where: ParsableArguments {
                 Telemetry.count("front_pid", Int(front.app.pid))
                 Telemetry.count("display", Int(front.display))
                 Telemetry.note("passed_over", front.passedOver ? front.own.name : "")
+                // How many processes were matched as the app eyes answers to: zero means none
+                // could be passed over or kept out, whatever is in front.
+                Telemetry.count("own_pids", front.own.pids.count)
                 return .front(front)
             }
         }

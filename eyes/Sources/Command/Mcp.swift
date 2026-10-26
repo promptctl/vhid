@@ -116,7 +116,7 @@ enum EyesTools {
 
     typealias DisplayList = @Sendable () async -> [Display]
 
-    typealias FrontmostApp = @Sendable () async -> Frontmost?
+    typealias FrontmostApp = @Sendable () async -> Front.App?
     /// A reader's answer to one query: the chosen reader in the process, a fake in a test.
     typealias Look = @Sendable (SourceKind, Query) async throws -> Judged
     /// A fresh reading of the grants and the app they are charged to.
@@ -124,7 +124,7 @@ enum EyesTools {
 
     static func all(
         windows listing: @escaping Listing = { try await Geometry.onScreen() },
-        frontmost: @escaping FrontmostApp = { await Frontmost.now() },
+        frontmost: @escaping FrontmostApp = { await Front.App.now() },
         displays: @escaping DisplayList = { Geometry.displays() },
         reading look: @escaping Look = { source, query in try await source.reader.judged(query) },
         grants: @escaping GrantsLook = { try await GrantsVerb.look() },
