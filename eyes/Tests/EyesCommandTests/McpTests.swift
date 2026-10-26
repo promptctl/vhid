@@ -70,7 +70,7 @@ import Testing
     private func connected<T>(front: @escaping Where.Place.Fronts = Self.fronts, _ body: (Client) async throws -> T) async throws -> T {
         let (clientSide, serverSide) = await InMemoryTransport.createConnectedPair()
         let transport = AnsweringTransport(serverSide)
-        let server = await Mcp.server(EyesTools.all(windows: { Self.listing }, frontmost: { Self.front }, displays: { DisplaysCommandTests.desk }, reading: Self.look, grants: { (Self.grantReading, Self.holder) }, pages: Self.pages, front: front), on: transport)
+        let server = await Mcp.server(EyesTools.all(windows: { Self.listing }, frontmost: { Self.front }, displays: { DisplaysCommandTests.desk }, reading: Self.look, grants: { (Self.grantReading, Self.holder) }, pages: Self.pages, front: front, landing: HitCommandTests.landings), on: transport)
         try await server.start(transport: transport)
         let client = Client(name: "test", version: "0")
         let result: Result<T, any Error>
@@ -96,7 +96,7 @@ import Testing
     @Test func noAppInFrontIsARefusalNamingTheAppEyesAnswersTo() async throws {
         let events = Collected()
         let (said, isError) = try await Telemetry.$export.withValue(events.export) {
-            try await call(["text": "Save"], tool: "find", front: { throw NoFront(own: "iTerm2") })
+            try await call(["text": "Save"], tool: "find", front: { throw NoFront(own: "iTerm2", why: .onlyOwn) })
         }
         #expect(isError == true)
         #expect(said.contains("no app but iTerm2, which eyes answers to, has a window on screen"))
@@ -130,7 +130,7 @@ import Testing
 
     @Test func theToolsAreListedAndReadOnly() async throws {
         let tools = try await connected { try await $0.listTools().tools }
-        #expect(tools.map(\.name) == ["windows", "displays", "find", "read", "grants"])
+        #expect(tools.map(\.name) == ["windows", "displays", "find", "read", "hit", "grants"])
         #expect(tools.allSatisfy { $0.annotations.readOnlyHint == true })
     }
 
@@ -163,6 +163,30 @@ import Testing
             #expect(isError == true)
             #expect(said == expected)
         }
+    }
+
+    /// The hit tool takes the point as vhid's click does and answers with the verb's report;
+    /// what it will not act on, and a missing grant, are tool errors naming it.
+    @Test func hitAnswersWithTheVerbsReport() async throws {
+        let (said, isError) = try await call(["x": 169, "y": 426.5], tool: "hit")
+        #expect(isError != true)
+        #expect(said == Hit.report(at: ScreenPoint(x: 169, y: 426.5), .landed(HitCommandTests.button)))
+        #expect(try await call(["x": 2, "y": 2], tool: "hit").0 == Hit.report(at: ScreenPoint(x: 2, y: 2), .nothing(calls: 1, window: nil)))
+        for (arguments, expected): ([String: Value], String) in [
+            (["x": 1], "x and y are required: the point a click would land on"),
+            (["x": "1", "y": 2], "x is 1, and it takes a number"),
+            (["x": 1, "y": 2, "box": "1,2,3,4"], "box is not an argument this tool takes: it takes x, y"),
+        ] {
+            let (said, isError) = try await call(arguments, tool: "hit")
+            #expect(isError == true)
+            #expect(said == expected)
+        }
+        let (blind, blindError) = try await call(["x": 3, "y": 3], tool: "hit")
+        #expect(blindError == true)
+        #expect(blind == "\(TreeError.noGrant)" + EyesTools.grantNote)
+        let (unheard, unheardError) = try await call(["x": 4, "y": 4], tool: "hit")
+        #expect(unheardError == true)
+        #expect(unheard == "\(HitUnheard(point: ScreenPoint(x: 4, y: 4), why: .unanswered, calls: 1))")
     }
 
     @Test func displaysAnswersWithTheVerbsReportAndTakesNoArguments() async throws {

@@ -33,7 +33,10 @@ Done means a look after the act showed the change. An act's answer says the act 
    `near` orders the matches by the text beside each, so `{"text": "Remove", "near":
    "Beta"}` puts the Remove in Beta's row first.
 2. **Act** on what you saw: `click` the box `find` printed, as `box`, or its point; `type` or `press` once
-   the field or window that should receive the keys is in front.
+   the field or window that should receive the keys is in front. Unsure what a point would
+   press? `hit` with the same `x` and `y` names the app, the window and the element a click
+   there lands on, with what holds it - the button around a label - and says when that app
+   is your own terminal or one behind the app in front.
 3. **Look again** at the same place. `find` the result you expected - the dialog's
    title, the new text, the button gone. To wait for it, pass `until` (`present` or
    `absent`) and a `timeout`, which re-reads until it happens.

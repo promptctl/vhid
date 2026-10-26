@@ -130,6 +130,7 @@ eyes windows                            # every window: its id, its app, where i
 eyes displays                           # every display: its id, where it is, its scale
 eyes find Save                          # where "Save" is on screen: the point, its box, then the text
 eyes find Remove --near Beta            # several "Remove" buttons: the one beside "Beta" first
+eyes hit 169 426                        # what a click there would land on, before you click
 eyes read --window 4127                 # all the text in one window, in reading order
 eyes find Saving --until absent --timeout 30   # wait until "Saving" has gone
 ```

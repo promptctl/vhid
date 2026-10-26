@@ -104,6 +104,13 @@ public struct ScreenPoint: Sendable, Hashable {
     }
 }
 
+/// `x,y`, each as given: the form a row's point is printed in.
+extension ScreenPoint: CustomStringConvertible {
+    public var description: String { "\(Self.spelled(x)),\(Self.spelled(y))" }
+
+    private static func spelled(_ v: Double) -> String { Int(exactly: v).map(String.init) ?? String(v) }
+}
+
 public extension ScreenRect {
     /// The one conversion from image space into screen space, and the only place the flip
     /// and the display origin are applied. [LAW:single-enforcer] One implementation to
@@ -154,7 +161,9 @@ public extension ScreenRect {
 }
 
 /// `x,y,width,height` in whole points: the one spelling every rectangle `eyes` prints in
-/// and the one `rect` reads, so anything printed as a rectangle can be read back as one.
+/// and the one `rect` reads, so a rectangle printed for a place on a screen can be read back
+/// as one. An app's claimed frame - a document's text area, taller than any screen - prints
+/// past `limit`, which `rect` refuses: a capture is cut in whole points.
 /// [LAW:one-source-of-truth]
 extension ScreenRect: CustomStringConvertible {
     /// The farthest from the origin any edge or size may be, in points.
@@ -168,8 +177,12 @@ extension ScreenRect: CustomStringConvertible {
     /// found, and a negative coordinate is not moved toward zero.
     public var description: String {
         let r = cgRect.integral
-        return "\(Int(r.minX)),\(Int(r.minY)),\(Int(r.width)),\(Int(r.height))"
+        return [r.minX, r.minY, r.width, r.height].map(Self.whole).joined(separator: ",")
     }
+
+    /// A whole number of points in figures, however large: a document's frame can run past
+    /// what an `Int` holds, and printing one never traps.
+    static func whole(_ v: Double) -> String { Int(exactly: v).map(String.init) ?? String(format: "%.0f", v) }
 
     /// A rectangle as `description` spells it, or none for anything that is not one.
     public init?(spelled: String) {

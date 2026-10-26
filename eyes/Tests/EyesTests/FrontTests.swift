@@ -72,15 +72,26 @@ import Testing
     /// Nothing but the agent's own terminal: no place it could mean, so a refusal naming it.
     @Test func onlyTheAppEyesAnswersToOnScreenIsARefusal() {
         let alone = WindowListing(windows: [Self.menuBar, Self.window(2, "iTerm2", pid: 80)], excluded: [])
-        #expect(throws: NoFront(own: "iTerm2")) { try Self.choose(frontmost: Front.App(pid: 80, name: "iTerm2"), listing: alone) }
-        #expect(NoFront(own: "iTerm2").description.contains("no app but iTerm2, which eyes answers to, has a window on screen"))
+        #expect(throws: NoFront(own: "iTerm2", why: .onlyOwn)) { try Self.choose(frontmost: Front.App(pid: 80, name: "iTerm2"), listing: alone) }
+        #expect(NoFront(own: "iTerm2", why: .onlyOwn).description.contains("no app but iTerm2, which eyes answers to, has a window on screen"))
+    }
+
+    /// With no display attached - one unplugged mid-read - the refusal says so, and not that
+    /// nothing else is on screen.
+    @Test func noDisplayIsARefusalSayingSo() {
+        #expect(throws: NoFront(own: "iTerm2", why: .noDisplay)) {
+            try Front.choose(frontmost: Front.App(pid: 300, name: "System Settings"), own: Self.terminal, regular: [300],
+                             names: [:], listing: Self.desk, displays: [])
+        }
+        #expect(NoFront(own: "iTerm2", why: .noDisplay).description == "no display is attached, so there is no screen to read")
     }
 
     /// The app, and whatever is in front of its front window that a click there lands in - a
     /// remote Open panel over it - but never what is behind it or the agent's own terminal.
     @Test func theOwnersAreTheAppAndWhatIsOverItLessTheAppPassedOver() {
         let front = Front(app: Front.App(pid: 300, name: "System Settings"), display: 1, own: Self.terminal, passedOver: true)
-        let panel = WindowListing(windows: [Self.window(9, "Open and Save Panel Service", pid: 900, x: -900)] + Self.desk.windows, excluded: [])
+        let panel = WindowListing(windows: [Self.menuBar, Self.window(9, "Open and Save Panel Service", pid: 900), Self.window(3, "System Settings", pid: 300),
+                                            Self.window(4, "Safari", pid: 400), Self.window(2, "iTerm2", pid: 80)], excluded: [])
         let landsInPanel: (ScreenPoint) -> Heard<Int32> = { _ in .answered(900) }
         #expect(front.owners(in: Self.desk, hit: landsInPanel) == [300])
         #expect(front.owners(in: panel, hit: landsInPanel) == [900, 300])
@@ -114,6 +125,41 @@ import Testing
         for region: Region in [.display(1), .window(3), .rect(Self.main.frame), .page(window: 3, frame: Self.main.frame)] {
             #expect(region.owners(in: Self.desk) { _ in Issue.record("hit test asked"); return .unanswered } == .every)
         }
+    }
+
+    /// Where an app a click lands in stands is the front look's own rule: the app it reads, a
+    /// window over that app's it reads too - the remote Open panel - the agent's own terminal,
+    /// or behind. The terminal in front, passed over, is the terminal, not the front app.
+    @Test func whereAHitAppStandsIsDecidedByTheFrontLooksRule() {
+        let settings = Front.App(pid: 300, name: "System Settings")
+        let front = Front(app: settings, display: 1, own: Self.terminal, passedOver: true)
+        let panel = WindowListing(windows: [Self.menuBar, Self.window(9, "Open and Save Panel Service", pid: 900), Self.window(3, "System Settings", pid: 300),
+                                            Self.window(4, "Safari", pid: 400), Self.window(2, "iTerm2", pid: 80)], excluded: [])
+        let landsInPanel: (ScreenPoint) -> Heard<Int32> = { _ in .answered(900) }
+        let standing = { (pid: Int32, front: Front?) in
+            Front.standing(of: pid, at: ScreenPoint(x: 100, y: 100), own: Self.terminal, front: front, in: panel,
+                           displays: [Self.main, Self.left], hit: landsInPanel)
+        }
+        #expect(standing(300, front) == .front(settings))
+        #expect(standing(900, front) == .overFront(settings))
+        #expect(standing(80, front) == .own("iTerm2"))
+        #expect(standing(81, front) == .own("iTerm2"))
+        #expect(standing(400, front) == .behind(settings))
+        // With nothing but the terminal on screen there is no front to read.
+        #expect(standing(80, nil) == .own("iTerm2"))
+        #expect(standing(400, nil) == .behind(nil))
+        // A front look reads one display: a hit on another is not read, the front app's own
+        // window there included.
+        let onLeft = { (pid: Int32) in
+            Front.standing(of: pid, at: ScreenPoint(x: -500, y: 100), own: Self.terminal, front: front, in: panel,
+                           displays: [Self.main, Self.left], hit: landsInPanel)
+        }
+        #expect(onLeft(300) == .otherDisplay(settings, 1))
+        #expect(onLeft(900) == .otherDisplay(settings, 1))
+        #expect(onLeft(80) == .own("iTerm2"))
+        // The front app's menu bar is no window of its own, which that look never walks.
+        #expect(Front.standing(of: 300, at: ScreenPoint(x: 100, y: 10), own: Self.terminal, front: front, in: panel,
+                               displays: [Self.main, Self.left], hit: landsInPanel) == .noWindow(settings))
     }
 
     @Test func twoReadersOwnersAreTheirUnion() {

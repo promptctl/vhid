@@ -129,12 +129,46 @@ enum EyesTools {
         reading look: @escaping Look = { source, query in try await source.reader.judged(query) },
         grants: @escaping GrantsLook = { try await GrantsVerb.look() },
         pages: @escaping Where.Place.Pages = Where.Place.tree,
-        front: @escaping Where.Place.Fronts = Where.Place.live
+        front: @escaping Where.Place.Fronts = Where.Place.live,
+        landing: @escaping Hit.Landings = { try await Hit.land(at: $0) }
     ) -> [EyesTool] {
         let serial = OneAtATime(look)
         let read: Look = { try await serial.read($0, $1) }
-        return [windows(listing, frontmost: frontmost), Self.displays(displays), find(read, pages, front), Self.read(read, pages, front), Self.grants(grants)]
+        return [windows(listing, frontmost: frontmost), Self.displays(displays), find(read, pages, front), Self.read(read, pages, front),
+                hit(landing), Self.grants(grants)]
     }
+
+    /// A point as vhid's `click` takes one, `x` and `y`, so the check and the act are handed
+    /// the same arguments.
+    static func hit(_ landing: @escaping Hit.Landings) -> EyesTool { EyesTool(
+        tool: Tool(
+            name: "hit",
+            description: Hit.configuration.abstract + " " + Hit.about
+                + " Granted to the app that runs this server.",
+            inputSchema: .object([
+                "type": "object",
+                "properties": .object([
+                    "x": .object(["type": "number", "description": "The point's x, in the screen points vhid click takes."]),
+                    "y": .object(["type": "number", "description": "The point's y, in the same points."]),
+                ]),
+                "required": .array(["x", "y"]),
+                "additionalProperties": false,
+            ]),
+            annotations: .init(readOnlyHint: true, openWorldHint: true)),
+        call: { given in
+            try refuseStray(given, taken: ["x", "y"])
+            let coordinate = { (name: String) throws -> Double in
+                // A JSON number only: the SDK's `Double(Value)` also reads a string of digits.
+                guard let n = try argument(name, in: given, { $0.doubleValue ?? $0.intValue.map(Double.init) }, "a number") else {
+                    throw ArgumentRefused(description: "x and y are required: the point a click would land on")
+                }
+                return n
+            }
+            let point = try Hit.point(try coordinate("x"), try coordinate("y"))
+            do { return try await Hit.answer(at: point, landing: landing) } catch let error as ReaderError where error.missingGrant {
+                throw ArgumentRefused(description: served(error))
+            }
+        }) }
 
     /// Where `find` and `read` look, as `--display`, `--window` and `--rect` take it.
     private static let place: [String: Value] = [

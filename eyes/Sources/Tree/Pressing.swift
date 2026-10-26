@@ -1,6 +1,6 @@
 import Eyes
 
-/// What one element says of itself for a row to be found by it.
+/// What one element says of itself for a row to be found by it, or for a climb to list it.
 struct Lineage<Element> {
     let role: Role
     /// Nil when it has no position or no size.
@@ -9,7 +9,28 @@ struct Lineage<Element> {
     let parent: Element?
 }
 
+/// What a climb from a point found.
+enum Climbed<Element> {
+    /// The hit test gave nothing to climb from, why, and the calls it took.
+    case unheard(Landing.Short, calls: Int)
+    /// The hit test answered: no element is there.
+    case nothing(calls: Int)
+    /// The element hit; what it and each parent said, nearest first; how the climb ended; and
+    /// the calls it made.
+    case hit(Element, [Landing.Element], Landing.End, calls: Int)
+}
+
 extension Lineage: Sendable where Element: Sendable {}
+
+extension Landing.Element {
+    /// An element as a climb lists it: its texts that are not blank, and how many would not say.
+    init<E>(_ lineage: Lineage<E>, texts: [Heard<String?>]) {
+        self.init(role: lineage.role,
+                  texts: texts.compactMap { $0.answer ?? nil }.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty },
+                  unanswered: texts.filter { $0 == .unanswered }.count,
+                  frame: lineage.frame)
+    }
+}
 
 /// Where a click on a row lands, asked of the accessibility tree: the system's hit test and
 /// the reads that place what it hits. Handed in, so every rule a box is cut by is tested
@@ -19,6 +40,9 @@ struct Probe<Element> {
     /// by; nil when there is none.
     let hit: (ScreenPoint) throws -> Heard<Element?>
     let lineage: (Element) throws -> Heard<Lineage<Element>>
+    /// An element's value, title and description, each as it came back: a read of its own, so a
+    /// box's check never copies a text area's whole contents. [LAW:effects-at-boundaries]
+    let texts: (Element) throws -> [Heard<String?>]
     /// An element's parent alone, nil at the top: all a climb from a hit needs.
     let parent: (Element) throws -> Heard<Element?>
     let same: (Element, Element) -> Bool
@@ -59,12 +83,45 @@ struct Probe<Element> {
             return Checked(.unchecked(stop.why), calls: check.calls)
         }
     }
+
+    /// What a click at `point` lands on, and the elements it sits in: the hit there, then each
+    /// parent, nearest first, up to and including the first area, or the top. An area holds
+    /// the elements below it, so past it the climb would say where a click lands, never what
+    /// it presses. Each call is counted and timed by the one `ask` a row's check uses, and a
+    /// climb that stops short says why. [LAW:single-enforcer]
+    func climb(from point: ScreenPoint) throws -> Climbed<Element> {
+        let check = Check(probe: self)
+        let start: Element?
+        do { start = try check.hit(point) } catch let stop as Check<Element>.Stop {
+            return .unheard(stop.short, calls: check.calls)
+        }
+        guard let start else { return .nothing(calls: check.calls) }
+        var said: [Landing.Element] = []
+        var at = start
+        do {
+            for _ in 0..<Self.depth {
+                let lineage = try check.lineage(at)
+                said.append(Landing.Element(lineage, texts: try check.texts(at)))
+                if areas.contains(lineage.role) { return .hit(start, said, .area, calls: check.calls) }
+                guard let parent = lineage.parent else { return .hit(start, said, .top, calls: check.calls) }
+                at = parent
+            }
+            return .hit(start, said, .tooDeep, calls: check.calls)
+        } catch let stop as Check<Element>.Stop {
+            return .hit(start, said, .short(stop.short), calls: check.calls)
+        }
+    }
 }
 
 /// One row's check: every call it makes timed and counted in the one place.
 private final class Check<Element> {
     /// Why a row's check stopped short, thrown from wherever it did.
-    struct Stop: Error { let why: Unchecked }
+    struct Stop: Error {
+        let why: Unchecked
+
+        /// The same stop as a climb says it: a climb compares no frame, so it is never elsewhere.
+        var short: Landing.Short { why == .overTime ? .overTime : .unanswered }
+    }
 
     let probe: Probe<Element>
     private(set) var calls = 0
@@ -78,7 +135,10 @@ private final class Check<Element> {
         return value
     }
 
-    private func hit(_ point: ScreenPoint) throws -> Element? { try ask { try probe.hit(point) } }
+    func hit(_ point: ScreenPoint) throws -> Element? { try ask { try probe.hit(point) } }
+    func lineage(_ element: Element) throws -> Lineage<Element> { try ask { try probe.lineage(element) } }
+    /// Each text answers or not on its own, so the read as a whole always does.
+    func texts(_ element: Element) throws -> [Heard<String?>] { try ask { .answered(try probe.texts(element)) } }
     private func parent(_ element: Element) throws -> Element? { try ask { try probe.parent(element) } }
 
     func box(_ frame: ScreenRect, role: Role) throws -> Pressed {
@@ -142,7 +202,7 @@ private final class Check<Element> {
         var element: Element? = hit
         for _ in 0..<Probe<Element>.depth {
             guard let current = element else { return nil }
-            let said = try ask { try probe.lineage(current) }
+            let said = try lineage(current)
             if said.role == role, let placed = said.frame, placed.same(as: frame) { return current }
             element = said.parent
         }

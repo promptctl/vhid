@@ -35,10 +35,11 @@ public protocol Reader: Sendable {
     func pressing(_ reading: Reading, until deadline: ContinuousClock.Instant) async throws -> Reading
 }
 
-/// How long checking a reading's boxes may take, on top of the read. A page's button costs a
-/// few dozen calls at 10-35 ms each; an app too busy to answer holds each for the messaging
-/// timeout, and the rows the time does not reach are counted unchecked as over time.
-public let boxChecking = Duration.seconds(2)
+/// How long a look's hit tests may take, on top of any read: checking a reading's boxes, or
+/// climbing from the element a click at a point lands on. A page's button costs a few dozen
+/// calls at 10-35 ms each; an app too busy to answer holds each for the messaging timeout, and
+/// what the time does not reach is said to be over time - a row unchecked, a climb short.
+public let hitTesting = Duration.seconds(2)
 
 public extension Reader {
     /// The query's rows: what the reader saw, judged by the one rule every reader shares,
@@ -64,7 +65,7 @@ public struct Judged: Sendable {
     }
 
     /// The reading, each box checked by the reader that placed it by `deadline`.
-    public func pressed(until deadline: ContinuousClock.Instant = .now + boxChecking) async throws -> Reading {
+    public func pressed(until deadline: ContinuousClock.Instant = .now + hitTesting) async throws -> Reading {
         try await press(reading, deadline)
     }
 }

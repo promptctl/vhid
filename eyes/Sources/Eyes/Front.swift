@@ -71,6 +71,22 @@ public struct Front: Sendable, Hashable {
         return Set(over.map(\.pid)).union([app.pid]).subtracting(own.pids)
     }
 
+    /// Where an app a click at `point` lands in stands to a look with no place named, by the
+    /// rules that look reads by: `own`, its one display, the windows it walks, and `owners`.
+    /// [LAW:single-enforcer] `front` is nil when only the app eyes answers to has an ordinary
+    /// window open.
+    public static func standing(of pid: Int32, at point: ScreenPoint, own: Passed, front: Front?, in listing: WindowListing,
+                                displays: [Display], hit: (ScreenPoint) -> Heard<Int32>) -> Standing {
+        if own.pids.contains(pid) { return .own(own.name) }
+        guard let front else { return .behind(nil) }
+        guard displays.contains(where: { $0.id == front.display && $0.frame.contains(point) }) else {
+            return .otherDisplay(front.app, front.display)
+        }
+        guard listing.windows.contains(where: { $0.pid == pid && $0.frame.contains(point) }) else { return .noWindow(front.app) }
+        if pid == front.app.pid { return .front(front.app) }
+        return front.owners(in: listing, hit: hit).contains(pid) ? .overFront(front.app) : .behind(front.app)
+    }
+
     /// The app a look with no place named reads, from facts the caller gathered.
     ///
     /// - frontmost: the app AppKit names frontmost, when any is; when none is, the app of the
@@ -85,7 +101,7 @@ public struct Front: Sendable, Hashable {
         let app = { (window: Window) in App(pid: window.pid, name: names[window.pid] ?? window.owner) }
         let ordinary = { (pid: Int32) in regular.contains(pid) }
         guard let first = frontmost ?? listing.front(where: ordinary).map({ app(listing.windows[$0]) }) else {
-            throw NoFront(own: own.name)
+            throw NoFront(own: own.name, why: .onlyOwn)
         }
         let chosen: App
         let passed = own.pids.contains(first.pid)
@@ -94,12 +110,49 @@ public struct Front: Sendable, Hashable {
         } else if let behind = listing.front(where: { ordinary($0) && !own.pids.contains($0) }) {
             chosen = app(listing.windows[behind])
         } else {
-            throw NoFront(own: own.name)
+            throw NoFront(own: own.name, why: .onlyOwn)
         }
         let window = listing.front(of: chosen.pid).map { listing.windows[$0] }
         let display = window.flatMap { w in displays.first { $0.frame.contains(w.frame.centre) } } ?? displays.first { $0.isMain }
-        guard let display else { throw NoFront(own: own.name) }
+        guard let display else { throw NoFront(own: own.name, why: .noDisplay) }
         return Front(app: chosen, display: display.id, own: own, passedOver: passed)
+    }
+}
+
+/// Where an app stands to a look with no place named.
+public enum Standing: Sendable, Hashable {
+    /// The app that look reads.
+    case front(Front.App)
+    /// An app with a window over that app's front window where a click lands in it - an Open
+    /// panel another process draws - which that look reads too.
+    case overFront(Front.App)
+    /// The app eyes answers to, named: the agent's own terminal or Claude app, never read.
+    case own(String)
+    /// In no window of its own listed at the point - a menu bar, a menu - which that look,
+    /// walking windows, never reads; with the app it reads.
+    case noWindow(Front.App)
+    /// On a display that look does not read, with the app it reads and the display it does.
+    case otherDisplay(Front.App, CGDirectDisplayID)
+    /// An app that look does not read, with the app it reads, nil when there is none.
+    case behind(Front.App?)
+
+    /// The app a look with no place named reads, when there is one.
+    public var front: Front.App? {
+        switch self {
+        case .front(let app), .overFront(let app), .noWindow(let app), .otherDisplay(let app, _), .behind(let app?): app
+        case .own, .behind(nil): nil
+        }
+    }
+
+    public var said: String {
+        switch self {
+        case .front: "front"
+        case .overFront: "over_front"
+        case .own: "own"
+        case .otherDisplay: "other_display"
+        case .noWindow: "no_window"
+        case .behind: "behind"
+        }
     }
 }
 
@@ -119,15 +172,28 @@ extension WindowListing {
     func front(of pid: Int32) -> Int? { front { $0 == pid } }
 }
 
-/// No app but the one eyes answers to has a window on screen: a look with no place named
-/// has nothing it could mean. [LAW:no-silent-failure]
+/// A look with no place named has nothing it could mean: no app but the one eyes answers to
+/// has a window on screen, or no display is attached. [LAW:no-silent-failure]
 public struct NoFront: Error, Equatable, CustomStringConvertible {
     public let own: String
+    public let why: Why
 
-    public init(own: String) { self.own = own }
+    public enum Why: Sendable, Equatable {
+        case onlyOwn
+        /// Between a display detached and the next attached, as when one is unplugged mid-read.
+        case noDisplay
+    }
+
+    public init(own: String, why: Why) {
+        self.own = own
+        self.why = why
+    }
 
     public var description: String {
-        "no app but \(own), which eyes answers to, has a window on screen; name a display to read every app on it"
+        switch why {
+        case .onlyOwn: "no app but \(own), which eyes answers to, has a window on screen; name a display to read every app on it"
+        case .noDisplay: "no display is attached, so there is no screen to read"
+        }
     }
 }
 
