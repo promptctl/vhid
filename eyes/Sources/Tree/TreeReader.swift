@@ -217,13 +217,14 @@ public struct TreeReader: Reader {
         }
     }
 
-    /// A value as text: a string, or a number in figures - a checkbox's 0 or 1, a slider's
-    /// position. Any other kind is no text, and counted with the ones that would not say.
-    /// [LAW:no-silent-failure]
+    /// A value as text: a string, a number in figures - a checkbox's 0 or 1, a slider's
+    /// position - or a link's address. Any other kind - a range, an element - is an answer
+    /// with no text in it.
     static func spoken(_ value: CFTypeRef) -> Heard<String?> {
         if let text = value as? String { return .answered(text) }
         if let number = value as? NSNumber { return .answered(number.stringValue) }
-        return .unanswered
+        if let url = value as? URL { return .answered(url.absoluteString) }
+        return .answered(nil)
     }
 
     /// An element's parent, nil at the top of its tree.
@@ -287,12 +288,12 @@ public struct TreeReader: Reader {
         return AXValueGetValue(value as! AXValue, .axError, &error) ? error : nil
     }
 
-    /// Nil as well for a frame no screen holds - NaN, infinite, or past `ScreenRect.limit` - which
-    /// an app can claim, and no row or climb prints. [LAW:parse-dont-validate]
+    /// Nil as well for a frame that is no place - NaN or infinite - which an app can claim.
+    /// [LAW:parse-dont-validate]
     static func frame(_ position: CFTypeRef?, _ size: CFTypeRef?) -> ScreenRect? {
         unboxed(position, as: .cgPoint, CGPoint.zero).flatMap { origin in
             unboxed(size, as: .cgSize, CGSize.zero).map { ScreenRect(CGRect(origin: origin, size: $0)) }
-        }.flatMap { $0.isWithinLimit ? $0 : nil }
+        }.flatMap { [$0.x, $0.y, $0.width, $0.height].allSatisfy(\.isFinite) ? $0 : nil }
     }
 
     private static func bounded(_ element: AXUIElement) -> AXUIElement {

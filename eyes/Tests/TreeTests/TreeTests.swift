@@ -716,22 +716,26 @@ extension Covers {
         return (AXValueCreate(.cgPoint, &origin)!, AXValueCreate(.cgSize, &size)!)
     }
 
-    /// An app can claim a frame no screen holds; it is no frame, never a number a row prints.
-    @Test func aFrameNoScreenHoldsIsNoFrame() {
+    /// An app can claim a frame that is no place; it is no frame. A document's text area runs
+    /// past any screen and is a frame, printed whole however large.
+    @Test func aFrameThatIsNoPlaceIsNoFrame() {
         let placed = boxed(10, 20, 30, 40)
         #expect(TreeReader.frame(placed.0, placed.1) == ScreenRect(x: 10, y: 20, width: 30, height: 40))
-        for (x, w) in [(Double.nan, 30.0), (10, .infinity), (1e20, 30)] {
+        for (x, w) in [(Double.nan, 30.0), (10, .infinity)] {
             let claimed = boxed(x, 20, w, 40)
             #expect(TreeReader.frame(claimed.0, claimed.1) == nil)
         }
+        let document = boxed(46, -1_280_000, 1e20, 1_300_000)
+        #expect(TreeReader.frame(document.0, document.1)?.description == "46,-1280000,100000000000000000000,1300000")
     }
 
-    /// A checkbox's value is a number, said in figures; a value that is no text is counted
-    /// with the ones that would not say, never dropped unseen.
-    @Test func aNumberIsSaidAndAnyOtherKindCounted() {
+    /// A checkbox's value is a number, said in figures, and a link's an address; a range or an
+    /// element is an answer with no text, never counted as one that would not say.
+    @Test func aNumberOrAnAddressIsSaidAndAnyOtherKindIsNoText() {
         #expect(TreeReader.spoken("Add" as CFString) == .answered("Add"))
         #expect(TreeReader.spoken(kCFBooleanTrue) == .answered("1"))
         #expect(TreeReader.spoken(NSNumber(value: 0.5)) == .answered("0.5"))
-        #expect(TreeReader.spoken(boxed(1, 2, 3, 4).0) == .unanswered)
+        #expect(TreeReader.spoken(URL(string: "https://example.com/")! as CFURL) == .answered("https://example.com/"))
+        #expect(TreeReader.spoken(boxed(1, 2, 3, 4).0) == .answered(nil))
     }
 }

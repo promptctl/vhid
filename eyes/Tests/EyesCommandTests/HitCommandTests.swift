@@ -75,7 +75,7 @@ import Testing
         #expect(Hit.spelled("Save\tas…\n  PDF") == "Save as… PDF")
         let scrollback = String(repeating: "line\n", count: 100)
         let cut = Hit.spelled(scrollback)
-        #expect(cut == String(repeating: "line ", count: 24) + "... (499 characters)")
+        #expect(cut == String(repeating: "line ", count: 24) + "... (500 characters)")
         #expect(!cut.contains("\n"))
     }
 
@@ -104,7 +104,7 @@ import Testing
         #expect(hits[0].counts == ["pid": 300, "window": 4127, "rows": 2, "calls": 3])
         #expect(hits[1].facts == ["end": "nothing"])
         #expect(hits[1].counts == ["rows": 0, "calls": 1])
-        #expect(hits[2].error?.contains("did not answer at 4,4") == true)
+        #expect(hits[2].error?.contains("hit test at 4,4") == true)
         #expect(hits[2].facts == ["end": "unanswered"])
         #expect(hits[2].counts == ["rows": 0, "calls": 1])
     }

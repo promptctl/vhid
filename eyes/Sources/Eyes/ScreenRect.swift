@@ -167,11 +167,6 @@ extension ScreenRect: CustomStringConvertible {
     /// The farthest from the origin any edge or size may be, in points.
     static let limit = 1_000_000.0
 
-    /// Whether every edge and size is a number no farther than `limit`: what a rectangle on
-    /// a screen is, and what an app's claimed frame must be to be taken as one.
-    /// [LAW:single-enforcer] The one rule `rect` and the tree's frames are both read by.
-    public var isWithinLimit: Bool { [x, y, width, height].allSatisfy { abs($0) <= Self.limit } }
-
     /// What a refusal names as the form wanted.
     public static let spelling = "x,y,width,height in points - a positive size, nothing past \(Int(limit))"
 
@@ -180,17 +175,21 @@ extension ScreenRect: CustomStringConvertible {
     /// found, and a negative coordinate is not moved toward zero.
     public var description: String {
         let r = cgRect.integral
-        return "\(Int(r.minX)),\(Int(r.minY)),\(Int(r.width)),\(Int(r.height))"
+        return [r.minX, r.minY, r.width, r.height].map(Self.whole).joined(separator: ",")
     }
+
+    /// A whole number of points in figures, however large: a document's frame can run past
+    /// what an `Int` holds, and printing one never traps.
+    static func whole(_ v: Double) -> String { Int(exactly: v).map(String.init) ?? String(format: "%.0f", v) }
 
     /// A rectangle as `description` spells it, or none for anything that is not one.
     public init?(spelled: String) {
         let parts = spelled.split(separator: ",", omittingEmptySubsequences: false)
             .map { Double($0.trimmingCharacters(in: .whitespaces)) }
-        guard parts.count == 4, let x = parts[0], let y = parts[1], let w = parts[2], let h = parts[3], w > 0, h > 0
+        guard parts.count == 4, let x = parts[0], let y = parts[1], let w = parts[2], let h = parts[3],
+              [x, y, w, h].allSatisfy({ abs($0) <= Self.limit }), w > 0, h > 0
         else { return nil }
         self.init(x: x, y: y, width: w, height: h)
-        guard isWithinLimit else { return nil }
     }
 }
 

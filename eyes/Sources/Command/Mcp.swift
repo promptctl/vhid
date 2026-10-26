@@ -143,7 +143,7 @@ enum EyesTools {
     static func hit(_ landing: @escaping Hit.Landings) -> EyesTool { EyesTool(
         tool: Tool(
             name: "hit",
-            description: Hit.configuration.abstract + " " + Hit.configuration.discussion
+            description: Hit.configuration.abstract + " " + Hit.about
                 + " Granted to the app that runs this server.",
             inputSchema: .object([
                 "type": "object",

@@ -10,8 +10,11 @@ import Tree
 struct Hit: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Say what a click at a point would hit: the app and window it lands in, and the element it presses with the ones that hold it.",
-        discussion: "Asks the system's own hit test at the point, as vhid click takes it, and reads each element up to the area holding it - a window, a list, a toolbar, a web page. Says whether a look with no place named reads that app. Needs Accessibility. A negative coordinate, on a display left of or above the main one, follows --, as vhid click takes it: eyes hit -- -500 300."
+        discussion: about + " A negative coordinate, on a display left of or above the main one, follows --, as vhid click takes it: eyes hit -- -500 300."
     )
+
+    /// What the verb and the MCP tool both say of it; the shell's `--` is the verb's alone.
+    static let about = "Asks the system's own hit test at the point, as vhid click takes it, and reads each element up to the area holding it - a window, a list, a toolbar, a web page. Says whether a look with no place named reads that app. Needs Accessibility."
 
     @Argument(help: "The point's x, in the screen points vhid click takes.")
     var x: Double
@@ -118,10 +121,18 @@ struct Hit: AsyncParsableCommand {
 
     /// A text on one line - a row is one element - its whitespace runs, newlines and tabs
     /// among them, as one space, and cut past `longest` saying how long it was, so a cut text
-    /// is never taken for a whole one. [LAW:no-silent-failure]
+    /// is never taken for a whole one. [LAW:no-silent-failure] Stops reading at the cut: a text
+    /// area's value is a whole document.
     static func spelled(_ text: String) -> String {
-        let line = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        return line.count > longest ? "\(line.prefix(longest))... (\(line.count) characters)" : line
+        var line = "", length = 0, gap = false
+        for character in text {
+            if character.isWhitespace { gap = length > 0; continue }
+            if gap { line.append(" "); length += 1; gap = false }
+            guard length < longest else { return "\(line.prefix(longest))... (\(text.count) characters)" }
+            line.append(character)
+            length += 1
+        }
+        return line
     }
 
     /// The hit test and the window server, in the process. The window is looked for in the
@@ -140,7 +151,7 @@ struct Hit: AsyncParsableCommand {
         // Nothing but the app eyes answers to on screen is an answer here, not a refusal: a hit on
         // that app, with nothing else on screen, is the case most worth saying.
         let front: Front?
-        do { front = try Front.now(own: own, listing: listing) } catch {
+        do { front = try Front.now(own: own, listing: listing, displays: displays) } catch {
             guard error.why == .onlyOwn else { throw error }
             front = nil
         }

@@ -113,7 +113,7 @@ public struct HitUnheard: Error, Equatable, CustomStringConvertible {
 
     public var description: String {
         switch why {
-        case .unanswered: "the system's hit test did not answer at \(point), so what a click there would hit is unknown"
+        case .unanswered: "the system's hit test at \(point), or the app it hit asked which it is, did not answer, so what a click there would hit is unknown"
         case .overTime: "the time for hit tests ran out before the one at \(point), so what a click there would hit is unknown"
         }
     }
