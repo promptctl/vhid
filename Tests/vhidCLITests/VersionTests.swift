@@ -7,7 +7,7 @@ import Version
 @testable import vhid
 
 /// One version, reported the same way by every surface that reports one, and the value
-/// scripts/version derives from VERSION and git.
+/// scripts/version derives from claude-plugin/VERSION and git.
 @Suite(.ownThread) struct VersionTests {
     static let root = URL(filePath: #filePath).deletingLastPathComponent().appending(path: "../..").standardized
 
@@ -35,7 +35,7 @@ import Version
         return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Read against VERSION rather than against the tree's git state now, which can have
+    /// Read against claude-plugin/VERSION rather than against the tree's git state now, which can have
     /// moved on since the build stamped it.
     @Test func theBuildReportsVersionsValueOrADevBuildOfIt() throws {
         let base = try Self.run(Self.root.appending(path: "scripts/version").path(), ["--base"], in: Self.root)
@@ -69,13 +69,19 @@ import Version
         #expect(result.instructions == pairing.trimmingCharacters(in: .newlines))
     }
 
-    /// A scratch repo holding VERSION and one commit.
+    /// Where scripts/version reads the version in `repo`.
+    static func version(in repo: URL) throws -> URL {
+        let plugin = repo.appending(path: "claude-plugin")
+        try FileManager.default.createDirectory(at: plugin, withIntermediateDirectories: true)
+        return plugin.appending(path: "VERSION")
+    }
+
+    /// A scratch repo holding claude-plugin/VERSION and one commit.
     static func repo() throws -> URL {
         let repo = FileManager.default.temporaryDirectory.appending(path: "vhid-version-\(UUID())")
-        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
-        try "1.2.3\n".write(to: repo.appending(path: "VERSION"), atomically: true, encoding: .utf8)
+        try "1.2.3\n".write(to: Self.version(in: repo), atomically: true, encoding: .utf8)
         for arguments in [
-            ["init", "-q"], ["add", "VERSION"],
+            ["init", "-q"], ["add", "claude-plugin/VERSION"],
             ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "v"],
         ] {
             try Self.run("/usr/bin/git", arguments, in: repo)
@@ -93,7 +99,7 @@ import Version
         try "".write(to: repo.appending(path: "untracked.swift"), atomically: true, encoding: .utf8)
         #expect(try Self.script(in: repo) == "1.2.3-dev+\(commit)")
         try FileManager.default.removeItem(at: repo.appending(path: "untracked.swift"))
-        try "1.2.3 \n".write(to: repo.appending(path: "VERSION"), atomically: true, encoding: .utf8)
+        try "1.2.3 \n".write(to: Self.version(in: repo), atomically: true, encoding: .utf8)
         #expect(try Self.script(in: repo) == "1.2.3-dev+\(commit)")
     }
 
@@ -107,7 +113,7 @@ import Version
     @Test func aVersionThatIsNotDottedNumbersBuildsNothing() throws {
         let repo = try Self.repo()
         defer { try? FileManager.default.removeItem(at: repo) }
-        try "0.1\"0\n".write(to: repo.appending(path: "VERSION"), atomically: true, encoding: .utf8)
+        try "0.1\"0\n".write(to: Self.version(in: repo), atomically: true, encoding: .utf8)
         let process = Process()
         process.executableURL = Self.root.appending(path: "scripts/version")
         process.arguments = [repo.path()]
@@ -120,9 +126,8 @@ import Version
 
     @Test func withNoGitItIsADevBuild() throws {
         let dir = FileManager.default.temporaryDirectory.appending(path: "vhid-version-\(UUID())")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
-        try "1.2.3\n".write(to: dir.appending(path: "VERSION"), atomically: true, encoding: .utf8)
+        try "1.2.3\n".write(to: Self.version(in: dir), atomically: true, encoding: .utf8)
         #expect(try Self.script(in: dir) == "1.2.3-dev")
     }
 }

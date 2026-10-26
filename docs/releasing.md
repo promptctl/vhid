@@ -6,8 +6,8 @@ A release is published by pushing its tag, once `CHANGELOG.md` has its section:
 git tag v$(scripts/version --base) && git push origin v$(scripts/version --base)
 ```
 
-`.github/workflows/release.yaml` checks that the tag is `VERSION`'s, that the tagged
-commit is on master (a `-tag` pre-release may come from any branch), and that
+`.github/workflows/release.yaml` checks that the tag is `claude-plugin/VERSION`'s, that
+the tagged commit is on master (a `-tag` pre-release may come from any branch), and that
 `CHANGELOG.md` has a `## [<version>]` section. It then runs `scripts/release` in a
 keychain `scripts/release-keychain` makes for the job and deletes at its end. Once the
 pkg is notarized it requires the tagged commit's `vhid`, `eyes` and `pkg` checks to be
@@ -44,8 +44,8 @@ The same release can be made on that Mac directly:
 NOTARY_PROFILE=<profile> scripts/release dist    # dist/vhid-<version>.pkg
 ```
 
-The version is the one in `VERSION`, and a release is built from the commit tagged
-`v<version>` with `git status` clean: any other build reports `<version>-dev+<commit>`
+The version is the one in `claude-plugin/VERSION`, and a release is built from the commit
+tagged `v<version>` with `git status` clean: any other build reports `<version>-dev+<commit>`
 from `vhid --version`, and `scripts/make-pkg` refuses to package it.
 
 That runs two scripts, and each can also be run on its own:

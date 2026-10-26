@@ -7,7 +7,7 @@ import PackagePlugin
 // so an unchanged tree does not recompile the target.
 @main struct VersionStamp: BuildToolPlugin {
     func createBuildCommands(context: PluginContext, target: any Target) throws -> [Command] {
-        // eyes/ sits in the vhid repository, whose VERSION and scripts/version it reports.
+        // eyes/ sits in the vhid repository, whose claude-plugin/VERSION and scripts/version it reports.
         let root = context.package.directoryURL.deletingLastPathComponent()
         let output = context.pluginWorkDirectoryURL.appending(path: "Stamped")
         let file = output.appending(path: "Stamped.swift")

@@ -189,7 +189,7 @@ The rest of the tree:
 |---|---|
 | `eyes/` | the screen-reading package, built and tested on its own |
 | `Tests/` | test targets, each named for what it tests (`Signals`, `Version` and the two apps have none); `OwnThread` and `TestClock` are helpers for tests |
-| `claude-plugin/`, `.claude-plugin/` | the Claude Code plugin: skills, the session-start check, the marketplace entry |
+| `claude-plugin/`, `.claude-plugin/` | the Claude Code plugin: skills, the session-start check, the marketplace entry, and `VERSION`, the one place the version is written, which `scripts/version` reads for every build |
 | `pkg/`, `scripts/make-pkg`, `scripts/notarize` | building, signing and notarizing the package |
 | `scripts/` | every other build, check and release script; each says what it does in its header |
 | `site/` | the GitHub Pages site and its filmed demos |

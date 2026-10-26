@@ -29,8 +29,8 @@ let package = Package(
         // share one language without either having to link the other.
         // [LAW:one-way-deps]
         .target(name: "Eyes"),
-        // The version eyes reports, stamped at build time from the repository's VERSION
-        // and git by the plugin, the way vhid's is. [LAW:one-source-of-truth]
+        // The version eyes reports, stamped at build time from the repository's
+        // claude-plugin/VERSION and git by the plugin, the way vhid's is. [LAW:one-source-of-truth]
         .target(name: "Version", plugins: ["VersionStamp"]),
         .plugin(name: "VersionStamp", capability: .buildTool()),
         // Every type here is a value, so the whole vocabulary is exercised with no
