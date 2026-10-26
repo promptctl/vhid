@@ -26,12 +26,19 @@ servers "\"vhid\": {\"command\": \"$VHID\", \"args\": [\"mcp\"]}, \"eyes\": {\"c
 echo 0.5.0 >"$SCRATCH/VERSION"
 versions() { echo "$1" >"$SCRATCH/vhid.version"; echo "$2" >"$SCRATCH/eyes.version"; }
 versions 0.5.0 0.5.0
+# A stub binary that answers --version with what versions set for it and, for anything
+# else, runs the script lines given.
+stub() {
+  local binary=$1; shift
+  { printf '#!/bin/sh\n[ "$1" = --version ] && exec cat %s\n' "$SCRATCH/$(basename "$binary").version"
+    printf '%s\n' "$@"; } >"$binary"
+  chmod +x "$binary"
+}
 # A vhid whose doctor prints a verdict and row and exits with the status given.
 vhid_doctor() {
-  printf '#!/bin/sh\n[ "$1" = --version ] && exec cat %s\n[ "$1" = doctor ] || exit 64\nprintf "%%s\\nDriver extension: %%s\\n" "%s" "%s"\nexit %s\n' "$SCRATCH/vhid.version" "$1" "$2" "$3" >"$VHID"
-  chmod +x "$VHID"
+  stub "$VHID" '[ "$1" = doctor ] || exit 64' "printf '%s\\nDriver extension: %s\\n' '$1' '$2'" "exit $3"
 }
-eyes_present() { printf '#!/bin/sh\n[ "$1" = --version ] && exec cat %s\nexit 0\n' "$SCRATCH/eyes.version" >"$EYES"; chmod +x "$EYES"; }
+eyes_present() { stub "$EYES" 'exit 0'; }
 
 run() {
   out=$(CLAUDE_PLUGIN_ROOT=$SCRATCH claude-plugin/hooks/session-start 2>"$SCRATCH/err" </dev/null); status=$?
@@ -62,7 +69,7 @@ said "failed with exit status 3, so whether its tools can type or click is unkno
 said "Driver extension: crashed" "doctor failed"
 
 # Exit 1 with no verdict is a doctor that threw, not one that said "not ready".
-printf '#!/bin/sh\n[ "$1" = --version ] && exec cat %s\necho "Error: no installation" >&2\nexit 1\n' "$SCRATCH/vhid.version" >"$VHID"
+stub "$VHID" 'echo "Error: no installation" >&2' 'exit 1'
 run
 said "failed with exit status 1, so whether its tools can type or click is unknown" "doctor threw"
 said "Error: no installation" "doctor threw"
@@ -93,8 +100,11 @@ said "this session cannot type or click." "vhid missing"
 skew() {
   local case=$1; shift
   run
-  for want in "$@" "This vhid plugin was written for vhid 0.5.0" "brew upgrade --cask vhid" \
-    "claude plugin update vhid@vhid" "brew reinstall --cask vhid"; do
+  for want in "$@" "This vhid plugin was written for vhid 0.5.0" \
+    'If a binary is older than 0.5.0, the step is `brew upgrade --cask vhid`' \
+    'If it is newer, the step is `claude plugin marketplace update vhid` and `claude plugin update vhid@vhid`' \
+    'such as -rc.1 or -dev+<commit>, is a pre-release or a development build, which no plugin release is written for' \
+    '`brew reinstall --cask vhid` (or the pkg'; do
     said "$want" "$case"
   done
 }
@@ -129,6 +139,12 @@ run
 [ "$status" -ne 0 ] || fail "no VERSION: exited 0, should fail"
 echo "$err" | grep -qF "VERSION does not say the version the plugin was written for" || fail "no VERSION: said '$err'"
 mv "$SCRATCH/VERSION.away" "$SCRATCH/VERSION"
+# An empty VERSION says no version either.
+: >"$SCRATCH/VERSION"
+run
+[ "$status" -ne 0 ] || fail "empty VERSION: exited 0, should fail"
+echo "$err" | grep -qF "VERSION does not say the version the plugin was written for" || fail "empty VERSION: said '$err'"
+echo 0.5.0 >"$SCRATCH/VERSION"
 
 # A manifest that names no command for a server is the plugin's own fault, said loudly.
 servers "\"vhid\": {\"command\": \"$VHID\", \"args\": [\"mcp\"]}"
