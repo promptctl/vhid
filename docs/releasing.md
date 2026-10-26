@@ -79,17 +79,22 @@ but Accepted, staples the ticket, and requires Gatekeeper to assess the pkg as
 ## The plugin
 
 The Claude Code marketplace, `.claude-plugin/marketplace.json` on master, installs the
-plugin's directory from the branch its entry names, `latest-release`, not from master.
-Once a release is published, `release.yaml` pushes the tagged commit to that branch, so
-a Mac that installs or updates the plugin gets the skills and hook written for the
-binaries that release ships, and a change to `claude-plugin/` reaches nobody until it
-ships. A pre-release leaves it where it is. The push fast-forwards and nothing else: a
-repository ruleset on the branch refuses deletion and force-pushes from anyone, and the
-release job pushes with its own token. When the step fails, the Release is public by
-then, so it is moved by hand rather than by re-running the job:
+plugin's directory from the branch its entry names, `latest-release`, not from master, so
+a Mac that installs or updates the plugin gets the skills and hook of the newest release,
+and a change to `claude-plugin/` reaches nobody until it ships. Once a release is
+published, `release.yaml` runs `scripts/update-plugin`, which commits that release's
+`claude-plugin/` onto the branch, with the branch as it was for parent and a `Release:`
+trailer naming the version, and pushes it. A pre-release leaves it where it is, and so
+does a release older than the one the branch names. Each commit holds `claude-plugin/`
+and nothing else, so a push never changes a workflow file: GitHub refuses that from the
+release job's token. A repository ruleset on the branch refuses deletion and force-pushes
+from anyone. When the step fails, the Release is public by then, so the branch is moved
+by hand, from a checkout of master, rather than by re-running the job:
 
 ```sh
-git push origin v<version>^{commit}:refs/heads/latest-release
+git fetch origin latest-release:latest-release --tags
+scripts/update-plugin . latest-release <version>
+git push origin latest-release
 ```
 
 ## The cask

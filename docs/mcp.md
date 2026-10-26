@@ -33,8 +33,8 @@ session that tells the agent when vhid is missing or not `ready`:
 /plugin install vhid@vhid
 ```
 
-The plugin does not install vhid; the pkg or the cask does. It follows this repository's
-`master`, so it can teach a tool the latest release does not have yet.
+The plugin does not install vhid; the pkg or the cask does. It comes from vhid's newest
+release, so it can teach a tool an older vhid does not have yet.
 
 In Claude Code without the plugin:
 

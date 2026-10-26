@@ -156,6 +156,30 @@ jobs:
         if: always()
         run: scripts/release-keychain delete "$NOTARY_KEYCHAIN"
 
+      # The Claude Code marketplace installs the plugin from the branch marketplace.json
+      # names, so skills and hooks reach a Mac from the release whose binaries they were
+      # written for, and work on master reaches nobody until it ships. scripts/update-plugin
+      # commits this release's claude-plugin/ onto it, or leaves it when a newer release's
+      # job got there first. It runs before the cask step, and each step runs once the
+      # Release is public whatever the other did: they are separate channels, and each
+      # failure names its own recovery. [LAW:one-source-of-truth] The branch is read from
+      # marketplace.json, the one place it is named. Forward only: there is no --force
+      # here, and the branch's ruleset (docs/releasing.md) refuses a force-push or deletion
+      # from anyone.
+      - name: The plugin's branch is at this release
+        if: always() && steps.published.outcome == 'success' && env.PRERELEASE == 'false'
+        env:
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          branch=$(plutil -extract plugins.0.source.ref raw -o - .claude-plugin/marketplace.json)
+          trap '[ $? -eq 0 ] || echo "::error::vhid $VERSION_NUMBER is published but the plugin may not be; move it with scripts/update-plugin rather than re-running this job (docs/releasing.md)"' EXIT
+          git fetch --quiet origin "refs/heads/$branch:refs/heads/$branch"
+          scripts/update-plugin . "$branch" "$VERSION_NUMBER" | tee -a "$GITHUB_STEP_SUMMARY"
+          git push origin "refs/heads/$branch:refs/heads/$branch"
+
       # The tap's vhid workflow (cask.yaml here) is the one writer of the cask, with the
       # tap's own token; this starts it and waits until the cask is at this release, so
       # the release fails when the move does not land. [LAW:one-source-of-truth] The cask
@@ -166,7 +190,7 @@ jobs:
       # [LAW:single-enforcer] However the step fails, the Release is published by then, so
       # the trap names what moves the cask without re-running this job.
       - name: The tap's cask is at this release
-        if: env.PRERELEASE == 'false'
+        if: always() && steps.published.outcome == 'success' && env.PRERELEASE == 'false'
         env:
           GH_TOKEN: ${{ steps.tap.outputs.token }}
           READ_TOKEN: ${{ github.token }}
@@ -191,21 +215,3 @@ jobs:
             sleep 10
           done
           echo "the tap's cask is vhid $was, at $VERSION_NUMBER or past it, after ${SECONDS}s; the tap's run $run is $status $conclusion" | tee -a "$GITHUB_STEP_SUMMARY"
-
-      # The Claude Code marketplace installs the plugin from the branch marketplace.json
-      # names, so skills and hooks reach a Mac with the release whose binaries they were
-      # written for, and work on master reaches nobody until it ships. Once the Release is
-      # public the branch moves to its commit, whatever the cask step did: the two are
-      # separate channels, and each failure names its own recovery. Placed after the cask
-      # step so that step is never skipped by this one. [LAW:one-source-of-truth] The
-      # branch is read from marketplace.json, the one place it is named. Forward only:
-      # there is no --force here, and the branch's ruleset (docs/releasing.md) refuses a
-      # force-push or deletion from anyone.
-      - name: The plugin's branch is at this release
-        if: always() && steps.published.outcome == 'success' && env.PRERELEASE == 'false'
-        run: |
-          branch=$(plutil -extract plugins.0.source.ref raw -o - .claude-plugin/marketplace.json)
-          trap '[ $? -eq 0 ] || echo "::error::vhid $VERSION_NUMBER is published but the plugin is not; move it with \`git push origin $TAG^{commit}:refs/heads/$branch\` (docs/releasing.md)"' EXIT
-          was=$(git ls-remote --exit-code origin "refs/heads/$branch" | cut -f1)
-          git push origin "$GITHUB_SHA:refs/heads/$branch"
-          echo "the plugin's branch $branch moved from $was to $GITHUB_SHA ($TAG)" | tee -a "$GITHUB_STEP_SUMMARY"

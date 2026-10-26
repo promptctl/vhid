@@ -1,0 +1,72 @@
+#!/bin/bash
+# scripts/update-plugin run against a scratch repository with two releases' tags and a
+# plugin branch at the first, so nothing here reaches promptctl/vhid.
+#
+# [LAW:behavior-not-structure] What is checked is the branch after each run - its tree,
+# its parent and the release it names - and what the script said and exited with.
+#
+# Held to bash 3.2, like every script here.
+set -uo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+SCRATCH=$(mktemp -d) || exit 1
+trap 'rm -rf "$SCRATCH"' EXIT
+failed=0
+fail() { echo "update-plugin-test: $1" >&2; failed=1; }
+
+REPO=$SCRATCH/vhid
+BRANCH=latest-release
+git init --quiet "$REPO"
+git -C "$REPO" config user.name test
+git -C "$REPO" config user.email test@example.com
+# A release: claude-plugin/ and a workflow beside it, tagged v<version>.
+release() {
+  mkdir -p "$REPO/claude-plugin" "$REPO/.github/workflows"
+  echo "skill of $1" >"$REPO/claude-plugin/SKILL.md"
+  echo "workflow of $1" >"$REPO/.github/workflows/release.yaml"
+  git -C "$REPO" add -A
+  git -C "$REPO" commit --quiet -m "$1"
+  git -C "$REPO" tag -a "v$1" -m "$1"
+}
+release 0.1.0
+# The branch as the marketplace first named it: a whole release commit, naming 0.1.0.
+git -C "$REPO" branch "$BRANCH" "$(git -C "$REPO" commit-tree "v0.1.0^{tree}" -p "v0.1.0^{commit}" -m start -m "Release: 0.1.0")"
+release 0.2.0
+git -C "$REPO" tag -a v0.3.0-rc1 -m rc
+
+run() { out=$(scripts/update-plugin "$REPO" "$@" 2>&1); status=$?; }
+tip() { git -C "$REPO" rev-parse "$BRANCH"; }
+# A run that should be refused, or find the branch at or past it, leaves the branch as it was.
+unmoved() {
+  local want_status=$1 want=$2; shift 2
+  local before; before=$(tip)
+  run "$@"
+  [ "$status" -eq "$want_status" ] || fail "update-plugin $* exited $status, not $want_status: $out"
+  case $out in *"$want"*) ;; *) fail "update-plugin $* said \"$out\", not \"$want\"" ;; esac
+  [ "$(tip)" = "$before" ] || fail "update-plugin $* moved $BRANCH"
+}
+
+before=$(tip)
+run "$BRANCH" 0.2.0
+[ "$status" -eq 0 ] || fail "update-plugin $BRANCH 0.2.0 exited $status: $out"
+case $out in *"vhid 0.1.0 -> 0.2.0"*) ;; *) fail "update-plugin $BRANCH 0.2.0 said \"$out\"" ;; esac
+[ "$(git -C "$REPO" rev-parse "$BRANCH^")" = "$before" ] || fail "the new tip's parent is not the branch as it was"
+[ "$(git -C "$REPO" ls-tree --name-only "$BRANCH")" = claude-plugin ] \
+  || fail "the new tip holds $(git -C "$REPO" ls-tree --name-only "$BRANCH" | tr '\n' ' '), not claude-plugin alone"
+[ "$(git -C "$REPO" rev-parse "$BRANCH:claude-plugin")" = "$(git -C "$REPO" rev-parse "v0.2.0:claude-plugin")" ] \
+  || fail "the new tip's claude-plugin/ is not v0.2.0's"
+[ "$(git -C "$REPO" log -1 --format='%(trailers:key=Release,valueonly)' "$BRANCH" | sed '/^$/d')" = 0.2.0 ] \
+  || fail "the new tip does not name release 0.2.0"
+
+unmoved 0 "holds vhid 0.2.0, at 0.2.0 or past it" "$BRANCH" 0.2.0
+unmoved 0 "holds vhid 0.2.0, at 0.1.0 or past it" "$BRANCH" 0.1.0
+unmoved 2 "'0.3.0-rc1' is not a release version" "$BRANCH" 0.3.0-rc1
+unmoved 1 "no tag v0.4.0" "$BRANCH" 0.4.0
+unmoved 1 "has no branch elsewhere" elsewhere 0.2.0
+git -C "$REPO" branch unnamed v0.2.0
+before=$(git -C "$REPO" rev-parse unnamed)
+run unnamed 0.2.0
+[ "$status" -eq 1 ] || fail "a branch whose tip names no release was not refused: $out"
+[ "$(git -C "$REPO" rev-parse unnamed)" = "$before" ] || fail "a branch whose tip names no release was moved"
+
+exit $failed

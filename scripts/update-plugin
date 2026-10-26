@@ -1,0 +1,45 @@
+#!/bin/bash
+# Commits a release's Claude Code plugin onto the branch the marketplace installs it from,
+# in a checkout of vhid holding that branch and the release's tag: the commit's tree is
+# claude-plugin/ as of the tag and nothing else, its parent is the branch as it was, and
+# its Release trailer is the version. Pushing is the caller's. release.yaml runs it once a
+# release is published, and a person runs it when that step failed (docs/releasing.md).
+#
+#   scripts/update-plugin <checkout> <branch> <version>
+#
+# The branch holds no .github/workflows, so pushing it never changes a workflow file:
+# GitHub refuses that from the release job's token, which cannot be given the workflows
+# permission.
+#
+# Held to bash 3.2, like every script here.
+set -euo pipefail
+[ $# -eq 3 ] || { echo "usage: scripts/update-plugin <checkout> <branch> <version>" >&2; exit 2; }
+checkout=$1 branch=$2 version=$3
+newest=$(dirname "$0")/newest-release
+
+# [LAW:parse-dont-validate] The plugin goes to everyone who installs it, so it takes a
+# release, never a pre-release, as the cask does.
+"$newest" "$version" >/dev/null || {
+  echo "update-plugin: '$version' is not a release version, as scripts/newest-release decides" >&2
+  exit 2
+}
+tip=$(git -C "$checkout" rev-parse --verify --quiet "refs/heads/$branch^{commit}") \
+  || { echo "update-plugin: $checkout has no branch $branch" >&2; exit 1; }
+# [LAW:one-source-of-truth] The branch's tip names the release it holds, and nothing else
+# records it.
+was=$(git -C "$checkout" log -1 --format='%(trailers:key=Release,valueonly)' "$tip" | sed '/^$/d')
+"$newest" "$was" >/dev/null \
+  || { echo "update-plugin: $branch's tip $tip names release '$was', which is not a release version" >&2; exit 1; }
+# Only forward: a newer release's job that finished first, or an older release's job run
+# again, leaves the plugin where it is.
+if [ "$("$newest" "$was" "$version")" = "$was" ]; then
+  echo "update-plugin: $branch holds vhid $was, at $version or past it"
+  exit 0
+fi
+plugin=$(git -C "$checkout" rev-parse --verify --quiet "refs/tags/v$version^{commit}:claude-plugin") \
+  || { echo "update-plugin: $checkout has no tag v$version holding claude-plugin/" >&2; exit 1; }
+tree=$(printf '040000 tree %s\tclaude-plugin\n' "$plugin" | git -C "$checkout" mktree)
+commit=$(git -C "$checkout" commit-tree "$tree" -p "$tip" \
+  -m "vhid $version: claude-plugin/ as of v$version" -m "Release: $version")
+git -C "$checkout" update-ref "refs/heads/$branch" "$commit" "$tip"
+echo "update-plugin: $branch vhid $was -> $version, commit $commit"
