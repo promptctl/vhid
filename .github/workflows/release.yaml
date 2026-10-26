@@ -142,6 +142,7 @@ jobs:
           echo "checks $(echo $checks) green on $GITHUB_SHA, after waiting ${SECONDS}s for them once the build was done" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Published
+        id: published
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -190,3 +191,21 @@ jobs:
             sleep 10
           done
           echo "the tap's cask is vhid $was, at $VERSION_NUMBER or past it, after ${SECONDS}s; the tap's run $run is $status $conclusion" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The Claude Code marketplace installs the plugin from the branch marketplace.json
+      # names, so skills and hooks reach a Mac with the release whose binaries they were
+      # written for, and work on master reaches nobody until it ships. Once the Release is
+      # public the branch moves to its commit, whatever the cask step did: the two are
+      # separate channels, and each failure names its own recovery. Placed after the cask
+      # step so that step is never skipped by this one. [LAW:one-source-of-truth] The
+      # branch is read from marketplace.json, the one place it is named. Forward only:
+      # there is no --force here, and the branch's ruleset (docs/releasing.md) refuses a
+      # force-push or deletion from anyone.
+      - name: The plugin's branch is at this release
+        if: always() && steps.published.outcome == 'success' && env.PRERELEASE == 'false'
+        run: |
+          branch=$(plutil -extract plugins.0.source.ref raw -o - .claude-plugin/marketplace.json)
+          trap '[ $? -eq 0 ] || echo "::error::vhid $VERSION_NUMBER is published but the plugin is not; move it with \`git push origin $TAG^{commit}:refs/heads/$branch\` (docs/releasing.md)"' EXIT
+          was=$(git ls-remote --exit-code origin "refs/heads/$branch" | cut -f1)
+          git push origin "$GITHUB_SHA:refs/heads/$branch"
+          echo "the plugin's branch $branch moved from $was to $GITHUB_SHA ($TAG)" | tee -a "$GITHUB_STEP_SUMMARY"

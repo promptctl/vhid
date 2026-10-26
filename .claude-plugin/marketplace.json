@@ -8,7 +8,12 @@
   "plugins": [
     {
       "name": "vhid",
-      "source": "./claude-plugin",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/promptctl/vhid.git",
+        "path": "claude-plugin",
+        "ref": "latest-release"
+      },
       "description": "Type, click and read the screen on this Mac through vhid and eyes"
     }
   ]
