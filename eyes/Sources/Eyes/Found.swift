@@ -81,8 +81,9 @@ public struct Found: Sendable, Hashable {
 /// reports no confidence. Attached to the source instead, the impossible pair cannot be
 /// spelled and no caller guards for it.
 public enum Source: Sendable, Hashable {
-    /// Read from the accessibility tree, which names what kind of element it was.
-    case tree(role: Role)
+    /// Read from the accessibility tree, which names what kind of element it was, and what
+    /// else the element says in words besides the row's text: a "+" button's description "Add".
+    case tree(role: Role, also: [Words])
     /// Recognised from pixels, which know nothing of elements and answer with how sure
     /// the recogniser was.
     case pixels(confidence: Confidence)
@@ -94,11 +95,57 @@ public enum Source: Sendable, Hashable {
     /// button from a browser bookmark of the same name, or a field from its label.
     public var role: Role? {
         switch self {
-        case .tree(let role): role
+        case .tree(let role, _): role
         case .pixels: nil
         case .merged(let a, let b): a.role ?? b.role
         }
     }
+
+    /// What else the element says in words, when a reader that reads elements saw it.
+    public var also: [Words] {
+        switch self {
+        case .tree(_, let also): also
+        case .pixels: []
+        case .merged(let a, let b): a.role == nil ? b.also : a.also
+        }
+    }
+}
+
+/// Which of an element's texts said something: the three an accessibility element says itself
+/// with, in the order a row's text is chosen from.
+public enum Attribute: String, Sendable, Hashable, CaseIterable {
+    case value, title, description
+}
+
+/// Text an element says in words, and which of its attributes said it.
+public struct Words: Sendable, Hashable {
+    public let attribute: Attribute
+    public let text: Text
+
+    public init(_ attribute: Attribute, _ text: Text) {
+        self.attribute = attribute
+        self.text = text
+    }
+}
+
+/// Anything an element answered as text, and what kind: words, a number in figures - a
+/// checkbox's 0 or 1, a slider's position - or a link's address. Only words name what an
+/// element is; the other two say its state or where it goes. [LAW:types-are-the-program]
+public struct Said: Sendable, Hashable {
+    public enum Kind: Sendable, Hashable { case words, figure, address }
+
+    public let attribute: Attribute
+    public let text: Text
+    public let kind: Kind
+
+    public init(_ attribute: Attribute, _ text: Text, _ kind: Kind) {
+        self.attribute = attribute
+        self.text = text
+        self.kind = kind
+    }
+
+    /// The words, when it said words.
+    public var words: Words? { kind == .words ? Words(attribute, text) : nil }
 }
 
 /// An accessibility role string such as `AXButton`. Apps define their own, so this is an

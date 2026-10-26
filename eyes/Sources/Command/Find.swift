@@ -28,6 +28,9 @@ struct Find: AsyncParsableCommand {
     @Option(help: .init(stringLiteral: Help.source))
     var source = SourceKind.merged
 
+    @Option(help: .init(stringLiteral: Help.role))
+    var role: String?
+
     @Option(help: .init(stringLiteral: Help.until))
     var until: Until?
 
@@ -37,6 +40,7 @@ struct Find: AsyncParsableCommand {
     func validate() throws {
         _ = try Self.match(text, exact: exact, edits: edits, as: .flag)
         _ = try Self.near(near)
+        _ = try Self.role(role, source: source, as: .flag)
         _ = try Where.limit(limit, as: .flag)
         _ = try Self.wait(until, timeout: timeout, as: .flag)
     }
@@ -44,7 +48,8 @@ struct Find: AsyncParsableCommand {
     @MainActor
     func run() async throws {
         try await look(Query(match: Self.match(text, exact: exact, edits: edits, as: .flag),
-                             region: await place.region, limit: Where.limit(limit, as: .flag), near: Self.near(near)),
+                             region: await place.region, limit: Where.limit(limit, as: .flag), near: Self.near(near),
+                             role: Self.role(role, source: source, as: .flag)),
                        source: source, wait: Self.wait(until, timeout: timeout, as: .flag))
     }
 
@@ -60,6 +65,19 @@ struct Find: AsyncParsableCommand {
             throw ValidationError("\(s("timeout")) is \(seconds), and it takes seconds above 0 and at most \(Int(Wait.longest))")
         }
         return wait
+    }
+
+    /// The role every match is of, none, or the refusal - one rule for both verbs and both
+    /// MCP tools. Pixels know no roles, so a role asked of them alone could only ever match
+    /// nothing. [LAW:single-enforcer]
+    static func role(_ name: String?, source: SourceKind, as s: Spelling) throws -> Role? {
+        try name.map { name in
+            guard Text(name) != nil else { throw ValidationError("the role to find is blank") }
+            guard source != .pixels else {
+                throw ValidationError("\(s("role")) needs the tree, and \(s("source")) pixels reads no roles: use tree or merged")
+            }
+            return Role(rawValue: name)
+        }
     }
 
     /// The text the matches are ordered beside, or the refusal - one rule for the verb and
@@ -96,12 +114,17 @@ struct Read: AsyncParsableCommand {
     @Option(help: .init(stringLiteral: Help.source))
     var source = SourceKind.merged
 
+    @Option(help: .init(stringLiteral: Help.role))
+    var role: String?
+
     func validate() throws {
         _ = try Where.limit(limit, as: .flag)
+        _ = try Find.role(role, source: source, as: .flag)
     }
 
     @MainActor
     func run() async throws {
-        try await look(Query(match: nil, region: await place.region, limit: Where.limit(limit, as: .flag)), source: source)
+        try await look(Query(match: nil, region: await place.region, limit: Where.limit(limit, as: .flag),
+                             role: Find.role(role, source: source, as: .flag)), source: source)
     }
 }

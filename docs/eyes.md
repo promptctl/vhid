@@ -48,6 +48,22 @@ takes, rounded outward to whole points so it covers the run and holds the point 
 beside it. Every rectangle eyes prints is in that form, a window's or display's bounds and
 a scope line's region too, so any of them can be passed back as `--rect`.
 
+A row the tree found is its element's first text in words, of its value, title and
+description. Whatever else the element says in words follows the role, each after the
+attribute that says it: a button drawn "+" and described "Add" prints
+`169,426  160,417,18,18  +  AXButton  description Add`. `find` matches those words too, so
+`find Add` finds that button, and its row still reads "+". A checkbox's 0 or 1 and a link's
+address are its state and where it goes, never its row's text or a word it is found by.
+A near miss's edits off follow its role, before those words. Every text on a row is on one
+line, its runs of whitespace one space, and cut past 120 characters, saying how long it was.
+
+`--role <role>` keeps only rows of that role, as rows print it: `find Add --role AXButton`
+answers the button and not a label of the same text, and `read --role AXButton` lists every
+button with what each is called. Rows of another role are counted `other_role`. Text the
+pixels reader alone saw has no role anyone knows and could be the control asked for, so a
+row of it that matches is counted `role_unknown` and the region is not read whole; with
+`--source tree` there is none. A role is the tree's, so `--source pixels` refuses it.
+
 A row the accessibility tree found has its box checked against where a click lands. An
 element's frame is its app's claim: Safari gives a page's native-looking button a frame
 several points wider than the button, and a click inside the frame can press the page
@@ -78,7 +94,8 @@ Open panel, the app eyes answers to, an app behind, a point on a display other t
 one that look reads, or one in none of the app's windows, such as its menu bar - and its window by the id `--window`
 takes. Then a row per element: the one hit, then each holding it, up to the area that holds
 them, such as a window, a list, a toolbar or a web page, each with its role, its frame and
-what it says. A click on a button's label lands on the label; the row under it is the
+what it says, each text after the attribute that says it - a checkbox's `value 1`, a
+button's `description Add` - its state and where it goes among them. A click on a button's label lands on the label; the row under it is the
 button. Where the hit test names no element, as over a game or a canvas, it names the window
 listed frontmost there, which a click lands in all the same. It needs Accessibility, and decides nothing: `vhid click` presses what is there
 whatever it said. The climb's hit tests get the same two seconds as a look's box checks, and

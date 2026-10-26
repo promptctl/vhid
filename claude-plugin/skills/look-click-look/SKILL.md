@@ -26,7 +26,10 @@ Done means a look after the act showed the change. An act's answer says the act 
    text in a window in reading order, for when you do not yet know what to look for.
    Each row is the point, the box around the run, the text, and what it is: the
    element's role, such as `AXButton` or `AXLink`, or `pixels` for text drawn with no
-   element behind it.
+   element behind it - then what else the element says, such as `description Add` on a
+   button drawn "+". `find` matches those words too, and `role` keeps one kind of
+   element: `{"text": "Add", "role": "AXButton"}` is the Add button, not a label
+   reading Add. `read` with a `role` lists every button and what each is called.
    In a browser, pass `page` with the window's id instead of `window`: it reads the
    web page alone, so a bookmark or toolbar button with the same name is not a match.
    When the same label appears several times, such as a Remove button on every row,

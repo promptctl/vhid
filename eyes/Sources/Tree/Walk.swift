@@ -67,7 +67,7 @@ struct Facts {
     /// `AXUnknown` - the tree's own word - when the app would not name it.
     let role: Role
     /// Its value, title and description, in that order.
-    let texts: [Heard<String?>]
+    let texts: [Heard<Said?>]
     /// Where it is: nil inside when it has no position or no size.
     let frame: Heard<ScreenRect?>
     /// Whether the app answered its role, even with nothing. Apart from `role` because
@@ -113,7 +113,9 @@ let areas: Set<Role> = Set([
 ].map { Role(rawValue: $0) } + [webArea])
 
 extension Node {
-    /// The element as a finding: its first text that is not blank, at its own frame, if it
+    /// The element as a finding: its first text in words, at its own frame, with the rest of
+    /// its words as `also` - a figure or an address says an element's state or where it goes,
+    /// never what it is, so neither is a row's text or a name to find it by. If it
     /// is not an area, and the centre of that frame - the point a click lands on - is
     /// inside `clip` and under none of the windows in front of this one.
     ///
@@ -136,7 +138,8 @@ extension Node {
         if case .answered(let placed) = facts.frame {
             guard let placed, !placed.isThin, clip.contains(placed.centre) else { return .excluded(.unplaced) }
         }
-        let text = facts.texts.lazy.compactMap({ $0.answer.flatMap { $0 }.flatMap(Text.init) }).first
+        let words = facts.texts.compactMap { $0.answer??.words }
+        let text = words.first?.text
         guard text != nil || facts.texts.contains(.unanswered) else { return .excluded(.wordless) }
         if case .answered(let placed?) = facts.frame {
             switch covers.hide(placed.centre) {
@@ -146,7 +149,9 @@ extension Node {
             }
         }
         guard let text, case .answered(let placed?) = facts.frame else { return .excluded(.unanswered) }
-        return .found(Found(text: text, frame: placed, source: .tree(role: facts.role)))
+        var said: Set = [text]
+        let also = words.dropFirst().filter { said.insert($0.text).inserted }
+        return .found(Found(text: text, frame: placed, source: .tree(role: facts.role, also: also)))
     }
 }
 
@@ -342,13 +347,6 @@ struct Bounds {
     let time: Duration
 }
 
-/// One text at one place, whatever role said it: a button and the label inside it are two
-/// elements and one thing on screen.
-private struct Place: Hashable {
-    let text: String
-    let frame: ScreenRect
-}
-
 /// Each root in turn, front to back, breadth first within it, every element read once,
 /// until the roots run out or a bound is hit - so a walk cut short has spent its bounds on
 /// the windows in front, never on the shallow levels of one behind.
@@ -369,7 +367,6 @@ func walk<Element>(
     read: (Element) throws -> Node<Element>
 ) rethrows -> Walked {
     var found: [Found] = []
-    var seen: Set<Place> = []
     var counts: [Exclusion.Reason: Int] = unwalked > 0 ? [.unwalked: unwalked] : [:]
     var examined = 0
     var stop: Stop?
@@ -391,8 +388,6 @@ func walk<Element>(
             }()
             switch candidate {
             case _ where quiet: break
-            case .found(let run) where !seen.insert(Place(text: run.text.value, frame: run.frame)).inserted:
-                counts[.duplicate, default: 0] += 1
             case .found(let run): found.append(run)
             case .excluded(let reason): counts[reason, default: 0] += 1
             }

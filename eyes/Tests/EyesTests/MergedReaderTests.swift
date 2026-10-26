@@ -25,7 +25,7 @@ import Testing
         func pressing(_ reading: Reading, until deadline: ContinuousClock.Instant) async throws -> Reading { reading.pressing { Checked(press($0), calls: calls) } }
     }
 
-    static let role = Source.tree(role: Role(rawValue: "AXButton"))
+    static let role = Source.tree(role: Role(rawValue: "AXButton"), also: [])
     static let seen = Source.pixels(confidence: Confidence(0.8)!)
 
     private func at(_ text: String, _ x: Double, _ y: Double, _ source: Source, width: Double = 60) -> Found {
@@ -180,7 +180,7 @@ import Testing
     @Test func twoFindsOfTheSecondReaderAreNeverMergedWithEachOther() async throws {
         let r = try await read(
             Fake(source: .pixels, found: []),
-            Fake(source: .tree, found: [at("OK", 100, 100, Self.role), at("OK", 104, 102, .tree(role: Role(rawValue: "AXStaticText")))])
+            Fake(source: .tree, found: [at("OK", 100, 100, Self.role), at("OK", 104, 102, .tree(role: Role(rawValue: "AXStaticText"), also: []))])
         )
         #expect(all(r).map(\.source.kind) == [.tree, .tree])
         #expect(r.scope.excluded.isEmpty)

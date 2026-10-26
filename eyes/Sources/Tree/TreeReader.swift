@@ -208,24 +208,27 @@ public struct TreeReader: Reader {
 
     /// An element's value, title and description, in one round trip of their own: a text area's
     /// value is its whole contents, which no read of its place should wait on.
-    static func texts(_ element: AXUIElement) throws(TreeError) -> [Heard<String?>] {
-        try read([kAXValueAttribute, kAXTitleAttribute, kAXDescriptionAttribute], of: element, as: [.text, .text, .text]).map { heard in
-            switch heard {
-            case .answered(let value?): spoken(value)
-            case .answered(nil): .answered(nil)
-            case .unanswered: .unanswered
-            }
-        }
+    static func texts(_ element: AXUIElement) throws(TreeError) -> [Heard<Said?>] {
+        said(try read(Attribute.allCases.map(\.name), of: element, as: [.text, .text, .text]))
+    }
+
+    /// The three reads of value, title and description, each as what it said - the one
+    /// conversion find's walk and hit's climb both read an element's texts through.
+    /// [LAW:one-source-of-truth]
+    nonisolated static func said(_ reads: some Collection<Heard<CFTypeRef?>>) -> [Heard<Said?>] {
+        zip(Attribute.allCases, reads).map { attribute, heard in heard.map { $0.flatMap { spoken($0, as: attribute) } } }
     }
 
     /// A value as text: a string, a number in figures - a checkbox's 0 or 1, a slider's
-    /// position - or a link's address. Any other kind - a range, an element - is an answer
-    /// with no text in it.
-    static func spoken(_ value: CFTypeRef) -> Heard<String?> {
-        if let text = value as? String { return .answered(text) }
-        if let number = value as? NSNumber { return .answered(number.stringValue) }
-        if let url = value as? URL { return .answered(url.absoluteString) }
-        return .answered(nil)
+    /// position - or a link's address. Blank, or any other kind - a range, an element - is an
+    /// answer with no text in it.
+    nonisolated static func spoken(_ value: CFTypeRef, as attribute: Attribute) -> Said? {
+        let (text, kind): (String?, Said.Kind) =
+            if let text = value as? String { (text, .words) }
+            else if let number = value as? NSNumber { (number.stringValue, .figure) }
+            else if let url = value as? URL { (url.absoluteString, .address) }
+            else { (nil, .words) }
+        return text.flatMap(Text.init).map { Said(attribute, $0, kind) }
     }
 
     /// An element's parent, nil at the top of its tree.
@@ -238,8 +241,7 @@ public struct TreeReader: Reader {
         (value as? [CFTypeRef] ?? []).compactMap(element).map(bounded)
     }
 
-    private static let attributes = [
-        kAXRoleAttribute, kAXValueAttribute, kAXTitleAttribute, kAXDescriptionAttribute,
+    private static let attributes = [kAXRoleAttribute] + Attribute.allCases.map(\.name) + [
         kAXPositionAttribute, kAXSizeAttribute, kAXChildrenAttribute,
     ]
     private static let parts: [Part] = [.structure, .text, .text, .text, .structure, .structure, .structure]
@@ -254,7 +256,7 @@ public struct TreeReader: Reader {
         return Node(
             facts: Facts(
                 role: Role(rawValue: reads[0].answer.flatMap { $0 as? String } ?? kAXUnknownRole),
-                texts: reads[1...3].map { $0.map { $0 as? String } },
+                texts: said(reads[1...3]),
                 frame: frame,
                 named: { if case .answered = reads[0] { true } else { false } }()
             ),
@@ -314,5 +316,16 @@ public struct TreeReader: Reader {
 
     private static func element(_ value: CFTypeRef) -> AXUIElement? {
         CFGetTypeID(value) == AXUIElementGetTypeID() ? (value as! AXUIElement) : nil
+    }
+}
+
+extension Attribute {
+    /// The accessibility attribute read for it.
+    var name: String {
+        switch self {
+        case .value: kAXValueAttribute
+        case .title: kAXTitleAttribute
+        case .description: kAXDescriptionAttribute
+        }
     }
 }

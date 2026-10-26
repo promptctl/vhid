@@ -44,7 +44,12 @@ let region = ScreenRect(x: 0, y: 0, width: 1000, height: 800)
 let button = ScreenRect(x: 100, y: 100, width: 80, height: 30)
 
 func facts(_ texts: [Heard<String?>] = [.answered("OK")], frame: Heard<ScreenRect?> = .answered(button), role: String = "AXButton", named: Bool = true) -> Facts {
-    Facts(role: Role(rawValue: role), texts: texts, frame: frame, named: named)
+    Facts(role: Role(rawValue: role), texts: said(texts), frame: frame, named: named)
+}
+
+/// Value, title and description as an app answers them, through the reader's own conversion.
+func said(_ texts: [Heard<String?>]) -> [Heard<Said?>] {
+    TreeReader.said(texts.map { $0.map { $0.map { $0 as CFString } } })
 }
 
 /// The facts of an element with nothing under it, which is most of what a candidate rule asks.
@@ -55,6 +60,23 @@ extension Facts {
 }
 
 @Suite struct CandidateTests {
+    /// A row's text is the element's first in words; the rest of its words come along, each
+    /// once, and a figure or an address is neither: a checkbox's 1 is its state, not its name.
+    @Test func aRowIsItsFirstWordsAndTheRestComeAlong() {
+        let plus = facts([.answered(nil), .answered("+"), .answered("Add")])
+        #expect(plus.candidate(in: region, under: .none) == .found(Found(text: Text("+")!, frame: button,
+                                                                          source: .tree(role: Role(rawValue: "AXButton"), also: [Words(.description, Text("Add")!)]))))
+        let box = Facts(role: Role(rawValue: "AXCheckBox"),
+                        texts: [.answered(Said(.value, Text("1")!, .figure)), .answered(Said(.title, Text("Remember me")!, .words)),
+                                .answered(Said(.description, Text("Remember me")!, .words))],
+                        frame: .answered(button), named: true)
+        #expect(box.candidate(in: region, under: .none) == .found(Found(text: Text("Remember me")!, frame: button,
+                                                                         source: .tree(role: Role(rawValue: "AXCheckBox"), also: []))))
+        let link = Facts(role: Role(rawValue: "AXLink"), texts: [.answered(Said(.value, Text("https://example.com/")!, .address)), .answered(nil), .answered(nil)],
+                         frame: .answered(button), named: true)
+        #expect(link.candidate(in: region, under: .none) == .excluded(.wordless))
+    }
+
     /// An area with nothing under it is the thing its label names; one holding something is not.
     @Test func aListWithNothingUnderItIsFoundAndOneHoldingSomethingIsAnArea() {
         let list = facts([.answered("Inbox")], role: "AXList")
@@ -86,7 +108,7 @@ extension Facts {
     }
 
     @Test func anElementWithTextInTheRegionIsFoundAtItsFrameWithItsRole() {
-        #expect(facts().candidate(in: region, under: .none) == .found(Found(text: Text("OK")!, frame: button, source: .tree(role: Role(rawValue: "AXButton")))))
+        #expect(facts().candidate(in: region, under: .none) == .found(Found(text: Text("OK")!, frame: button, source: .tree(role: Role(rawValue: "AXButton"), also: []))))
     }
 
     /// The first text that says something wins: an empty value gives way to the title.
@@ -144,7 +166,7 @@ extension Facts {
     /// that does not answer leaves the element unread, never found or covered by guess.
     @Test func aWindowInFrontCoversOnlyWhereTheHitTestLandsInIt() {
         let overlay = [Cover(frame: region, pid: 9)]
-        #expect(facts().candidate(in: region, under: Covers(windows: overlay, owner: 1, hit: { _ in .answered(1) })) == .found(Found(text: Text("OK")!, frame: button, source: .tree(role: Role(rawValue: "AXButton")))))
+        #expect(facts().candidate(in: region, under: Covers(windows: overlay, owner: 1, hit: { _ in .answered(1) })) == .found(Found(text: Text("OK")!, frame: button, source: .tree(role: Role(rawValue: "AXButton"), also: []))))
         #expect(facts().candidate(in: region, under: Covers(windows: overlay, owner: 1, hit: { _ in .answered(9) })) == .excluded(.covered))
         #expect(facts().candidate(in: region, under: Covers(windows: overlay, owner: 1, hit: { _ in .unanswered })) == .excluded(.overlaid))
     }
@@ -254,18 +276,18 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
         "window": node("Save changes?", region, children: .answered(["group", "busy"])),
         "group": node(nil, ScreenRect(x: 50, y: 50, width: 400, height: 200), children: .answered(["ok", "label"])),
         "ok": node("OK"),
-        // The label inside the button: one text at one place, twice, whatever the roles.
+        // The label inside the button: one text at one place, twice, each with its role. Which
+        // one a reading answers is the judge's to say, after the role asked for.
         "label": node("OK", role: "AXStaticText"),
         "busy": node("Cancel", ScreenRect(x: 300, y: 100, width: 80, height: 30), children: .unanswered),
     ])
 
     @Test func everyElementIsReadOnceAndEachOneIsCounted() {
         let w = dialog.walked()
-        #expect(w.found.map(\.text.value) == ["Save changes?", "Cancel", "OK"])
+        #expect(w.found.map(\.text.value) == ["Save changes?", "Cancel", "OK", "OK"])
+        #expect(w.found.map(\.source.role?.rawValue) == ["AXButton", "AXButton", "AXButton", "AXStaticText"])
         #expect(w.examined == 5)
-        #expect(w.excluded == [
-            Exclusion(reason: .duplicate, count: 1), Exclusion(reason: .unanswered, count: 1), Exclusion(reason: .wordless, count: 1),
-        ])
+        #expect(w.excluded == [Exclusion(reason: .unanswered, count: 1), Exclusion(reason: .wordless, count: 1)])
     }
 
     /// A subtree that went unread keeps the region from having been read whole, so a busy
@@ -732,10 +754,11 @@ extension Covers {
     /// A checkbox's value is a number, said in figures, and a link's an address; a range or an
     /// element is an answer with no text, never counted as one that would not say.
     @Test func aNumberOrAnAddressIsSaidAndAnyOtherKindIsNoText() {
-        #expect(TreeReader.spoken("Add" as CFString) == .answered("Add"))
-        #expect(TreeReader.spoken(kCFBooleanTrue) == .answered("1"))
-        #expect(TreeReader.spoken(NSNumber(value: 0.5)) == .answered("0.5"))
-        #expect(TreeReader.spoken(URL(string: "https://example.com/")! as CFURL) == .answered("https://example.com/"))
-        #expect(TreeReader.spoken(boxed(1, 2, 3, 4).0) == .answered(nil))
+        #expect(TreeReader.spoken("Add" as CFString, as: .title) == Said(.title, Text("Add")!, .words))
+        #expect(TreeReader.spoken(kCFBooleanTrue, as: .value) == Said(.value, Text("1")!, .figure))
+        #expect(TreeReader.spoken(NSNumber(value: 0.5), as: .value) == Said(.value, Text("0.5")!, .figure))
+        #expect(TreeReader.spoken(URL(string: "https://example.com/")! as CFURL, as: .value) == Said(.value, Text("https://example.com/")!, .address))
+        #expect(TreeReader.spoken(boxed(1, 2, 3, 4).0, as: .value) == nil)
+        #expect(TreeReader.spoken("  " as CFString, as: .description) == nil)
     }
 }

@@ -9,7 +9,7 @@ import Testing
 @Suite(.eventsKept) struct HitCommandTests {
     static let settings = Front.App(pid: 300, name: "System Settings")
     static let window = Window(id: 4127, owner: "System Settings", pid: 300, frame: ScreenRect(x: 0, y: 25, width: 800, height: 600), layer: 0)
-    static let add = Landing.Element(role: Role(rawValue: "AXButton"), texts: ["Add"], frame: ScreenRect(x: 160, y: 417, width: 18, height: 18))
+    static let add = Landing.Element(role: Role(rawValue: "AXButton"), texts: [Said(.description, Text("Add")!, .words)], frame: ScreenRect(x: 160, y: 417, width: 18, height: 18))
     static let list = Landing.Element(role: Role(rawValue: "AXList"), texts: [], unanswered: 1, frame: nil)
 
     /// The case the epic began with: the button "Add" in System Settings, the front app.
@@ -40,7 +40,7 @@ import Testing
             A click at 169,426.5 lands in System Settings (pid 300), the front app, which a look with no place named reads, \
             in its window 4127 at 0,25,800,600. The element hit, then each holding it, up to the area holding them. \
             Each row: role, frame as x,y,width,height in vhid click coordinates, then what it says.
-            AXButton\t160,417,18,18\tAdd
+            AXButton\t160,417,18,18\tdescription Add
             AXList\t(no frame)\t(1 of its texts unanswered)
             """)
     }
@@ -81,9 +81,9 @@ import Testing
     /// A row is one line: a text area's value - a terminal's whole scrollback - is one line,
     /// cut, saying how long it was.
     @Test func aLongOrManyLinedTextIsOneLineAndSaysItWasCut() {
-        #expect(Hit.spelled("Save\tas…\n  PDF") == "Save as… PDF")
+        #expect(Report.spelled("Save\tas…\n  PDF") == "Save as… PDF")
         let scrollback = String(repeating: "line\n", count: 100)
-        let cut = Hit.spelled(scrollback)
+        let cut = Report.spelled(scrollback)
         #expect(cut == String(repeating: "line ", count: 24) + "... (500 characters)")
         #expect(!cut.contains("\n"))
     }

@@ -121,32 +121,13 @@ struct Hit: AsyncParsableCommand {
         }
     }
 
-    /// One element: role, frame, then each text it said, and how many would not say.
+    /// One element: role, frame, then each text it said after the attribute that said it, as a
+    /// row's other words are, and how many would not say.
     /// Tab-separated, like every row eyes prints.
     private static func row(_ element: Landing.Element) -> String {
-        ([element.role.rawValue, element.frame.map(String.init(describing:)) ?? "(no frame)"] + element.texts.map(spelled)
+        ([element.role.rawValue, element.frame.map(String.init(describing:)) ?? "(no frame)"] + element.texts.map { "\($0.attribute.rawValue) \(Report.spelled($0.text.value))" }
             + (element.unanswered > 0 ? ["(\(element.unanswered) of its texts unanswered)"] : []))
             .joined(separator: "\t")
-    }
-
-    /// The most of one text a row prints: a control's name whole, never a terminal's or a
-    /// document's whole contents, which is a text area's value.
-    static let longest = 120
-
-    /// A text on one line - a row is one element - its whitespace runs, newlines and tabs
-    /// among them, as one space, and cut past `longest` saying how long it was, so a cut text
-    /// is never taken for a whole one. [LAW:no-silent-failure] Stops reading at the cut: a text
-    /// area's value is a whole document.
-    static func spelled(_ text: String) -> String {
-        var line = "", length = 0, gap = false
-        for character in text {
-            if character.isWhitespace { gap = length > 0; continue }
-            if gap { line.append(" "); length += 1; gap = false }
-            guard length < longest else { return "\(line.prefix(longest))... (\(text.count) characters)" }
-            line.append(character)
-            length += 1
-        }
-        return line
     }
 
     /// The hit test and the window server, in the process. The window is looked for in the
