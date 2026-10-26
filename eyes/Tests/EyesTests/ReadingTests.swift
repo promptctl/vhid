@@ -106,7 +106,7 @@ import Testing
     /// A role exists exactly when the tree found it. There is no spelling of a recognised
     /// run that carries a role, or a tree element that carries a confidence.
     @Test func onlyTheTreeNamesARole() {
-        #expect(Source.tree(role: Role(rawValue: "AXButton")).kind == .tree)
+        #expect(Source.tree(role: Role(rawValue: "AXButton"), also: []).kind == .tree)
         #expect(Source.pixels(confidence: Confidence(0.5)!).kind == .pixels)
     }
 

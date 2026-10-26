@@ -35,6 +35,8 @@ enum Help {
         + " Absent counts only a region read whole, twice running."
     static let timeout = "With until, the most seconds to wait: at most \(Int(Wait.longest)). A wait that runs out answers"
         + " with its last reading and says it timed out. Defaults to \(Int(Wait.defaultSeconds))."
+    static let role = "Only rows of this accessibility role, as rows print it: AXButton for buttons, AXLink for links."
+        + " A role is the tree's, so text the pixels alone saw is set aside as role unknown, and the read is not whole."
     static let source = "Which reader looks: tree (the accessibility tree: exact text and roles),"
         + " pixels (recognised text, anything drawn), or merged (both, each thing reported once;"
         + " answers with either grant, naming a reader that could not look). Defaults to merged. " + needs
@@ -191,12 +193,13 @@ enum Report {
     /// [LAW:no-silent-failure]
     static func scope(_ reading: Reading, query: Query, source: SourceKind, grantNote: String = "") -> String {
         let s = reading.scope
-        let asked = query.match.map { match in wanted(match) + (query.near.map { " near \(wanted($0))" } ?? "") }
+        let role = query.role.map { " as \($0.rawValue)" } ?? ""
+        let asked = query.match.map { match in wanted(match) + role + (query.near.map { " near \(wanted($0))" } ?? "") }
         let head: String = switch reading.outcome {
         case .matched(let m):
-            asked.map { "\(m.count) matched \($0)" } ?? "\(m.count) run\(m.count == 1 ? "" : "s")"
+            asked.map { "\(m.count) matched \($0)" } ?? "\(m.count) run\(m.count == 1 ? "" : "s")\(role)"
         case .nearest:
-            asked.map { "\($0) not found" } ?? "no text"
+            asked.map { "\($0) not found" } ?? "no text\(role)"
         case .unanchored:
             // The near misses that follow are the anchor's, so the anchor is what is named
             // not found. [LAW:no-silent-failure]
@@ -234,7 +237,9 @@ enum Report {
 
     /// One run per row: the centre a click lands on, the box around the run, the text,
     /// and what it is - the role the tree gave it, or `pixels` for text only the pixels
-    /// reader saw, which has none. The nearest rows add how many edits off they were.
+    /// reader saw, which has none - then what else its element says in words, each after the
+    /// attribute that says it: a "+" button's `description Add`. The nearest rows add how many
+    /// edits off they were.
     static func rows(_ outcome: Outcome) -> [String] {
         switch outcome {
         case .matched(let m): m.all.map(row)
@@ -244,7 +249,8 @@ enum Report {
 
     private static func row(_ found: Found) -> String {
         let at = clickPoint(found.frame.centre)
-        return "\(Int(at.x)),\(Int(at.y))\t\(box(found.frame, holding: at))\t\(found.text)\t\(found.source.role?.rawValue ?? "pixels")"
+        return (["\(Int(at.x)),\(Int(at.y))", "\(box(found.frame, holding: at))", "\(found.text)", found.source.role?.rawValue ?? "pixels"]
+            + found.source.also.map { "\($0.attribute.rawValue) \($0.text)" }).joined(separator: "\t")
     }
 
     /// The whole point a click is sent to: the frame's centre, rounded.
@@ -369,6 +375,7 @@ extension Report {
             Telemetry.note("source", source.rawValue)
             Telemetry.note("region", query.region.kind)
             Telemetry.note("order", query.near == nil ? "reading" : "near")
+            Telemetry.note("role", query.role?.rawValue ?? "none")
             // Tallied as each read starts, so a look that fails says how many it spent.
             Telemetry.count("reads", 0)
             Telemetry.count("box_ms", 0)
@@ -385,13 +392,13 @@ extension Report {
             }
             guard let wait else {
                 let reading = try await counted(query).pressed()
-                Self.count(reading)
+                Self.count(reading, query)
                 return (text: lines(reading, query: query, source: source, grantNote: grantNote).joined(separator: "\n"),
                         outcome: reading.outcome.said)
             }
             Telemetry.note("until", wait.until.rawValue)
             let waited = try await waiting(for: wait, on: query, read: counted)
-            Self.count(waited.reading)
+            Self.count(waited.reading, query)
             let said = lines(waited.reading, query: query, source: source, grantNote: grantNote)
             return (text: ([waitedClause(waited, wait) + said[0]] + said.dropFirst()).joined(separator: "\n"),
                     outcome: waited.settled ? "settled" : "timed_out")
@@ -399,7 +406,7 @@ extension Report {
     }
 
     /// The counts of the reading a look ended on, zeros included.
-    private static func count(_ reading: Reading) {
+    private static func count(_ reading: Reading, _ query: Query) {
         Telemetry.count("examined", reading.scope.examined)
         Telemetry.count("boxes_narrowed", reading.scope.boxes.narrowed)
         for (why, count) in reading.scope.boxes.unchecked { Telemetry.count("boxes_unchecked_\(why.rawValue)", count) }
@@ -410,8 +417,15 @@ extension Report {
         // How many processes' windows a front look took in; every other region reads them all.
         if case .only(let pids) = reading.scope.owners { Telemetry.count("owners", pids.count) }
         switch reading.outcome {
-        case .matched(let m): Telemetry.count("matched", m.count); Telemetry.count("nearest", 0)
-        case .nearest(let n), .unanchored(let n): Telemetry.count("matched", 0); Telemetry.count("nearest", n.count)
+        case .matched(let m):
+            Telemetry.count("matched", m.count)
+            Telemetry.count("nearest", 0)
+            // Rows matched by another of their element's texts than the one they show.
+            Telemetry.count("matched_also", m.all.filter { if case .also = query.match.fit($0) { true } else { false } }.count)
+        case .nearest(let n), .unanchored(let n):
+            Telemetry.count("matched", 0)
+            Telemetry.count("nearest", n.count)
+            Telemetry.count("matched_also", 0)
         }
     }
 

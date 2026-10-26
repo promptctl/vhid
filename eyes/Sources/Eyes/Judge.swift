@@ -55,14 +55,22 @@ public extension Reading {
         reach: Reach,
         owners: Owners
     ) -> Reading {
-        let scored = candidates.map { (found: $0, distance: query.match.distance(to: $0.text.value)) }
-        let matching = scored.filter { query.match.tolerates($0.distance) }.flatMap { query.match.narrowing($0.found) }
+        // [LAW:single-enforcer] Text first, then role, then one row per place, then narrowed
+        // to the words: a role or a duplicate is judged only of what says the text asked for.
+        let fitting = candidates.map { (found: $0, fit: query.match.fit($0)) }.filter { query.match.tolerates($0.fit.distance) }
+        let cast = Dictionary(grouping: fitting) { query.role.cast($0.found) }
+        let admitted = distinct(cast[.admitted] ?? [], by: \.found)
+        let matching = admitted.kept.flatMap { query.match.narrowing($0.found, by: $0.fit) }
         // Absent `near` is one anchor everywhere at once: every match beside it, reading
-        // order kept by the stable sort. [LAW:dataflow-not-control-flow]
-        let anchors = query.near.map { near in candidates.filter { near.tolerates(near.distance(to: $0.text.value)) }.flatMap(near.narrowing) }
-        func misses(_ wanted: Match?) -> [Near] {
-            candidates.map { (found: $0, distance: wanted.distance(to: $0.text.value)) }
-                .sorted { $0.distance < $1.distance }
+        // order kept by the stable sort. Anchors are any text on screen, whatever its role.
+        // [LAW:dataflow-not-control-flow]
+        let anchors = query.near.map { near in
+            distinct(candidates.map { (found: $0, fit: near.fit($0)) }.filter { near.tolerates($0.fit.distance) }, by: \.found).kept
+                .flatMap { near.narrowing($0.found, by: $0.fit) }
+        }
+        // The rows a miss shows: the asked-for text's of the asked-for role, the anchor's of any.
+        func misses(_ wanted: Match?, among pool: [Found]) -> [Near] {
+            distinct(pool.map { (found: $0, distance: wanted.fit($0).distance) }.sorted { $0.distance < $1.distance }, by: \.found).kept
                 .prefix(nearestShown)
                 .map { Near(found: $0.found, distance: $0.distance) }
         }
@@ -77,13 +85,16 @@ public extension Reading {
         let kept = Array(ordered.prefix(query.limit.count))
         let cut = ordered.count - kept.count
 
-        let outcome: Outcome = unanchored ? .unanchored(misses(query.near))
-            : Matches(kept).map(Outcome.matched) ?? .nearest(misses(query.match))
+        let outcome: Outcome = unanchored ? .unanchored(misses(query.near, among: candidates))
+            : Matches(kept).map(Outcome.matched) ?? .nearest(misses(query.match, among: candidates.filter { query.role.cast($0) == .admitted }))
+        let unknown = cast[.unknown]?.count ?? 0
+        let counts: [(Exclusion.Reason, Int)] = [(.duplicate, admitted.dropped), (.otherRole, cast[.other]?.count ?? 0), (.roleUnknown, unknown), (.ranked, cut)]
+        let set = counts.filter { $0.1 > 0 }.map { Exclusion(reason: $0.0, count: $0.1) }
         let scope = Scope(
             region: region,
             examined: examined,
-            excluded: excluded + (cut > 0 ? [Exclusion(reason: .ranked, count: cut)] : []),
-            reach: reach == .whole && cut > 0 ? .stopped(.resultLimit(query.limit)) : reach,
+            excluded: excluded + set,
+            reach: reach != .whole ? reach : unknown > 0 ? .stopped(.unread) : cut > 0 ? .stopped(.resultLimit(query.limit)) : reach,
             owners: owners
         )
         return Reading(outcome: outcome, scope: scope)
@@ -94,12 +105,65 @@ extension Optional where Wrapped == Match {
     /// An absent match asks for everything, which is a match every candidate meets at
     /// distance zero rather than a branch that skips the judging.
     /// [LAW:dataflow-not-control-flow]
-    func distance(to text: String) -> Int { map { $0.distance(to: text) } ?? 0 }
+    public func fit(_ found: Found) -> Fit { map { $0.fit(found) } ?? .drawn(0) }
     func tolerates(_ distance: Int) -> Bool { map { $0.tolerates(distance) } ?? true }
-    func narrowing(_ found: Found) -> [Found] { map { $0.narrowing(found) } ?? [found] }
+    func narrowing(_ found: Found, by fit: Fit) -> [Found] { map { $0.narrowing(found, by: fit) } ?? [found] }
+}
+
+/// Which of a row's texts a match fits best, and how many edits off: its own text, or one of
+/// the other things its element says in words. Derived wherever it is needed, never stored on
+/// the row, so a row cannot disagree with how it matched. [LAW:one-source-of-truth]
+public enum Fit: Sendable, Hashable {
+    case drawn(Int)
+    case also(Words, Int)
+
+    public var distance: Int {
+        switch self {
+        case .drawn(let d), .also(_, let d): d
+        }
+    }
+}
+
+/// How a row stands to the role asked for.
+enum Cast: Hashable {
+    /// Of the role, or no role was asked for.
+    case admitted
+    /// The tree named another role.
+    case other
+    /// No reader that knows roles saw it.
+    case unknown
+}
+
+extension Optional where Wrapped == Role {
+    /// Absent asks for every role, which every row is cast in. [LAW:dataflow-not-control-flow]
+    func cast(_ found: Found) -> Cast {
+        map { asked in found.source.role.map { $0 == asked ? .admitted : .other } ?? .unknown } ?? .admitted
+    }
+}
+
+/// One text at one place, whatever role said it: a cell and the label inside it are two
+/// elements and one thing on screen. Each row list a reading prints passes through here, the
+/// first of each place kept, so the rows a reading answers and the near misses it shows say
+/// one thing once. [LAW:single-enforcer]
+func distinct<Row>(_ rows: [Row], by found: (Row) -> Found) -> (kept: [Row], dropped: Int) {
+    var seen: Set<Place> = []
+    let kept = rows.filter { seen.insert(Place(text: found($0).text.value, frame: found($0).frame)).inserted }
+    return (kept, rows.count - kept.count)
+}
+
+private struct Place: Hashable {
+    let text: String
+    let frame: ScreenRect
 }
 
 extension Match {
+    /// The row's text or the first of its element's other words at the least distance, the
+    /// row's own text on a tie.
+    func fit(_ found: Found) -> Fit {
+        ([.drawn(distance(to: found.text.value))] + found.source.also.map { .also($0, distance(to: $0.text.value)) })
+            .min { $0.distance < $1.distance }!
+    }
+
     /// Edits between what was asked for and `text`, measured the way this match compares.
     ///
     /// `exact` measures the whole run. The other two measure the best-fitting stretch of
@@ -118,10 +182,12 @@ extension Match {
     /// matches, not one with the second dropped uncounted. Shortest stretches win, and no
     /// two share a word. `exact` matched the whole run and reports it whole, as does a
     /// match that only fits across the words' own spacing.
-    func narrowing(_ found: Found) -> [Found] {
-        switch self {
-        case .exact: [found]
-        case .contains, .within: narrowed(found)
+    /// A row matched by another of its element's texts answers whole: those words have no
+    /// place of their own to narrow to.
+    func narrowing(_ found: Found, by fit: Fit) -> [Found] {
+        switch (self, fit) {
+        case (.exact, _), (_, .also): [found]
+        case (.contains, .drawn), (.within, .drawn): narrowed(found)
         }
     }
 

@@ -36,11 +36,11 @@ public struct Landing: Sendable, Equatable {
     /// nil without a position or a size.
     public struct Element: Sendable, Hashable {
         public let role: Role
-        public let texts: [String]
+        public let texts: [Said]
         public let unanswered: Int
         public let frame: ScreenRect?
 
-        public init(role: Role, texts: [String], unanswered: Int = 0, frame: ScreenRect?) {
+        public init(role: Role, texts: [Said], unanswered: Int = 0, frame: ScreenRect?) {
             self.role = role
             self.texts = texts
             self.unanswered = unanswered

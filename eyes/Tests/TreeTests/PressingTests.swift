@@ -35,12 +35,12 @@ import Grants
                        spent: @escaping () throws -> Bool = { false }) -> Probe<Int> {
         Probe(hit: { asked.hits += 1; return try hit($0) },
               lineage: { lineages[$0].map(Heard.answered) ?? .unanswered },
-              texts: { texts[$0] ?? [] },
+              texts: { said(texts[$0] ?? []) },
               parent: { asked.parents += 1; return lineages[$0].map { .answered($0.parent) } ?? .unanswered },
               same: ==, spent: spent)
     }
 
-    private func row(_ frame: ScreenRect = frame, source: Source = .tree(role: button)) -> Found {
+    private func row(_ frame: ScreenRect = frame, source: Source = .tree(role: button, also: [])) -> Found {
         Found(text: Text("Target B")!, frame: frame, source: source)
     }
 
@@ -57,7 +57,7 @@ import Grants
 
     /// A row merged from both readers carries the tree's role and frame, and is checked.
     @Test func aMergedRowIsCheckedAsTheTreesRowIs() throws {
-        let merged = Source.merged(.tree(role: Self.button), .pixels(confidence: Confidence(0.9)!))
+        let merged = Source.merged(.tree(role: Self.button, also: []), .pixels(confidence: Confidence(0.9)!))
         guard case .narrowed = try probe().press(row(source: merged)).pressed else { Issue.record("not narrowed"); return }
     }
 
@@ -197,8 +197,8 @@ import Grants
     @Test func aClimbListsTheTextsThatAnsweredAndCountsTheRest() throws {
         let texts: [Int: [Heard<String?>]] = [1: [.answered(nil), .answered("Add"), .unanswered], 2: [.answered("+"), .answered("  "), .answered(nil)]]
         let c = try #require(climbed(try probe(texts: texts).climb(from: Self.text.centre)))
-        #expect(c.elements[0] == Landing.Element(role: Self.label, texts: ["+"], unanswered: 0, frame: Self.text))
-        #expect(c.elements[1] == Landing.Element(role: Self.button, texts: ["Add"], unanswered: 1, frame: Self.frame))
+        #expect(c.elements[0] == Landing.Element(role: Self.label, texts: [Said(.value, Text("+")!, .words)], unanswered: 0, frame: Self.text))
+        #expect(c.elements[1] == Landing.Element(role: Self.button, texts: [Said(.title, Text("Add")!, .words)], unanswered: 1, frame: Self.frame))
     }
 
     /// With no area above it, the climb reads to the top of the tree and says so.

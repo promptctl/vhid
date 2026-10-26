@@ -46,16 +46,20 @@ public struct Query: Sendable, Hashable {
     /// A match is only ever placed by what is on screen beside it, so a query naming
     /// text that is not there matches nothing. [LAW:dataflow-not-control-flow]
     public let near: Match?
+    /// The role every match is of, as the tree names it: `AXButton` for the buttons alone.
+    /// Absent admits every role, and text no reader could give a role.
+    public let role: Role?
 
-    public init(match: Match?, region: Region, limit: Limit = .default, near: Match? = nil) {
+    public init(match: Match?, region: Region, limit: Limit = .default, near: Match? = nil, role: Role? = nil) {
         self.match = match
         self.region = region
         self.limit = limit
         self.near = near
+        self.role = role
     }
 
     /// The same question asked of another region. [LAW:one-source-of-truth]
-    public func on(_ region: Region) -> Query { Query(match: match, region: region, limit: limit, near: near) }
+    public func on(_ region: Region) -> Query { Query(match: match, region: region, limit: limit, near: near, role: role) }
 }
 
 /// How text is compared.
@@ -301,6 +305,11 @@ public struct Exclusion: Sendable, Hashable {
         /// The same text at the same place, already reported once. The accessibility tree
         /// produces these constantly - a cell and its own label are two elements.
         case duplicate
+        /// Matched, but of another role than the one asked for: the tree said what it is.
+        case otherRole = "other_role"
+        /// Matched, but seen by pixels alone, which know nothing of roles: it could be the
+        /// control asked for, so a region holding one was not read whole for the question.
+        case roleUnknown = "role_unknown"
         /// Ranked below what the limit allowed through.
         case ranked
         /// The app did not answer for it - busy past the messaging timeout, or the element
@@ -325,8 +334,8 @@ public struct Exclusion: Sendable, Hashable {
         /// [LAW:single-enforcer] Every reader's reach is decided here.
         public var leavesUnread: Bool {
             switch self {
-            case .unanswered, .unwalked, .overlaid: true
-            case .wordless, .unplaced, .area, .covered, .duplicate, .ranked, .outside: false
+            case .unanswered, .unwalked, .overlaid, .roleUnknown: true
+            case .wordless, .unplaced, .area, .covered, .duplicate, .ranked, .outside, .otherRole: false
             }
         }
     }
@@ -357,7 +366,7 @@ public enum Stop: Sendable, Hashable {
     case resultLimit(Limit)
     /// Parts of the region went unread: elements that did not answer, windows with nothing
     /// to walk, or parts under a window the hit test would not settle. How many is the
-    /// scope's `unanswered`, `unwalked` and `overlaid` exclusions; this
+    /// scope's `unanswered`, `unwalked`, `overlaid` and `role_unknown` exclusions; this
     /// says only that the region was not read whole, which is what keeps a busy app or an
     /// open menu from proving an absence.
     case unread

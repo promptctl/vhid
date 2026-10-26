@@ -9,7 +9,7 @@ import Testing
 @Suite(.eventsKept) struct HitCommandTests {
     static let settings = Front.App(pid: 300, name: "System Settings")
     static let window = Window(id: 4127, owner: "System Settings", pid: 300, frame: ScreenRect(x: 0, y: 25, width: 800, height: 600), layer: 0)
-    static let add = Landing.Element(role: Role(rawValue: "AXButton"), texts: ["Add"], frame: ScreenRect(x: 160, y: 417, width: 18, height: 18))
+    static let add = Landing.Element(role: Role(rawValue: "AXButton"), texts: [Said(.description, Text("Add")!, .words)], frame: ScreenRect(x: 160, y: 417, width: 18, height: 18))
     static let list = Landing.Element(role: Role(rawValue: "AXList"), texts: [], unanswered: 1, frame: nil)
 
     /// The case the epic began with: the button "Add" in System Settings, the front app.

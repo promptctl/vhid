@@ -23,10 +23,10 @@ enum Climbed<Element> {
 extension Lineage: Sendable where Element: Sendable {}
 
 extension Landing.Element {
-    /// An element as a climb lists it: its texts that are not blank, and how many would not say.
-    init<E>(_ lineage: Lineage<E>, texts: [Heard<String?>]) {
+    /// An element as a climb lists it: what its texts said, and how many would not say.
+    init<E>(_ lineage: Lineage<E>, texts: [Heard<Said?>]) {
         self.init(role: lineage.role,
-                  texts: texts.compactMap { $0.answer ?? nil }.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty },
+                  texts: texts.compactMap { $0.answer ?? nil },
                   unanswered: texts.filter { $0 == .unanswered }.count,
                   frame: lineage.frame)
     }
@@ -42,7 +42,7 @@ struct Probe<Element> {
     let lineage: (Element) throws -> Heard<Lineage<Element>>
     /// An element's value, title and description, each as it came back: a read of its own, so a
     /// box's check never copies a text area's whole contents. [LAW:effects-at-boundaries]
-    let texts: (Element) throws -> [Heard<String?>]
+    let texts: (Element) throws -> [Heard<Said?>]
     /// An element's parent alone, nil at the top: all a climb from a hit needs.
     let parent: (Element) throws -> Heard<Element?>
     let same: (Element, Element) -> Bool
@@ -138,7 +138,7 @@ private final class Check<Element> {
     func hit(_ point: ScreenPoint) throws -> Element? { try ask { try probe.hit(point) } }
     func lineage(_ element: Element) throws -> Lineage<Element> { try ask { try probe.lineage(element) } }
     /// Each text answers or not on its own, so the read as a whole always does.
-    func texts(_ element: Element) throws -> [Heard<String?>] { try ask { .answered(try probe.texts(element)) } }
+    func texts(_ element: Element) throws -> [Heard<Said?>] { try ask { .answered(try probe.texts(element)) } }
     private func parent(_ element: Element) throws -> Element? { try ask { try probe.parent(element) } }
 
     func box(_ frame: ScreenRect, role: Role) throws -> Pressed {

@@ -49,13 +49,34 @@ import Testing
     /// only pixels saw - so a page's button is told from a bookmark of the same name.
     @Test func aRowNamesItsRole() {
         let frame = ScreenRect(x: 0, y: 0, width: 40, height: 20)
-        let button = Source.tree(role: Role(rawValue: "AXButton"))
+        let button = Source.tree(role: Role(rawValue: "AXButton"), also: [])
         let rows = Report.rows(.matched(Matches([
-            Found(text: Text("Settings")!, frame: frame, source: .tree(role: Role(rawValue: "AXLink"))),
+            Found(text: Text("Settings")!, frame: frame, source: .tree(role: Role(rawValue: "AXLink"), also: [])),
             Found(text: Text("Settings")!, frame: frame, source: .merged(button, .pixels(confidence: Confidence(1)!))),
             Found(text: Text("Canvas")!, frame: frame, source: .pixels(confidence: Confidence(1)!)),
         ])!))
         #expect(rows == ["20,10\t0,0,40,20\tSettings\tAXLink", "20,10\t0,0,40,20\tSettings\tAXButton", "20,10\t0,0,40,20\tCanvas\tpixels"])
+    }
+
+    /// A row keeps the text its element shows and then says what else the element says in
+    /// words, each after its attribute: the "+" button found as "Add" still reads "+".
+    @Test func aRowSaysWhatElseItsElementSays() {
+        let frame = ScreenRect(x: 160, y: 417, width: 18, height: 18)
+        let plus = Found(text: Text("+")!, frame: frame, source: .tree(role: Role(rawValue: "AXButton"), also: [Words(.description, Text("Add")!)]))
+        #expect(Report.rows(.matched(Matches([plus])!)) == ["169,426\t160,417,18,18\t+\tAXButton\tdescription Add"])
+        let reading = Reading(outcome: .matched(Matches([plus])!), scope: Scope(region: frame, examined: 1, reach: .whole))
+        #expect(Report.scope(reading, query: Query(match: .contains("Add"), region: .rect(frame), role: Role(rawValue: "AXButton")), source: .tree)
+            .hasPrefix("1 matched \"Add\" as AXButton in rect"))
+        #expect(Report.scope(reading, query: Query(match: nil, region: .rect(frame), role: Role(rawValue: "AXButton")), source: .tree)
+            .hasPrefix("1 run as AXButton in rect"))
+    }
+
+    /// The verbs refuse a blank role, and a role asked of pixels, which read none.
+    @Test func aRoleIsRefusedBlankOrOfPixels() throws {
+        #expect(try Find.parse(["Add", "--role", "AXButton"]).role == "AXButton")
+        #expect(throws: (any Error).self) { try Find.parse(["Add", "--role", " "]) }
+        #expect(throws: (any Error).self) { try Find.parse(["Add", "--role", "AXButton", "--source", "pixels"]) }
+        #expect(throws: (any Error).self) { try Read.parse(["--role", "AXButton", "--source", "pixels"]) }
     }
 
     /// A row's box covers its frame in whole points, takes the form `rect` takes, and holds
@@ -70,7 +91,7 @@ import Testing
         (ScreenRect(x: 10.5, y: 20, width: 0.4, height: 10), "10,20,2,10"),
     ])
     func aRowsBoxHoldsItsFrameAndItsCentre(frame: ScreenRect, box: String) throws {
-        let found = Found(text: Text("Save")!, frame: frame, source: .tree(role: Role(rawValue: "AXButton")))
+        let found = Found(text: Text("Save")!, frame: frame, source: .tree(role: Role(rawValue: "AXButton"), also: []))
         let columns = try #require(Report.rows(.matched(Matches([found])!)).first).split(separator: "\t").map(String.init)
         #expect(columns[1] == box)
         let c = columns[0].split(separator: ",").compactMap { Double($0) }
@@ -175,13 +196,14 @@ import Testing
         #expect(seen.map { $0.facts["source"] } == ["tree", "pixels", "merged", "tree"])
         #expect(seen.map { $0.facts["region"] } == ["display", "display", "display", "page"])
         #expect(seen.map { $0.facts["order"] } == ["reading", "reading", "reading", "near"])
+        #expect(seen.map { $0.facts["role"] } == ["none", "none", "none", "none"])
         // Every reason an exclusion can have, zeros included.
         let none = Dictionary(uniqueKeysWithValues: Exclusion.Reason.allCases.map { ("excluded_\($0.rawValue)", 0) })
         #expect(seen[0].counts == none.merging(["excluded_outside": 3]) { $1 }.merging(
-            ["reads": 1, "examined": 5, "matched": 0, "nearest": 0, "boxes_narrowed": 0, "boxes_unchecked_unanswered": 0,
+            ["reads": 1, "examined": 5, "matched": 0, "matched_also": 0, "nearest": 0, "boxes_narrowed": 0, "boxes_unchecked_unanswered": 0,
              "boxes_unchecked_elsewhere": 0, "boxes_unchecked_over_time": 0, "box_calls": 0, "box_ms": 0]) { $1 })
         #expect(seen[1].counts.filter { $0.key != "box_ms" } == none.merging(
-            ["reads": 1, "examined": 9, "matched": 1, "nearest": 0, "boxes_narrowed": 1,
+            ["reads": 1, "examined": 9, "matched": 1, "matched_also": 0, "nearest": 0, "boxes_narrowed": 1,
              "boxes_unchecked_unanswered": 0, "boxes_unchecked_elsewhere": 2, "boxes_unchecked_over_time": 0, "box_calls": 41]) { $1 })
         #expect((seen[1].counts["box_ms"] ?? 0) >= 20)
         #expect(seen[1].facts["until"] == "present")

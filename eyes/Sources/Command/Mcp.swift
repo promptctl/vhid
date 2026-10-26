@@ -178,6 +178,7 @@ enum EyesTools {
         "page": .object(["type": "integer", "description": .string(Help.page)]),
         "limit": .object(["type": "integer", "minimum": 1, "description": "The most rows to answer with. Defaults to \(Limit.default.count)."]),
         "source": .object(["type": "string", "enum": .array(SourceKind.allCases.map { .string($0.rawValue) }), "description": .string(Help.source)]),
+        "role": .object(["type": "string", "description": .string(Help.role)]),
     ]
 
     /// Reading needs a grant - Accessibility for the tree, Screen Recording for pixels -
@@ -210,7 +211,7 @@ enum EyesTools {
             ]),
             annotations: .init(readOnlyHint: true, openWorldHint: true)),
         call: { given in
-            try refuseStray(given, taken: ["text", "exact", "edits", "near", "display", "window", "page", "rect", "limit", "source", "until", "timeout"])
+            try refuseStray(given, taken: ["text", "exact", "edits", "near", "display", "window", "page", "rect", "limit", "source", "role", "until", "timeout"])
             guard let text = try argument("text", in: given, \.stringValue, "a string") else {
                 throw ArgumentRefused(description: "text is required: the text to look for")
             }
@@ -239,7 +240,7 @@ enum EyesTools {
             ]),
             annotations: .init(readOnlyHint: true, openWorldHint: true)),
         call: { given in
-            try refuseStray(given, taken: ["display", "window", "page", "rect", "limit", "source"])
+            try refuseStray(given, taken: ["display", "window", "page", "rect", "limit", "source", "role"])
             return try await answer(try await query(nil, given, pages: pages, front: front), try source(given), look)
         }) }
 
@@ -258,13 +259,14 @@ enum EyesTools {
         let place = try Where.place(display: try id("display"), window: try id("window"), page: try id("page"),
                                     rect: try argument("rect", in: given, \.stringValue, "a string"), as: .argument)
         let limit = try Where.limit(try argument("limit", in: given, \.intValue, "an integer") ?? Limit.default.count, as: .argument)
+        let role = try Find.role(try argument("role", in: given, \.stringValue, "a string"), source: try source(given), as: .argument)
         // Finding a page reads the tree, so a missing grant names the app holding it, as a
         // reading's does.
         let region: Region
         do { region = try await place.region(pages: pages, front: front) } catch let error as ReaderError where error.missingGrant {
             throw ArgumentRefused(description: served(error))
         }
-        return Query(match: match, region: region, limit: limit, near: near)
+        return Query(match: match, region: region, limit: limit, near: near, role: role)
     }
 
     /// Which reader, as `--source` takes it.

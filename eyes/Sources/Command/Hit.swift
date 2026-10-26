@@ -124,7 +124,7 @@ struct Hit: AsyncParsableCommand {
     /// One element: role, frame, then each text it said, and how many would not say.
     /// Tab-separated, like every row eyes prints.
     private static func row(_ element: Landing.Element) -> String {
-        ([element.role.rawValue, element.frame.map(String.init(describing:)) ?? "(no frame)"] + element.texts.map(spelled)
+        ([element.role.rawValue, element.frame.map(String.init(describing:)) ?? "(no frame)"] + element.texts.map { spelled($0.text.value) }
             + (element.unanswered > 0 ? ["(\(element.unanswered) of its texts unanswered)"] : []))
             .joined(separator: "\t")
     }
