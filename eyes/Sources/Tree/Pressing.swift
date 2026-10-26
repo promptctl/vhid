@@ -106,7 +106,7 @@ struct Probe<Element> {
                 guard let parent = lineage.parent else { return .hit(start, said, .top, calls: check.calls) }
                 at = parent
             }
-            return .hit(start, said, .short(.unanswered), calls: check.calls)
+            return .hit(start, said, .tooDeep, calls: check.calls)
         } catch let stop as Check<Element>.Stop {
             return .hit(start, said, .short(stop.short), calls: check.calls)
         }

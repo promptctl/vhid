@@ -161,7 +161,9 @@ public extension ScreenRect {
 }
 
 /// `x,y,width,height` in whole points: the one spelling every rectangle `eyes` prints in
-/// and the one `rect` reads, so anything printed as a rectangle can be read back as one.
+/// and the one `rect` reads, so a rectangle printed for a place on a screen can be read back
+/// as one. An app's claimed frame - a document's text area, taller than any screen - prints
+/// past `limit`, which `rect` refuses: a capture is cut in whole points.
 /// [LAW:one-source-of-truth]
 extension ScreenRect: CustomStringConvertible {
     /// The farthest from the origin any edge or size may be, in points.

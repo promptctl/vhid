@@ -90,7 +90,8 @@ import Testing
     /// remote Open panel over it - but never what is behind it or the agent's own terminal.
     @Test func theOwnersAreTheAppAndWhatIsOverItLessTheAppPassedOver() {
         let front = Front(app: Front.App(pid: 300, name: "System Settings"), display: 1, own: Self.terminal, passedOver: true)
-        let panel = WindowListing(windows: [Self.window(9, "Open and Save Panel Service", pid: 900, x: -900)] + Self.desk.windows, excluded: [])
+        let panel = WindowListing(windows: [Self.menuBar, Self.window(9, "Open and Save Panel Service", pid: 900), Self.window(3, "System Settings", pid: 300),
+                                            Self.window(4, "Safari", pid: 400), Self.window(2, "iTerm2", pid: 80)], excluded: [])
         let landsInPanel: (ScreenPoint) -> Heard<Int32> = { _ in .answered(900) }
         #expect(front.owners(in: Self.desk, hit: landsInPanel) == [300])
         #expect(front.owners(in: panel, hit: landsInPanel) == [900, 300])
@@ -132,7 +133,8 @@ import Testing
     @Test func whereAHitAppStandsIsDecidedByTheFrontLooksRule() {
         let settings = Front.App(pid: 300, name: "System Settings")
         let front = Front(app: settings, display: 1, own: Self.terminal, passedOver: true)
-        let panel = WindowListing(windows: [Self.window(9, "Open and Save Panel Service", pid: 900, x: -900)] + Self.desk.windows, excluded: [])
+        let panel = WindowListing(windows: [Self.menuBar, Self.window(9, "Open and Save Panel Service", pid: 900), Self.window(3, "System Settings", pid: 300),
+                                            Self.window(4, "Safari", pid: 400), Self.window(2, "iTerm2", pid: 80)], excluded: [])
         let landsInPanel: (ScreenPoint) -> Heard<Int32> = { _ in .answered(900) }
         let standing = { (pid: Int32, front: Front?) in
             Front.standing(of: pid, at: ScreenPoint(x: 100, y: 100), own: Self.terminal, front: front, in: panel,
@@ -155,6 +157,9 @@ import Testing
         #expect(onLeft(300) == .otherDisplay(settings, 1))
         #expect(onLeft(900) == .otherDisplay(settings, 1))
         #expect(onLeft(80) == .own("iTerm2"))
+        // The front app's menu bar is no window of its own, which that look never walks.
+        #expect(Front.standing(of: 300, at: ScreenPoint(x: 100, y: 10), own: Self.terminal, front: front, in: panel,
+                               displays: [Self.main, Self.left], hit: landsInPanel) == .noWindow(settings))
     }
 
     @Test func twoReadersOwnersAreTheirUnion() {

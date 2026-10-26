@@ -81,9 +81,10 @@ public struct TreeReader: Reader {
     /// What a click at `point` lands on, climbed to the area holding it, or that nothing is
     /// there. `Probe.climb` decides; this is its reads, and the process of the element hit.
     /// Throws when there is nothing to climb from, by name. [LAW:no-silent-failure]
-    public func climb(from point: ScreenPoint, until deadline: ContinuousClock.Instant) async throws -> Landed<Landing.Climb> {
+    /// The `budget` starts once the grant is known, so its asking is not spent from the hit tests'.
+    public func climb(from point: ScreenPoint, within budget: Duration) async throws -> Landed {
         guard try await granted(Self.grant) else { throw TreeError.noGrant }
-        switch try Self.probe(until: deadline).climb(from: point) {
+        switch try Self.probe(until: .now + budget).climb(from: point) {
         case .unheard(let why, let calls): throw HitUnheard(point: point, why: why, calls: calls)
         case .nothing(let calls): return .nothing(calls: calls)
         case .hit(let element, let said, let end, let calls):

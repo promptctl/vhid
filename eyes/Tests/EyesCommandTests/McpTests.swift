@@ -170,8 +170,8 @@ import Testing
     @Test func hitAnswersWithTheVerbsReport() async throws {
         let (said, isError) = try await call(["x": 169, "y": 426.5], tool: "hit")
         #expect(isError != true)
-        #expect(said == Hit.report(at: ScreenPoint(x: 169, y: 426.5), HitCommandTests.button))
-        #expect(try await call(["x": 2, "y": 2], tool: "hit").0 == Hit.report(at: ScreenPoint(x: 2, y: 2), nil))
+        #expect(said == Hit.report(at: ScreenPoint(x: 169, y: 426.5), .landed(HitCommandTests.button)))
+        #expect(try await call(["x": 2, "y": 2], tool: "hit").0 == Hit.report(at: ScreenPoint(x: 2, y: 2), .nothing(calls: 1, window: nil)))
         for (arguments, expected): ([String: Value], String) in [
             (["x": 1], "x and y are required: the point a click would land on"),
             (["x": "1", "y": 2], "x is 1, and it takes a number"),

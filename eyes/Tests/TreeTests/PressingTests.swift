@@ -242,7 +242,7 @@ import Grants
         ]
         let looped = try #require(climbed(try probe(hit: { _ in .answered(1) }, lineages: loop).climb(from: Self.text.centre)))
         #expect(looped.elements.count == Probe<Int>.depth)
-        #expect(looped.end == .short(.unanswered))
+        #expect(looped.end == .tooDeep)
     }
 
     /// A tree exactly as deep as the climb reads is read whole: the last parent is the top.

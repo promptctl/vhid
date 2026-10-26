@@ -16,8 +16,11 @@ public struct Landing: Sendable, Equatable {
     public let end: End
     /// The hit tests and reads the climb made.
     public let calls: Int
+    /// The hit tests the front look's rule made, to say where the app stands.
+    public let frontCalls: Int
 
-    public init(point: ScreenPoint, app: Front.App, standing: Standing, window: Window?, elements: [Element], end: End, calls: Int) {
+    public init(point: ScreenPoint, app: Front.App, standing: Standing, window: Window?, elements: [Element], end: End, calls: Int,
+                frontCalls: Int) {
         self.point = point
         self.app = app
         self.standing = standing
@@ -25,6 +28,7 @@ public struct Landing: Sendable, Equatable {
         self.elements = elements
         self.end = end
         self.calls = calls
+        self.frontCalls = frontCalls
     }
 
     /// One element as it says itself: its role, the value, title and description it answered
@@ -51,6 +55,8 @@ public struct Landing: Sendable, Equatable {
         case area
         /// At the top of the element's tree, with no area on the way.
         case top
+        /// Past `Probe.depth` parents, every one of which answered: parents that run in a loop.
+        case tooDeep
         /// Before either, so the elements above the last one listed were never read.
         case short(Short)
 
@@ -58,6 +64,7 @@ public struct Landing: Sendable, Equatable {
             switch self {
             case .area: "area"
             case .top: "top"
+            case .tooDeep: "too_deep"
             case .short(let why): why.rawValue
             }
         }
@@ -82,18 +89,26 @@ public struct Landing: Sendable, Equatable {
 
     /// Why a climb stopped short of an area or the top.
     public enum Short: String, Sendable, Hashable {
-        /// A hit test or a read did not answer, or the parents ran past `Probe.depth`.
+        /// A hit test or a read did not answer.
         case unanswered
         /// The time for hit tests ran out first.
         case overTime = "over_time"
     }
 }
 
-/// What the hit test at a point answered, when it answered: nothing there, with the calls that
-/// took, or what a click there lands on.
-public enum Landed<On: Sendable & Equatable>: Sendable, Equatable {
+/// What the tree's hit test at a point answered, when it answered: no element there, with the
+/// calls that took, or the climb from the element hit.
+public enum Landed: Sendable, Equatable {
     case nothing(calls: Int)
-    case on(On)
+    case on(Landing.Climb)
+}
+
+/// What `eyes hit` answers of a point it heard back about.
+public enum Struck: Sendable, Equatable {
+    /// No element answers there; the window listed frontmost at the point, which a click lands
+    /// in all the same, nil when none is - an app that exposes nothing, a game, a canvas.
+    case nothing(calls: Int, window: Window?)
+    case landed(Landing)
 }
 
 /// The hit test at a point gave no element to climb from: it did not answer, or the time ran
