@@ -68,8 +68,8 @@ do not route around it.
   Code, or whichever app started it. Tell the user to switch that app on under System
   Settings > Privacy & Security; a grant switched on counts from the next call.
 - A tool says an argument is not one it takes: the installed vhid is older than this
-  skill, which follows vhid's `master`. Tell the user; `brew upgrade --cask
-  promptctl/tap/vhid` brings the latest release.
+  skill, which comes from vhid's newest release. Tell the user; `brew upgrade --cask
+  promptctl/tap/vhid` brings that release.
 - `find` matched nothing: it lists the nearest runs and how many edits off each is.
   A misread one edit away is still the thing you were looking for.
 

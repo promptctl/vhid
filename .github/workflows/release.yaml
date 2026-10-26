@@ -142,6 +142,7 @@ jobs:
           echo "checks $(echo $checks) green on $GITHUB_SHA, after waiting ${SECONDS}s for them once the build was done" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Published
+        id: published
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -165,7 +166,7 @@ jobs:
       # [LAW:single-enforcer] However the step fails, the Release is published by then, so
       # the trap names what moves the cask without re-running this job.
       - name: The tap's cask is at this release
-        if: env.PRERELEASE == 'false'
+        if: ${{ !cancelled() && steps.published.outcome == 'success' && env.PRERELEASE == 'false' }}
         env:
           GH_TOKEN: ${{ steps.tap.outputs.token }}
           READ_TOKEN: ${{ github.token }}
@@ -190,3 +191,23 @@ jobs:
             sleep 10
           done
           echo "the tap's cask is vhid $was, at $VERSION_NUMBER or past it, after ${SECONDS}s; the tap's run $run is $status $conclusion" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The Claude Code marketplace installs the plugin from the branch marketplace.json
+      # names, so skills and hooks reach a Mac from the release whose binaries they were
+      # written for, and work on master reaches nobody until it ships. scripts/update-plugin
+      # commits this release's claude-plugin/ onto that branch and pushes it, or leaves it
+      # when a newer release's job got there first. It runs after the cask step, so the
+      # skills arrive once `brew upgrade` can bring their binaries, and whatever that step
+      # did: the two are separate channels, and each failure names its own recovery.
+      # Forward only: there is no --force here, and the branch's ruleset
+      # (docs/releasing.md) refuses a force-push or deletion from anyone.
+      - name: The plugin's branch is at this release
+        if: ${{ !cancelled() && steps.published.outcome == 'success' && env.PRERELEASE == 'false' }}
+        env:
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          trap '[ $? -eq 0 ] || echo "::error::vhid $VERSION_NUMBER is published but the plugin may not be; from a checkout of master, move it with \`git fetch origin --tags && scripts/update-plugin . $VERSION_NUMBER\` rather than re-running this job (docs/releasing.md)"' EXIT
+          scripts/update-plugin . "$VERSION_NUMBER" | tee -a "$GITHUB_STEP_SUMMARY"
