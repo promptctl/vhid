@@ -20,19 +20,32 @@ Done means a look after the act showed the change. An act's answer says the act 
 ## Each step
 
 1. **Look.** `windows` says what is in front and which app is frontmost. `find` with
-   the text you want says where it is - `{"text": "Save"}`, narrowed with `window` or
-   `display` when the text could be in more than one place. `read` gives every run of
+   the text you want says where it is - `{"text": "Save"}`. Named no place, it reads the
+   app in front, or the app behind your own terminal when that is in front, and its first
+   line names which; narrow it with `window`, or pass `display` to read every app there. `read` gives every run of
    text in a window in reading order, for when you do not yet know what to look for.
    Each row is the point, the box around the run, the text, and what it is: the
    element's role, such as `AXButton` or `AXLink`, or `pixels` for text drawn with no
-   element behind it.
+   element behind it - then what else the element says, such as `description Add` on a
+   button drawn "+". `find` matches those words too, and `role` keeps one kind of
+   element: `{"text": "Add", "role": "AXButton"}` is the Add button, not a label
+   reading Add. `read` with a `role` lists every button and what each is called.
+   A first line that says `in the part read of` stopped short of the place: its match
+   may not be the one meant and its not found proves nothing. The rest of the line says
+   why. A smaller place gets past `stopped after` or `stopped at … elements`, `source: tree`
+   past `role_unknown`, and a reader that `could not look` needs its grant. `unanswered` is
+   an app too busy to answer and `unwalked` a window with nothing to read, such as an open
+   menu: look again once it has settled or closed.
    In a browser, pass `page` with the window's id instead of `window`: it reads the
    web page alone, so a bookmark or toolbar button with the same name is not a match.
    When the same label appears several times, such as a Remove button on every row,
    `near` orders the matches by the text beside each, so `{"text": "Remove", "near":
    "Beta"}` puts the Remove in Beta's row first.
 2. **Act** on what you saw: `click` the box `find` printed, as `box`, or its point; `type` or `press` once
-   the field or window that should receive the keys is in front.
+   the field or window that should receive the keys is in front. Unsure what a point would
+   press? `hit` with the same `x` and `y` names the app, the window and the element a click
+   there lands on, with what holds it - the button around a label - and says when that app
+   is your own terminal or one behind the app in front.
 3. **Look again** at the same place. `find` the result you expected - the dialog's
    title, the new text, the button gone. To wait for it, pass `until` (`present` or
    `absent`) and a `timeout`, which re-reads until it happens.

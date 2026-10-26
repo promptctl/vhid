@@ -28,7 +28,8 @@ others reach around the devices.
    Studio Code"). An app with no windows listed is in front when the header's
    Frontmost names it. If the app is not in front, click one of its visible windows
    on the title bar, not content that could act, or its Dock icon found with
-   `find`; then `windows` again, three looks in all, until its rows are `front`. Not
+   `find` naming the display the Dock is on (`displays` gives its id) - a `find` with
+   no place named reads only the app in front; then `windows` again, three looks in all, until its rows are `front`. Not
    `open -a`, not `osascript`.
 2. **Find the Help title.** `find {"text": "Help", "rect": "0,0,800,30"}` - the strip
    of the main display's menu bar that reached Help in every app measured; widen the
