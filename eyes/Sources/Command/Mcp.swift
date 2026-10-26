@@ -26,14 +26,14 @@ struct Mcp: AsyncParsableCommand {
             answer with what those verbs print, scope line first.
             """)
 
-    /// What a client's initialize tells it about pairing this server with vhid's: the
+    /// How this server pairs with vhid's, as both say it at initialize: the
     /// shared screen points and the look-act-look loop. A copy of docs/mcp-instructions.txt,
     /// which vhid's server carries too: the packages link nothing of each other's, so each
     /// holds the text, and a test in each holds it to the file. [LAW:one-source-of-truth]
-    static let instructions = """
+    static let pairing = """
         vhid and eyes are two MCP servers that work as a pair. eyes reads the screen: what is in front, and where text is. vhid drives a virtual keyboard and mouse that macOS takes for hardware. A client with only one of them is half the pair; both come with vhid, served by `vhid mcp` and `eyes mcp`.
 
-        Every point either server prints or takes is the same screen point. The point eyes `find` prints is the point vhid `click` takes, as printed: no scaling, no offset, negative on a display left of or above the main one. Beside each point, eyes prints a box around the text that holds the point, as x,y,width,height in the same points: the form eyes' `rect` takes, and vhid `click`, `move` and `scroll` take it too, as `box`, and `drag` as `from` or `to`, pressing a point drawn inside it as a hand lands somewhere on a button rather than on its exact centre.
+        Every point either server prints or takes is the same screen point. The point eyes `find` prints is the point vhid `click` takes, as printed: no scaling, no offset, negative on a display left of or above the main one. Beside each point, eyes prints a box around the text that holds the point, as x,y,width,height in the same points: the form eyes' `rect` takes, and vhid `click`, `move` and `scroll` take it too from 0.5.0, as `box`, and `drag` as `from` or `to`, pressing a point drawn inside it as a hand lands somewhere on a button rather than on its exact centre.
 
         Neither server decides anything. `click` presses whatever is at the point it is given, `type` types into whatever has keyboard focus, and `find` reports what is on screen, not whether an act did what was meant. So work in a loop:
 
@@ -43,6 +43,12 @@ struct Mcp: AsyncParsableCommand {
 
         Done means a look after the act showed the change. An act's answer says the act happened, not what it did.
         """
+
+    /// What a client's initialize tells it: the pairing, then which server and version it
+    /// is talking to. The model reads a server's instructions, not its `serverInfo`, so the
+    /// version is said here too, from the one the binary was stamped with, and an agent
+    /// can tell which of the pairing's arguments it can pass. [LAW:one-source-of-truth]
+    static let instructions = pairing + "\n\nThis is eyes \(Version.current)."
 
     /// The server as a client's initialize finds it, with its tools attached, each call
     /// held `underway` on the transport it will be started on.
