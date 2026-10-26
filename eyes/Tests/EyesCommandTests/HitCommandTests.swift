@@ -40,7 +40,7 @@ import Testing
             A click at 169,426.5 lands in System Settings (pid 300), the front app, which a look with no place named reads, \
             in its window 4127 at 0,25,800,600. The element hit, then each holding it, up to the area holding them. \
             Each row: role, frame as x,y,width,height in vhid click coordinates, then what it says.
-            AXButton\t160,417,18,18\tAdd
+            AXButton\t160,417,18,18\tdescription Add
             AXList\t(no frame)\t(1 of its texts unanswered)
             """)
     }

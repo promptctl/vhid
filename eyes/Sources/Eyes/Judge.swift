@@ -57,22 +57,25 @@ public extension Reading {
     ) -> Reading {
         // [LAW:single-enforcer] Text first, then role, then one row per place, then narrowed
         // to the words: a role or a duplicate is judged only of what says the text asked for.
-        let fitting = candidates.map { (found: $0, fit: query.match.fit($0)) }.filter { query.match.tolerates($0.fit.distance) }
+        // Each candidate is fitted once, for its match and its miss alike: a text area's value
+        // is a whole document.
+        let fits = candidates.map { (found: $0, fit: query.match.fit($0)) }
+        let fitting = fits.filter { query.match.tolerates($0.fit.distance) }
         let cast = Dictionary(grouping: fitting) { query.role.cast($0.found) }
         let admitted = distinct(cast[.admitted] ?? [], by: \.found)
         let matching = admitted.kept.flatMap { query.match.narrowing($0.found, by: $0.fit) }
         // Absent `near` is one anchor everywhere at once: every match beside it, reading
         // order kept by the stable sort. Anchors are any text on screen, whatever its role.
         // [LAW:dataflow-not-control-flow]
-        let anchors = query.near.map { near in
-            distinct(candidates.map { (found: $0, fit: near.fit($0)) }.filter { near.tolerates($0.fit.distance) }, by: \.found).kept
-                .flatMap { near.narrowing($0.found, by: $0.fit) }
+        let nearFits = query.near.map { near in (near: near, fits: candidates.map { (found: $0, fit: near.fit($0)) }) }
+        let anchors = nearFits.map { near, fits in
+            distinct(fits.filter { near.tolerates($0.fit.distance) }, by: \.found).kept.flatMap { near.narrowing($0.found, by: $0.fit) }
         }
         // The rows a miss shows: the asked-for text's of the asked-for role, the anchor's of any.
-        func misses(_ wanted: Match?, among pool: [Found]) -> [Near] {
-            distinct(pool.map { (found: $0, distance: wanted.fit($0).distance) }.sorted { $0.distance < $1.distance }, by: \.found).kept
+        func misses(among pool: [(found: Found, fit: Fit)]) -> [Near] {
+            distinct(pool.sorted { $0.fit.distance < $1.fit.distance }, by: \.found).kept
                 .prefix(nearestShown)
-                .map { Near(found: $0.found, distance: $0.distance) }
+                .map { Near(found: $0.found, distance: $0.fit.distance) }
         }
         // Nothing matching is an absence whatever the anchor. Matches with named text
         // nowhere to stand beside are neither found nor gone: which one was meant is
@@ -85,19 +88,21 @@ public extension Reading {
         let kept = Array(ordered.prefix(query.limit.count))
         let cut = ordered.count - kept.count
 
-        let outcome: Outcome = unanchored ? .unanchored(misses(query.near, among: candidates))
-            : Matches(kept).map(Outcome.matched) ?? .nearest(misses(query.match, among: candidates.filter { query.role.cast($0) == .admitted }))
+        let outcome: Outcome = unanchored ? .unanchored(misses(among: nearFits?.fits ?? []))
+            : Matches(kept).map(Outcome.matched) ?? .nearest(misses(among: fits.filter { query.role.cast($0.found) == .admitted }))
         // Rows set aside for their role are things on screen too, each counted once.
-        let unknown = distinct(cast[.unknown] ?? [], by: \.found).kept.count
         let set: [Exclusion] = [Exclusion(reason: .duplicate, count: admitted.dropped),
                                 Exclusion(reason: .otherRole, count: distinct(cast[.other] ?? [], by: \.found).kept.count),
-                                Exclusion(reason: .roleUnknown, count: unknown), Exclusion(reason: .ranked, count: cut)]
+                                Exclusion(reason: .roleUnknown, count: distinct(cast[.unknown] ?? [], by: \.found).kept.count),
+                                Exclusion(reason: .ranked, count: cut)]
         let scope = Scope(
             region: region,
             examined: examined,
             // A reader's own duplicates and the judge's are one count. [LAW:one-source-of-truth]
             excluded: (excluded + set).summed,
-            reach: reach != .whole ? reach : unknown > 0 ? .stopped(.unread) : cut > 0 ? .stopped(.resultLimit(query.limit)) : reach,
+            // The first stop of the reader's own, what the judge set aside unread - decided where
+            // every reach is - and the limit. [LAW:single-enforcer]
+            reach: [reach, Reach(set), cut > 0 ? .stopped(.resultLimit(query.limit)) : .whole].first { $0 != .whole } ?? .whole,
             owners: owners
         )
         return Reading(outcome: outcome, scope: scope)

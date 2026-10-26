@@ -121,10 +121,11 @@ struct Hit: AsyncParsableCommand {
         }
     }
 
-    /// One element: role, frame, then each text it said, and how many would not say.
+    /// One element: role, frame, then each text it said after the attribute that said it, as a
+    /// row's other words are, and how many would not say.
     /// Tab-separated, like every row eyes prints.
     private static func row(_ element: Landing.Element) -> String {
-        ([element.role.rawValue, element.frame.map(String.init(describing:)) ?? "(no frame)"] + element.texts.map { Report.spelled($0.text.value) }
+        ([element.role.rawValue, element.frame.map(String.init(describing:)) ?? "(no frame)"] + element.texts.map { "\($0.attribute.rawValue) \(Report.spelled($0.text.value))" }
             + (element.unanswered > 0 ? ["(\(element.unanswered) of its texts unanswered)"] : []))
             .joined(separator: "\t")
     }

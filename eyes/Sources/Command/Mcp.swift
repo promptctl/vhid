@@ -170,7 +170,8 @@ enum EyesTools {
             }
         }) }
 
-    /// Where `find` and `read` look, as `--display`, `--window` and `--rect` take it.
+    /// What `find` and `read` both take: where they look, as `--display`, `--window` and `--rect`
+    /// take it, how many rows, which reader and which role.
     private static let place: [String: Value] = [
         "display": .object(["type": "integer", "description": .string(Help.display)]),
         "window": .object(["type": "integer", "description": .string(Help.window)]),
