@@ -162,7 +162,7 @@ struct Where: ParsableArguments {
                 let paged = try await pages(id)
                 Telemetry.count("examined", paged.examined)
                 Telemetry.count("pages", paged.pages.count)
-                Telemetry.note("reach", paged.stop?.kind ?? "whole")
+                Telemetry.note("reach", (paged.stop?.reach ?? .whole).kind)
                 return .page(window: id, frame: try paged.page(in: id))
             }
         }
@@ -206,7 +206,9 @@ enum Report {
             "\(query.near.map(wanted) ?? "") not found to place \(query.match.map(wanted) ?? "the text")\(role) near"
         }
         let clauses: [String?] = [
-            "\(head) in \(place(query.region)) \(s.region) \(looked(source, s.reach))",
+            // A partial read says so in the words a caller acts on, not only in the last clause:
+            // what it matched or missed may be the wrong thing, or not all there is.
+            "\(head) in \(s.reach.readWhole ? "" : "the part read of ")\(place(query.region)) \(s.region) \(looked(source, s.reach))",
             "\(s.examined) run\(s.examined == 1 ? "" : "s") read",
             s.excluded.isEmpty ? nil : s.excluded.map { "\($0.count) \($0.reason.rawValue)" }.joined(separator: ", "),
             boxes(s.boxes),
@@ -335,12 +337,39 @@ enum Report {
 }
 
 private extension Paged.Stop {
-    /// Why a page search stopped short, for the page's event.
+    /// Why a page search stopped short, as the reach a look reports, so a page's event and a
+    /// look's spell it the one way. [LAW:one-source-of-truth]
+    var reach: Reach {
+        switch self {
+        case .elementLimit(let l): .stopped(.elementLimit(l))
+        case .timeBudget(let d): .stopped(.timeBudget(d))
+        case .unread: .stopped(.unread)
+        }
+    }
+}
+
+private extension Reach {
+    /// How far a look read, for its event. A merge that did not read whole names each
+    /// reader's reach, `tree_blind+pixels_whole`, since merged is the default source and a
+    /// missing grant and a time budget are different causes.
     var kind: String {
         switch self {
-        case .elementLimit: "element_limit"
-        case .timeBudget: "time_budget"
-        case .unread: "unread"
+        case .whole: "whole"
+        case .stopped(.resultLimit): "result_limit"
+        case .stopped(.elementLimit): "element_limit"
+        case .stopped(.timeBudget): "time_budget"
+        case .stopped(.unread): "unread"
+        case .stopped(.merged(let a, let b)): "\(a.reachKind)+\(b.reachKind)"
+        }
+    }
+}
+
+private extension Part {
+    /// One reader's reach in a merge, for the look's event.
+    var reachKind: String {
+        switch self {
+        case .read(let source, let reach): "\(source.rawValue)_\(reach.kind)"
+        case .blind(let source, _, _): "\(source.rawValue)_blind"
         }
     }
 }
@@ -438,6 +467,7 @@ extension Report {
         }
         // How many processes' windows a front look took in; every other region reads them all.
         if case .only(let pids) = reading.scope.owners { Telemetry.count("owners", pids.count) }
+        Telemetry.note("reach", reading.scope.reach.kind)
         switch reading.outcome {
         case .matched(let m):
             Telemetry.count("matched", m.count)

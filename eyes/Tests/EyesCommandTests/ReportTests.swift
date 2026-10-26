@@ -158,6 +158,32 @@ import Testing
         #expect(line.contains("8 ranked; stopped at the limit of 1"))
     }
 
+    /// A read that stopped short says so in its first words, where a caller acting on a
+    /// match or an absence reads, whatever it ended in; a cut answer read the whole region.
+    @Test func aPartialReadSaysSoInItsFirstWords() {
+        let query = Query(match: .contains("Add"), region: .display(12))
+        func head(_ outcome: Outcome, _ reach: Reach, near: Match? = nil) -> String {
+            let line = Report.scope(Reading(outcome: outcome, scope: Scope(region: Self.display, examined: 3, reach: reach)),
+                                    query: Query(match: query.match, region: query.region, near: near), source: .tree)
+            return String(line.prefix { $0 != ";" })
+        }
+        let matched = Outcome.matched(Matches([found("Add", x: -2000)])!)
+        let partial = " in the part read of display 12 -2400,-300,2400,1600 by the tree"
+        #expect(head(matched, .stopped(.timeBudget(.seconds(5)))) == "1 matched \"Add\"" + partial)
+        #expect(head(.nearest([]), .stopped(.unread)) == "\"Add\" not found" + partial)
+        #expect(head(.unanchored([]), .stopped(.elementLimit(Limit(10)!)), near: .contains("Beta"))
+            == "\"Beta\" not found to place \"Add\" near" + partial)
+        #expect(head(.nearest([]), .stopped(.merged(.read(.tree, .whole), .read(.pixels, .stopped(.unread)))))
+            .hasPrefix("\"Add\" not found in the part read of display 12"))
+        // A merge with one reader blind read the place whole by the other, but not what only
+        // the blind one sees: its match or absence is not complete, as provesAbsence says.
+        let halfBlind = Report.scope(Reading(outcome: matched, scope: Scope(region: Self.display, examined: 3, reach: .stopped(.merged(
+            .read(.tree, .whole), .blind(.pixels, "no grant", missingGrant: true))))), query: query, source: .merged)
+        #expect(halfBlind.hasPrefix("1 matched \"Add\" in the part read of display 12 -2400,-300,2400,1600 by tree alone;"))
+        #expect(head(matched, .stopped(.resultLimit(Limit(1)!))) == "1 matched \"Add\" in display 12 -2400,-300,2400,1600 by the tree")
+        #expect(head(.nearest([]), .whole) == "\"Add\" not found in display 12 -2400,-300,2400,1600 by the tree")
+    }
+
     /// A merge that did not read whole names each reader's reach, a blind one on one line,
     /// so an absence it cannot prove is never printed as one.
     @Test func aMergedReadingNamesEachReadersReach() {
@@ -204,9 +230,12 @@ import Testing
     /// Every look is one event: which reader, how it ended, and its counts, zeros included.
     @Test func aLookIsOneEvent() async throws {
         let events = Collected()
-        let near = Reading(outcome: .nearest([]), scope: Scope(region: Self.display, examined: 5, excluded: [Exclusion(reason: .outside, count: 3)], reach: .whole))
+        let near = Reading(outcome: .nearest([]), scope: Scope(region: Self.display, examined: 5, excluded: [Exclusion(reason: .outside, count: 3)],
+                                                               reach: .stopped(.timeBudget(.seconds(5)))))
         let hit = Reading(outcome: .matched(Matches([found("OK", x: -100)])!),
                           scope: Scope(region: Self.display, examined: 9, reach: .whole, boxes: Boxes(narrowed: 1, unchecked: [.elsewhere: 2], calls: 41)))
+        let halfBlind = Reading(outcome: hit.outcome, scope: Scope(region: Self.display, examined: 9, reach: .stopped(.merged(
+            .blind(.tree, "no grant", missingGrant: true), .read(.pixels, .stopped(.timeBudget(.seconds(5))))))))
         try await Telemetry.$export.withValue(events.export) {
             _ = try await Report.text(Query(match: .contains("OK"), region: .display(12)), source: .tree) { _, _ in .standing(near) }
             _ = try await Report.text(Query(match: .contains("OK"), region: .display(12)), source: .pixels,
@@ -215,15 +244,17 @@ import Testing
             }
             _ = try? await Report.text(Query(match: nil, region: .display(12)), source: .merged) { _, _ in throw PixelsError.noGrant }
             _ = try await Report.text(Query(match: .contains("OK"), region: .page(window: 7, frame: Self.display), near: .contains("Beta")),
-                                      source: .tree) { _, _ in .standing(hit) }
+                                      source: .merged) { _, _ in .standing(halfBlind) }
         }
         let seen = events.all
         #expect(seen.map(\.event) == ["look", "look", "look", "look"])
         #expect(seen.map(\.outcome) == ["not_matched", "settled", "error", "matched"])
-        #expect(seen.map { $0.facts["source"] } == ["tree", "pixels", "merged", "tree"])
+        #expect(seen.map { $0.facts["source"] } == ["tree", "pixels", "merged", "merged"])
         #expect(seen.map { $0.facts["region"] } == ["display", "display", "display", "page"])
         #expect(seen.map { $0.facts["order"] } == ["reading", "reading", "reading", "near"])
         #expect(seen.map { $0.facts["role"] } == ["none", "none", "none", "none"])
+        // A merge names each reader's reach, so a missing grant is told apart from a time budget.
+        #expect(seen.map { $0.facts["reach"] } == ["time_budget", "whole", nil, "tree_blind+pixels_time_budget"])
         // Every reason an exclusion can have, zeros included.
         let none = Dictionary(uniqueKeysWithValues: Exclusion.Reason.allCases.map { ("excluded_\($0.rawValue)", 0) })
         #expect(seen[0].counts == none.merging(["excluded_outside": 3]) { $1 }.merging(
