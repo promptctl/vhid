@@ -25,6 +25,19 @@ reader could not look. Each prints a scope line first — where it looked, which
 looked, how many runs it read, what it set aside, whether it read the whole region. A `find` that matches nothing prints the nearest runs
 and how many edits off each is, so a misread one edit away is not taken for an absence.
 
+Named no place, `find` and `read` read what is in front: the frontmost app's windows
+and whatever is over its front window, such as an Open panel another process draws, on
+the display holding that window. When the frontmost app is the one eyes answers to — the
+terminal or app running it, which shows the very text an agent asks eyes to find — they
+read the app behind it instead and say they passed it over; that app's windows are never
+read, in front or not. A window over the front one is read only where the system's hit
+test lands a click in it, so a full-screen overlay that draws nothing there is not. Text
+in a window behind is not read, and the pixels reader counts it as `outside`; text under
+a window in front where a click lands elsewhere is `covered`, and where the hit test does
+not answer, as without Accessibility, `overlaid` and the region is not read whole. The
+menu bar is not read either, since `--rect` reads it. With nothing but that app on screen,
+the look is refused. `--display` reads every app on a display.
+
 Each row is a point, the box around the run, the text, and what it is: the role the
 accessibility tree gives the element (`AXButton`, `AXLink`, `AXTextField`, ...), or
 `pixels` for text only the pixels reader saw, such as words drawn on a canvas. The role

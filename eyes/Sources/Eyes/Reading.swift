@@ -112,6 +112,9 @@ public enum Region: Sendable, Hashable {
     /// is the only reader that knows where a page is, and this package links none, so the
     /// frame is found by the caller and carried here with the window it is in.
     case page(window: UInt32, frame: ScreenRect)
+    /// What is in front, when a look names no place: the app an agent is working in, read on
+    /// the display holding its front window. `Front` says which app, and why.
+    case front(Front)
 
     /// Where a wait looks after its first read resolved this region to `resolved`.
     /// A window or a page is held to that rectangle, so one that closes is its region with
@@ -122,7 +125,8 @@ public enum Region: Sendable, Hashable {
     func pinned(to resolved: ScreenRect) -> Region {
         switch self {
         case .window, .page: .rect(resolved)
-        case .display, .rect: self
+        // The front keeps its app and display: which windows it takes in is read afresh.
+        case .display, .rect, .front: self
         }
     }
 }
@@ -230,13 +234,16 @@ public struct Scope: Sendable, Hashable {
     public let reach: Reach
     /// How the rows' boxes stand against where a click presses what each row names.
     public let boxes: Boxes
+    /// Whose windows were read: every process's, unless the region was the front.
+    public let owners: Owners
 
-    public init(region: ScreenRect, examined: Int, excluded: [Exclusion] = [], reach: Reach, boxes: Boxes = Boxes()) {
+    public init(region: ScreenRect, examined: Int, excluded: [Exclusion] = [], reach: Reach, boxes: Boxes = Boxes(), owners: Owners = .every) {
         self.region = region
         self.examined = examined
         self.excluded = excluded
         self.reach = reach
         self.boxes = boxes
+        self.owners = owners
     }
 }
 
@@ -278,7 +285,7 @@ public struct Exclusion: Sendable, Hashable {
         self.count = count
     }
 
-    public enum Reason: String, Sendable, Hashable {
+    public enum Reason: String, Sendable, Hashable, CaseIterable {
         /// No text on it at all.
         case wordless
         /// Zero-sized, offscreen, outside the region asked for, or outside what holds it - a
@@ -308,11 +315,30 @@ public struct Exclusion: Sendable, Hashable {
         /// An on-screen window with no accessibility element to walk - an open menu, a
         /// system surface, or a window its app would not list - so nothing in it was read.
         case unwalked
+        /// Seen, but in no window of the processes a front look reads - an app behind the
+        /// front one, or beside it. Only a reader that sees what is on top meets these; the
+        /// tree never walks another app's windows.
+        case outside
+
+        /// Whether a part set aside for this reason went unread, rather than being read and
+        /// left out: then the region was not read whole, and an absence in it proves nothing.
+        /// [LAW:single-enforcer] Every reader's reach is decided here.
+        public var leavesUnread: Bool {
+            switch self {
+            case .unanswered, .unwalked, .overlaid: true
+            case .wordless, .unplaced, .area, .covered, .duplicate, .ranked, .outside: false
+            }
+        }
     }
 }
 
 /// Whether the reader got through the region, or stopped short of it.
 public enum Reach: Sendable, Hashable {
+    /// How far a reader that did not stop got: whole, unless something it set aside went unread.
+    public init(_ excluded: [Exclusion]) {
+        self = excluded.contains { $0.reason.leavesUnread && $0.count > 0 } ? .stopped(.unread) : .whole
+    }
+
     /// Everything in the region was examined. Only this one makes an absence a fact
     /// about the screen rather than a fact about the read.
     case whole
@@ -329,8 +355,9 @@ public enum Stop: Sendable, Hashable {
     /// `Limit` rather than a loose `Int`, so the cap that was hit and the cap that was
     /// asked for are one value. [LAW:one-source-of-truth]
     case resultLimit(Limit)
-    /// Parts of the region went unread: elements that did not answer, or windows with
-    /// nothing to walk. How many is the scope's `unanswered` and `unwalked` exclusions; this
+    /// Parts of the region went unread: elements that did not answer, windows with nothing
+    /// to walk, or parts under a window the hit test would not settle. How many is the
+    /// scope's `unanswered`, `unwalked` and `overlaid` exclusions; this
     /// says only that the region was not read whole, which is what keeps a busy app or an
     /// open menu from proving an absence.
     case unread
@@ -387,7 +414,7 @@ public extension Reading {
         }
         let s = scope
         return Reading(outcome: outcome, scope: Scope(region: s.region, examined: s.examined, excluded: s.excluded, reach: s.reach,
-                                                      boxes: Boxes(narrowed: narrowed, unchecked: unchecked, calls: calls)))
+                                                      boxes: Boxes(narrowed: narrowed, unchecked: unchecked, calls: calls), owners: s.owners))
     }
 
     /// Whether "it is not there" is a fact about the screen rather than about the read.

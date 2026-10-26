@@ -529,7 +529,7 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
 
     @Test func eachMatchedWindowIsARootCoveredByTheOnesInFront() {
         let front = window(1, pid: 2, ScreenRect(x: 0, y: 0, width: 300, height: 300))
-        let (roots, unwalked) = plan(seen([front, window(2, document)], in: region, hit: { _ in .answered(1) }), matched: [1: "front", 2: "doc"])
+        let (roots, unwalked) = plan(seen([front, window(2, document)], of: .every, in: region, hit: { _ in .answered(1) }), matched: [1: "front", 2: "doc"])
         #expect(roots.map(\.element) == ["front", "doc"])
         #expect(roots.map { $0.covers.windows.map(\.frame) } == [[], [front.frame]])
         #expect(roots.map(\.clip) == [front.frame, document])
@@ -540,7 +540,7 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
     /// it read, and it says so - it also covers what is under it.
     @Test func aVisibleWindowWithNothingToWalkIsCountedAndCovers() {
         let menu = window(5, ScreenRect(x: 150, y: 120, width: 200, height: 300))
-        let (roots, unwalked) = plan(seen([menu, window(2, document)], in: region, hit: { _ in .answered(1) }), matched: [2: "doc"])
+        let (roots, unwalked) = plan(seen([menu, window(2, document)], of: .every, in: region, hit: { _ in .answered(1) }), matched: [2: "doc"])
         #expect(roots.map(\.element) == ["doc"])
         #expect(roots[0].covers.windows.map(\.frame) == [menu.frame])
         #expect(unwalked == 1)
@@ -549,7 +549,7 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
     /// Off the region or wholly behind a window in front, a window holds nothing to read.
     @Test func aWindowNothingOfWhichCanBeSeenIsNeitherWalkedNorCounted() {
         let full = window(1, pid: 2, region)
-        let visible = seen([full, window(2, document), window(3, pid: 4, ScreenRect(x: 2000, y: 0, width: 10, height: 10))], in: region, hit: { _ in .answered(2) })
+        let visible = seen([full, window(2, document), window(3, pid: 4, ScreenRect(x: 2000, y: 0, width: 10, height: 10))], of: .every, in: region, hit: { _ in .answered(2) })
         #expect(visible.map(\.window.id) == [1])
         let (roots, unwalked) = plan(visible, matched: [1: "full"])
         #expect(roots.map(\.element) == ["full"])
@@ -561,7 +561,7 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
     @Test func aSmallWindowOverTheMiddleDoesNotHideTheWholeWindow() {
         let overlay = window(1, pid: 9, region)
         let small = window(3, pid: 5, ScreenRect(x: 350, y: 250, width: 100, height: 100))
-        let visible = seen([overlay, small, window(2, document)], in: region, hit: { _ in .answered(5) })
+        let visible = seen([overlay, small, window(2, document)], of: .every, in: region, hit: { _ in .answered(5) })
         #expect(visible.map(\.window.id) == [1, 3, 2])
     }
 
@@ -569,14 +569,25 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
     /// hides the whole window: the centre stands for the rest.
     @Test func aClickAtTheCentreLandingInTheWholeWindowInFrontHidesIt() {
         let overlay = window(1, pid: 9, region)
-        let visible = seen([overlay, window(2, document)], in: region, hit: { _ in .answered(9) })
+        let visible = seen([overlay, window(2, document)], of: .every, in: region, hit: { _ in .answered(9) })
         #expect(visible.map(\.window.id) == [1])
+    }
+
+    /// Only the owners' windows are seen, each against every window in front of it, owner or
+    /// not; no other window's visibility is asked of the hit test.
+    @Test func onlyTheOwnersWindowsAreSeenAgainstEveryWindowInFront() {
+        let overlay = window(1, pid: 9, region)
+        var asked = 0
+        let visible = seen([overlay, window(2, document)], of: .only([1]), in: region, hit: { _ in asked += 1; return .answered(1) })
+        #expect(visible.map(\.window.id) == [2])
+        #expect(visible[0].covers.windows.map(\.frame) == [overlay.frame])
+        #expect(asked == 1)
     }
 
     /// A window over the whole screen that a click passes through hides nothing behind it.
     @Test func aWindowInFrontAClickPassesThroughHidesNothing() {
         let overlay = window(1, pid: 9, region)
-        let visible = seen([overlay, window(2, document)], in: region, hit: { _ in .answered(1) })
+        let visible = seen([overlay, window(2, document)], of: .every, in: region, hit: { _ in .answered(1) })
         #expect(visible.map(\.window.id) == [1, 2])
         #expect(visible.map(\.clip) == [region, document])
     }

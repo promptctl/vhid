@@ -20,8 +20,9 @@ Done means a look after the act showed the change. An act's answer says the act 
 ## Each step
 
 1. **Look.** `windows` says what is in front and which app is frontmost. `find` with
-   the text you want says where it is - `{"text": "Save"}`, narrowed with `window` or
-   `display` when the text could be in more than one place. `read` gives every run of
+   the text you want says where it is - `{"text": "Save"}`. Named no place, it reads the
+   app in front, or the app behind your own terminal when that is in front, and its first
+   line names which; narrow it with `window`, or pass `display` to read every app there. `read` gives every run of
    text in a window in reading order, for when you do not yet know what to look for.
    Each row is the point, the box around the run, the text, and what it is: the
    element's role, such as `AXButton` or `AXLink`, or `pixels` for text drawn with no

@@ -200,4 +200,15 @@ import Testing
         #expect(matched.outcome == .matched(Matches([Found(text: Text("Allow")!, frame: cut, source: found("Allow").source)])!))
         #expect(matched.scope.boxes == Boxes(narrowed: 1, calls: 9))
     }
+
+    /// A reader that did not stop read the region whole unless something it set aside went
+    /// unread - so a pixel run under a window the hit test would not settle keeps an absence
+    /// from proving anything, as an unanswered element does for the tree.
+    @Test func whatWentUnreadKeepsAReadFromBeingWhole() {
+        #expect(Reach([Exclusion(reason: .covered, count: 4), Exclusion(reason: .outside, count: 9)]) == .whole)
+        for why in [Exclusion.Reason.overlaid, .unanswered, .unwalked] {
+            #expect(Reach([Exclusion(reason: .covered, count: 4), Exclusion(reason: why, count: 1)]) == .stopped(.unread))
+        }
+        #expect(Reach([Exclusion(reason: .overlaid, count: 0)]) == .whole)
+    }
 }

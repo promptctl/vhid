@@ -20,7 +20,8 @@ import Testing
             region: Self.region,
             examined: texts.count,
             excluded: [],
-            reach: .whole
+            reach: .whole,
+            owners: .every
         )
     }
 
@@ -35,7 +36,7 @@ import Testing
         let seen = [at("Alpha", 52, 0, 60), at("Remove", 192, 0, 84), at("Beta", 52, 1, 50),
                     at("Remove", 192, 1, 84), at("Gamma", 52, 2, 70), at("Remove", 192, 2, 84)]
         return Reading.judging(seen, query: Query(match: .exact(match), region: .rect(Self.region), limit: limit, near: .contains(near)),
-                               region: Self.region, examined: seen.count, excluded: [], reach: .whole)
+                               region: Self.region, examined: seen.count, excluded: [], reach: .whole, owners: .every)
     }
 
     /// The Remove in Beta's row comes first, then the rows either side in reading order.
@@ -61,7 +62,7 @@ import Testing
         }
         let seen = [at("Release notes", 200, 110), at("More", 310, 36), at(" · Pricing ", 346, 79), at("More", 425, 36)]
         let read = Reading.judging(seen, query: Query(match: .exact("More"), region: .rect(Self.region), near: .contains("Pricing")),
-                                   region: Self.region, examined: seen.count, excluded: [], reach: .whole)
+                                   region: Self.region, examined: seen.count, excluded: [], reach: .whole, owners: .every)
         guard case .matched(let m) = read.outcome else { Issue.record("\(read)"); return }
         #expect(m.all.map(\.frame.x) == [425, 310])
     }
@@ -154,7 +155,7 @@ import Testing
         }
         let run = Found(first: words[0], rest: Array(words.dropFirst()), source: .pixels(confidence: Confidence(1)!))
         let read = Reading.judging([run], query: Query(match: .contains("edit"), region: .rect(Self.region)),
-                                   region: Self.region, examined: 1, excluded: [], reach: .whole)
+                                   region: Self.region, examined: 1, excluded: [], reach: .whole, owners: .every)
         guard case .matched(let m) = read.outcome else { Issue.record("nothing"); return }
         #expect(m.first.text.value == "Edit")
         #expect(m.first.frame.centre == ScreenPoint(x: 70, y: 10))
@@ -194,7 +195,7 @@ import Testing
     @Test func aReadersOwnStopOutlastsTheLimit() {
         let read = Reading.judging(["OK", "OK"].enumerated().map { found($1, y: Double($0) * 20) },
                                    query: Query(match: nil, region: .rect(Self.region), limit: Limit(1)!),
-                                   region: Self.region, examined: 2, excluded: [], reach: .stopped(.unread))
+                                   region: Self.region, examined: 2, excluded: [], reach: .stopped(.unread), owners: .every)
         #expect(read.scope.reach == .stopped(.unread))
         #expect(read.scope.excluded == [Exclusion(reason: .ranked, count: 1)])
     }

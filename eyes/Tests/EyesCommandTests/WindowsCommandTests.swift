@@ -36,7 +36,7 @@ import Testing
             Window(id: 1, owner: "Safari", pid: 400, frame: ScreenRect(x: 0, y: 33, width: 1512, height: 949), layer: 0),
         ]
         let lines = Windows.report(WindowListing(windows: rows, excluded: []), owner: nil,
-                                   frontmost: Frontmost(pid: 400, name: "Safari")).split(separator: "\n")
+                                   frontmost: Front.App(pid: 400, name: "Safari")).split(separator: "\n")
         #expect(lines[0].contains(" Frontmost: Safari (pid 400), its rows marked front."))
         #expect(lines.dropFirst().map { $0.hasSuffix("\tfront") } == [true, false, false, false, true])
     }
@@ -45,9 +45,9 @@ import Testing
     /// window the owner filter hid from an application with no window listed.
     @Test func aFrontmostApplicationWithNoRowShownIsStillNamed() {
         let listing = WindowListing(windows: [window(id: 1, owner: "Safari"), window(id: 2, owner: "Terminal")], excluded: [])
-        let absent = Windows.report(listing, owner: nil, frontmost: Frontmost(pid: 77, name: "Float"))
-        #expect(Windows.report(listing, owner: "terminal", frontmost: Frontmost(pid: 999, name: "X")).contains("X (pid 999), with no window listed."))
-        #expect(Windows.report(WindowListing(windows: [window(id: 1)], excluded: []), owner: "zzz", frontmost: Frontmost(pid: 400, name: "Safari"))
+        let absent = Windows.report(listing, owner: nil, frontmost: Front.App(pid: 77, name: "Float"))
+        #expect(Windows.report(listing, owner: "terminal", frontmost: Front.App(pid: 999, name: "X")).contains("X (pid 999), with no window listed."))
+        #expect(Windows.report(WindowListing(windows: [window(id: 1)], excluded: []), owner: "zzz", frontmost: Front.App(pid: 400, name: "Safari"))
             .contains("Frontmost: Safari (pid 400), its rows hidden by the owner filter."))
         #expect(absent.contains("Frontmost: Float (pid 77), with no window listed."))
         #expect(!absent.contains("\tfront"))

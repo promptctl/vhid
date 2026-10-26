@@ -18,19 +18,22 @@ public struct Candidates: Sendable, Hashable {
     public let excluded: [Exclusion]
     /// How far the reader itself got.
     public let reach: Reach
+    /// Whose windows were read: every process's, or the front's owners at this read.
+    public let owners: Owners
 
-    public init(found: [Found], region: ScreenRect, examined: Int, excluded: [Exclusion], reach: Reach) {
+    public init(found: [Found], region: ScreenRect, examined: Int, excluded: [Exclusion], reach: Reach, owners: Owners) {
         self.found = found
         self.region = region
         self.examined = examined
         self.excluded = excluded
         self.reach = reach
+        self.owners = owners
     }
 }
 
 public extension Reading {
     static func judging(_ seen: Candidates, query: Query) -> Reading {
-        judging(seen.found, query: query, region: seen.region, examined: seen.examined, excluded: seen.excluded, reach: seen.reach)
+        judging(seen.found, query: query, region: seen.region, examined: seen.examined, excluded: seen.excluded, reach: seen.reach, owners: seen.owners)
     }
 
     /// How many near misses a failed query carries: enough to tell a slip from an absence,
@@ -49,7 +52,8 @@ public extension Reading {
         region: ScreenRect,
         examined: Int,
         excluded: [Exclusion],
-        reach: Reach
+        reach: Reach,
+        owners: Owners
     ) -> Reading {
         let scored = candidates.map { (found: $0, distance: query.match.distance(to: $0.text.value)) }
         let matching = scored.filter { query.match.tolerates($0.distance) }.flatMap { query.match.narrowing($0.found) }
@@ -79,7 +83,8 @@ public extension Reading {
             region: region,
             examined: examined,
             excluded: excluded + (cut > 0 ? [Exclusion(reason: .ranked, count: cut)] : []),
-            reach: reach == .whole && cut > 0 ? .stopped(.resultLimit(query.limit)) : reach
+            reach: reach == .whole && cut > 0 ? .stopped(.resultLimit(query.limit)) : reach,
+            owners: owners
         )
         return Reading(outcome: outcome, scope: scope)
     }

@@ -4,6 +4,8 @@ Each release's section is its GitHub Release notes, which keep line breaks, so e
 
 ## [Unreleased]
 
+- `eyes find` and `eyes read`, and their MCP tools, named no place, read what is in front: the frontmost app's windows and whatever is over its front window, such as an Open panel, where they read the main display, every app on it. When the frontmost app is the terminal or app eyes runs in, which shows the very text an agent asks eyes to find, they read the app behind it and the scope line says it passed over; that app's windows are never read, in front or not. A window over the front one is read only where a click there lands in it, so Notification Center's full-screen window is not. The pixels reader counts text in windows behind as `outside`, and a pixels read whose hit tests do not answer, as without Accessibility, says parts were left unread. `--display` reads every app on a display, as before. Each choice is a `front` record naming the app, its pid, the display, the app passed over and how many processes were matched as the one eyes runs in (`own_pids`), and each look's record counts the processes it read as `owners` and every exclusion as `excluded_<reason>`.
+
 ## [0.5.0]
 
 - The Claude Code plugin is installed and updated from the newest release, not from `master`: its skills and session-start check are that release's, written for the binaries it ships. Until this release, a plugin installed after a change on `master` could describe tool arguments no released vhid took, such as `click`'s `box` under 0.4.1.

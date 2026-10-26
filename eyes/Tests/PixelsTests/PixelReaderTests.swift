@@ -158,7 +158,7 @@ import Testing
 @Suite struct PixelGateTests {
     @MainActor @Test func aWithheldGrantRefusesBeforeLooking() async {
         let asked = Asked()
-        let reader = PixelReader { await asked.add($0); return false }
+        let reader = PixelReader(granted: { await asked.add($0); return false }, hit: { _ in Issue.record("hit test asked"); return .unanswered })
         await #expect { try await reader.look(Query(match: .contains("Save"), region: .display(1))) } throws: {
             ($0 as? PixelsError)?.missingGrant == true
         }

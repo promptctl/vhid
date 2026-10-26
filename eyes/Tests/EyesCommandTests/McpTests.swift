@@ -20,7 +20,7 @@ import Testing
             Window(id: 2, owner: "Finder", pid: 401, frame: ScreenRect(x: -800, y: 0, width: 800, height: 600), layer: 0),
         ],
         excluded: [])
-    private static let front = Frontmost(pid: 401, name: "Finder")
+    private static let front = Front.App(pid: 401, name: "Finder")
     private static let grantReading = GrantReading { $0 == .accessibility }
     private static let holder = Holder(executable: "/Applications/Claude.app/Contents/MacOS/Claude")
 
@@ -61,11 +61,16 @@ import Testing
         }
     }
 
+    /// What is in front: System Settings, with the agent's own terminal passed over.
+    static let systemSettings = Front(app: Front.App(pid: 300, name: "System Settings"), display: 1,
+                                      own: Front.Passed(pids: [80], name: "iTerm2"), passedOver: true)
+    private static let fronts: Where.Place.Fronts = { Self.systemSettings }
+
     /// A client connected to a server over `listing`, both torn down before this returns.
-    private func connected<T>(_ body: (Client) async throws -> T) async throws -> T {
+    private func connected<T>(front: @escaping Where.Place.Fronts = Self.fronts, _ body: (Client) async throws -> T) async throws -> T {
         let (clientSide, serverSide) = await InMemoryTransport.createConnectedPair()
         let transport = AnsweringTransport(serverSide)
-        let server = await Mcp.server(EyesTools.all(windows: { Self.listing }, frontmost: { Self.front }, displays: { DisplaysCommandTests.desk }, reading: Self.look, grants: { (Self.grantReading, Self.holder) }, pages: Self.pages), on: transport)
+        let server = await Mcp.server(EyesTools.all(windows: { Self.listing }, frontmost: { Self.front }, displays: { DisplaysCommandTests.desk }, reading: Self.look, grants: { (Self.grantReading, Self.holder) }, pages: Self.pages, front: front), on: transport)
         try await server.start(transport: transport)
         let client = Client(name: "test", version: "0")
         let result: Result<T, any Error>
@@ -80,10 +85,22 @@ import Testing
         return try result.get()
     }
 
-    private func call(_ arguments: [String: Value], tool: String = "windows") async throws -> (String, Bool?) {
-        let (content, isError) = try await connected { try await $0.callTool(name: tool, arguments: arguments) }
+    private func call(_ arguments: [String: Value], tool: String = "windows", front: @escaping Where.Place.Fronts = Self.fronts) async throws -> (String, Bool?) {
+        let (content, isError) = try await connected(front: front) { try await $0.callTool(name: tool, arguments: arguments) }
         guard case .text(let said, _, _) = content.first else { return ("no text: \(content)", isError) }
         return (said, isError)
+    }
+
+    /// With nothing but the app eyes answers to on screen, a look naming no place is refused,
+    /// naming it, and the choice is its own event. [LAW:no-silent-failure]
+    @Test func noAppInFrontIsARefusalNamingTheAppEyesAnswersTo() async throws {
+        let events = Collected()
+        let (said, isError) = try await Telemetry.$export.withValue(events.export) {
+            try await call(["text": "Save"], tool: "find", front: { throw NoFront(own: "iTerm2") })
+        }
+        #expect(isError == true)
+        #expect(said.contains("no app but iTerm2, which eyes answers to, has a window on screen"))
+        #expect(events.all.filter { $0.event == "front" }.map(\.outcome) == ["error"])
     }
 
     /// The binary and the server report the one stamped version, and the server the one
@@ -166,6 +183,9 @@ import Testing
             ("find", ["text": "Sabe", "edits": 1, "rect": "-400,0,200,100"],
              Query(match: .within(edits: Edits(1)!, of: "Sabe"), region: .rect(ScreenRect(x: -400, y: 0, width: 200, height: 100)))),
             ("read", ["display": 1, "limit": .null], Query(match: nil, region: .display(1))),
+            // No place named: what is in front.
+            ("find", ["text": "save"], Query(match: .contains("save"), region: .front(Self.systemSettings))),
+            ("read", [:], Query(match: nil, region: .front(Self.systemSettings))),
         ] {
             let (said, isError) = try await call(arguments, tool: tool)
             #expect(isError != true)

@@ -42,7 +42,7 @@ struct Windows: AsyncParsableCommand {
     @MainActor
     func run() async throws {
         // Frontmost first: an activation lands before the listing that reflects it.
-        let frontmost = Frontmost.now()
+        let frontmost = Front.App.now()
         print(Self.report(try Geometry.onScreen(), owner: owner, frontmost: frontmost))
     }
 
@@ -52,7 +52,7 @@ struct Windows: AsyncParsableCommand {
     ///
     /// The frontmost application's rows are marked by its pid, not found by row order:
     /// menus and the Dock sit on higher layers, so the first row is often not its window.
-    static func report(_ listing: WindowListing, owner: String?, frontmost: Frontmost?) -> String {
+    static func report(_ listing: WindowListing, owner: String?, frontmost: Front.App?) -> String {
         // The filter always runs; an absent owner is a predicate that admits everything
         // rather than a branch that skips the operation. [LAW:dataflow-not-control-flow]
         let shown = listing.windows.filter { window in
@@ -61,7 +61,7 @@ struct Windows: AsyncParsableCommand {
         let rows = shown.map { row($0, front: $0.pid == frontmost?.pid) }
         // Judged against the whole listing too, so a window the owner filter hid is not
         // reported as a window that is not on screen.
-        let front = frontmost.map { app -> (Frontmost, FrontRows) in
+        let front = frontmost.map { app -> (Front.App, FrontRows) in
             let owns = { (w: Window) in w.pid == app.pid }
             return (app, shown.contains(where: owns) ? .shown : listing.windows.contains(where: owns) ? .filtered : .none)
         }
@@ -83,7 +83,7 @@ struct Windows: AsyncParsableCommand {
     ///
     /// It names the frontmost application whether or not a row of it is shown, because
     /// that is usually where keystrokes go, and says so when nothing is frontmost.
-    static func scope(shown: Int, listing: WindowListing, frontmost: (app: Frontmost, rows: FrontRows)?) -> String {
+    static func scope(shown: Int, listing: WindowListing, frontmost: (app: Front.App, rows: FrontRows)?) -> String {
         let filtered = listing.windows.count - shown
         let clauses: [String?] = [
             "\(shown) window\(shown == 1 ? "" : "s"), front to back",
@@ -123,15 +123,10 @@ struct Windows: AsyncParsableCommand {
     }
 }
 
-/// The frontmost application: usually where keystrokes go, and nothing eyes chooses.
-struct Frontmost: Sendable, Hashable, CustomStringConvertible {
-    let pid: Int32
-    let name: String?
-
-    var description: String { "\(name ?? "(unnamed)") (pid \(pid))" }
-
+extension Front.App {
+    /// The frontmost application: usually where keystrokes go, and nothing eyes chooses.
     @MainActor
-    static func now() -> Frontmost? {
-        NSWorkspace.shared.frontmostApplication.map { Frontmost(pid: $0.processIdentifier, name: $0.localizedName) }
+    static func now() -> Front.App? {
+        NSWorkspace.shared.frontmostApplication.map { Front.App(pid: $0.processIdentifier, name: $0.localizedName) }
     }
 }

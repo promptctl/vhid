@@ -25,6 +25,10 @@ public extension Region {
                 throw NoSuchPlace.window(id)
             }
             return window.frame
+        case .front(let front):
+            // Its display, as `.display` is refused when detached; the windows read on it are
+            // the front's owners, which each reader takes from its own window list.
+            return try Region.display(front.display).bounds()
         case .page(let id, let frame):
             // The page goes with its window: a window closed since leaves no page to read.
             guard try Geometry.onScreen().windows.contains(where: { $0.id == id }) else { throw NoSuchPlace.window(id) }

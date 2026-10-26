@@ -17,8 +17,14 @@ public struct PixelReader: Reader {
     nonisolated static let grant = Grant.screenRecording
 
     private let granted: Gate
+    /// The process a click at a point lands in: the system's hit test, which the tree reader
+    /// has and this package links nothing to ask, handed in by whoever built both.
+    private let hit: @MainActor @Sendable (ScreenPoint) -> Heard<Int32>
 
-    public init(granted: @escaping Gate) { self.granted = granted }
+    public init(granted: @escaping Gate, hit: @escaping @MainActor @Sendable (ScreenPoint) -> Heard<Int32>) {
+        self.granted = granted
+        self.hit = hit
+    }
 
     /// A recognised run's box is where its text is drawn, and nothing this reader can ask
     /// says more about where a click on it lands.
@@ -30,6 +36,8 @@ public struct PixelReader: Reader {
         // and recognising that is a confident "nothing here".
         guard try await granted(Self.grant) else { throw PixelsError.noGrant }
         let region = try Self.resolve(query.region)
+        let listing = try Geometry.onScreen()
+        let owners = query.region.owners(in: listing, hit: hit)
         let image = try Self.capture(region)
         // A run with no words in it is nil: examined, and counted as wordless.
         // One piece after another, never at once: measured, recognising the pieces in a
@@ -43,16 +51,21 @@ public struct PixelReader: Reader {
         }
 
         let distinct = Self.distinct(readable)
-        let excluded = [
+        // A capture is what is on top, every app's; the owners' part of it is what is read.
+        let seen = distinct.map { (found: $0, seen: owners.see($0.frame.centre, windows: listing.windows, hit: hit)) }
+        let setAside = seen.compactMap { if case .setAside(let why) = $0.seen { why } else { nil } }
+        let excluded = ([
             Exclusion(reason: .wordless, count: runs.count - readable.count),
             Exclusion(reason: .duplicate, count: readable.count - distinct.count),
-        ].filter { $0.count > 0 }
+        ] + Exclusion.Reason.allCases.map { why in Exclusion(reason: why, count: setAside.filter { $0 == why }.count) })
+            .filter { $0.count > 0 }
         return Candidates(
-            found: distinct.inReadingOrder,
+            found: seen.filter { $0.seen == .read }.map(\.found).inReadingOrder,
             region: region,
             examined: runs.count,
             excluded: excluded,
-            reach: .whole
+            reach: Reach(excluded),
+            owners: owners
         )
     }
 

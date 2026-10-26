@@ -138,7 +138,9 @@ public extension Candidates {
             region: both.isNull ? seen[0].region : ScreenRect(both),
             examined: seen.map(\.examined).reduce(0, +),
             excluded: (seen.flatMap(\.excluded) + [Exclusion(reason: .duplicate, count: duplicates)]).summed,
-            reach: a.part.isWhole && b.part.isWhole ? .whole : .stopped(.merged(a.part, b.part))
+            reach: a.part.isWhole && b.part.isWhole ? .whole : .stopped(.merged(a.part, b.part)),
+            // A reader that could not look took in nobody's windows.
+            owners: seen.map(\.owners).reduce(.only([])) { $0.union($1) }
         )
     }
 }
