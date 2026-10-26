@@ -1,6 +1,6 @@
 # Human hands: design
 
-What vhid's pointer, clicks and typing look like to a web page today, what a person's look like, and the model `move`, `click`, `drag`, `scroll`, `type` and `press` will follow to close the gap. `vhid play` replays a script's own timing and is not covered here.
+What vhid's pointer, clicks and typing looked like to a web page in 0.4.1, what a person's look like, and the model `move`, `click`, `drag`, `scroll`, `type` and `press` follow from 0.5.0 to close the gap. `vhid play` replays a script's own timing and is not covered here.
 
 Measured on studious on 2026-10-06: macOS 15.0.1, Safari 18.0.1, vhid 0.4.1, the virtual pointer at the system's default tracking speed (`com.apple.mouse.scaling` 2). The human figures come from the literature cited beside each one.
 
@@ -19,7 +19,7 @@ Measured on studious on 2026-10-06: macOS 15.0.1, Safari 18.0.1, vhid 0.4.1, the
 
 All "± x" figures are a normal distribution's mean and standard deviation. A draw outside the floors and ceilings below is drawn again, never clamped: clamping would pile identical values at each bound, the uniform timing this design removes.
 
-## vhid today
+## vhid 0.4.1
 
 A probe page ([human-probe.html](human-probe.html), served by [human-probe.py](human-probe.py)) logged every pointer and key event Safari dispatched while `vhid move`, `vhid click` and `vhid type` ran against it.
 
@@ -30,7 +30,7 @@ A probe page ([human-probe.html](human-probe.html), served by [human-probe.py](h
 | Key down to next key down | median 2 ms; 53 characters in 1.3 s | 180 ± 60 ms [1] |
 | Key held | median 1 ms, at most 17 | 80–120 ms (assumed; see below) |
 
-Every vhid click is a *teleport click* as the bot-detection literature defines it: a cursor jump of more than 100 px in under 50 ms within 100 ms before the click [1]. That paper finds two features enough to catch every agent it tested: the ratio of teleport clicks and the rate of mouse events a page sees. vhid's 8 ms reports reach a page as about one pointer event a frame, as a 125 Hz mouse's do; what gives it away today is that a move is three or four of them.
+Every vhid click is a *teleport click* as the bot-detection literature defines it: a cursor jump of more than 100 px in under 50 ms within 100 ms before the click [1]. That paper finds two features enough to catch every agent it tested: the ratio of teleport clicks and the rate of mouse events a page sees. vhid's 8 ms reports reach a page as about one pointer event a frame, as a 125 Hz mouse's do; what gave it away in 0.4.1 is that a move is three or four of them.
 
 ## The model
 
