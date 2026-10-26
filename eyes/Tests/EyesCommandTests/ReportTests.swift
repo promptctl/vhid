@@ -156,7 +156,7 @@ import Testing
     /// Every look is one event: which reader, how it ended, and its counts, zeros included.
     @Test func aLookIsOneEvent() async throws {
         let events = Collected()
-        let near = Reading(outcome: .nearest([]), scope: Scope(region: Self.display, examined: 5, reach: .whole))
+        let near = Reading(outcome: .nearest([]), scope: Scope(region: Self.display, examined: 5, excluded: [Exclusion(reason: .outside, count: 3)], reach: .whole))
         let hit = Reading(outcome: .matched(Matches([found("OK", x: -100)])!),
                           scope: Scope(region: Self.display, examined: 9, reach: .whole, boxes: Boxes(narrowed: 1, unchecked: [.elsewhere: 2], calls: 41)))
         try await Telemetry.$export.withValue(events.export) {
@@ -175,10 +175,14 @@ import Testing
         #expect(seen.map { $0.facts["source"] } == ["tree", "pixels", "merged", "tree"])
         #expect(seen.map { $0.facts["region"] } == ["display", "display", "display", "page"])
         #expect(seen.map { $0.facts["order"] } == ["reading", "reading", "reading", "near"])
-        #expect(seen[0].counts == ["reads": 1, "examined": 5, "matched": 0, "nearest": 0, "boxes_narrowed": 0, "boxes_unchecked_unanswered": 0,
-                                   "boxes_unchecked_elsewhere": 0, "boxes_unchecked_over_time": 0, "box_calls": 0, "box_ms": 0])
-        #expect(seen[1].counts.filter { $0.key != "box_ms" } == ["reads": 1, "examined": 9, "matched": 1, "nearest": 0, "boxes_narrowed": 1,
-                                   "boxes_unchecked_unanswered": 0, "boxes_unchecked_elsewhere": 2, "boxes_unchecked_over_time": 0, "box_calls": 41])
+        // Every reason an exclusion can have, zeros included.
+        let none = Dictionary(uniqueKeysWithValues: Exclusion.Reason.allCases.map { ("excluded_\($0.rawValue)", 0) })
+        #expect(seen[0].counts == none.merging(["excluded_outside": 3]) { $1 }.merging(
+            ["reads": 1, "examined": 5, "matched": 0, "nearest": 0, "boxes_narrowed": 0, "boxes_unchecked_unanswered": 0,
+             "boxes_unchecked_elsewhere": 0, "boxes_unchecked_over_time": 0, "box_calls": 0, "box_ms": 0]) { $1 })
+        #expect(seen[1].counts.filter { $0.key != "box_ms" } == none.merging(
+            ["reads": 1, "examined": 9, "matched": 1, "nearest": 0, "boxes_narrowed": 1,
+             "boxes_unchecked_unanswered": 0, "boxes_unchecked_elsewhere": 2, "boxes_unchecked_over_time": 0, "box_calls": 41]) { $1 })
         #expect((seen[1].counts["box_ms"] ?? 0) >= 20)
         #expect(seen[1].facts["until"] == "present")
         #expect(seen[2].error != nil && seen[2].counts == ["reads": 1, "box_ms": 0])

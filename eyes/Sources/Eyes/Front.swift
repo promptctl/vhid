@@ -6,7 +6,7 @@ import CoreGraphics
 /// to, the agent's own terminal or Claude app, which echoes on screen the very text it asks
 /// eyes to find. Then it is the app of the frontmost window behind it. What is read is that
 /// app's windows and whatever is stacked in front of its front window - a remote Open panel,
-/// a service's popover - derived afresh from each read's own window list by `owners(in:)`,
+/// a service's popover - derived afresh from each read's own window list by `owners(in:hit:)`,
 /// so a panel that opens during a wait is read from the next read on. Only what a wait must
 /// keep is held here. [LAW:one-source-of-truth]
 public struct Front: Sendable, Hashable {
@@ -48,19 +48,30 @@ public struct Front: Sendable, Hashable {
     }
 
     /// The processes this read takes in, from the windows on screen now: the app, and every
-    /// process with a window in front of the app's frontmost one - listed above it and over
-    /// it - less the app eyes answers to. Over it, and not merely above: the menu bar is
-    /// listed above every window and shows the frontmost app's menus, which with the app eyes
-    /// answers to in front are that app's own.
-    public func owners(in listing: WindowListing) -> Set<Int32> {
-        let front = listing.windows.firstIndex { $0.pid == app.pid }
-        let over = front.map { i in listing.windows[..<i].filter { $0.frame.intersects(listing.windows[i].frame) } } ?? []
+    /// process with a window in front of the app's front window that a click there lands in -
+    /// a remote Open panel, a service's popover - less the app eyes answers to.
+    ///
+    /// Listed above and over the front window is not enough: a frame says only where a window
+    /// could be drawn. Notification Center holds one over the whole screen that draws nothing
+    /// there, and the menu bar is listed above every window and shows the frontmost app's
+    /// menus. So the hit test settles each, at the centre of what it covers of the front
+    /// window, as `Covers` settles a rect; one that does not answer takes nothing in.
+    /// [LAW:single-enforcer]
+    public func owners(in listing: WindowListing, hit: (ScreenPoint) -> Heard<Int32>) -> Set<Int32> {
+        let front = listing.front(of: app.pid)
+        let over = front.map { i in
+            listing.windows[..<i].filter { window in
+                let shared = window.frame.cgRect.intersection(listing.windows[i].frame.cgRect)
+                return !shared.isNull && !shared.isEmpty && hit(ScreenRect(shared).centre) == .answered(window.pid)
+            }
+        } ?? []
         return Set(over.map(\.pid)).union([app.pid]).subtracting(passedOver?.pids ?? [])
     }
 
     /// The app a look with no place named reads, from facts the caller gathered.
     ///
-    /// - frontmost: the app AppKit names frontmost, when any is.
+    /// - frontmost: the app AppKit names frontmost, when any is; when none is, the app of the
+    ///   frontmost ordinary window stands for it, by the same rule.
     /// - own: the app eyes answers to.
     /// - regular: the processes that are ordinary apps (AppKit's `.regular` activation
     ///   policy), which is what "an app behind" can be - not the Dock, the menu bar or a
@@ -68,20 +79,41 @@ public struct Front: Sendable, Hashable {
     /// - names: what each of those apps is called.
     public static func choose(frontmost: App?, own: Passed, regular: Set<Int32>, names: [Int32: String],
                               listing: WindowListing, displays: [Display]) throws(NoFront) -> Front {
-        let app: App
+        let app = { (window: Window) in App(pid: window.pid, name: names[window.pid] ?? window.owner) }
+        let ordinary = { (pid: Int32) in regular.contains(pid) }
+        guard let first = frontmost ?? listing.front(where: ordinary).map({ app(listing.windows[$0]) }) else {
+            throw NoFront(own: own.name)
+        }
+        let chosen: App
         let passed: Passed?
-        if let frontmost, !own.pids.contains(frontmost.pid) {
-            (app, passed) = (frontmost, nil)
-        } else if let behind = listing.windows.first(where: { regular.contains($0.pid) && !own.pids.contains($0.pid) }) {
-            (app, passed) = (App(pid: behind.pid, name: names[behind.pid] ?? behind.owner), own)
+        if !own.pids.contains(first.pid) {
+            (chosen, passed) = (first, nil)
+        } else if let behind = listing.front(where: { ordinary($0) && !own.pids.contains($0) }) {
+            (chosen, passed) = (app(listing.windows[behind]), own)
         } else {
             throw NoFront(own: own.name)
         }
-        let window = listing.windows.first { $0.pid == app.pid }
+        let window = listing.front(of: chosen.pid).map { listing.windows[$0] }
         let display = window.flatMap { w in displays.first { $0.frame.contains(w.frame.centre) } } ?? displays.first { $0.isMain }
         guard let display else { throw NoFront(own: own.name) }
-        return Front(app: app, display: display.id, passedOver: passed)
+        return Front(app: chosen, display: display.id, passedOver: passed)
     }
+}
+
+extension WindowListing {
+    /// The window server's level for document and main windows. An app's front window is its
+    /// frontmost one here, not whatever of it is listed first: a status item in the menu bar
+    /// (25) or an open menu (101) is listed above every ordinary window. The level is the
+    /// window server's own constant, not a threshold this module invents.
+    static let ordinary = Int(CGWindowLevelForKey(.normalWindow))
+
+    /// Where the frontmost ordinary window of a process `of` accepts is listed.
+    func front(where of: (Int32) -> Bool) -> Int? {
+        windows.firstIndex { $0.layer == Self.ordinary && of($0.pid) }
+    }
+
+    /// Where an app's front window is listed.
+    func front(of pid: Int32) -> Int? { front { $0 == pid } }
 }
 
 /// No app but the one eyes answers to has a window on screen: a look with no place named
@@ -118,13 +150,12 @@ public enum Owners: Sendable, Hashable {
     }
 
     /// Whether a run at `point` is the owners', for a reader that sees what is on top
-    /// rather than walking windows: read, outside every owner window (out of the region, as
-    /// text outside a rect is), or set aside under a window in front as the tree sets an
-    /// element aside - covered, or overlaid when the hit test does not settle it.
-    /// [LAW:single-enforcer] The rule is `Covers`, the tree's own.
+    /// rather than walking windows: read, or set aside - outside every owner window, or
+    /// under a window in front as the tree sets an element aside, covered, or overlaid when
+    /// the hit test does not settle it. [LAW:single-enforcer] The rule is `Covers`, the tree's own.
     public func see(_ point: ScreenPoint, windows: [Window], hit: @escaping (ScreenPoint) -> Heard<Int32>) -> Seen {
         guard case .only = self else { return .read }
-        guard let index = windows.firstIndex(where: { hold($0.pid) && $0.frame.contains(point) }) else { return .outside }
+        guard let index = windows.firstIndex(where: { hold($0.pid) && $0.frame.contains(point) }) else { return .setAside(.outside) }
         let covers = Covers(windows: windows[..<index].map { Cover(frame: $0.frame, pid: $0.pid) }, owner: windows[index].pid, hit: hit)
         switch covers.hide(point) {
         case .answered(false): return .read
@@ -135,7 +166,6 @@ public enum Owners: Sendable, Hashable {
 
     public enum Seen: Equatable {
         case read
-        case outside
         case setAside(Exclusion.Reason)
     }
 }
@@ -144,9 +174,9 @@ public extension Region {
     /// The processes a read of this region takes in, from the windows on screen at that
     /// read. Every region but the front is every process's; a reader asks rather than
     /// branching on the region. [LAW:dataflow-not-control-flow]
-    func owners(in listing: WindowListing) -> Owners {
+    func owners(in listing: WindowListing, hit: (ScreenPoint) -> Heard<Int32>) -> Owners {
         switch self {
-        case .front(let front): .only(front.owners(in: listing))
+        case .front(let front): .only(front.owners(in: listing, hit: hit))
         case .display, .window, .rect, .page: .every
         }
     }

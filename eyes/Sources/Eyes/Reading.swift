@@ -315,6 +315,10 @@ public struct Exclusion: Sendable, Hashable {
         /// An on-screen window with no accessibility element to walk - an open menu, a
         /// system surface, or a window its app would not list - so nothing in it was read.
         case unwalked
+        /// Seen, but in no window of the processes a front look reads - an app behind the
+        /// front one, or beside it. Only a reader that sees what is on top meets these; the
+        /// tree never walks another app's windows.
+        case outside
     }
 }
 

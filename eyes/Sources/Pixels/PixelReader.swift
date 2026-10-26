@@ -37,7 +37,7 @@ public struct PixelReader: Reader {
         guard try await granted(Self.grant) else { throw PixelsError.noGrant }
         let region = try Self.resolve(query.region)
         let listing = try Geometry.onScreen()
-        let owners = query.region.owners(in: listing)
+        let owners = query.region.owners(in: listing, hit: hit)
         let image = try Self.capture(region)
         // A run with no words in it is nil: examined, and counted as wordless.
         // One piece after another, never at once: measured, recognising the pieces in a
@@ -53,7 +53,6 @@ public struct PixelReader: Reader {
         let distinct = Self.distinct(readable)
         // A capture is what is on top, every app's; the owners' part of it is what is read.
         let seen = distinct.map { (found: $0, seen: owners.see($0.frame.centre, windows: listing.windows, hit: hit)) }
-        let outside = seen.filter { $0.seen == .outside }.count
         let setAside = seen.compactMap { if case .setAside(let why) = $0.seen { why } else { nil } }
         let excluded = ([
             Exclusion(reason: .wordless, count: runs.count - readable.count),
@@ -63,7 +62,7 @@ public struct PixelReader: Reader {
         return Candidates(
             found: seen.filter { $0.seen == .read }.map(\.found).inReadingOrder,
             region: region,
-            examined: runs.count - outside,
+            examined: runs.count,
             excluded: excluded,
             reach: .whole,
             owners: owners

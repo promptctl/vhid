@@ -428,8 +428,8 @@ func walk<Element>(
 /// region or wholly behind one in front holds nothing to read, so it is never matched,
 /// walked or counted. The hit test is handed in, so the rule is tested with windows and a
 /// hit test a test wrote.
-func seen(_ windows: [Window], in region: ScreenRect, hit: @escaping (ScreenPoint) -> Heard<Int32>) -> [Seen] {
-    windows.enumerated().compactMap { index, window in
+func seen(_ windows: [Window], of owners: Owners, in region: ScreenRect, hit: @escaping (ScreenPoint) -> Heard<Int32>) -> [Seen] {
+    windows.enumerated().filter { owners.hold($0.element.pid) }.compactMap { index, window in
         let covers = Covers(windows: windows[..<index].map { Cover(frame: $0.frame, pid: $0.pid) }, owner: window.pid, hit: hit)
         return visible(window.frame, in: region, under: covers).map { Seen(window: window, clip: $0, covers: covers) }
     }

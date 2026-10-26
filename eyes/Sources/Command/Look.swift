@@ -415,6 +415,9 @@ extension Report {
         Telemetry.count("boxes_narrowed", reading.scope.boxes.narrowed)
         for (why, count) in reading.scope.boxes.unchecked { Telemetry.count("boxes_unchecked_\(why.rawValue)", count) }
         Telemetry.count("box_calls", reading.scope.boxes.calls)
+        for why in Exclusion.Reason.allCases {
+            Telemetry.count("excluded_\(why.rawValue)", reading.scope.excluded.first { $0.reason == why }?.count ?? 0)
+        }
         // How many processes' windows a front look took in; every other region reads them all.
         if case .only(let pids) = reading.scope.owners { Telemetry.count("owners", pids.count) }
         switch reading.outcome {

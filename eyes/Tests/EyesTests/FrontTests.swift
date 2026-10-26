@@ -42,8 +42,27 @@ import Testing
         #expect(front.display == 2)
     }
 
+    /// With no app named frontmost, the app of the frontmost ordinary window stands for it -
+    /// and is passed over only when it is the agent's own terminal.
     @Test func noFrontmostAppReadsTheAppOfTheFrontmostOrdinaryWindow() throws {
-        #expect(try Self.choose(frontmost: nil).app.pid == 300)
+        let terminalFirst = try Self.choose(frontmost: nil)
+        #expect(terminalFirst.app.pid == 300)
+        #expect(terminalFirst.passedOver == Self.terminal)
+        let safariFirst = WindowListing(windows: [Self.menuBar, Self.window(4, "Safari", pid: 400), Self.window(2, "iTerm2", pid: 80)], excluded: [])
+        let safari = try Self.choose(frontmost: nil, listing: safariFirst)
+        #expect(safari == Front(app: Front.App(pid: 400, name: "Safari"), display: 1, passedOver: nil))
+    }
+
+    /// A status item in the menu bar is listed above every ordinary window, so an app with
+    /// one is not the app behind for that, and its front window is its ordinary one.
+    @Test func aStatusItemIsNotAnAppsFrontWindow() throws {
+        let statusItem = Window(id: 8, owner: "1Password", pid: 500, frame: ScreenRect(x: -1900, y: 0, width: 30, height: 24), layer: 25)
+        let note = Window(id: 7, owner: "1Password", pid: 500, frame: ScreenRect(x: 100, y: 100, width: 300, height: 300), layer: 0)
+        let listing = WindowListing(windows: [statusItem, Self.menuBar] + Self.desk.windows.dropFirst() + [note], excluded: [])
+        let front = try Front.choose(frontmost: Front.App(pid: 80, name: "iTerm2"), own: Self.terminal, regular: [80, 300, 400, 500],
+                                     names: [300: "System Settings", 500: "1Password"], listing: listing, displays: [Self.main, Self.left])
+        #expect(front.app.pid == 300)
+        #expect(try Self.choose(frontmost: Front.App(pid: 500, name: "1Password"), listing: listing).display == 1)
     }
 
     @Test func anAppWithNoWindowOnScreenIsReadOnTheMainDisplay() throws {
@@ -57,20 +76,35 @@ import Testing
         #expect(NoFront(own: "iTerm2").description.contains("no app but iTerm2, which eyes answers to, has a window on screen"))
     }
 
-    /// The app, and whatever is in front of its front window - a remote Open panel over it -
-    /// but never what is behind it, the agent's own terminal, or the menu bar above it, which
-    /// shows the terminal's menus while the terminal is frontmost.
+    /// The app, and whatever is in front of its front window that a click there lands in - a
+    /// remote Open panel over it - but never what is behind it or the agent's own terminal.
     @Test func theOwnersAreTheAppAndWhatIsOverItLessTheAppPassedOver() {
         let front = Front(app: Front.App(pid: 300, name: "System Settings"), display: 1, passedOver: Self.terminal)
         let panel = WindowListing(windows: [Self.window(9, "Open and Save Panel Service", pid: 900, x: -900)] + Self.desk.windows, excluded: [])
-        #expect(front.owners(in: Self.desk) == [300])
-        #expect(front.owners(in: panel) == [900, 300])
-        #expect(Region.front(front).owners(in: panel) == .only([900, 300]))
+        let landsInPanel: (ScreenPoint) -> Heard<Int32> = { _ in .answered(900) }
+        #expect(front.owners(in: Self.desk, hit: landsInPanel) == [300])
+        #expect(front.owners(in: panel, hit: landsInPanel) == [900, 300])
+        #expect(Region.front(front).owners(in: panel, hit: landsInPanel) == .only([900, 300]))
+    }
+
+    /// A frame over the front window says only where a window could be drawn. Notification
+    /// Center's covers the whole screen and draws nothing there; the menu bar shows the front
+    /// app's menus. A click there landing elsewhere, or not answering, takes neither in.
+    @Test func aWindowOverTheFrontOneIsTakenInOnlyWhereAClickLandsInIt() {
+        let front = Front(app: Front.App(pid: 300, name: "System Settings"), display: 1, passedOver: nil)
+        let center = Window(id: 6, owner: "Notification Center", pid: 700, frame: ScreenRect(x: -1920, y: 0, width: 3432, height: 1080), layer: 23)
+        let listing = WindowListing(windows: [center, Self.menuBar, Self.window(3, "System Settings", pid: 300, x: -1000)], excluded: [])
+        var asked: [ScreenPoint] = []
+        #expect(front.owners(in: listing) { asked.append($0); return .answered(300) } == [300])
+        // Notification Center at the front window's centre; the menu bar does not reach it.
+        #expect(asked == [ScreenPoint(x: -700, y: 240)])
+        #expect(front.owners(in: listing) { _ in .unanswered } == [300])
+        #expect(front.owners(in: listing) { _ in .answered(700) } == [700, 300])
     }
 
     @Test func everyOtherRegionReadsEveryProcess() {
         for region: Region in [.display(1), .window(3), .rect(Self.main.frame), .page(window: 3, frame: Self.main.frame)] {
-            #expect(region.owners(in: Self.desk) == .every)
+            #expect(region.owners(in: Self.desk) { _ in Issue.record("hit test asked"); return .unanswered } == .every)
         }
     }
 
@@ -95,7 +129,7 @@ import Testing
     }
 
     @Test func aRunInNoOwnerWindowIsOutside() {
-        #expect(Owners.only([300]).see(Self.onlyBehind, windows: [Self.app, Self.behind], hit: Self.asked) == .outside)
+        #expect(Owners.only([300]).see(Self.onlyBehind, windows: [Self.app, Self.behind], hit: Self.asked) == .setAside(.outside))
     }
 
     @Test func aRunInAnOwnerWindowWithNothingInFrontIsRead() {
