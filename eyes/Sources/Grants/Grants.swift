@@ -6,6 +6,14 @@ import Foundation
 import Responsibility
 import Telemetry
 
+extension Telemetry.Attribute {
+    /// The grant a gate asked about, whether its reading was taken or shared with one
+    /// already underway, and the executable a grant child was started from.
+    static let grant = Self("grant")
+    static let reading = Self("reading")
+    static let executable = Self("executable")
+}
+
 /// The two privacy grants eyes' readers need.
 ///
 /// macOS does not charge a grant to the process reading: it charges it to the process
@@ -90,17 +98,17 @@ public actor SharedReading {
     /// [LAW:nothing-unseen]
     public func holds(_ grant: Grant) async throws -> Bool {
         try await Telemetry.unit("grant_reading", result: { $0 ? "held" : "not_held" }) {
-            Telemetry.note("grant", .string(grant.rawValue))
+            Telemetry.note(.grant, .string(grant.rawValue))
             return try await reading(grant)
         }
     }
 
     private func reading(_ grant: Grant) async throws -> Bool {
         if let latest, latest.finished.map({ ContinuousClock.now - $0 < fresh }) ?? true {
-            Telemetry.note("reading", "shared")
+            Telemetry.note(.reading, "shared")
             return try await Self.waited(latest.reading).holds(grant)
         }
-        Telemetry.note("reading", "taken")
+        Telemetry.note(.reading, "taken")
         taking += 1
         let reading = Task { [take, taking] in
             // Stamped when the reading ends, not when a gate stops waiting: a cancelled
@@ -151,6 +159,15 @@ public struct GrantReading: Sendable, Equatable {
     public static func here() -> GrantReading {
         GrantReading { $0.heldHere() }
     }
+
+    /// How a reading process exits: 0 when this reading holds every grant, `lacking` when it
+    /// does not. A script reads this, as a parent reads `line`, so no script parses the line.
+    /// [LAW:one-source-of-truth] The verdict is the reading's own.
+    public var exitStatus: Int32 { Grant.allCases.allSatisfy(holds) ? 0 : Self.lacking }
+
+    /// The exit status of a reading process whose reading lacks a grant: apart from
+    /// ArgumentParser's own failure (1) and validation (64), so a failed run is not read as one.
+    public static let lacking: Int32 = 3
 
     /// The line a reading process prints and `init(line:)` reads back.
     public var line: String {
@@ -214,7 +231,7 @@ public struct GrantReading: Sendable, Equatable {
             if Task.isCancelled { throw CancellationError() }
             throw GrantReadingFailure("\(command) did not answer within \(deadline)")
         }
-        guard process.terminationReason == .exit, process.terminationStatus == 0 else {
+        guard process.terminationReason == .exit, [0, GrantReading.lacking].contains(process.terminationStatus) else {
             let complaint = await why.value
             let how = process.terminationReason == .uncaughtSignal ? "crashed with signal" : "exited"
             throw GrantReadingFailure("\(command) \(how) \(process.terminationStatus)\(complaint.isEmpty ? "" : ": \(complaint)")")
@@ -267,7 +284,7 @@ public struct Holder: Sendable, Equatable {
     public static func current() async throws(GrantReadingFailure) -> Holder {
         try await Telemetry.unit("holder") { () throws(GrantReadingFailure) -> Holder in
             let executable = try attributed()
-            Telemetry.note("executable", .string(executable))
+            Telemetry.note(.executable, .string(executable))
             return named(executable)
         }
     }

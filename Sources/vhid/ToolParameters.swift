@@ -1,3 +1,4 @@
+import struct EyesVerbs.ArgumentRefused
 import Input
 import MCP
 import Pointing
@@ -277,10 +278,4 @@ struct Arguments {
             }
         }
     }
-}
-
-/// An argument that is not what its tool takes, named.
-struct ArgumentRefused: Error, CustomStringConvertible {
-    let description: String
-    init(_ description: String) { self.description = description }
 }

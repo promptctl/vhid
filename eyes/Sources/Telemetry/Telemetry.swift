@@ -119,6 +119,40 @@ public enum JSON: Sendable, Equatable, Encodable, ExpressibleByStringLiteral, Ex
     }
 }
 
+/// A value a unit builds up as its work goes, which its record carries as one attribute.
+public protocol Accumulated: Sendable {
+    /// Before anything is added.
+    init()
+    var json: JSON { get }
+}
+
+extension Telemetry {
+    /// The name of a count a record keeps. Each is declared once, as a static member beside
+    /// the code that keeps it, in either half of the binary, so a typo is a compile error
+    /// rather than a second key no reader looks for. [LAW:types-are-the-program]
+    /// [LAW:one-source-of-truth] One vocabulary for every record, whichever half made it.
+    public struct Count: RawRepresentable, Hashable, Sendable {
+        public let rawValue: String
+        public init(rawValue: String) { self.rawValue = rawValue }
+        public init(_ rawValue: String) { self.rawValue = rawValue }
+    }
+
+    /// The name of an attribute a record carries: a fact that is not a count, an id among them.
+    /// Declared once each, as `Count` is.
+    public struct Attribute: RawRepresentable, Hashable, Sendable {
+        public let rawValue: String
+        public init(rawValue: String) { self.rawValue = rawValue }
+        public init(_ rawValue: String) { self.rawValue = rawValue }
+    }
+}
+
+extension Telemetry.Attribute {
+    /// Which dispatcher the unit came through: `cli` or `mcp`.
+    public static let entry = Self("entry")
+    /// What a returned unit found - matched, landed, held - beside how it ended.
+    public static let result = Self("result")
+}
+
 public enum Telemetry {
     public typealias Export = @Sendable (Record) async -> Void
 
@@ -165,7 +199,7 @@ public enum Telemetry {
         let ending: (Telemetry.Outcome, String?)
         switch ran {
         case .success(let value):
-            recorder.note("result", result(value).map(JSON.string))
+            recorder.note(.result, result(value).map(JSON.string))
             ending = (.ok, nil)
         case .failure(let error):
             ending = (error.isCancellation ? .cancelled : .failed, recorder.words(for: error, said: said))
@@ -179,23 +213,21 @@ public enum Telemetry {
     public static func name(_ name: String) { current?.name(name) }
 
     /// Sets an attribute on the unit underway; `nil` removes it.
-    public static func note(_ key: String, _ value: JSON?) { current?.note(key, value) }
+    public static func note(_ key: Attribute, _ value: JSON?) { current?.note(key, value) }
 
-    /// Replaces an attribute on the unit underway with what `change` makes of it, for a
-    /// value built up as the work goes - a list, a running total.
-    public static func revise(_ key: String, _ change: (JSON?) -> JSON) { current?.revise(key, change) }
-
-    /// Adds `value` to the end of a list attribute, which is absent until something is added.
-    public static func append(_ value: JSON, to key: String) {
-        revise(key) { if case .array(let values)? = $0 { .array(values + [value]) } else { .array([value]) } }
+    /// Changes a value the unit underway builds up as the work goes - a list, a running
+    /// total - kept as its own type until the record is made, when it becomes the attribute
+    /// `key`. A key built up as two types is a fault, said at once. [LAW:types-are-the-program]
+    public static func accumulate<Value: Accumulated>(_ key: Attribute, _ change: (inout Value) -> Void) {
+        current?.accumulate(key, change)
     }
 
     /// Sets a count on the unit underway.
-    public static func count(_ key: String, _ value: Int) { current?.count(key, value) }
+    public static func count(_ key: Count, _ value: Int) { current?.count(key, value) }
 
     /// Adds to a count on the unit underway, so a unit that ends early still says how far
     /// it got, and a unit that does a thing many times says its total.
-    public static func tally(_ key: String, by amount: Int = 1) { current?.tally(key, by: amount) }
+    public static func tally(_ key: Count, by amount: Int = 1) { current?.tally(key, by: amount) }
 
     /// Says the unit underway handles text it was given, which can be meant for a password
     /// field. Its record then names the kinds of the error it ended in rather than quoting

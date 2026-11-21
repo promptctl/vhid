@@ -82,7 +82,7 @@ echo "$out" | grep -qF "not ready" && fail "doctor threw: said not ready: '$out'
 
 # Ready, with a grant missing: said, with the doctor's rows that name the app to switch on.
 vhid_doctor ready running 0
-grants 'screenRecording=true accessibility=false'
+grants 'screenRecording=true accessibility=false' 3
 run
 said "A grant look reads the screen by is not held" "grant missing"
 said "Driver extension: running" "grant missing"
@@ -94,14 +94,14 @@ said "vhid is installed but not ready" "not ready, grant missing"
 said "A grant look reads the screen by is not held" "not ready, grant missing"
 [ "$(echo "$out" | grep -cF "Driver extension:")" -eq 1 ] || fail "not ready, grant missing: the rows said other than once: '$out'"
 
-# A reading that failed, or that is not the line, is said as unknown with what it printed.
+# A reading that failed is said as unknown, with what it printed, whatever it printed.
 vhid_doctor ready running 0
 grants "Error: no such verb" 64
 run
-said 'Whether look can read the screen is unknown: `vhid read-grants` exited 64 and printed: Error: no such verb' "grants failed"
-grants "Accessibility: granted" 0
+said 'Whether look can read the screen is unknown: `vhid read-grants` exited 64 and printed: Error: no such verb' "grants refused"
+grants "screenRecording=true accessibility=true" 1
 run
-said 'Whether look can read the screen is unknown: `vhid read-grants` exited 0 and printed: Accessibility: granted' "grants unreadable"
+said 'Whether look can read the screen is unknown: `vhid read-grants` exited 1 and printed: screenRecording=true accessibility=true' "grants failed"
 grants "$GRANTS_HELD"
 
 # Missing: named, with what it takes away and the install step.

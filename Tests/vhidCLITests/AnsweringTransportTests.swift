@@ -201,6 +201,10 @@ actor Stdio: Transport {
     nonisolated let (stream, lines) = AsyncThrowingStream<Data, any Error>.makeStream()
     private nonisolated let kept = Kept()
     nonisolated var sent: [String] { kept.lines }
+    /// The first message sent under `id`, once it is sent.
+    nonisolated func answer(to id: Int) async -> String { await kept.first { $0.contains(#""id":\#(id)"#) } }
+    /// The first message sent, once one is.
+    nonisolated func firstSent() async -> String { await kept.first { _ in true } }
     func connect() async throws {}
     func disconnect() async {}
     func send(_ data: Data) async throws { kept.append(String(decoding: data, as: UTF8.self)) }
@@ -227,6 +231,28 @@ actor Stdio: Transport {
 final class Kept: @unchecked Sendable {
     private let lock = NSLock()
     private var kept: [String] = []
+    private var waiting: [(matches: @Sendable (String) -> Bool, resume: CheckedContinuation<String, Never>)] = []
     var lines: [String] { lock.withLock { kept } }
-    func append(_ line: String) { lock.withLock { kept.append(line) } }
+
+    func append(_ line: String) {
+        let woken = lock.withLock {
+            kept.append(line)
+            let (woken, still) = (waiting.filter { $0.matches(line) }, waiting.filter { !$0.matches(line) })
+            waiting = still
+            return woken
+        }
+        woken.forEach { $0.resume.resume(returning: line) }
+    }
+
+    /// The first line kept that `matches`, waiting for it if none has come yet.
+    func first(where matches: @escaping @Sendable (String) -> Bool) async -> String {
+        await withCheckedContinuation { resume in
+            let found: String? = lock.withLock {
+                if let line = kept.first(where: matches) { return line }
+                waiting.append((matches, resume))
+                return nil
+            }
+            if let found { resume.resume(returning: found) }
+        }
+    }
 }

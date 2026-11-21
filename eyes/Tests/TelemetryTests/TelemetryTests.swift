@@ -16,7 +16,7 @@ import Testing
         let collected = Collected()
         await Telemetry.$export.withValue(collected.export) {
             _ = await Telemetry.unit("ok", result: { $0 ? "yes" : "no" }) {
-                Telemetry.note("who", "me"); Telemetry.count("seen", 0); return true
+                Telemetry.note(Telemetry.Attribute("who"), "me"); Telemetry.count(Telemetry.Count("seen"), 0); return true
             }
             await #expect(throws: Refusal.self) { try await Telemetry.unit("fails") { throw Refusal() } }
         }
@@ -84,7 +84,7 @@ import Testing
         let unit = Task {
             await Telemetry.$export.withValue(collected.export) {
                 try? await Telemetry.unit("withdrawn") {
-                    Telemetry.tally("reads"); Telemetry.tally("reads")
+                    Telemetry.tally(Telemetry.Count("reads")); Telemetry.tally(Telemetry.Count("reads"))
                     started.continuation.finish()
                     do { try await Task.sleep(for: .seconds(60)) } catch { throw Wrapped(cause: error) }
                 }

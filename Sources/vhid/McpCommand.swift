@@ -1,5 +1,6 @@
 import ArgumentParser
 import Darwin
+import enum EyesVerbs.Entry
 import Foundation
 import Input
 import Installations
@@ -95,7 +96,7 @@ struct McpCommand: AsyncParsableCommand {
                         try await verb.call(request.arguments ?? [:], on: installation, taking: turns, arrived: arrived)
                     }
                     return .init(content: [.text(text: said, annotations: nil, _meta: nil)], isError: false)
-                } catch where Task.isCancelled {
+                } catch where error.isCancellation {
                     FileHandle.standardError.write(Data("vhid: \(request.name) withdrawn: \(error.reported)\n".utf8))
                     return .init(content: [.text(text: "withdrawn: \(error.reported)", annotations: nil, _meta: nil)], isError: true)
                 } catch {
@@ -109,17 +110,10 @@ struct McpCommand: AsyncParsableCommand {
     /// Runs `work` as one call's unit of work, of a trace of its own: the tool it named,
     /// through this dispatcher, and the signal that stopped the session, if one did.
     static func dispatched<T>(_ name: String, stoppedBy signals: FirstSignal?, _ work: () async throws -> T) async throws -> T {
-        try await Telemetry.unit(name, trace: .fresh, said: words) {
-            Telemetry.note(.entry, "mcp")
+        try await Entry.mcp.unit(name, trace: .fresh, said: { $0.reported }) {
             defer { signals?.noted() }
             return try await work()
         }
-    }
-
-    /// What a call's record says of the error it ended in: what the model was told, except
-    /// refused arguments' words.
-    static func words(for error: any Error) -> String? {
-        error is ArgumentRefused ? Telemetry.refusedArguments : error.reported
     }
 
     func run() async throws {
@@ -140,8 +134,9 @@ struct McpCommand: AsyncParsableCommand {
     /// Serves `tools` over `transport` until the client hangs up or the serving task is
     /// cancelled, as Control-C and SIGTERM cancel it. A cancel withdraws every call owed,
     /// so each one stops as a client's cancel would stop it, and ends the session. Returns
-    /// once every call the transport received has been answered - each record in the
-    /// outbox by then, which the process drains at exit - throwing if it was cancelled.
+    /// once every call the transport received has been answered, or, once cancelled, once
+    /// every call running has stopped - each record in the outbox by then, which the
+    /// process drains at exit - throwing if it was cancelled.
     /// Each call's record names the signal in `signals` that stopped the session, if one did.
     ///
     /// The cancel has to be carried in by hand: the SDK serves from a task of its own,
@@ -158,6 +153,7 @@ struct McpCommand: AsyncParsableCommand {
                 await server.stop()
             }
         }
+        await transport.everyCallStopped()
         try Task.checkCancellation()
     }
 }

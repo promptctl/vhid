@@ -1,3 +1,5 @@
+import struct EyesVerbs.ArgumentRefused
+import enum EyesVerbs.Entry
 import ArgumentParser
 import DriverExtension
 import Foundation
@@ -222,7 +224,7 @@ import Testing
         }
         let record = try Self.only(collected)
         #expect(record["outcome"] as? String == "failed")
-        #expect(record["error"] as? String == thrown.flatMap(McpCommand.words))
+        #expect(record["error"] as? String == thrown?.reported)
         #expect((record["counts"] as? [String: Int])?["scroll_notches_vertical"] == 1)
     }
 
@@ -278,7 +280,7 @@ import Testing
                 try await McpCommand.serve([click], on: .nobody, over: transport)
             }
         }
-        while stdio.sent.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
+        _ = await stdio.firstSent()
         answered.withLock { $0 = true }
         stdio.feed([.end])
         try await session.value
@@ -324,9 +326,9 @@ import Testing
     /// The command line and MCP name a verb the same way, so one verb's records are found
     /// under one name.
     @Test func aCommandIsNamedAsItIsTypedAndAsItsToolIs() {
-        #expect(Vhid.name(of: Vhid.self) == "vhid")
-        #expect(Vhid.name(of: DriverCommand.State.self) == "driver state")
-        let commands = Vhid.configuration.subcommands.map { Vhid.name(of: $0) }
+        #expect(Entry.name(of: Vhid.self, under: Vhid.self) == "vhid")
+        #expect(Entry.name(of: DriverCommand.State.self, under: Vhid.self) == "driver state")
+        let commands = Vhid.configuration.subcommands.map { Entry.name(of: $0, under: Vhid.self) }
         for tool in Tools.all.map(\.tool.name) {
             #expect(commands.contains(tool), "no command is named \(tool)")
         }
@@ -336,7 +338,7 @@ import Testing
 
     /// `arguments` run as `Vhid.main` runs argv. Whatever the run threw is the record's to say.
     private static func commandLine(_ arguments: [String], into collected: Collected) async {
-        _ = try? await cli(Vhid._commandName, into: collected) { try await Vhid.run(arguments) }
+        _ = try? await cli(Vhid._commandName, into: collected) { try await Entry.commandLine(Vhid.self, arguments) }
     }
 
     /// ArgumentParser answers `--help` with a `help` command it never declares among
@@ -406,6 +408,44 @@ import Testing
         #expect(record["outcome"] as? String == "cancelled")
         #expect((record["counts"] as? [String: Int])?["mouse_reports"] == 1)
         #expect((record["attributes"] as? [String: Any])?["signal"] as? String == "SIGTERM")
+    }
+
+    /// A stopped session ends only once the call it withdrew has finished stopping: a
+    /// withdrawn verb hands the devices back and lets go of what it holds on its way out,
+    /// and its record says what it sent by then.
+    @Test func aStoppedSessionWaitsForItsWithdrawnCallToFinishStopping() async throws {
+        let (began, begin) = AsyncStream<Void>.makeStream()
+        let (handedBack, handBack) = AsyncStream<Void>.makeStream()
+        let holding = VerbTool(Help.click, []) { _, _ in
+            begin.yield()
+            do {
+                try await Task.sleep(for: .seconds(3600))
+            } catch {
+                // Waited on outside the cancelled task, which would end the wait at once.
+                await Task { for await _ in handedBack { break } }.value
+                Telemetry.tally(.mouseReports)
+                throw error
+            }
+            return "clicked"
+        }
+        let collected = Collected(), stdio = Stdio(), transport = AnsweringTransport(stdio), served = Mutex(false)
+        let session = Task {
+            defer { served.withLock { $0 = true } }
+            try await Telemetry.$export.withValue(collected.export) {
+                try await McpCommand.serve([holding], on: .nobody, over: transport)
+            }
+        }
+        stdio.call(4, then: [])
+        for await _ in began { break }
+        session.cancel()
+        for _ in 0..<200 where !(await transport.isWaitingOnCalls) { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(await transport.isWaitingOnCalls, "the stopped session did not wait on the call it withdrew")
+        #expect(!served.withLock { $0 }, "the session ended under a call still stopping")
+        handBack.yield()
+        await #expect(throws: CancellationError.self) { try await session.value }
+        let record = try Self.only(collected)
+        #expect(record["outcome"] as? String == "cancelled")
+        #expect((record["counts"] as? [String: Int])?["mouse_reports"] == 1)
     }
 
     /// The command line's dispatcher, as a shell meets it: `vhid mcp` serving, then a

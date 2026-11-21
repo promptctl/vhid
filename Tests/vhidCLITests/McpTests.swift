@@ -1,3 +1,4 @@
+import struct EyesVerbs.ArgumentRefused
 import Input
 import Foundation
 @testable import Doctor

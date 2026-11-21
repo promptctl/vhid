@@ -81,8 +81,8 @@ public struct Asked: Sendable {
         }
     }
 
-    /// The displays, the windows front to back, then the place's text or why it was not
-    /// read: every part from the one desk, rendered once whatever the place came to.
+    /// The displays, the windows front to back, from the one desk, then the place's text or
+    /// why it was not read: rendered once whatever the place came to.
     /// [LAW:one-source-of-truth] Pure, so a test reads what an agent is told.
     static func overview(_ desk: Desk, _ place: Result<String, any Error>) -> String {
         let text = switch place {

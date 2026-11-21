@@ -58,7 +58,7 @@ struct Devices {
         let queue = DeviceQueue()
         // [LAW:nothing-unseen] Every report a verb sends passes here, so here is where they
         // are counted, from zero: a verb that opened the devices and sent nothing says so.
-        for tally in Tally.allCases { Telemetry.count(tally.rawValue, 0) }
+        for count in Telemetry.Count.sent { Telemetry.count(count, 0) }
         let mouse = TalliedMouse(mouse: QueuedMouse(pointing: helper.mouse, queue: queue))
         let cursor = cursor(helper, on: queue)
         let randomness = RandomSource(seed: UInt64.random(in: .min ... .max))

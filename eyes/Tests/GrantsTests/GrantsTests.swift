@@ -58,17 +58,37 @@ import Testing
     /// child is gone with it.
     @Test func aReadingWithdrawnWhileItsChildRunsIsCancelled() async throws {
         let events = Collected()
+        // The child says it is running through a FIFO, which this side's open blocks on
+        // until the child opens it to write: the cancel lands while the child runs.
+        let started = FileManager.default.temporaryDirectory.appending(path: "grants-started-\(UUID().uuidString)")
+        try #require(mkfifo(started.path, 0o600) == 0)
+        defer { try? FileManager.default.removeItem(at: started) }
         let reading = Task {
             try await Telemetry.$export.withValue(events.export) {
-                try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/sleep"), ["5"])
+                try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/sh"), ["-c", "echo > \"$0\"; exec sleep 5", started.path])
             }
         }
-        try await Task.sleep(for: .milliseconds(100))
+        await withCheckedContinuation { running in
+            DispatchQueue.global().async {
+                _ = FileHandle(forReadingAtPath: started.path)?.readDataToEndOfFile()
+                running.resume()
+            }
+        }
         let start = ContinuousClock.now
         reading.cancel()
         await #expect(throws: CancellationError.self) { try await reading.value }
         #expect(ContinuousClock.now - start < .seconds(2))
         #expect(events.all.map(\.outcome) == [.cancelled])
+    }
+
+    /// A reading process says by its exit status whether every grant is held, and a parent
+    /// still reads a reading that lacks one.
+    @Test func aReadingThatLacksAGrantExitsSoAndIsStillRead() async throws {
+        let lacking = GrantReading { $0 == .screenRecording }
+        #expect(GrantReading { _ in true }.exitStatus == 0)
+        #expect(lacking.exitStatus == GrantReading.lacking)
+        let sh = URL(fileURLWithPath: "/bin/sh")
+        #expect(try await GrantReading.taken(by: sh, ["-c", "echo \(lacking.line); exit \(GrantReading.lacking)"]) == lacking)
     }
 
     /// The child reads nothing of this process's stdin, and a child that says more than a

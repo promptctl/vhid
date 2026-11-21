@@ -2,9 +2,10 @@
 /// what is running, the windows on screen and the displays, read once, frontmost first -
 /// an activation lands before the listing that reflects it.
 ///
-/// [LAW:one-source-of-truth] Every part of one answer - the displays and windows it lists,
-/// the app it chooses to read, where a click it was asked about lands - is judged against
-/// this one value, so no two parts of an answer describe two moments.
+/// [LAW:one-source-of-truth] The displays and windows an answer lists, the app it chooses
+/// to read, and where a click it was asked about lands are judged against this one value,
+/// so those parts of an answer describe one moment. The text read in the chosen place is
+/// read after it, by readers that read the screen as they read - a wait reads it many times.
 public struct Desk: Sendable {
     public let frontmost: Front.App?
     public let own: Front.Passed

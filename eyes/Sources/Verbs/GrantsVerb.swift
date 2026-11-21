@@ -85,5 +85,9 @@ public struct ReadGrants: ParsableCommand {
 
     public static let configuration = CommandConfiguration(commandName: "read-grants", shouldDisplay: false)
 
-    public func run() { print(GrantReading.here().line) }
+    public func run() throws {
+        let reading = GrantReading.here()
+        print(reading.line)
+        if reading.exitStatus != 0 { throw ExitCode(reading.exitStatus) }
+    }
 }

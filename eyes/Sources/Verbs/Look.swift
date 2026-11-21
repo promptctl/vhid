@@ -163,15 +163,15 @@ struct Where: ParsableArguments {
         /// starts: which app, how it was chosen, on which display, and which app it passed over.
         @MainActor private static func front(_ desks: Desks, _ chosen: String, by rule: (Desk) throws -> Front) async throws -> Region {
             try await Telemetry.unit("front") {
-                Telemetry.note("chosen", .string(chosen))
+                Telemetry.note(.chosen, .string(chosen))
                 let front = try rule(try await desks())
-                Telemetry.note("front_app", .string(front.app.name ?? ""))
-                Telemetry.count("front_pid", Int(front.app.pid))
-                Telemetry.count("display", Int(front.display))
-                Telemetry.note("passed_over", front.passedOver.map { .string($0.said) })
+                Telemetry.note(.frontApp, front.app.name.map(JSON.string))
+                Telemetry.note(.frontPid, .int(Int(front.app.pid)))
+                Telemetry.note(.display, .int(Int(front.display)))
+                Telemetry.note(.passedOver, front.passedOver.map { .string($0.said) })
                 // How many processes were matched as the agent's own app: zero means none
                 // could be passed over or kept out, whatever is in front.
-                Telemetry.count("own_pids", front.own.pids.count)
+                Telemetry.count(.ownPids, front.own.pids.count)
                 return .front(front)
             }
         }
@@ -182,9 +182,9 @@ struct Where: ParsableArguments {
         @MainActor private static func page(_ id: UInt32, pages: Pages) async throws -> Region {
             try await Telemetry.unit("page") {
                 let paged = try await pages(id)
-                Telemetry.count("examined", paged.examined)
-                Telemetry.count("pages", paged.pages.count)
-                Telemetry.note("reach", .string((paged.stop?.reach ?? .whole).kind))
+                Telemetry.count(.examined, paged.examined)
+                Telemetry.count(.pages, paged.pages.count)
+                Telemetry.note(.reach, .string((paged.stop?.reach ?? .whole).kind))
                 return .page(window: id, frame: try paged.page(in: id))
             }
         }
@@ -445,21 +445,21 @@ extension Report {
         // [LAW:nothing-unseen] One event per look, from the one path every verb and tool
         // reads through: which reader, what it read, and how it ended.
         try await Telemetry.unit("reading", result: { $0.result }) {
-            Telemetry.note("source", .string(source.rawValue))
-            Telemetry.note("region", .string(query.region.kind))
-            Telemetry.note("order", .string(query.near == nil ? "reading" : "near"))
-            Telemetry.note("role", .string(query.role?.rawValue ?? "none"))
+            Telemetry.note(.source, .string(source.rawValue))
+            Telemetry.note(.region, .string(query.region.kind))
+            Telemetry.note(.order, .string(query.near == nil ? "reading" : "near"))
+            Telemetry.note(.role, query.role.map { JSON.string($0.rawValue) })
             // Tallied as each read starts, so a look that fails says how many it spent.
-            Telemetry.count("reads", 0)
-            Telemetry.count("box_ms", 0)
+            Telemetry.count(.reads, 0)
+            Telemetry.count(.boxMilliseconds, 0)
             // The boxes' checks timed apart from the read, wherever they run - after a read,
             // or at the end of a wait.
             func counted(_ query: Query) async throws -> Judged {
-                Telemetry.tally("reads")
+                Telemetry.tally(.reads)
                 let judged = try await read(source, query)
                 return Judged(judged.reading) { _, deadline in
                     let start = ContinuousClock.now
-                    defer { Telemetry.tally("box_ms", by: Int((ContinuousClock.now - start) / .milliseconds(1))) }
+                    defer { Telemetry.tally(.boxMilliseconds, by: Int((ContinuousClock.now - start) / .milliseconds(1))) }
                     return try await judged.pressed(until: deadline)
                 }
             }
@@ -469,7 +469,7 @@ extension Report {
                 return (text: lines(reading, query: query, source: source, grantNote: grantNote).joined(separator: "\n"),
                         result: reading.outcome.said)
             }
-            Telemetry.note("until", .string(wait.until.rawValue))
+            Telemetry.note(.until, .string(wait.until.rawValue))
             let waited = try await waiting(for: wait, on: query, read: counted)
             Self.count(waited.reading, query)
             let said = lines(waited.reading, query: query, source: source, grantNote: grantNote)
@@ -480,26 +480,26 @@ extension Report {
 
     /// The counts of the reading a look ended on, zeros included.
     private static func count(_ reading: Reading, _ query: Query) {
-        Telemetry.count("examined", reading.scope.examined)
-        Telemetry.count("boxes_narrowed", reading.scope.boxes.narrowed)
-        for (why, count) in reading.scope.boxes.unchecked { Telemetry.count("boxes_unchecked_\(why.rawValue)", count) }
-        Telemetry.count("box_calls", reading.scope.boxes.calls)
+        Telemetry.count(.examined, reading.scope.examined)
+        Telemetry.count(.boxesNarrowed, reading.scope.boxes.narrowed)
+        for (why, count) in reading.scope.boxes.unchecked { Telemetry.count(Telemetry.Count("boxes_unchecked_\(why.rawValue)"), count) }
+        Telemetry.count(.boxCalls, reading.scope.boxes.calls)
         for why in Exclusion.Reason.allCases {
-            Telemetry.count("excluded_\(why.rawValue)", reading.scope.excluded.first { $0.reason == why }?.count ?? 0)
+            Telemetry.count(Telemetry.Count("excluded_\(why.rawValue)"), reading.scope.excluded.first { $0.reason == why }?.count ?? 0)
         }
         // How many processes' windows a front look took in; every other region reads them all.
-        if case .only(let pids) = reading.scope.owners { Telemetry.count("owners", pids.count) }
-        Telemetry.note("reach", .string(reading.scope.reach.kind))
+        if case .only(let pids) = reading.scope.owners { Telemetry.count(.owners, pids.count) }
+        Telemetry.note(.reach, .string(reading.scope.reach.kind))
         switch reading.outcome {
         case .matched(let m):
-            Telemetry.count("matched", m.count)
-            Telemetry.count("nearest", 0)
+            Telemetry.count(.matched, m.count)
+            Telemetry.count(.nearest, 0)
             // Rows matched by another of their element's texts than the one they show.
-            Telemetry.count("matched_also", m.all.filter { if case .also = query.match.fit($0) { true } else { false } }.count)
+            Telemetry.count(.matchedAlso, m.all.filter { if case .also = query.match.fit($0) { true } else { false } }.count)
         case .nearest(let n), .unanchored(let n):
-            Telemetry.count("matched", 0)
-            Telemetry.count("nearest", n.count)
-            Telemetry.count("matched_also", 0)
+            Telemetry.count(.matched, 0)
+            Telemetry.count(.nearest, n.count)
+            Telemetry.count(.matchedAlso, 0)
         }
     }
 
@@ -521,16 +521,14 @@ extension Report {
 extension Until: ExpressibleByArgument {}
 
 extension Front.Passed {
-    /// The agent's own app: every running process of the app responsible for this one,
-    /// matched by where it runs from, never by name - two apps can share one. The one place
-    /// it is derived, for a front look and a hit alike. [LAW:one-source-of-truth]
-    @MainActor
-    static func current() async throws -> Front.Passed {
-        let holder = try await Holder.current()
+    /// The agent's own app: every process among `running` of the app responsible for this
+    /// one, `holder`, matched by where it runs from, never by name - two apps can share one.
+    /// The one place it is derived, for a front look and a hit alike. [LAW:one-source-of-truth]
+    init(holder: Holder, among running: [NSRunningApplication]) {
         let path = { (url: URL?) in url?.resolvingSymlinksInPath().path }
         let holderPath = path(URL(fileURLWithPath: holder.path))
-        let own = NSWorkspace.shared.runningApplications.filter { path($0.bundleURL ?? $0.executableURL) == holderPath }
-        return Front.Passed(pids: Set(own.map(\.processIdentifier)), name: holder.name)
+        let own = running.filter { path($0.bundleURL ?? $0.executableURL) == holderPath }
+        self.init(pids: Set(own.map(\.processIdentifier)), name: holder.name)
     }
 }
 
@@ -547,20 +545,24 @@ extension Front.PassedOver {
     var said: String {
         switch self {
         case .own(let name): name
-        case .windowless(let app): app.name ?? ""
+        case .windowless(let app): "\(app)"
         }
     }
 }
 
 extension Desk {
-    /// The screen now, frontmost first: an activation lands before the listing that reflects it.
+    /// The screen now, frontmost first: an activation lands before the listing that reflects
+    /// it. The running apps are read once, for the agent's own and every other alike, so no
+    /// process can be among the running and missing from the agent's own.
     @MainActor
     static func now() async throws -> Desk {
+        let holder = try await Holder.current()
         let frontmost = Front.App.now()
-        let own = try await Front.Passed.current()
-        let running = NSWorkspace.shared.runningApplications.map {
+        let apps = NSWorkspace.shared.runningApplications
+        let running = apps.map {
             Desk.Running(app: Front.App(pid: $0.processIdentifier, name: $0.localizedName), regular: $0.activationPolicy == .regular)
         }
-        return Desk(frontmost: frontmost, own: own, running: running, listing: try Geometry.onScreen(), displays: Geometry.displays())
+        return Desk(frontmost: frontmost, own: Front.Passed(holder: holder, among: apps), running: running,
+                    listing: try Geometry.onScreen(), displays: Geometry.displays())
     }
 }

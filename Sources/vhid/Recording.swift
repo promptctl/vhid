@@ -12,65 +12,66 @@ import Telemetry
 /// that opened them and sent nothing reads zero, and a verb that never opened them carries
 /// none. Opening is not reaching: the connection is lazy, and a daemon that never answered
 /// shows in the outcome and the error, not here.
-enum Tally: String, CaseIterable, Sendable {
-    case keyboardReports = "keyboard_reports"
-    case mouseReports = "mouse_reports"
+extension Telemetry.Count {
+    static let keyboardReports = Self("keyboard_reports")
+    static let mouseReports = Self("mouse_reports")
     /// Wheel reports with a count on the vertical axis: notches, since macOS takes a
     /// report as one notch whatever count it carries (`Pointer.scroll`).
-    case verticalNotches = "scroll_notches_vertical"
-    case horizontalNotches = "scroll_notches_horizontal"
+    static let verticalNotches = Self("scroll_notches_vertical")
+    static let horizontalNotches = Self("scroll_notches_horizontal")
     /// Keys a typist put down while another key was still held.
-    case keyRollovers = "key_rollovers"
+    static let keyRollovers = Self("key_rollovers")
     /// Words a typist hesitated before.
-    case keyHesitations = "key_hesitations"
+    static let keyHesitations = Self("key_hesitations")
+
+    /// Every count above, which `Devices.using` writes as zero.
+    static let sent: [Self] = [.keyboardReports, .mouseReports, .verticalNotches, .horizontalNotches, .keyRollovers, .keyHesitations]
 }
 
 /// A fact a verb decided that is not a count.
-enum Attribute: String, Sendable {
+extension Telemetry.Attribute {
     /// The double-click interval the pointer's hand was fitted to, as the HID system holds it.
     /// Absent when the devices were never opened.
-    case doubleClickMilliseconds = "double_click_ms"
+    static let doubleClickMilliseconds = Self("double_click_ms")
     /// The delay until a held key repeats that the typist's key holds were fitted to, as the
     /// HID system holds it. Absent when the devices were never opened.
-    case keyRepeatDelayMilliseconds = "key_repeat_delay_ms"
+    static let keyRepeatDelayMilliseconds = Self("key_repeat_delay_ms")
     /// How far behind its drawn timing the typist's last report went out, in milliseconds:
     /// what slow acknowledgements and late wakes added to the run, every key after them
     /// moved rather than shortened. Zero for a run that sent nothing, and
     /// absent for a verb that never typed.
-    case keysLateMilliseconds = "keys_late_ms"
+    static let keysLateMilliseconds = Self("keys_late_ms")
     /// The hesitations a typist drew before the words it hesitated before, in milliseconds
     /// all told: drawn into the waits they precede, which `pauses` totals by the report
     /// each ends in. Zero for a run with none, and absent for a verb that never typed.
-    case keyHesitationMilliseconds = "key_hesitation_ms"
+    static let keyHesitationMilliseconds = Self("key_hesitation_ms")
     /// The pauses the pointer and the typist made between reports, the one it stopped in
     /// too, by kind - the pointer's `rest`, `hold`, `gap`, `drag_hold`, `notch`, and the
     /// typist's waits named for the report they end in, `modifier_down`, `key_down`,
     /// `key_up`, `modifier_up`: how many and how long they slept in all. By kind, not one
     /// by one, so a roll or a text of any length is a record of bounded size; the seed draws
     /// each one again. Absent for a verb that made none.
-    case pauses
+    static let pauses = Self("pauses")
     /// What the devices' random source was seeded with, as hex: what draws the pointer's
     /// moves and pauses and the typist's key timings again. Absent when the devices were never opened.
-    case seed
+    static let seed = Self("seed")
     /// Each pointer move the verb made, in order, the one it stopped in too: the point it
     /// aimed at (`aimed`), the box it was drawn inside (`box`, absent for a point, which is
     /// `aimed` itself) and the target width its time was read from (`fitts_width`), how long its trajectory was drawn to take, how many reports
     /// steered it and then closed onto the aim, how many steered reports the cursor never
     /// showed, and where the cursor was read when it landed (`landed`, absent for a move that
     /// stopped first). Absent for a verb that made none.
-    case paths
+    static let paths = Self("paths")
     /// How long an MCP tool call waited behind the calls before it, which its
     /// `duration_ms` includes.
-    case queuedMilliseconds = "queued_ms"
-    /// Which dispatcher the verb came through: `cli` or `mcp`.
-    case entry
+    static let queuedMilliseconds = Self("queued_ms")
     /// The signal that landed while a command-line verb ran: `SIGINT`, which Control-C
     /// sends, or `SIGTERM`, a supervisor's. Absent when none did.
-    case signal
+    static let signal = Self("signal")
     /// The commands a cancelled reading's stop ended, each as it was run: empty when the
     /// cancel landed while the reading waited on no command. Absent when no reading was
     /// cancelled.
-    case stopped
+    static let stopped = Self("stopped")
 
     static func name(ofSignal number: Int32) -> String {
         switch number {
@@ -81,18 +82,10 @@ enum Attribute: String, Sendable {
     }
 }
 
-extension Telemetry {
-    /// Adds `by` to `tally` on the unit underway.
-    static func tally(_ tally: Tally, by amount: Int = 1) { Self.tally(tally.rawValue, by: amount) }
-
-    /// Sets `attribute` on the unit underway.
-    static func note(_ attribute: Attribute, _ value: JSON?) { note(attribute.rawValue, value) }
-}
-
 extension FirstSignal {
     /// Notes the signal taken, if one was, on the unit underway.
     func noted() {
-        if let number = taken { Telemetry.note(.signal, .string(Attribute.name(ofSignal: number))) }
+        if let number = taken { Telemetry.note(.signal, .string(Telemetry.Attribute.name(ofSignal: number))) }
     }
 }
 
@@ -124,13 +117,7 @@ extension Telemetry {
 
     /// Adds a pause to its kind's total in `pauses`, a pointer's or a typist's.
     private static func paused(_ pause: Pause) {
-        revise(Attribute.pauses.rawValue) { pauses in
-            var kinds: [String: JSON] = if case .object(let kinds)? = pauses { kinds } else { [:] }
-            let (count, ms): (Int, Double) = if case .object(let total)? = kinds[pause.kind.name],
-                case .int(let count)? = total["count"], case .double(let ms)? = total["ms"] { (count, ms) } else { (0, 0) }
-            kinds[pause.kind.name] = .object(["count": .int(count + 1), "ms": .double(ms + pause.length / .milliseconds(1))])
-            return .object(kinds)
-        }
+        accumulate(.pauses) { (pauses: inout Pauses) in pauses.add(pause) }
     }
 
     private static func moved(_ move: Pointer.Moved) {
@@ -151,10 +138,30 @@ extension Telemetry {
         // The box the aim was drawn inside, which with the seed and `from` draws the path
         // again; a point target is `aimed` itself.
         if case .box(let box) = move.toward { path["box"] = .array([box.x, box.y, box.width, box.height].map(JSON.double)) }
-        append(.object(path), to: Attribute.paths.rawValue)
+        accumulate(.paths) { (paths: inout Paths) in paths.moves.append(.object(path)) }
     }
 
     private static func point(_ point: ScreenPoint) -> JSON {
         .array([.double(point.x), .double(point.y)])
     }
+}
+
+/// The pauses a unit made, by kind: how many, and how long in all.
+struct Pauses: Accumulated {
+    private var kinds: [String: (count: Int, length: Duration)] = [:]
+
+    mutating func add(_ pause: Pause) {
+        let total = kinds[pause.kind.name, default: (0, .zero)]
+        kinds[pause.kind.name] = (total.count + 1, total.length + pause.length)
+    }
+
+    var json: JSON {
+        .object(kinds.mapValues { .object(["count": .int($0.count), "ms": .double($0.length / .milliseconds(1))]) })
+    }
+}
+
+/// The pointer moves a unit made, in order.
+struct Paths: Accumulated {
+    var moves: [JSON] = []
+    var json: JSON { .array(moves) }
 }

@@ -22,31 +22,17 @@ struct Eye: AsyncParsableCommand {
     /// exits, however the verb ended. Parsing is part of the unit, so refused arguments
     /// leave a record too. [LAW:nothing-unseen]
     static func main() async {
-        let failure: (any Error)?
+        let ending: Result<Entry.Ran, any Error>
         do {
-            failure = try await Telemetry.unit(_commandName, said: said) {
-                Telemetry.note("entry", "cli")
-                do {
-                    var command = try parseAsRoot()
-                    Telemetry.name(type(of: command)._commandName)
-                    if var command = command as? any AsyncParsableCommand { try await command.run() } else { try command.run() }
-                    return nil
-                } catch where exitCode(for: error) == .success {
-                    // `--help` and `--version` arrive as errors that exit 0: the unit did
-                    // what it was asked.
-                    return error
-                }
-            }
+            ending = .success(try await Entry.cli.unit(_commandName, said: message(for:)) { try await Entry.commandLine(Self.self, nil) })
         } catch {
-            failure = error
+            ending = .failure(error)
         }
         await Telemetry.drained()
-        exit(withError: failure)
-    }
-
-    /// What the record says of a verb that ended in `error`: what the operator was told,
-    /// except refused arguments' words.
-    static func said(for error: any Error) -> String? {
-        exitCode(for: error) == .validationFailure ? Telemetry.refusedArguments : message(for: error)
+        switch ending {
+        case .success(.ran): exit()
+        case .success(.answered(let answer)): exit(withError: answer)
+        case .failure(let error): exit(withError: error)
+        }
     }
 }

@@ -58,6 +58,8 @@ actor AnsweringTransport: Transport, HTTPContextProviding {
     /// Resumed when nothing is owed, by whichever end comes last. Keyed by waiter, so a
     /// stopped relay lets go of its own wait and no other.
     private var settled: [UUID: CheckedContinuation<Void, Never>] = [:]
+    /// Resumed when no handler is running.
+    private var stopped: [CheckedContinuation<Void, Never>] = []
 
     /// Diagnostics go to stderr, which is the only place they may: stdout is the protocol's.
     nonisolated let logger: Logger
@@ -164,6 +166,22 @@ actor AnsweringTransport: Transport, HTTPContextProviding {
     private func leave(_ id: ID, _ key: UUID) {
         running[id]?[key] = nil
         if running[id]?.isEmpty == true { running[id] = nil }
+        if running.isEmpty {
+            stopped.forEach { $0.resume() }
+            stopped = []
+        }
+    }
+
+    /// Returns once no handler is running: each one has ended and handed back what it
+    /// held, and its record is in the outbox. A stopped session's handlers are withdrawn,
+    /// not finished, and a withdrawn `type` still lets go of the keys it holds as it ends;
+    /// the SDK runs them in tasks of its own, which its stop does not wait on, so this is
+    /// what the session waits on instead. [LAW:no-ambient-temporal-coupling] [LAW:nothing-unseen]
+    /// A handler the SDK has not yet started when this returns is never waited on, as the
+    /// SDK says nothing of a request it has read and not yet handed on; it starts withdrawn.
+    func everyCallStopped() async {
+        guard !running.isEmpty else { return }
+        await withCheckedContinuation { stopped.append($0) }
     }
 
     private func release() {
@@ -177,6 +195,9 @@ actor AnsweringTransport: Transport, HTTPContextProviding {
 
     /// Whether a relay is parked, waiting on what is owed.
     var isWaiting: Bool { !settled.isEmpty }
+
+    /// Whether a stopped session is waiting on a handler still running.
+    var isWaitingOnCalls: Bool { !stopped.isEmpty }
 
     /// How many requests read under `id` are not yet answered.
     func owing(_ id: ID) -> Int { owed[id] ?? 0 }

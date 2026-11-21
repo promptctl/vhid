@@ -60,7 +60,7 @@ import Testing
         stdio.call(1, then: [])
         for await _ in began { break }
         stdio.call(2, "look", then: [])
-        while !stdio.sent.contains(where: { $0.contains(#""id":2"#) }) { try await Task.sleep(for: .milliseconds(5)) }
+        _ = await stdio.answer(to: 2)
         #expect(!stdio.sent.contains { $0.contains(#""id":1"#) }, "the click answered before it was let go")
         release.yield()
         stdio.feed([.end])

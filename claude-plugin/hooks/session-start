@@ -22,8 +22,8 @@ set -uo pipefail
 root=${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
 servers=$root/.mcp.json
 
-vhid=$(plutil -extract "mcpServers.vhid.command" raw -o - "$servers" 2>/dev/null) \
-  || { echo "vhid plugin: $servers names no command for the vhid server" >&2; exit 1; }
+vhid=$(plutil -extract "mcpServers.vhid.command" raw -o - "$servers" 2>&1) \
+  || { echo "vhid plugin: $servers names no command for the vhid server: $vhid" >&2; exit 1; }
 # [LAW:one-source-of-truth] The version the plugin was written for is the one its release's
 # binaries were built as: scripts/version reads this same file for every build, and refuses
 # to build from one that is not a version, so the release that shipped it has checked it.
@@ -63,18 +63,17 @@ case "$status:$doctor" in
   "1:not ready"*) verdict="vhid is installed but not ready, so the vhid tools will refuse to type or click until the row below that is not met is put right." ;;
   *) verdict="vhid is installed, but \`vhid doctor\` failed with exit status $status, so whether its tools can type or click is unknown." ;;
 esac
-# Whether look can read the screen, from the line `read-grants` prints for a program to
-# read, never from the doctor's sentences: a word changed there would silently read as held.
-# A reading that is not that line is said as unknown. [LAW:no-silent-failure]
-grants=$("$vhid" read-grants 2>/dev/null)
+# Whether look can read the screen, from the exit status `read-grants` answers it with -
+# 0 every grant held, 3 one not (GrantReading.exitStatus) - never from what it prints: the
+# reading is vhid's to judge, and the hook keeps no second reader of its line. Any other
+# status is a reading that failed, said as unknown. [LAW:one-source-of-truth] [LAW:no-silent-failure]
+grants=$("$vhid" read-grants 2>&1)
 status=$?
-if [ "$status" -ne 0 ] || ! echo "$grants" | grep -Eqx '[A-Za-z]+=(true|false)( [A-Za-z]+=(true|false))*'; then
-  sight="Whether look can read the screen is unknown: \`vhid read-grants\` exited $status and printed: $("$vhid" read-grants 2>&1)"
-elif echo "$grants" | grep -qF '=false'; then
-  sight="A grant look reads the screen by is not held, so look reads less than is on screen until the app \`vhid doctor\` names below holds it."
-else
-  sight=
-fi
+case $status in
+  0) sight= ;;
+  3) sight="A grant look reads the screen by is not held, so look reads less than is on screen until the app \`vhid doctor\` names below holds it." ;;
+  *) sight="Whether look can read the screen is unknown: \`vhid read-grants\` exited $status and printed: $grants" ;;
+esac
 [ -z "$verdict" ] && [ -z "$sight" ] && exit 0
 cat <<EOF
 ${verdict:+$verdict }${sight:+$sight }\`vhid doctor\` says:

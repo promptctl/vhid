@@ -49,29 +49,29 @@ public struct Hit: AsyncParsableCommand {
     /// - no window, no front - is absent, never zero.
     static func answer(at point: ScreenPoint, landing: Landings) async throws -> String {
         try await Telemetry.unit("hit", result: { $0.0 }) {
-            Telemetry.count("rows", 0)
+            Telemetry.count(.rows, 0)
             let struck: Struck
             do { struck = try await landing(point) } catch let unheard as HitUnheard {
-                Telemetry.note("end", .string(unheard.why.rawValue))
-                Telemetry.count("calls", unheard.calls)
+                Telemetry.note(.end, .string(unheard.why.rawValue))
+                Telemetry.count(.calls, unheard.calls)
                 throw unheard
             }
             switch struck {
             case .nothing(let calls, let window):
-                Telemetry.note("end", "nothing")
-                Telemetry.count("calls", calls)
-                if let window { Telemetry.count("window", Int(window.id)) }
+                Telemetry.note(.end, "nothing")
+                Telemetry.count(.calls, calls)
+                if let window { Telemetry.note(.window, .int(Int(window.id))) }
                 return ("nothing", report(at: point, struck))
             case .landed(let landed):
-                Telemetry.note("app", .string(landed.app.name ?? ""))
-                Telemetry.note("standing", .string(landed.standing.said))
-                if let front = landed.standing.front { Telemetry.note("front", .string(front.name ?? "")) }
-                Telemetry.note("end", .string(landed.end.said))
-                Telemetry.count("pid", Int(landed.app.pid))
-                if let window = landed.window { Telemetry.count("window", Int(window.id)) }
-                Telemetry.count("rows", landed.elements.count)
-                Telemetry.count("calls", landed.calls)
-                Telemetry.count("front_calls", landed.frontCalls)
+                Telemetry.note(.app, landed.app.name.map(JSON.string))
+                Telemetry.note(.standing, .string(landed.standing.said))
+                Telemetry.note(.front, landed.standing.front?.name.map(JSON.string))
+                Telemetry.note(.end, .string(landed.end.said))
+                Telemetry.note(.pid, .int(Int(landed.app.pid)))
+                if let window = landed.window { Telemetry.note(.window, .int(Int(window.id))) }
+                Telemetry.count(.rows, landed.elements.count)
+                Telemetry.count(.calls, landed.calls)
+                Telemetry.count(.frontCalls, landed.frontCalls)
                 return ("landed", report(at: point, struck))
             }
         }.1

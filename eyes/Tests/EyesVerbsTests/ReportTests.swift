@@ -253,7 +253,8 @@ import Testing
         #expect(seen.map { $0.attributes["source"] } == ["tree", "pixels", "merged", "merged"])
         #expect(seen.map { $0.attributes["region"] } == ["display", "display", "display", "page"])
         #expect(seen.map { $0.attributes["order"] } == ["reading", "reading", "reading", "near"])
-        #expect(seen.map { $0.attributes["role"] } == ["none", "none", "none", "none"])
+        // No role asked for is no role on the record, not a role's name.
+        #expect(seen.map { $0.attributes["role"] } == [nil, nil, nil, nil])
         // A merge names each reader's reach, so a missing grant is told apart from a time budget.
         #expect(seen.map { $0.attributes["reach"] } == ["time_budget", "whole", nil, "tree_blind+pixels_time_budget"])
         // Every reason an exclusion can have, zeros included.
@@ -308,8 +309,8 @@ import Testing
         #expect(region == .front(Front(app: settings, display: 2, own: desk.own, passedOver: .windowless(finder))))
         let event = try #require(events.all.first)
         #expect(event.event == "front")
-        #expect(event.attributes["front_app"] == "System Settings" && event.attributes["passed_over"] == "Finder")
-        #expect(event.counts["front_pid"] == 300 && event.counts["display"] == 2 && event.counts["own_pids"] == 1)
+        #expect(event.attributes["front_app"] == "System Settings" && event.attributes["passed_over"] == .string("\(finder)"))
+        #expect(event.attributes["front_pid"] == 300 && event.attributes["display"] == 2 && event.counts["own_pids"] == 1)
     }
 
     @Test func namingNoPlaceReadsWhatIsInFront() throws {

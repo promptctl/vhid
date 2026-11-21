@@ -1,4 +1,4 @@
-/// One piece of work at a time, for a resource that serves one: the daemon, which serves
+/// A FIFO async mutex: one piece of work at a time, for a resource that serves one: the daemon, which serves
 /// one client, and Vision, which crashes the process with two recognitions in flight.
 ///
 /// **Not the order they were sent in.** A caller's turn is queued when its call reaches
@@ -24,6 +24,10 @@ public actor Turns {
     public nonisolated func take<T>(_ work: () async throws -> T) async throws -> T {
         try await acquire()
         do {
+            // A caller cancelled before its turn came never starts its work: not when no turn
+            // was ahead of it, and not when the turn reached it before its withdrawal from
+            // the queue did.
+            try Task.checkCancellation()
             let done = try await work()
             await release()
             return done
@@ -34,8 +38,6 @@ public actor Turns {
     }
 
     private func acquire() async throws {
-        // A caller cancelled before its turn never starts its work, even with no turn ahead.
-        try Task.checkCancellation()
         guard held else { held = true; return }
         issued += 1
         let ticket = issued

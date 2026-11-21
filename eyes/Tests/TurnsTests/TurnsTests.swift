@@ -44,6 +44,31 @@ import Testing
         #expect(try await turns.take { "after" } == "after")
     }
 
+    /// A caller cancelled as the turn ahead of it ends never runs its work, whichever comes
+    /// first to this actor: the turn handed on, or the caller's withdrawal from the queue.
+    @Test(.timeLimit(.minutes(1))) func aWaiterCancelledAsTheTurnReachesItNeverRuns() async throws {
+        let turns = Turns(), ran = Mutex(false)
+        let (gate, open) = AsyncStream<Void>.makeStream()
+        let (began, begin) = AsyncStream<Void>.makeStream()
+        let waiter = Mutex<Task<Void, any Error>?>(nil)
+        let running = Task {
+            try await turns.take {
+                begin.finish()
+                for await _ in gate { break }
+                // Cancelled from inside the turn, which is handed on the moment this returns.
+                waiter.withLock { $0 }?.cancel()
+            }
+        }
+        for await _ in began {}
+        let queued = Task { try await turns.take { ran.withLock { $0 = true } } }
+        waiter.withLock { $0 = queued }
+        while await turns.queued == 0 { await Task.yield() }
+        open.yield()
+        try await running.value
+        await #expect(throws: CancellationError.self) { try await queued.value }
+        #expect(!ran.withLock { $0 }, "a caller withdrawn as its turn came ran its work")
+    }
+
     /// A caller cancelled before it takes its turn never starts its work, even with no turn
     /// ahead of it, when the work would otherwise begin at once.
     @Test func workCancelledBeforeItsTurnNeverStarts() async throws {
