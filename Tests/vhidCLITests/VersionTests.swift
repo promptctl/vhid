@@ -2,13 +2,14 @@ import Foundation
 import Installations
 import MCP
 import OwnThread
+import TelemetryTesting
 import Testing
 import Version
 @testable import vhid
 
 /// One version, reported the same way by every surface that reports one, and the value
 /// scripts/version derives from claude-plugin/VERSION and git.
-@Suite(.ownThread) struct VersionTests {
+@Suite(.ownThread, .eventsKept) struct VersionTests {
     static let root = URL(filePath: #filePath).deletingLastPathComponent().appending(path: "../..").standardized
 
     /// What scripts/version prints for `repo`.
@@ -52,7 +53,7 @@ import Version
     @Test func mcpInitializeReportsItAndThePairingWithEyes() async throws {
         let (clientSide, serverSide) = await InMemoryTransport.createConnectedPair()
         let transport = AnsweringTransport(serverSide)
-        let server = await McpCommand.server(on: Installation(service: "ai.promptctl.vhid.tests.nobody")!, over: transport, recordingTo: .scratch(), carriedBy: Flights())
+        let server = await McpCommand.server(on: Installation(service: "ai.promptctl.vhid.tests.nobody")!, over: transport)
         try await server.start(transport: transport)
         let result: Initialize.Result
         do {
@@ -64,10 +65,10 @@ import Version
         await server.stop()
         #expect(result.serverInfo.name == "vhid")
         #expect(result.serverInfo.version == Version.current)
-        // The pairing with eyes, as docs/mcp-instructions.txt words it for both servers, then
-        // the version, which the model reads in the instructions and not in serverInfo.
-        let pairing = try String(contentsOf: Self.root.appending(path: "docs/mcp-instructions.txt"), encoding: .utf8)
-        #expect(result.instructions == pairing.trimmingCharacters(in: .newlines) + "\n\nThis is vhid \(Version.current).")
+        // The guidance, as docs/mcp-instructions.txt words it, then the version, which the
+        // model reads in the instructions and not in serverInfo.
+        let guidance = try String(contentsOf: Self.root.appending(path: "docs/mcp-instructions.txt"), encoding: .utf8)
+        #expect(result.instructions == guidance.trimmingCharacters(in: .newlines) + "\n\nThis is vhid \(Version.current).")
     }
 
     /// Where scripts/version reads the version in `repo`.

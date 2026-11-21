@@ -1,7 +1,9 @@
+import struct EyesVerbs.ArgumentRefused
 import Input
 import Installations
 import Keystrokes
 import MCP
+import struct Seeing.Front
 import Testing
 @testable import vhid
 
@@ -9,8 +11,8 @@ import Testing
 /// nothing at all otherwise. The app in front is handed in, so which one it is is a fact
 /// of the test rather than of the Mac running it. [LAW:effects-at-boundaries]
 @Suite struct AimTests {
-    static let textEdit = FrontApp(pid: 41, name: "TextEdit")
-    static let terminal = FrontApp(pid: 42, name: "Terminal")
+    static let textEdit = Front.App(pid: 41, name: "TextEdit")
+    static let terminal = Front.App(pid: 42, name: "Terminal")
 
     @Test func typeIntoTheAppInFrontTypesAndSaysWhere() async throws {
         let keyboard = RecordingKeyboard()
@@ -44,7 +46,7 @@ import Testing
     /// A name that only contains the one in front is another app: "Notes" is not Sticky Notes.
     @Test func theNameMustBeTheWholeName() async {
         await #expect(throws: NotInFront.self) {
-            try await Aim.into("Notes").admit { FrontApp(pid: 7, name: "Sticky Notes") }
+            try await Aim.into("Notes").admit { Front.App(pid: 7, name: "Sticky Notes") }
         }
         await #expect(throws: NotInFront.self) {
             try await Aim.into("textedit").admit { Self.textEdit }

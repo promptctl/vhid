@@ -1,4 +1,4 @@
-# Builds and tests every package in the repository, so a branch is known to build
+# Builds and tests the package and the installer, so a branch is known to build
 # somewhere other than the machine it was written on.
 #
 # The job names are the check names ruleset 23733334 requires before a PR can merge
@@ -22,7 +22,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
-# [LAW:one-source-of-truth] The one place the toolchain is chosen, for every job: the
+# [LAW:one-source-of-truth] Where the toolchain is chosen, for every job - release.yaml says
+# the same, and a step below holds the two to each other: the
 # Xcode developers build with, named rather than left to the runner's default, which
 # moves under us. A Swift older than the one the code was written against can refuse
 # code that compiles locally, and a newer one can accept code that does not.
@@ -42,24 +43,6 @@ jobs:
       - uses: actions/checkout@v7
       - run: swift --version
       - run: make test
-
-  # A package of its own, which a root `swift test` never builds, so a green root suite
-  # says nothing about it. It signs nothing, so it has no make target to share.
-  eyes:
-    runs-on: macos-26
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: eyes
-    steps:
-      - uses: actions/checkout@v7
-      - run: swift --version
-      # eyes' transport is a copy of vhid's, since the packages link nothing of each
-      # other's; this holds the copy to the original, header and logger label aside.
-      - run: diff <(tail -n +3 Sources/Command/AnsweringTransport.swift | sed 's/eyes\.mcp/vhid.mcp/') ../Sources/vhid/AnsweringTransport.swift
-        shell: bash
-      - run: swift build
-      - run: swift test
 
   # The installer, built as a release builds it but unsigned, since CI holds no Developer
   # ID certificate, and then read back from the pkg: its paths, modes and service names

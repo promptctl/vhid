@@ -43,10 +43,11 @@ the screen.
 
 What `vhid` can't do is just as useful to know:
 
-- **It can't see the screen.** It types and clicks blind. Reading the screen is `eyes`'
-  job. Without permissions, `eyes` still lists every window on screen, its app and its
-  bounds, as any program can. Reading text needs the Accessibility or Screen Recording
-  permission you grant to the app that runs it.
+- **It sees only what you grant.** Without permissions, `vhid look` and `eyes` list every
+  window on screen, its app and its bounds, as any program can. Reading the text in them
+  needs the Accessibility or Screen Recording permission you grant to the app that runs
+  them, and `vhid doctor` names that app. The devices take no part in reading: a look
+  works with the driver extension off.
 - **It can't read your typing.** The virtual devices only send input. `vhid record` is the
   exception, and it works only after you grant Input Monitoring to `vhid-record.app`.
 - **It can't reach the FileVault unlock screen.** Nothing of vhid runs before the disk is
@@ -59,8 +60,9 @@ go. A caller that holds a key down past a time limit has the key released for it
 
 From vhid 0.5.0, every `vhid` run appends one line to `~/Library/Logs/vhid/events.jsonl`, in the home
 folder of the account that ran it. The line holds the command's name, whether it
-worked, how long it took and how many reports it sent. It never holds the text typed. It
-doesn't quote arguments it refused, either, because those could hold a password. `eyes`
+worked, how long it took and how many reports it sent. It never holds the text typed, or
+the text a look read. It doesn't quote arguments it refused, either, because those could
+hold a password. `eyes`
 keeps a similar log in `~/Library/Logs/eyes/`. With `OTEL_EXPORTER_OTLP_ENDPOINT` set,
 these records go to that collector instead. Nothing is sent anywhere unless you set it.
 

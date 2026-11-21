@@ -1,7 +1,9 @@
+import ChildProcess
 import ArgumentParser
 import DriverExtension
 import Foundation
 import Helper
+import Installations
 import RecordingTie
 
 /// Records the physical keyboard and mouse as a script `vhid play` replays.
@@ -17,8 +19,9 @@ struct RecordCommand: AsyncParsableCommand {
     @OptionGroup var service: ServiceOption
 
     func run() async throws {
-        // [LAW:parse-dont-validate] Every refusal the command can make is made before the
-        // app is launched, so a refused recording leaves nothing running.
+        // [LAW:parse-dont-validate] Every refusal this side can make is made before the
+        // app is launched, so a recording vhid refuses leaves nothing running. The app's own
+        // refusal, and a first word that is not one, come after it.
         let installation = try service.installation()
         let holder = try HelperConnection(installation: installation).status()
         let (system, session) = try await reading { stop in
@@ -47,7 +50,7 @@ struct RecordCommand: AsyncParsableCommand {
         // nothing. Either is answered by finishing, so the process exits as the recording
         // ended. A failed send is the app gone, which the read below reports. A second
         // signal ends the process, whose exit the app's pid watch sees.
-        let signals = Invocation.current?.signals
+        let signals = Vhid.signals
         try await withTaskCancellationHandler {
             while let message = try app.receive(FromApp.self) {
                 switch message {
@@ -98,13 +101,11 @@ struct RecordCommand: AsyncParsableCommand {
 
     /// The tap app, where this build's copy is: the pkg's in libexec, and a working tree's
     /// in ~/Applications, where System Settings can add it to Input Monitoring - a bundle
-    /// inside `.build` cannot be. Chosen the way `Installation.thisBuild` is, so a dev vhid
-    /// never runs the installed tap or the other way round. [LAW:one-source-of-truth]
-    #if DEBUG
-    static let appPath = NSHomeDirectory() + "/Applications/vhid-record-dev.app"
-    #else
-    static let appPath = "/usr/local/libexec/vhid-record.app"
-    #endif
+    /// inside `.build` cannot be. Chosen by `Installation.thisBuild`, so a dev vhid never
+    /// runs the installed tap or the other way round. [LAW:one-source-of-truth]
+    static let appPath = Installation.thisBuild == .development
+        ? NSHomeDirectory() + "/Applications/vhid-record-dev.app"
+        : "/usr/local/libexec/vhid-record.app"
 
     static func app() throws -> URL {
         guard FileManager.default.fileExists(atPath: appPath) else { throw RecordRefusal.noApp(appPath) }

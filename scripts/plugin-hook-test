@@ -1,6 +1,6 @@
 #!/bin/bash
 # The Claude Code plugin's SessionStart hook run against a scratch plugin root, whose
-# .mcp.json names stub vhid and eyes binaries, so nothing here reads this Mac's install.
+# .mcp.json names a stub vhid binary, so nothing here reads this Mac's install.
 #
 # [LAW:behavior-not-structure] What is checked is what the hook said, on which stream,
 # and what it exited with, for each state an install can be in.
@@ -15,30 +15,31 @@ failed=0
 fail() { echo "plugin-hook-test: $1" >&2; failed=1; }
 
 VHID=$SCRATCH/bin/vhid
-EYES=$SCRATCH/bin/eyes
 mkdir -p "$SCRATCH/bin"
 servers() {
   printf '{"mcpServers": {%s}}\n' "$1" >"$SCRATCH/.mcp.json"
 }
-servers "\"vhid\": {\"command\": \"$VHID\", \"args\": [\"mcp\"]}, \"eyes\": {\"command\": \"$EYES\", \"args\": [\"mcp\"]}"
-# The version the scratch plugin was written for, and the ones its stub binaries report:
-# the same until a case says otherwise.
+servers "\"vhid\": {\"command\": \"$VHID\", \"args\": [\"mcp\"]}"
+# The version the scratch plugin was written for, and the one the stub reports: the same
+# until a case says otherwise.
 echo 0.5.0 >"$SCRATCH/VERSION"
-versions() { echo "$1" >"$SCRATCH/vhid.version"; echo "$2" >"$SCRATCH/eyes.version"; }
-versions 0.5.0 0.5.0
-# A stub binary that answers --version with what versions set for it and, for anything
-# else, runs the script lines given.
-stub() {
-  local binary=$1; shift
-  { printf '#!/bin/sh\n[ "$1" = --version ] && exec cat "%s"\n' "$SCRATCH/$(basename "$binary").version"
-    printf '%s\n' "$@"; } >"$binary"
-  chmod +x "$binary"
-}
-# A vhid whose doctor prints a verdict and row and exits with the status given.
+version() { echo "$1" >"$SCRATCH/vhid.version"; }
+version 0.5.0
+# The grants line `vhid read-grants` prints, and its exit status, as a case sets them.
+GRANTS_HELD='screenRecording=true accessibility=true'
+grants() { printf '%s\n' "$1" >"$SCRATCH/grants"; echo "${2:-0}" >"$SCRATCH/grants.status"; }
+grants "$GRANTS_HELD"
+# A stub vhid: --version prints what version set, read-grants what grants set, and doctor
+# a verdict and row, exiting with the status given; or, given script lines, those instead.
 vhid_doctor() {
-  stub "$VHID" '[ "$1" = doctor ] || exit 64' "printf '%s\\nDriver extension: %s\\n' '$1' '$2'" "exit $3"
+  { printf '#!/bin/sh\n'
+    printf '[ "$1" = --version ] && exec cat "%s"\n' "$SCRATCH/vhid.version"
+    printf '[ "$1" = read-grants ] && { cat "%s"; exit $(cat "%s"); }\n' "$SCRATCH/grants" "$SCRATCH/grants.status"
+    printf '[ "$1" = doctor ] || exit 64\n'
+    printf "printf '%%s\\\\nDriver extension: %%s\\\\n' '%s' '%s'\n" "$1" "$2"
+    printf 'exit %s\n' "$3"; } >"$VHID"
+  chmod +x "$VHID"
 }
-eyes_present() { stub "$EYES" 'exit 0'; }
 
 run() {
   out=$(CLAUDE_PLUGIN_ROOT=$SCRATCH claude-plugin/hooks/session-start 2>"$SCRATCH/err" </dev/null); status=$?
@@ -50,17 +51,21 @@ said() {
   [ -z "$err" ] || fail "$case: wrote to stderr: $err"
   echo "$out" | grep -qF -- "$want" || fail "$case: said '$out', not '$want'"
 }
+silent() {
+  [ "$status" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ] || fail "$1: exited $status, said '$out', '$err'; should say nothing"
+}
 
-# Ready: nothing to tell the agent.
-vhid_doctor ready running 0; eyes_present
+# Ready, every grant held: nothing to tell the agent.
+vhid_doctor ready running 0
 run
-[ "$status" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ] || fail "ready: exited $status, said '$out', '$err'; should say nothing"
+silent "ready"
 
 # Not ready: the doctor's reading, rows and all, and that its tools will refuse.
 vhid_doctor "not ready" "awaiting approval" 1
 run
 said "vhid is installed but not ready" "not ready"
 said "Driver extension: awaiting approval" "not ready"
+echo "$out" | grep -qF "look can read" && fail "not ready: said something of the grants, which are held: '$out'"
 
 # A doctor that fails some other way is not taken for either verdict.
 vhid_doctor "" crashed 3
@@ -69,75 +74,82 @@ said "failed with exit status 3, so whether its tools can type or click is unkno
 said "Driver extension: crashed" "doctor failed"
 
 # Exit 1 with no verdict is a doctor that threw, not one that said "not ready".
-stub "$VHID" 'echo "Error: no installation" >&2' 'exit 1'
+vhid_doctor "Error: no installation" "" 1
 run
 said "failed with exit status 1, so whether its tools can type or click is unknown" "doctor threw"
 said "Error: no installation" "doctor threw"
 echo "$out" | grep -qF "not ready" && fail "doctor threw: said not ready: '$out'"
 
-# Missing binaries: each named, with what it takes away and the install step.
-rm -f "$EYES"; vhid_doctor ready running 0
+# Ready, with a grant missing: said, with the doctor's rows that name the app to switch on.
+vhid_doctor ready running 0
+grants 'screenRecording=true accessibility=false' 3
 run
-said "there is no $EYES, so" "eyes missing"
-said "this session cannot read the screen." "eyes missing"
-said "brew install --cask promptctl/tap/vhid" "eyes missing"
-# With eyes missing, vhid's own readiness is still asked and said.
+said "A grant look reads the screen by is not held" "grant missing"
+said "Driver extension: running" "grant missing"
+echo "$out" | grep -qF "not ready" && fail "grant missing: said not ready: '$out'"
+# Not ready and a grant missing: both said, once each, before the one copy of the rows.
 vhid_doctor "not ready" "awaiting approval" 1
 run
-said "there is no $EYES, so" "eyes missing, vhid not ready"
-said "Driver extension: awaiting approval" "eyes missing, vhid not ready"
+said "vhid is installed but not ready" "not ready, grant missing"
+said "A grant look reads the screen by is not held" "not ready, grant missing"
+[ "$(echo "$out" | grep -cF "Driver extension:")" -eq 1 ] || fail "not ready, grant missing: the rows said other than once: '$out'"
+
+# A reading that failed is said as unknown, with what it printed, whatever it printed.
+vhid_doctor ready running 0
+grants "Error: no such verb" 64
+run
+said 'Whether look can read the screen is unknown: `vhid read-grants` exited 64 and printed: Error: no such verb' "grants refused"
+grants "screenRecording=true accessibility=true" 1
+run
+said 'Whether look can read the screen is unknown: `vhid read-grants` exited 1 and printed: screenRecording=true accessibility=true' "grants failed"
+grants "$GRANTS_HELD"
+
+# Missing: named, with what it takes away and the install step.
 rm -f "$VHID"
 run
-said "there is no $VHID or $EYES, so" "both missing"
-said "this session cannot type or click, or read the screen." "both missing"
-eyes_present
-run
 said "there is no $VHID, so" "vhid missing"
-said "this session cannot type or click." "vhid missing"
+said "this session cannot look at the screen, type or click." "vhid missing"
+said "brew install --cask promptctl/tap/vhid" "vhid missing"
 
-# Binaries of another version than the plugin's: each that differs named with what it
-# reported, and every step the agent may need, since the hook leaves which is newer to it.
+# A binary of another version than the plugin's: named with what it reported, and every
+# step the agent may need, since the hook leaves which is newer to it.
 skew() {
   local case=$1; shift
   run
   for want in "$@" "This vhid plugin was written for vhid 0.5.0" \
-    'If a binary is older than 0.5.0, the step is `brew upgrade --cask vhid`' \
+    'If the binary is older than 0.5.0, the step is `brew upgrade --cask vhid`' \
     'If it is newer, the step is `claude plugin marketplace update vhid` and `claude plugin update vhid@vhid`' \
     'such as -rc.1 or -dev+<commit>, is a pre-release or a development build, which no plugin release is written for' \
     '`brew reinstall --cask vhid` (or the pkg'; do
     said "$want" "$case"
   done
 }
-eyes_present; vhid_doctor ready running 0
-versions 0.4.1 0.4.1
-skew "older" "$VHID is 0.4.1; $EYES is 0.4.1"
-versions 0.6.0 0.6.0
-skew "newer" "$VHID is 0.6.0; $EYES is 0.6.0"
-versions 0.5.0-dev+abc123 0.5.0-dev+abc123
-skew "dev build" "$VHID is 0.5.0-dev+abc123; $EYES is 0.5.0-dev+abc123"
-versions 0.5.0 0.4.1
-skew "eyes alone" "not every installed binary is that version: $EYES is 0.4.1."
-echo "$out" | grep -qF "$VHID is" && fail "eyes alone: named vhid: '$out'"
+vhid_doctor ready running 0
+version 0.4.1
+skew "older" "$VHID is 0.4.1."
+version 0.6.0
+skew "newer" "$VHID is 0.6.0."
+version 0.5.0-dev+abc123
+skew "dev build" "$VHID is 0.5.0-dev+abc123."
 # The skew is said and the doctor is still asked.
+version 0.4.1
 vhid_doctor "not ready" "awaiting approval" 1
-skew "older, not ready" "$EYES is 0.4.1" "Driver extension: awaiting approval"
-# A --version that fails is said with its status and output, not taken for a match.
-vhid_doctor ready running 0; versions 0.5.0 0.5.0
-printf '#!/bin/sh\necho "unknown option" >&2\nexit 64\n' >"$EYES"
-skew "eyes --version failed" "$EYES --version failed with exit status 64 and printed: unknown option"
-versions 0.5.0 0.5.0; eyes_present
-# Both failing are both said, one after the other; one that exits 0 having printed no
-# version is said as a failure, with what it printed.
-printf '#!/bin/sh\necho "unknown option" >&2\nexit 64\n' >"$VHID"
-printf '#!/bin/sh\n[ "$1" = --version ] || exit 0\necho "no version here" >&2\n' >"$EYES"
-skew "both --version failed" "$VHID --version failed with exit status 64 and printed: unknown option; $EYES --version failed with exit status 0 and printed: no version here."
-vhid_doctor ready running 0; eyes_present
+skew "older, not ready" "$VHID is 0.4.1" "Driver extension: awaiting approval"
+# A --version that fails is said with its status and output, not taken for a match; one
+# that exits 0 having printed no version is said as a failure, with what it printed.
+version 0.5.0
+printf '#!/bin/sh\n[ "$1" = --version ] || exit 0\necho "unknown option" >&2\nexit 64\n' >"$VHID"
+skew "--version failed" "$VHID --version failed with exit status 64 and printed: unknown option"
+printf '#!/bin/sh\n[ "$1" = --version ] || exit 0\necho "no version here" >&2\n' >"$VHID"
+skew "--version said nothing" "$VHID --version failed with exit status 0 and printed: no version here."
 
 # A --version that succeeds and also warns on stderr still reports its version: a match.
-printf '#!/bin/sh\n[ "$1" = --version ] || exit 0\necho "dyld: a warning" >&2\nexec cat %s\n' "$SCRATCH/eyes.version" >"$EYES"
+vhid_doctor ready running 0
+sed -i '' '1a\
+[ "$1" = --version ] \&\& echo "dyld: a warning" >\&2
+' "$VHID"
 run
-[ "$status" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ] || fail "--version warns: exited $status, said '$out', '$err'; should say nothing"
-eyes_present
+silent "--version warns"
 
 # A plugin root with no VERSION is the plugin's own fault, said loudly.
 mv "$SCRATCH/VERSION" "$SCRATCH/VERSION.away"
@@ -152,17 +164,17 @@ run
 echo "$err" | grep -qF "VERSION does not say the version the plugin was written for" || fail "empty VERSION: said '$err'"
 echo 0.5.0 >"$SCRATCH/VERSION"
 
-# A manifest that names no command for a server is the plugin's own fault, said loudly.
-servers "\"vhid\": {\"command\": \"$VHID\", \"args\": [\"mcp\"]}"
+# A manifest that names no command for the server is the plugin's own fault, said loudly.
+servers "\"other\": {\"command\": \"$VHID\", \"args\": [\"mcp\"]}"
 run
-[ "$status" -ne 0 ] || fail "no eyes server: exited 0, should fail"
-echo "$err" | grep -qF "names no command for the eyes server" || fail "no eyes server: said '$err'"
+[ "$status" -ne 0 ] || fail "no vhid server: exited 0, should fail"
+echo "$err" | grep -qF "names no command for the vhid server" || fail "no vhid server: said '$err'"
 
-# The hook reads the plugin's real manifest, and that manifest names both servers.
-for server in vhid eyes; do
-  plutil -extract "mcpServers.$server.command" raw -o - claude-plugin/.mcp.json >/dev/null \
-    || fail "claude-plugin/.mcp.json names no command for the $server server"
-done
+# The hook reads the plugin's real manifest, which names the one server, vhid.
+plutil -extract "mcpServers.vhid.command" raw -o - claude-plugin/.mcp.json >/dev/null \
+  || fail "claude-plugin/.mcp.json names no command for the vhid server"
+[ "$(plutil -extract mcpServers raw -o - claude-plugin/.mcp.json)" = vhid ] \
+  || fail "claude-plugin/.mcp.json names other servers than vhid"
 
 # The real plugin carries its version as a file of its own, since the marketplace installs
 # claude-plugin/ alone, and it is the version every build of this tree is stamped from.

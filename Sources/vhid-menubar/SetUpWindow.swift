@@ -1,3 +1,4 @@
+import ChildProcess
 import AppKit
 import Doctor
 import DriverExtension

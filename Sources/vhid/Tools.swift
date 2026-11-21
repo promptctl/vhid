@@ -1,11 +1,18 @@
+import ChildProcess
+import ArgumentParser
 import Dispatch
 import Doctor
+import EyesVerbs
 import Helper
 import Input
 import Installations
 import KeyboardLayouts
 import MCP
 import Pointing
+import enum Seeing.SourceKind
+import enum Seeing.Until
+import Telemetry
+import Turns
 
 /// One verb as an MCP tool: what a client is shown, and what a call does.
 ///
@@ -14,10 +21,29 @@ import Pointing
 struct VerbTool: Sendable {
     let tool: Tool
     private let parameters: [any DeclaredParameter]
-    private let perform: @Sendable (Arguments, Installation) async throws -> String
+    private let perform: Perform
+
+    /// What a call does, and so whether it waits its turn for the daemon.
+    enum Perform: Sendable {
+        /// Reaches the daemon, which serves one client at a time, so the call takes the
+        /// session's turn.
+        case daemon(@Sendable (Arguments, Installation) async throws -> String)
+        /// Reads the screen in this process and asks nothing of the daemon, so it waits
+        /// behind no device call.
+        case screen(@Sendable (Arguments) async throws -> String)
+    }
 
     init(_ help: VerbHelp, readOnly: Bool = false, _ parameters: [any DeclaredParameter],
          perform: @escaping @Sendable (Arguments, Installation) async throws -> String) {
+        self.init(help, readOnly: readOnly, parameters, .daemon(perform))
+    }
+
+    /// A tool that reads the screen, which changes nothing.
+    init(screen help: VerbHelp, _ parameters: [any DeclaredParameter], reading: @escaping @Sendable (Arguments) async throws -> String) {
+        self.init(help, readOnly: true, parameters, .screen(reading))
+    }
+
+    private init(_ help: VerbHelp, readOnly: Bool, _ parameters: [any DeclaredParameter], _ perform: Perform) {
         tool = Tool(
             name: help.name, description: help.tool,
             inputSchema: .object([
@@ -31,7 +57,8 @@ struct VerbTool: Sendable {
         self.perform = perform
     }
 
-    /// Runs the verb against `installation`'s daemon and says what it did.
+    /// Runs the verb and says what it did: against `installation`'s daemon in its turn of
+    /// `turns`, or on the screen, at once.
     ///
     /// **Every call reaches the daemon afresh.** A verb reaches the devices through
     /// `Devices.using` inside `perform`, exactly as the CLI's `run` does, and hands them
@@ -40,10 +67,20 @@ struct VerbTool: Sendable {
     /// `vhid click` between two calls finds it free, and so does a second agent's session.
     /// [LAW:no-ambient-temporal-coupling] The holding is a scope, not a policy.
     ///
-    /// Every argument is read before the scope opens, so an argument that is refused never
-    /// reaches the daemon at all.
-    func call(_ given: [String: Value], on installation: Installation) async throws -> String {
-        try await perform(try Arguments(given, for: parameters), installation)
+    /// Every argument is read before the call waits its turn, so an argument that is
+    /// refused never waits, and never reaches the daemon at all.
+    func call(_ given: [String: Value], on installation: Installation, taking turns: Turns, arrived: ContinuousClock.Instant) async throws -> String {
+        let arguments = try Arguments(given, for: parameters)
+        switch perform {
+        case .screen(let read):
+            return try await read(arguments)
+        case .daemon(let act):
+            return try await turns.take(waited: {
+                Telemetry.count(.queuedMilliseconds, Int((ContinuousClock.now - arrived) / .milliseconds(1)))
+            }) {
+                try await act(arguments, installation)
+            }
+        }
     }
 }
 
@@ -52,7 +89,7 @@ struct VerbTool: Sendable {
 /// Each is a CLI verb's core called with arguments read from JSON rather than from argv,
 /// so a tool and its verb cannot come to do different things. [LAW:one-source-of-truth]
 enum Tools {
-    static let all: [VerbTool] = [type, press, gesture, click, move, scroll, drag, play, cursor, doctor]
+    static let all: [VerbTool] = [look(), type, press, gesture, click, move, scroll, drag, play, cursor, doctor()]
 
     private static let x = Parameter.number("x", Help.x + ", given with y unless box is").optional
     private static let y = Parameter.number("y", Help.y + ", given with x unless box is").optional
@@ -71,6 +108,40 @@ enum Tools {
         case let (x?, y?, nil): .point(try vhid.place(x, y))
         case let (nil, nil, box?): .box(box)
         default: throw ArgumentRefused("give x and y, or box, and not both")
+        }
+    }
+
+    /// What is on screen, read in this process: the arguments `vhid look` takes, read by
+    /// the one rule it reads them by. [LAW:single-enforcer]
+    static func look(on screen: Screen = .live) -> VerbTool {
+        let text = Parameter.text("text", LookHelp.text).optional
+        let exact = Parameter.flag("exact", LookHelp.exact).absent(false)
+        let edits = Parameter.whole("edits", LookHelp.edits).optional
+        let near = Parameter.text("near", LookHelp.near).optional
+        let until = Parameter<Until>.choice("until", LookHelp.until).optional
+        let timeout = Parameter.number("timeout", LookHelp.timeout).optional
+        let display = Parameter.id("display", LookHelp.display).optional
+        let window = Parameter.id("window", LookHelp.window).optional
+        let page = Parameter.id("page", LookHelp.page).optional
+        let rect = Parameter.text("rect", LookHelp.rect).optional
+        let app = Parameter.text("app", LookHelp.app).optional
+        let limit = Parameter.whole("limit", LookHelp.limit).optional
+        let source = Parameter<SourceKind>.choice("source", LookHelp.source).optional
+        let role = Parameter.text("role", LookHelp.role).optional
+        let x = Parameter.number("x", Help.lookX).optional
+        let y = Parameter.number("y", Help.lookY).optional
+        return VerbTool(screen: Help.look, [text, exact, edits, near, until, timeout, display, window, page, rect, app, limit, source, role, x, y]) { arguments in
+            let asked: Asked
+            do {
+                asked = try Asked.parsed(
+                    text: try arguments[text], exact: try arguments[exact], edits: try arguments[edits], near: try arguments[near],
+                    until: try arguments[until], timeout: try arguments[timeout], display: try arguments[display], window: try arguments[window],
+                    page: try arguments[page], rect: try arguments[rect], app: try arguments[app], limit: try arguments[limit],
+                    source: try arguments[source], role: try arguments[role], x: try arguments[x], y: try arguments[y], as: .argument)
+            } catch let refused as ValidationError {
+                throw ArgumentRefused(refused.message)
+            }
+            return try await asked.answer(on: screen)
         }
     }
 
@@ -156,7 +227,10 @@ enum Tools {
 
     /// `vhid doctor` as a tool. A Mac that is not ready is an answer and not a failure of
     /// the call, so it comes back as what the verb prints, whose first line says it.
-    static let doctor: VerbTool = VerbTool(Help.doctor, readOnly: true, []) { _, installation in
-        DoctorCommand.doctor(try await reading { Readiness.read(for: installation, stoppedBy: $0) })
+    static func doctor(grants: @escaping @Sendable () async throws -> String = { try await GrantsVerb.answer() }) -> VerbTool {
+        VerbTool(Help.doctor, readOnly: true, []) { _, installation in
+            DoctorCommand.doctor(try await reading { Readiness.read(for: installation, stoppedBy: $0) },
+                                 grants: try await DoctorCommand.grants(grants))
+        }
     }
 }

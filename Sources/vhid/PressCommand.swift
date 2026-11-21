@@ -1,12 +1,14 @@
 import ArgumentParser
+import EyesVerbs
 import Input
 import KeyboardLayouts
+import struct Seeing.Front
 
 /// Presses chords on the virtual keyboard, in the order they were given.
 struct PressCommand: AsyncParsableCommand {
     static let configuration = Help.press.configuration
 
-    @Argument(help: Help.sentence(Help.chords))
+    @Argument(help: .sentence(Help.chords))
     var chords: [String]
 
     @OptionGroup var layoutOption: LayoutOption
@@ -20,7 +22,7 @@ struct PressCommand: AsyncParsableCommand {
 
     /// The verb itself, over a typist from anywhere. [LAW:decomposition]
     static func press(_ chords: [String], on layout: KeyboardLayout, into aim: Aim, with typist: Typist,
-                      front: () async throws -> FrontApp?) async throws -> String {
+                      front: () async throws -> Front.App?) async throws -> String {
         // [LAW:parse-dont-validate] Both crossings - the spelling, then whether the device
         // can press what it names - are made for every chord before any key goes down. A
         // list that stops half way through has already pressed the chords before the bad

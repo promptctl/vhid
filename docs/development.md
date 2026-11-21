@@ -10,35 +10,34 @@ names, so that one is known to work.
 ```sh
 git clone https://github.com/promptctl/vhid.git
 cd vhid
-make test                              # build, sign, and test vhid
-(cd eyes && swift build && swift test) # eyes is a separate package with its own tests
-make dev-daemon                        # optional: run the daemon this tree builds (asks for sudo)
+make test        # build, sign, and test everything, eyes included
+make dev-daemon  # optional: run the daemon this tree builds (asks for sudo)
 ```
 
-Pull requests go to `master` and must pass the `vhid`, `eyes` and `pkg` checks.
+Pull requests go to `master` and must pass the `vhid` and `pkg` checks.
 
-## Two packages
+## Two halves
 
-The repository holds two SwiftPM packages, and the root manifest deliberately does not
-mention the second one.
+The package holds two halves that share no code: the devices, and eyes.
 
-| | what it is | build and test |
+| | what it is | where |
 |---|---|---|
-| `.` | the devices: the keyboard, the mouse, and the root daemon that owns them | `make test` |
-| `eyes/` | reading the screen: where the windows are, and where text is, as the points `vhid click` takes | `cd eyes && swift build && swift test` |
+| the devices | the keyboard, the mouse, and the root daemon that owns them | `Sources/` |
+| eyes | reading the screen: where the windows are, and where text is, as the points `click` takes | `eyes/Sources/` |
 
-`eyes` finds a coordinate; `vhid click` presses it. Nothing joins them in code — only that
-workflow. A target in the root manifest would be one `dependencies:` line away from
-linking the two, and nothing in review catches that line, so the separation is a package
-boundary rather than a rule someone has to remember.
-
-The cost of that isolation is this paragraph: `make test` at the root does not run
-`eyes`' tests.
+No target of either half links a target of the other. What links both is the `vhid`
+executable: its `look` reads with eyes and its acts press with the devices, so one MCP
+server does both. The `eyes` executable links eyes alone. The targets they both stand on,
+`Telemetry`, `Turns` and `ChildProcess`, link neither half, wherever their directory: a
+command either half runs to read this Mac is run by `ChildProcess`'s `Command`, to a
+deadline. The manifest's comments say which target is
+which, and a `dependencies:` line that joins the halves anywhere but in `vhid` is the line
+to refuse in review.
 
 ## Scope
 
 vhid's core is input that macOS sees as hardware, from a virtual keyboard and mouse;
-its sibling package `eyes` reads the screen so that input can be aimed. A feature that
+its other half, eyes, reads the screen so that input can be aimed. A feature that
 works through the devices fits naturally. A feature that reaches around them — the
 clipboard, posting synthetic events, app-specific APIs — belongs here only when the case
 for it is overwhelmingly compelling, close to a requirement, *and* it would make no sense

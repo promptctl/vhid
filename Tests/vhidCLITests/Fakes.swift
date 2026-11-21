@@ -2,11 +2,20 @@ import Foundation
 import Input
 import Installations
 import Keystrokes
+import MCP
 import Pointing
 import Synchronization
 import TestClock
 import Testing
+import Turns
 @testable import vhid
+
+extension VerbTool {
+    /// One call alone, as a session with nothing else underway makes it: its turn is free.
+    func call(_ given: [String: MCP.Value], on installation: Installation) async throws -> String {
+        try await call(given, on: installation, taking: Turns(), arrived: .now)
+    }
+}
 
 /// A keyboard that records instead of typing, and can be told to fail at the nth key.
 ///
@@ -105,25 +114,6 @@ extension Installation {
     /// connect rather than moving the pointer of the Mac running the tests, and a doctor
     /// asked about it is never ready, on any Mac.
     static let nobody = Installation(service: "ai.promptctl.vhid.tests.nobody")!
-}
-
-extension EventExport {
-    /// An export to a file of its own under the temporary directory, and no collector, so
-    /// a test's records never reach the operator's log.
-    static func scratch() -> EventExport {
-        EventExport(collector: nil, file: FileManager.default.temporaryDirectory.appending(path: "vhid-tests-\(UUID().uuidString)/events.jsonl"),
-                    deliver: { _ in Issue.record("a scratch export has no collector to deliver to") })
-    }
-
-    /// Every record in the file, parsed back.
-    var written: [[String: Any]] {
-        get throws {
-            guard FileManager.default.fileExists(atPath: file.path) else { return [] }
-            return try String(contentsOf: file, encoding: .utf8).split(separator: "\n").map {
-                try #require(try JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any])
-            }
-        }
-    }
 }
 
 extension Displays {

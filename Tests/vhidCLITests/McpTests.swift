@@ -1,3 +1,4 @@
+import struct EyesVerbs.ArgumentRefused
 import Input
 import Foundation
 @testable import Doctor
@@ -12,31 +13,34 @@ import Testing
 /// daemon: every refusal here is one that comes back before a connection is made.
 @Suite struct McpTests {
     @Test func theToolsAreListedInOrder() {
-        #expect(Tools.all.map(\.tool.name) == ["type", "press", "gesture", "click", "move", "scroll", "drag", "play", "cursor", "doctor"])
+        #expect(Tools.all.map(\.tool.name) == ["look", "type", "press", "gesture", "click", "move", "scroll", "drag", "play", "cursor", "doctor"])
     }
 
-    /// Only cursor and doctor promise to change nothing: cursor reaches no device, and
-    /// doctor asks the daemon a question that claims none.
-    @Test func onlyCursorAndDoctorAreReadOnly() {
-        #expect(Tools.all.filter { $0.tool.annotations.readOnlyHint == true }.map(\.tool.name) == ["cursor", "doctor"])
+    /// Only look, cursor and doctor promise to change nothing: look reads the screen, cursor
+    /// reaches no device, and doctor asks the daemon a question that claims none.
+    @Test func onlyLookCursorAndDoctorAreReadOnly() {
+        #expect(Tools.all.filter { $0.tool.annotations.readOnlyHint == true }.map(\.tool.name) == ["look", "cursor", "doctor"])
     }
 
-    /// The plugin's skill opens with the pairing as both servers word it at initialize, so a
-    /// client running a release whose servers send no instructions still reads it, and the
+    /// The plugin's skill opens with the guidance as the server words it at initialize, so a
+    /// client running a release whose server sends no instructions still reads it, and the
     /// two never become two versions. [LAW:one-source-of-truth]
     @Test func theSkillCarriesThePairingTheServersSend() throws {
         let root = URL(filePath: #filePath).deletingLastPathComponent().appending(path: "../..").standardized
-        let pairing = try String(contentsOf: root.appending(path: "docs/mcp-instructions.txt"), encoding: .utf8)
+        let guidance = try String(contentsOf: root.appending(path: "docs/mcp-instructions.txt"), encoding: .utf8)
         let skill = try String(contentsOf: root.appending(path: "claude-plugin/skills/look-click-look/SKILL.md"), encoding: .utf8)
-        #expect(skill.contains(pairing.trimmingCharacters(in: .newlines)))
+        #expect(skill.contains(guidance.trimmingCharacters(in: .newlines)))
     }
 
     /// The doctor tool answers with every row, in order, under a one-word verdict. Against
     /// a service nothing registers, the verdict is always "not ready" - whatever Mac runs
     /// this - and a Mac that is not ready is an answer, not a failed call.
     @Test func theDoctorToolAnswersEveryRowUnderItsVerdict() async throws {
-        let said = try await Tools.doctor.call([:], on: Installation.nobody)
-        let lines = said.components(separatedBy: "\n")
+        let said = try await Tools.doctor { "the grants" }.call([:], on: Installation.nobody)
+        let sections = said.components(separatedBy: "\n\n")
+        // The grants after the rows, whatever the verdict: it is the devices' alone.
+        #expect(sections.last == "the grants")
+        let lines = sections[0].components(separatedBy: "\n")
         #expect(lines.first == "not ready")
         let rows = lines.dropFirst().filter { !$0.hasPrefix(" ") }
         #expect(rows.count == Requirement.Row.allCases.count, "\(said)")
@@ -44,7 +48,7 @@ import Testing
             #expect(line.hasPrefix(row.rawValue + ": "), "\(said)")
         }
         #expect(said.contains("\(Requirement.Row.launchdJob.rawValue): no job"), "\(said)")
-        #expect(await Self.refusal(Tools.doctor, ["service": "x"]) == "service is not an argument this tool takes, and it takes none")
+        #expect(await Self.refusal(Tools.doctor(), ["service": "x"]) == "service is not an argument this tool takes, and it takes none")
     }
 
     // MARK: arguments
@@ -66,6 +70,16 @@ import Testing
         #expect(await Self.refusal(Tools.click, ["x": 1, "y": 2, "modifiers": "leftShift+hyper"])?.hasSuffix("\"hyper\" in \"leftShift+hyper\" is not a modifier to hold (\(Modifier.holdableNames))") == true)
         #expect(await Self.refusal(Tools.scroll, ["x": 1, "y": 2, "modifiers": "function"])?.hasSuffix("function is not a key the device can hold") == true)
         #expect(await Self.refusal(Tools.drag, ["from": ["x": 1, "y": 2], "to": ["x": 3, "y": 4], "modifiers": 3])?.hasPrefix("modifiers is 3") == true)
+    }
+
+    /// A window-server id past 32 bits is refused saying the range, however it is written;
+    /// a number that is not whole is no id at all.
+    @Test func anIdPastItsRangeIsRefusedSayingTheRange() async {
+        for display: Value in [4_294_967_296, 1e300] {
+            #expect(await Self.refusal(Tools.look(), ["display": display])?.hasSuffix("which is no window-server id: those run from 0 to 4294967295") == true,
+                    "\(display)")
+        }
+        #expect(await Self.refusal(Tools.look(), ["display": 1.5])?.hasPrefix("display is 1.5, and it is") == true)
     }
 
     /// The schema offers it, not required.
@@ -233,57 +247,5 @@ import Testing
     @Test func aRequestOfAnUnexpectedShapeIsStillOwed() {
         #expect(Exchange.requested(in: Self.line(#"{"jsonrpc":"2.0","id":9,"method":"tools/call","params":"x"}"#)) == [9])
         #expect(Exchange.requested(in: Self.line("not json")).isEmpty)
-    }
-
-    // MARK: turns
-
-    /// Calls sent together run one after another, never report by report together: the
-    /// daemon serves one client, and two calls at once would be two.
-    @Test func callsTakeTurnsAndNeverOverlap() async throws {
-        actor Record { var log: [String] = []; func note(_ s: String) { log.append(s) } }
-        let turns = Turns(), record = Record()
-        try await withThrowingTaskGroup(of: Void.self) { group in
-            for name in ["a", "b", "c"] {
-                group.addTask {
-                    try await turns.take {
-                        await record.note("\(name) begins"); await Task.yield(); await record.note("\(name) ends")
-                    }
-                }
-            }
-            try await group.waitForAll()
-        }
-        let log = await record.log
-        #expect(log.count == 6)
-        for pair in stride(from: 0, to: log.count, by: 2) {
-            #expect(log[pair].dropLast(7) == log[pair + 1].dropLast(5), "\(log) interleaves")
-        }
-    }
-
-    /// A call whose caller is cancelled never runs, even behind one still running, and the
-    /// turn after it still comes.
-    @Test func aCancelledCallNeverRuns() async throws {
-        let turns = Turns()
-        let (gate, open) = AsyncStream<Void>.makeStream()
-        let running = Task { try await turns.take { for await _ in gate { break } } }
-        let cancelled = Task {
-            withUnsafeCurrentTask { $0?.cancel() }
-            return try await turns.take { "ran" }
-        }
-        open.yield()
-        try await running.value
-        await #expect(throws: CancellationError.self) { try await cancelled.value }
-        #expect(try await turns.take { "after" } == "after")
-    }
-
-    /// A caller cancelled before it takes its turn never starts its call, even with no
-    /// turn ahead of it, when the call would otherwise begin at once.
-    @Test func aCallCancelledBeforeItsTurnNeverStarts() async throws {
-        let turns = Turns(), started = Kept()
-        let cancelled = Task {
-            withUnsafeCurrentTask { $0?.cancel() }
-            return try await turns.take { started.append("ran"); return "ran" }
-        }
-        await #expect(throws: CancellationError.self) { try await cancelled.value }
-        #expect(started.lines.isEmpty, "the call started though its caller was cancelled")
     }
 }

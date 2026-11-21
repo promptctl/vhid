@@ -10,7 +10,7 @@ git tag v$(scripts/version --base) && git push origin v$(scripts/version --base)
 the tagged commit is on master (a `-tag` pre-release may come from any branch), and that
 `CHANGELOG.md` has a `## [<version>]` section. It then runs `scripts/release` in a
 keychain `scripts/release-keychain` makes for the job and deletes at its end. Once the
-pkg is notarized it requires the tagged commit's `vhid`, `eyes` and `pkg` checks to be
+pkg is notarized it requires the tagged commit's `vhid` and `pkg` checks to be
 green, waiting for any still running, so a tag pushed right after its merge builds while
 CI tests it. Then it attaches the pkg to a GitHub Release whose notes are that section,
 marked a pre-release when the version has a `-tag`, and for a release moves the tap's

@@ -1,6 +1,6 @@
 # eyes: reading the screen
 
-`eyes` says what is on screen and where, in the coordinates `vhid click` takes. `eyes help <verb>` has each verb's full text.
+`eyes` says what is on screen and where, in the coordinates `vhid click` takes. `eyes help <verb>` has each verb's full text. `vhid look` and the `look` tool read the screen the same way, with the same options in one verb; [cli.md](cli.md) has it.
 
 ```sh
 eyes windows                      # owner, layer and bounds of each on-screen window; the frontmost app
@@ -12,10 +12,10 @@ eyes find OK --source tree        # only the accessibility tree: exact text, no 
 eyes find Saving --window 4127 --until absent --timeout 30   # returns once the text is gone
 eyes find Settings --page 219     # only the web page in browser window 219, not its toolbar or bookmarks
 eyes find Remove --near Beta      # every "Remove", the one beside "Beta" first
+eyes read --app Safari            # Safari's windows and what is stacked in front of them
 eyes hit 169 426                  # what a click at 169,426 lands on: the app, its window, the element
 eyes grants                       # Screen Recording and Accessibility: held or not, and the app they are charged to
 eyes grants --ask                 # raise macOS's dialog for each missing grant (once per app); run eyes grants again once answered
-eyes mcp                          # the verbs as MCP tools over stdio: windows, displays, find, read, hit, grants
 ```
 
 `find` and `read` read with `--source`: `tree` walks the accessibility tree (exact text
@@ -30,16 +30,20 @@ and how many edits off each is, so a misread one edit away is not taken for an a
 
 Named no place, `find` and `read` read what is in front: the frontmost app's windows
 and whatever is over its front window, such as an Open panel another process draws, on
-the display holding that window. When the frontmost app is the one eyes answers to — the
+the display holding that window. When the frontmost app is the agent's own — the
 terminal or app running it, which shows the very text an agent asks eyes to find — they
 read the app behind it instead and say they passed it over; that app's windows are never
-read, in front or not. A window over the front one is read only where the system's hit
+read, in front or not. A frontmost app with no window open, such as Finder over the
+desktop, is passed over the same way, for the app of the frontmost ordinary window behind
+it. A window over the front one is read only where the system's hit
 test lands a click in it, so a full-screen overlay that draws nothing there is not. Text
 in a window behind is not read, and the pixels reader counts it as `outside`; text under
 a window in front where a click lands elsewhere is `covered`, and where the hit test does
 not answer, as without Accessibility, `overlaid` and the region is not read whole. The
 menu bar is not read either, since `--rect` reads it. With nothing but that app on screen,
-the look is refused. `--display` reads every app on a display.
+the look is refused. `--display` reads every app on a display, and `--app <name>` one
+app's windows and what is stacked in front of them, the name exactly as `windows` prints
+the frontmost application, such as `Safari`.
 
 Each row is a point, the box around the run, the text, and what it is: the role the
 accessibility tree gives the element (`AXButton`, `AXLink`, `AXTextField`, ...), or
@@ -92,7 +96,7 @@ found, the rows are its near misses, and a wait settles neither present nor abse
 `hit X Y` asks the system's hit test what a click at that point, as `vhid click X Y` takes
 it, would land on, and says so before anything is pressed. Its first line names the app,
 whether a look with no place named reads it - the front app, a window over it such as an
-Open panel, the app eyes answers to, an app behind, a point on a display other than the
+Open panel, the agent's own app, an app behind, a point on a display other than the
 one that look reads, or one in none of the app's windows, such as its menu bar - and its window by the id `--window`
 takes. Then a row per element: the one hit, then each holding it, up to the area that holds
 them, such as a window, a list, a toolbar or a web page, each with its role, its frame and
@@ -112,7 +116,8 @@ When `--timeout` runs out, the answer is the last reading, marked as timed out.
 ## Events
 
 Every look (`find`, `read`, and each wait), every `hit`, every grant check a reader makes, and every
-grants reading taken from a child emits one JSON event, from the verbs and the tools alike. Events go to the OTLP collector that
+grants reading taken from a child emits one JSON event, from `eyes` and from `vhid look` and the `look` tool alike. Events go to the OTLP collector that
 `OTEL_EXPORTER_OTLP_ENDPOINT` names. With no collector set, or one that can't take them,
-they're appended to `~/Library/Logs/eyes/events.jsonl`. An event appended because the
+they're appended to the log of the command that looked, `~/Library/Logs/eyes/events.jsonl`
+or `~/Library/Logs/vhid/events.jsonl`. An event appended because the
 collector failed carries `sink_error`.

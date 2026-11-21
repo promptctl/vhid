@@ -5,11 +5,9 @@
 /// a target the pointer can be sent to with no conversion between. [FRAMING:representation]
 /// One space, named, rather than a pair of doubles whose meaning each caller remembers.
 ///
-/// The same space `eyes` reports text and window frames in, and said twice on purpose:
-/// the two packages share no code by design, so each states the space it speaks rather
-/// than one depending on the other to define it. A shared definition would be the
-/// dependency this separation exists to avoid; two definitions of one fixed system
-/// coordinate space cannot drift, because neither is free to choose.
+/// The same space eyes reports text and window frames in. [LAW:one-source-of-truth]
+/// exception: Seeing's `ScreenPoint` says it too, until vhid-one-server-4qe.nih, ranked next
+/// in this lane, makes the devices and the readers speak one screen-space vocabulary.
 public struct ScreenPoint: Hashable, Codable, Sendable, CustomStringConvertible {
     public let x: Double
     public let y: Double

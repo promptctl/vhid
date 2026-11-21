@@ -1,8 +1,11 @@
+import ChildProcess
 import CoreGraphics
-import Eyes
 import Foundation
 import Grants
 import ImageIO
+import Seeing
+import Telemetry
+import Turns
 import Vision
 
 /// Reads the screen as pixels: captures the region, recognises its text on-device with
@@ -34,11 +37,15 @@ public struct PixelReader: Reader {
         // [LAW:no-silent-failure] The grant is asked explicitly because capturing without
         // it does not fail - it returns the desktop wallpaper with every window blanked,
         // and recognising that is a confident "nothing here".
-        guard try await granted(Self.grant) else { throw PixelsError.noGrant }
+        guard try await granted(Self.grant) else { throw PixelsError.noGrant(Self.grant) }
+        // Which runs are the front app's is settled by the system's hit test, which answers
+        // nothing without Accessibility; without it every run would be set aside as unknown
+        // rather than the read said to be missing a grant. [LAW:no-silent-failure]
+        if case .front = query.region, !(try await granted(.accessibility)) { throw PixelsError.noGrant(.accessibility) }
         let region = try Self.resolve(query.region)
         let listing = try Geometry.onScreen()
         let owners = query.region.owners(in: listing, hit: hit)
-        let image = try Self.capture(region)
+        let image = try await Self.capture(region)
         // A run with no words in it is nil: examined, and counted as wordless.
         // One piece after another, never at once: measured, recognising the pieces in a
         // task group segfaulted inside TextRecognition in 4 runs of 15.
@@ -136,7 +143,7 @@ public struct PixelReader: Reader {
     /// clipped to the display it lies on.
     @MainActor
     static func resolve(_ region: Region) throws -> ScreenRect {
-        try onOneDisplay(region.bounds(), displays: Geometry.displays().map(\.frame))
+        try onOneDisplay(region.bounds(), displays: try Geometry.displays().map(\.frame))
     }
 
     /// The part of `rect` a capture can see, on the one display it lies on, in whole points.
@@ -165,19 +172,18 @@ public struct PixelReader: Reader {
     /// [LAW:no-silent-failure] Its exit status is not evidence: measured, it exits 0 having
     /// written nothing when the path is unwritable. The file it wrote, decoded, is the only
     /// proof a capture happened.
-    nonisolated static func capture(_ region: ScreenRect) throws -> CGImage {
+    ///
+    /// Run as every command is, to `Command.limit` or until the look is withdrawn, and over
+    /// either way only once the child is collected: the file is removed after nothing can
+    /// still be writing it. [LAW:single-enforcer] [LAW:no-ambient-temporal-coupling]
+    nonisolated static func capture(_ region: ScreenRect) async throws -> CGImage {
         let path = FileManager.default.temporaryDirectory
             .appendingPathComponent("eyes-\(UUID().uuidString).png")
         defer { try? FileManager.default.removeItem(at: path) }
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
         let r = region.cgRect
-        process.arguments = ["-x", "-t", "png", "-R\(Int(r.minX)),\(Int(r.minY)),\(Int(r.width)),\(Int(r.height))", path.path]
-        let stderr = Pipe()
-        process.standardError = stderr
-        try process.run()
-        process.waitUntilExit()
+        let command = Command("/usr/sbin/screencapture", ["-x", "-t", "png", "-R\(Int(r.minX)),\(Int(r.minY)),\(Int(r.width)),\(Int(r.height))", path.path])
+        let output = try await reading { stop in Result { try command.run(by: .within(Command.limit, or: stop)) } }.get()
 
         guard let source = CGImageSourceCreateWithURL(path as CFURL, nil),
               // Decoded now, not on first use: the image is lazy by default, and the file
@@ -187,8 +193,7 @@ public struct PixelReader: Reader {
                   source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary
               )
         else {
-            let said = String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            throw PixelsError.captureWroteNothing(region, said.trimmingCharacters(in: .whitespacesAndNewlines))
+            throw PixelsError.captureWroteNothing(region, output.merged)
         }
         // The backstop for the clipping above: an image not the shape of the rectangle
         // would map every box to the wrong place, so it is refused rather than read.
@@ -207,7 +212,27 @@ public struct PixelReader: Reader {
     /// Vision answers inside the region of interest as fractions of that region, so the
     /// piece is the rectangle each box is converted on - the one conversion, applied to a
     /// smaller display. [LAW:single-enforcer]
+    ///
+    /// One recognition at a time in the process: two in flight crash it inside Vision, and
+    /// two looks under one MCP server, or one look's tiles, would otherwise put two there.
+    /// The gate is here, at the one call into Vision, so nothing that recognises can go
+    /// round it; the time a recognition waited is counted on the unit underway.
+    /// [LAW:single-enforcer]
     nonisolated static func recognise(_ image: CGImage, of region: ScreenRect, in tile: ScreenRect) async throws -> [Found?] {
+        let asked = ContinuousClock.now
+        return try await vision.take(waited: {
+            Telemetry.tally(.visionQueuedMilliseconds, by: Int((ContinuousClock.now - asked) / .milliseconds(1)))
+        }) {
+            try await recognised(image, of: region, in: tile)
+        }
+    }
+
+    /// The one gate on Vision for this process. [LAW:no-shared-mutable-globals] Owned
+    /// here, and taken only by `recognise`, the one call into Vision: a second gate would let
+    /// two recognitions run together, which crashes the process.
+    nonisolated static let vision = Turns()
+
+    private nonisolated static func recognised(_ image: CGImage, of region: ScreenRect, in tile: ScreenRect) async throws -> [Found?] {
         var request = RecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.regionOfInterest = NormalizedRect(normalizedRect: tile.normalized(in: region))
@@ -250,7 +275,7 @@ struct Piece {
 /// Everything that means the reader could not look, as opposed to having looked and found
 /// nothing. Each one throws, because a returned `Reading` is taken as proof of looking.
 public enum PixelsError: ReaderError, CustomStringConvertible {
-    case noGrant
+    case noGrant(Grant)
     case offScreen(ScreenRect)
     case spansDisplays(ScreenRect)
     case captureWrongShape(ScreenRect, width: Int, height: Int)
@@ -261,9 +286,10 @@ public enum PixelsError: ReaderError, CustomStringConvertible {
 
     public var description: String {
         switch self {
-        case .noGrant:
-            "\(PixelReader.grant.name) is not granted to the app responsible for eyes, so a capture would show only the wallpaper."
-                + " Grant it in \(PixelReader.grant.pane)."
+        case .noGrant(let grant):
+            "\(grant.name) is not granted to the app responsible for this process, so "
+                + (grant == PixelReader.grant ? "a capture would show only the wallpaper." : "the front app's text cannot be told from what covers it.")
+                + " Grant it in \(grant.pane); \(Grant.holderNamedBy) names that app."
         case .offScreen(let r):
             "\(r) is on no display, so there is nothing there to read"
         case .spansDisplays(let r):

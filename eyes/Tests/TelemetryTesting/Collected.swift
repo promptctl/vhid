@@ -1,23 +1,32 @@
+import Foundation
 import Synchronization
 import Telemetry
 import Testing
 
-/// Every event a unit of work emitted, collected in place of the edge.
+/// Every record a unit of work made, collected in place of the edge.
 public final class Collected: Sendable {
-    private let events = Mutex<[Event]>([])
+    private let records = Mutex<[Record]>([])
     public init() {}
-    public var all: [Event] { events.withLock { $0 } }
-    public var export: Telemetry.Export { { event in self.events.withLock { $0.append(event) } } }
+    public var all: [Record] { records.withLock { $0 } }
+    public var export: Telemetry.Export { { record in self.records.withLock { $0.append(record) } } }
+
+    /// Every record as the file's line renders it, parsed back: what a reader of the log
+    /// would find.
+    public var written: [[String: Any]] {
+        get throws {
+            try all.map { try JSONSerialization.jsonObject(with: JSON.object($0.fields(sink: .file)).line) as! [String: Any] }
+        }
+    }
 }
 
-/// A suite whose code runs units of work, with their events kept in the test rather than
+/// A suite whose code runs units of work, with their records kept in the test rather than
 /// sent through the process's edge to the real log or collector. A test that asserts on
-/// its events binds its own `Collected` inside.
+/// its records binds its own `Collected` inside.
 public struct EventsKept: SuiteTrait, TestTrait, TestScoping {
     public var isRecursive: Bool { true }
 
     public func provideScope(
-        for test: Test, testCase: Test.Case?, performing function: @Sendable () async throws -> Void
+        for test: Test, testCase: Test.Case?, performing function: @concurrent @Sendable () async throws -> Void
     ) async throws {
         try await Telemetry.$export.withValue(Collected().export) { try await function() }
     }

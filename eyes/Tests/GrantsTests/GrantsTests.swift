@@ -1,11 +1,22 @@
 import Foundation
-import Eyes
+import Seeing
 import Grants
 import Telemetry
 import TelemetryTesting
+import OwnThread
 import Testing
 
-@Suite(.eventsKept) struct GrantsTests {
+@Suite(.eventsKept, .ownThread) struct GrantsTests {
+    /// The session-start hook reads a reading's verdict by its exit status alone, so its arms
+    /// are the statuses a reading exits with, and every other status is unknown.
+    @Test func theHookReadsTheStatusesAReadingExitsWith() throws {
+        let root = URL(filePath: #filePath).deletingLastPathComponent().appending(path: "../../..").standardized
+        let hook = try String(contentsOf: root.appending(path: "claude-plugin/hooks/session-start"), encoding: .utf8)
+        let arms = hook.split(separator: "\n").filter { $0.hasPrefix("  ") && $0.contains(") sight=") }
+            .map { String($0.drop { $0 == " " }.prefix { $0 != ")" }) }
+        #expect(arms == ["0", "\(GrantReading.lacking)", "*"])
+    }
+
     /// A reading survives the line a reading process prints for it.
     @Test func aReadingRoundTripsThroughItsLine() throws {
         for held in [(true, false), (false, true), (true, true), (false, false)] {
@@ -42,15 +53,55 @@ import Testing
         await #expect(throws: GrantReadingFailure("/usr/bin/false exited 1")) {
             try await GrantReading.taken(by: URL(fileURLWithPath: "/usr/bin/false"), [])
         }
-        await #expect(throws: GrantReadingFailure("/bin/sleep 5 did not answer within 0.2 seconds")) {
+        // Given up on at its deadline as every command is, and said as `Command` says it.
+        let stuck = await #expect(throws: GrantReadingFailure.self) {
             try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/sleep"), ["5"], within: .milliseconds(200))
         }
+        #expect(stuck?.description.hasPrefix("`sleep 5` had not ended") == true)
+        #expect(stuck?.description.hasSuffix("at the limit of 0.2 seconds, and was given up on") == true)
         // A grandchild holding the pipe does not hold the call past its deadline.
         let start = ContinuousClock.now
         await #expect(throws: GrantReadingFailure.self) {
             try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/sh"), ["-c", "sleep 5"], within: .milliseconds(200))
         }
         #expect(ContinuousClock.now - start < .seconds(2))
+    }
+
+    /// A reading withdrawn while its child runs is a cancellation, recorded as one, and its
+    /// child is gone with it.
+    @Test func aReadingWithdrawnWhileItsChildRunsIsCancelled() async throws {
+        let events = Collected()
+        // The child says it is running through a FIFO, which this side's open blocks on
+        // until the child opens it to write: the cancel lands while the child runs.
+        let started = FileManager.default.temporaryDirectory.appending(path: "grants-started-\(UUID().uuidString)")
+        try #require(mkfifo(started.path, 0o600) == 0)
+        defer { try? FileManager.default.removeItem(at: started) }
+        let reading = Task {
+            try await Telemetry.$export.withValue(events.export) {
+                try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/sh"), ["-c", "echo > \"$0\"; exec sleep 5", started.path])
+            }
+        }
+        await withCheckedContinuation { running in
+            DispatchQueue.global().async {
+                _ = FileHandle(forReadingAtPath: started.path)?.readDataToEndOfFile()
+                running.resume()
+            }
+        }
+        let start = ContinuousClock.now
+        reading.cancel()
+        await #expect(throws: CancellationError.self) { try await reading.value }
+        #expect(ContinuousClock.now - start < .seconds(2))
+        #expect(events.all.map(\.outcome) == [.cancelled])
+    }
+
+    /// A reading process says by its exit status whether every grant is held, and a parent
+    /// still reads a reading that lacks one.
+    @Test func aReadingThatLacksAGrantExitsSoAndIsStillRead() async throws {
+        let lacking = GrantReading { $0 == .screenRecording }
+        #expect(GrantReading { _ in true }.exitStatus == 0)
+        #expect(lacking.exitStatus == GrantReading.lacking)
+        let sh = URL(fileURLWithPath: "/bin/sh")
+        #expect(try await GrantReading.taken(by: sh, ["-c", "echo \(lacking.line); exit \(GrantReading.lacking)"]) == lacking)
     }
 
     /// The child reads nothing of this process's stdin, and a child that says more than a
@@ -108,12 +159,12 @@ struct GrantMappingTests {
         /// Whether a gate asked now shares the reading or takes its own, read off its event.
         /// The gate is cancelled as it asks, so it gives up instead of waiting: the choice is
         /// made the moment it asks, whatever the reading is still doing.
-        func choice() async -> String? {
+        func choice() async -> JSON? {
             let events = Collected()
             let gate = Task { try await Telemetry.$export.withValue(events.export) { try await shared.holds(.accessibility) } }
             gate.cancel()
             await #expect(throws: CancellationError.self) { try await gate.value }
-            return events.all.first?.facts["reading"]
+            return events.all.first?.attributes["reading"]
         }
     }
 
@@ -176,9 +227,10 @@ struct GrantMappingTests {
     }
     let seen = events.all
     #expect(seen.map(\.event) == ["grant_reading", "grant_reading", "grant_reading"])
-    #expect(seen.map(\.outcome) == ["held", "not_held", "error"])
-    #expect(seen.map { $0.facts["reading"] } == ["taken", "shared", "taken"])
-    #expect(seen.map { $0.facts["grant"] } == ["accessibility", "screenRecording", "accessibility"])
+    #expect(seen.map(\.outcome) == [.ok, .ok, .failed])
+    #expect(seen.map { $0.attributes["result"] } == ["held", "not_held", nil])
+    #expect(seen.map { $0.attributes["reading"] } == ["taken", "shared", "taken"])
+    #expect(seen.map { $0.attributes["grant"] } == ["accessibility", "screenRecording", "accessibility"])
     #expect(seen[2].error == "no child")
 }
 
@@ -190,7 +242,7 @@ struct GrantMappingTests {
         _ = try? await GrantReading.taken(by: URL(fileURLWithPath: "/usr/bin/false"), [])
     }
     #expect(events.all.map(\.event) == ["grant_child", "grant_child"])
-    #expect(events.all.map(\.outcome) == ["ok", "error"])
+    #expect(events.all.map(\.outcome) == [.ok, .failed])
     #expect(events.all[1].error != nil)
 }
 
@@ -200,7 +252,7 @@ struct GrantMappingTests {
     let events = Collected()
     let holder = try await Telemetry.$export.withValue(events.export) { try await Holder.current() }
     #expect(events.all.map(\.event) == ["holder"])
-    let executable = try #require(events.all.first?.facts["executable"])
+    let executable = try #require(events.all.first?.attributes["executable"].flatMap { if case .string(let s) = $0 { s } else { nil } })
     #expect(executable.hasPrefix("/"))
     #expect(FileManager.default.isExecutableFile(atPath: executable))
     #expect(executable.hasPrefix(holder.path))

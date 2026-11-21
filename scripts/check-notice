@@ -3,9 +3,8 @@
 # Package.resolved that NOTICE does not name and that is not listed below as
 # resolved-but-unlinked, or an unlinked package whose module turns up in the binary after all.
 #
-#   scripts/check-notice [binary [scratch path [package directory]]]
-#     # vhid's debug build, .build and the root by default; make-pkg names its own,
-#     # and eyes/ for eyes, whose dependencies are its own package's
+#   scripts/check-notice [binary [scratch path]]
+#     # vhid's debug build and .build by default; make-pkg names its own
 #
 # NOTICE is hand-written, so this is what makes a new dependency, or an SDK upgrade that
 # starts linking one it only resolved before, a red build instead of a license page that
@@ -13,7 +12,7 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 binary=${1:-.build/debug/vhid}
-resolved=${3:-.}/Package.resolved
+resolved=Package.resolved
 # The package checkouts are the build's, so a scratch path of its own has its own.
 checkouts=${2:-.build}/checkouts
 

@@ -1,17 +1,18 @@
 import ApplicationServices
+import ChildProcess
 import CoreGraphics
 import Darwin
-import Eyes
+import Seeing
 import Foundation
 import Responsibility
 import Telemetry
 
 /// The two privacy grants eyes' readers need.
 ///
-/// macOS does not charge a grant to eyes: it charges it to the process responsible for
-/// eyes - the terminal a command was typed into, the client that started `eyes mcp`. So
-/// every answer here names that app, because "grant it to eyes" is advice nobody can
-/// follow. Measured: from iTerm2, `CGPreflightScreenCaptureAccess()` answers for iTerm2
+/// macOS does not charge a grant to the process reading: it charges it to the process
+/// responsible for it - the terminal a command was typed into, the client that started
+/// `vhid mcp`. So every answer here names that app, because "grant it to vhid" is advice
+/// nobody can follow. Measured: from iTerm2, `CGPreflightScreenCaptureAccess()` answers for iTerm2
 /// even in an unsigned binary built a moment earlier.
 public enum Grant: String, CaseIterable, Sendable {
     case screenRecording
@@ -36,6 +37,10 @@ public enum Grant: String, CaseIterable, Sendable {
     }
 
     public var pane: String { "System Settings > Privacy & Security > \(name)" }
+
+    /// Where a refusal points for the app that has to hold a grant, which is not this
+    /// binary but whichever app macOS charges it to: a terminal, an agent's app.
+    public static let holderNamedBy = "`vhid doctor` or `eyes grants`"
 
     /// Whether this process holds it, read without ever putting a dialog on screen.
     ///
@@ -85,18 +90,18 @@ public actor SharedReading {
     /// and how long the gate waited. The child's own event is `grant_child`, on this trace.
     /// [LAW:nothing-unseen]
     public func holds(_ grant: Grant) async throws -> Bool {
-        try await Telemetry.unit("grant_reading", outcome: { $0 ? "held" : "not_held" }) {
-            Telemetry.note("grant", grant.rawValue)
+        try await Telemetry.unit("grant_reading", result: { $0 ? "held" : "not_held" }) {
+            Telemetry.note(.grant, .string(grant.rawValue))
             return try await reading(grant)
         }
     }
 
     private func reading(_ grant: Grant) async throws -> Bool {
         if let latest, latest.finished.map({ ContinuousClock.now - $0 < fresh }) ?? true {
-            Telemetry.note("reading", "shared")
+            Telemetry.note(.reading, "shared")
             return try await Self.waited(latest.reading).holds(grant)
         }
-        Telemetry.note("reading", "taken")
+        Telemetry.note(.reading, "taken")
         taking += 1
         let reading = Task { [take, taking] in
             // Stamped when the reading ends, not when a gate stops waiting: a cancelled
@@ -148,6 +153,15 @@ public struct GrantReading: Sendable, Equatable {
         GrantReading { $0.heldHere() }
     }
 
+    /// How a reading process exits: 0 when this reading holds every grant, `lacking` when it
+    /// does not. A script reads this, as a parent reads `line`, so no script parses the line.
+    /// [LAW:one-source-of-truth] The verdict is the reading's own.
+    public var exitStatus: Int32 { Grant.allCases.allSatisfy(holds) ? 0 : Self.lacking }
+
+    /// The exit status of a reading process whose reading lacks a grant: apart from
+    /// ArgumentParser's own failure (1) and validation (64), so a failed run is not read as one.
+    public static let lacking: Int32 = 3
+
     /// The line a reading process prints and `init(line:)` reads back.
     public var line: String {
         Grant.allCases.map { "\($0.rawValue)=\(holds($0))" }.joined(separator: " ")
@@ -175,57 +189,24 @@ public struct GrantReading: Sendable, Equatable {
     ///   milliseconds; a new binary's first launch is checked by macOS first.
     /// One event per child, however its gates end: how long the child took and why it failed,
     /// apart from how long any gate waited on it. [LAW:nothing-unseen]
-    public static func taken(by reader: URL, _ arguments: [String], within deadline: Duration = .seconds(10)) async throws(GrantReadingFailure) -> GrantReading {
-        try await Telemetry.unit("grant_child") { () async throws(GrantReadingFailure) -> GrantReading in
-            try await child(reader, arguments, within: deadline)
-        }
+    /// Throws `GrantReadingFailure`, or `CancellationError` when the reading was withdrawn,
+    /// which is a cancellation, recorded and passed on as one.
+    public static func taken(by reader: URL, _ arguments: [String], within deadline: Duration = .seconds(10)) async throws -> GrantReading {
+        try await Telemetry.unit("grant_child") { try await child(reader, arguments, within: deadline) }
     }
 
-    private static func child(_ reader: URL, _ arguments: [String], within deadline: Duration) async throws(GrantReadingFailure) -> GrantReading {
-        let command = ([reader.path] + arguments).joined(separator: " ")
-        let process = Process()
-        process.executableURL = reader
-        process.arguments = arguments
-        let output = Pipe(), complaint = Pipe()
-        // Under `eyes mcp` this process's stdin is the client's JSON-RPC stream.
-        process.standardInput = FileHandle.nullDevice
-        process.standardOutput = output
-        process.standardError = complaint
-        let (ended, end) = AsyncStream<Void>.makeStream()
-        process.terminationHandler = { _ in end.finish() }
-        do { try process.run() } catch { throw GrantReadingFailure("\(command) did not start: \(error)") }
-        // Drained while the child runs, so a child that says a lot cannot fill a pipe and stall;
-        // unstructured, so a deadline returns without waiting on whatever still holds a pipe.
-        let said = Task { await drained(output) }, why = Task { await drained(complaint) }
-        let finished = await withTaskGroup(of: Bool.self) { group in
-            group.addTask { for await _ in ended {}; return !Task.isCancelled }
-            group.addTask { try? await Task.sleep(for: deadline); return false }
-            defer { group.cancelAll() }
-            return await group.next()!
+    private static func child(_ reader: URL, _ arguments: [String], within deadline: Duration) async throws -> GrantReading {
+        // The child's records, if it makes any, belong under this reading's span.
+        let command = Command(reader.path, arguments, environment: Telemetry.childEnvironment())
+        let ran = try await reading { stop in Result { try command.run(by: .within(deadline, or: stop)) } }
+        let output: Command.Output
+        do { output = try ran.get() } catch { throw GrantReadingFailure("\(error)") }
+        guard case .exited(let status) = output.ending, [0, GrantReading.lacking].contains(status) else {
+            let how = switch output.ending { case .exited(let code): "exited \(code)"; case .signalled(let code): "crashed with signal \(code)" }
+            let complaint = output.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw GrantReadingFailure("\(reader.path) \(how)\(complaint.isEmpty ? "" : ": \(complaint)")")
         }
-        guard finished else {
-            kill(process.processIdentifier, SIGKILL)
-            throw GrantReadingFailure(Task.isCancelled
-                ? "\(command) was withdrawn before it answered"
-                : "\(command) did not answer within \(deadline)")
-        }
-        guard process.terminationReason == .exit, process.terminationStatus == 0 else {
-            let complaint = await why.value
-            let how = process.terminationReason == .uncaughtSignal ? "crashed with signal" : "exited"
-            throw GrantReadingFailure("\(command) \(how) \(process.terminationStatus)\(complaint.isEmpty ? "" : ": \(complaint)")")
-        }
-        return try GrantReading(line: await said.value)
-    }
-
-    /// Everything a pipe carries until its writer closes it, read off the cooperative pool,
-    /// which a blocking read must not hold.
-    private static func drained(_ pipe: Pipe) async -> String {
-        await withCheckedContinuation { done in
-            DispatchQueue.global().async {
-                done.resume(returning: String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-                    .trimmingCharacters(in: .whitespacesAndNewlines))
-            }
-        }
+        return try GrantReading(line: output.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 }
 
@@ -262,7 +243,7 @@ public struct Holder: Sendable, Equatable {
     public static func current() async throws(GrantReadingFailure) -> Holder {
         try await Telemetry.unit("holder") { () throws(GrantReadingFailure) -> Holder in
             let executable = try attributed()
-            Telemetry.note("executable", executable)
+            Telemetry.note(.executable, .string(executable))
             return named(executable)
         }
     }

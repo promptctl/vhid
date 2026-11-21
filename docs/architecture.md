@@ -136,40 +136,54 @@ installation it is; it asks the value for the name it needs.
   keyboard first, so the question is never asked
   ([`vhidd/KeyboardTypeAnswer.swift`](../Sources/vhidd/KeyboardTypeAnswer.swift)).
 
-## eyes, the separate package
+## eyes, the half that reads the screen
 
-`eyes/` is its own SwiftPM package, and the root manifest doesn't mention it. Nothing in
-code joins reading the screen to pressing keys, only the workflow, and a package boundary
-keeps it that way ([development.md](development.md#two-packages)).
+eyes reads the screen so that input can be aimed, and links nothing of the devices': no
+target of either half links the other's, and only the `vhid` executable links both
+([development.md](development.md#two-halves)). That is what lets one server, `vhid mcp`,
+serve `look` beside the acts.
 
-Inside, two readers answer the same query. The tree reader walks the accessibility tree
+Two readers answer the same query. The tree reader walks the accessibility tree
 ([`eyes/Sources/Tree/`](../eyes/Sources/Tree)). The pixels reader runs Vision's text
 recognition on a screen capture ([`eyes/Sources/Pixels/`](../eyes/Sources/Pixels)).
-`MergedReader` asks both and reports a thing they both saw once. Every reader hands its
-candidates to one pure `Judge`, so "matches" means the same thing whichever reader looked
-([`eyes/Sources/Eyes/`](../eyes/Sources/Eyes)). macOS charges a privacy grant to the
-*responsible* process, such as the terminal or the MCP client, not to `eyes`. So
-[`Grants`](../eyes/Sources/Grants/Grants.swift) names that app in every answer, and a
-small C target, `Responsibility`, asks macOS which one it is.
+`MergedReader` asks both and reports a thing they both saw once. Every reader's candidates
+are judged by one rule, so "matches" means the same thing whichever reader looked
+([`eyes/Sources/Seeing/Reader.swift`](../eyes/Sources/Seeing/Reader.swift)). One answer
+reads the frontmost app, the running apps, the windows and the displays once, as a `Desk`
+([`eyes/Sources/Seeing/Desk.swift`](../eyes/Sources/Seeing/Desk.swift)), so its parts
+cannot disagree about what was in front. What `look` was asked is parsed once, for the
+tool and `vhid look` alike, into an `Asked`
+([`eyes/Sources/Verbs/Asked.swift`](../eyes/Sources/Verbs/Asked.swift)).
+
+macOS charges a privacy grant to the *responsible* process, such as the terminal or the
+MCP client, not to `vhid`. So [`Grants`](../eyes/Sources/Grants/Grants.swift) names that
+app, in `vhid doctor` and in a refusal, and a small C target, `Responsibility`, asks macOS
+which one it is.
+
+A look asks nothing of the daemon, so it waits behind no act: under `vhid mcp`, only the
+acts take turns with one another
+([`eyes/Sources/Turns/`](../eyes/Sources/Turns)). Vision recognises one image at a time
+per process, gated the same way.
 
 ## Every run leaves a record
 
-Each `vhid` run and each MCP tool call emits one event, with its outcome, duration, the
-reports it sent and why it failed. It goes to an OpenTelemetry collector when one is
-configured, and to `~/Library/Logs/vhid/events.jsonl` otherwise
-([`vhid/EventExport.swift`](../Sources/vhid/EventExport.swift)). The counts are taken
-where every report passes ([`vhid/Devices.swift`](../Sources/vhid/Devices.swift)), so a
-run that connected and sent nothing says zero. `eyes` does the same in its own
-[`Telemetry`](../eyes/Sources/Telemetry/Telemetry.swift) target. The daemon logs to the
-unified log under its installation's service name.
+Each `vhid` run and each MCP tool call is one unit of work, recorded with its outcome
+(ok, failed or cancelled), its duration, what it answered and why it failed. The units
+inside it, such as a look's reading of the front app, are recorded with it on one trace,
+each naming its parent. Records go to an OpenTelemetry collector when one is configured,
+and to `~/Library/Logs/vhid/events.jsonl` otherwise; both halves record through the one
+[`Telemetry`](../eyes/Sources/Telemetry/Telemetry.swift) target. The report counts are
+taken where every report passes ([`vhid/Devices.swift`](../Sources/vhid/Devices.swift)),
+so a run that connected and sent nothing says zero. The daemon logs to the unified log
+under its installation's service name.
 
 ## Code map
 
-The root package, by layer. Lower rows depend on nothing above them.
+The devices' half, by layer. Lower rows depend on nothing above them.
 
 | Module | What it is |
 |---|---|
-| `vhid` | the CLI and `vhid mcp`: argument parsing, the verbs, the MCP tools, event export |
+| `vhid` | the CLI and `vhid mcp`: argument parsing, the verbs, the MCP tools |
 | `vhidd` | the root daemon: admission, the holder, readiness, the front-session cursor |
 | `vhid-menubar`, `MenuBar` | the menu bar item and its setup walk |
 | `vhid-record`, `RecordingTie` | the recording app and its socket to the command |
@@ -181,13 +195,14 @@ The root package, by layer. Lower rows depend on nothing above them.
 | `KeyboardLayouts` | a layout's characters mapped back to the keys that type them |
 | `Keystrokes`, `Pointing` | key usages, key codes, buttons: plain values |
 | `Installations` | an installation's names, built from one string |
-| `ChildProcess`, `Signals`, `Version` | spawning children, catching signals, the build's version |
+| `ChildProcess` | starting a child and running a command to its deadline or its stop, for both halves |
+| `Signals`, `Version` | catching signals, the build's version |
 
 The rest of the tree:
 
 | Path | What it is |
 |---|---|
-| `eyes/` | the screen-reading package, built and tested on its own |
+| `eyes/` | the half that reads the screen: `Seeing`, `Tree`, `Pixels`, `Grants`, `EyesVerbs` and the `eyes` command line, with `Telemetry` and `Turns`, which both halves use |
 | `Tests/` | test targets, each named for what it tests (`Signals`, `Version` and the two apps have none); `OwnThread` and `TestClock` are helpers for tests |
 | `claude-plugin/`, `.claude-plugin/` | the Claude Code plugin: skills, the session-start check, the marketplace entry, and `VERSION`, the one place the version is written, which `scripts/version` reads for every build |
 | `pkg/`, `scripts/make-pkg`, `scripts/notarize` | building, signing and notarizing the package |

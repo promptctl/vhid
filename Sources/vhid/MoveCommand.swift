@@ -1,11 +1,12 @@
 import ArgumentParser
+import EyesVerbs
 import Input
 
 /// Moves the pointer to a place on the screen, and presses nothing.
 struct MoveCommand: AsyncParsableCommand {
     static let configuration = Help.move.configuration
 
-    @Argument(help: Help.sentence(Help.target))
+    @Argument(help: .sentence(Help.target))
     var place: [String]
 
     @OptionGroup var service: ServiceOption

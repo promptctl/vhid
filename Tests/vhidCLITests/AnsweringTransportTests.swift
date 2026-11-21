@@ -2,11 +2,12 @@ import Foundation
 import Installations
 import Logging
 import MCP
+import TelemetryTesting
 import Testing
 @testable import vhid
 
 /// What the transport holds the session open for, driven through a stand-in for stdio.
-@Suite struct AnsweringTransportTests {
+@Suite(.eventsKept) struct AnsweringTransportTests {
     /// Two requests in flight under one id are two answers owed: the first settles one,
     /// and the end of stdin still waits on the other.
     @Test func aReusedIdIsOwedOnceForEachRequest() async throws {
@@ -51,7 +52,7 @@ import Testing
 
     /// Stopped after stdin has ended, when the relay is already parked on what is owed, the
     /// session still ends, and says which answers it gave up on.
-    @Test func aSessionStoppedWhileParkedEndsAndSaysWhatWasOwed() async throws {
+    @Test(.timeLimit(.minutes(1))) func aSessionStoppedWhileParkedEndsAndSaysWhatWasOwed() async throws {
         let stdio = Stdio(), said = Said()
         let transport = AnsweringTransport(stdio, logger: Logger(label: "test") { _ in said })
         let (read, next) = AsyncStream<Void>.makeStream()
@@ -63,11 +64,10 @@ import Testing
         stdio.lines.finish()
         for await _ in read.prefix(2) {}
         // Parked: the only thing left for the relay to do is wait on id 7.
-        for _ in 0..<200 where !(await transport.isWaiting) { try await Task.sleep(for: .milliseconds(10)) }
-        #expect(await transport.isWaiting)
+        await transport.until { $0.isWaiting }
         session.cancel()
         _ = try? await session.value
-        for _ in 0..<200 where said.lines.count < 2 { try await Task.sleep(for: .milliseconds(10)) }
+        for await _ in said.logged.stream.prefix(2) {}
         #expect(said.lines == [
             #"stdin ended, waiting on answers owed owed="7"×1, 7×1"#,
             #"session stopped with answers owed owed="7"×1, 7×1"#,
@@ -76,7 +76,7 @@ import Testing
 
     /// A withdrawn call whose handler pays the withdrawal no mind holds the end of stdin
     /// until its handler is over, and its answer is never written.
-    @Test func aWithdrawnCallHoldsTheSessionUntilItsHandlerIsOver() async throws {
+    @Test(.timeLimit(.minutes(1))) func aWithdrawnCallHoldsTheSessionUntilItsHandlerIsOver() async throws {
         let (finish, done) = AsyncStream<Void>.makeStream()
         let (began, begin) = AsyncStream<Void>.makeStream()
         let stubborn = VerbTool(Help.click, []) { _, _ in
@@ -90,15 +90,14 @@ import Testing
         let stdio = Stdio(), said = Said()
         let transport = AnsweringTransport(stdio, logger: Logger(label: "test") { _ in said })
         let session = Task {
-            let server = await McpCommand.server([stubborn], on: Installation(service: "ai.promptctl.vhid.tests.nobody")!, over: transport, recordingTo: .scratch(), carriedBy: Flights())
+            let server = await McpCommand.server([stubborn], on: Installation(service: "ai.promptctl.vhid.tests.nobody")!, over: transport)
             try await server.start(transport: transport)
             await server.waitUntilCompleted()
         }
         stdio.call(3, then: [])
         for await _ in began { break }
         stdio.feed([.cancel(3), .end])
-        for _ in 0..<200 where !(await transport.isWaiting) { try await Task.sleep(for: .milliseconds(10)) }
-        #expect(await transport.isWaiting, "the session ended under a handler still running")
+        await transport.until { $0.isWaiting }
         #expect(said.lines.filter { $0.hasPrefix("stdin ended") } == ["stdin ended, waiting on answers owed owed=3×1 (1 withdrawn)"])
         done.finish()
         try await session.value
@@ -107,7 +106,7 @@ import Testing
     }
 
     /// A call cancelled twice is withdrawn once: a later call that reuses its id is answered.
-    @Test func aCancelSentTwiceWithdrawsOnlyTheCallItNames() async throws {
+    @Test(.timeLimit(.minutes(1))) func aCancelSentTwiceWithdrawsOnlyTheCallItNames() async throws {
         let stdio = Stdio(), transport = AnsweringTransport(stdio)
         let (read, next) = AsyncStream<Void>.makeStream()
         let session = Task {
@@ -117,7 +116,7 @@ import Testing
         stdio.call(5, then: [.cancel(5), .cancel(5)])
         for await _ in read.prefix(1) {}
         // Both cancels are read once one is withdrawn and a probe sent after them is read.
-        for _ in 0..<200 where await transport.withdrawing(5) == 0 { try await Task.sleep(for: .milliseconds(10)) }
+        await transport.until { $0.withdrawing(5) > 0 }
         stdio.lines.yield(Data(#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#.utf8))
         for await _ in read.prefix(1) {}
         #expect(await transport.withdrawing(5) == 1)
@@ -162,7 +161,7 @@ import Testing
         }
         let stdio = Stdio(), transport = AnsweringTransport(stdio)
         let session = Task {
-            let server = await McpCommand.server([waiting], on: Installation(service: "ai.promptctl.vhid.tests.nobody")!, over: transport, recordingTo: .scratch(), carriedBy: Flights())
+            let server = await McpCommand.server([waiting], on: Installation(service: "ai.promptctl.vhid.tests.nobody")!, over: transport)
             try await server.start(transport: transport)
             await server.waitUntilCompleted()
         }
@@ -183,6 +182,8 @@ private final class Said: LogHandler, @unchecked Sendable {
     private let lock = NSLock()
     private var kept: [String] = []
     var lines: [String] { lock.withLock { kept } }
+    /// Each line as it is logged, so a test waits on the logging rather than for it.
+    let logged = AsyncStream<String>.makeStream()
     var metadata: Logger.Metadata = [:]
     var logLevel: Logger.Level = .trace
     subscript(metadataKey key: String) -> Logger.Metadata.Value? {
@@ -190,7 +191,9 @@ private final class Said: LogHandler, @unchecked Sendable {
     }
     func log(level: Logger.Level, message: Logger.Message, metadata: Logger.Metadata?, source: String, file: String, function: String, line: UInt) {
         let fields = (metadata ?? [:]).sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }
-        lock.withLock { kept.append(([message.description] + fields).joined(separator: " ")) }
+        let line = ([message.description] + fields).joined(separator: " ")
+        lock.withLock { kept.append(line) }
+        logged.continuation.yield(line)
     }
 }
 
@@ -200,6 +203,13 @@ actor Stdio: Transport {
     nonisolated let (stream, lines) = AsyncThrowingStream<Data, any Error>.makeStream()
     private nonisolated let kept = Kept()
     nonisolated var sent: [String] { kept.lines }
+    /// The first message sent under `id`, once it is sent.
+    nonisolated func answer(to id: Int) async -> String { await kept.first { Self.answers($0, id) } }
+
+    /// Whether `sent` answers `id`, read by the transport's own reading of an answer.
+    static func answers(_ sent: String, _ id: Int) -> Bool { Exchange.answered(in: Data(sent.utf8)).contains(.number(id)) }
+    /// The first message sent, once one is.
+    nonisolated func firstSent() async -> String { await kept.first { _ in true } }
     func connect() async throws {}
     func disconnect() async {}
     func send(_ data: Data) async throws { kept.append(String(decoding: data, as: UTF8.self)) }
@@ -207,9 +217,9 @@ actor Stdio: Transport {
 
     enum Line { case cancel(Int), end }
 
-    /// A tool call under `id` naming `click`, then `rest`, all in one go.
-    nonisolated func call(_ id: Int, then rest: [Line]) {
-        lines.yield(Data(#"{"jsonrpc":"2.0","id":\#(id),"method":"tools/call","params":{"name":"click"}}"#.utf8))
+    /// A tool call under `id` naming `tool`, then `rest`, all in one go.
+    nonisolated func call(_ id: Int, _ tool: String = "click", then rest: [Line]) {
+        lines.yield(Data(#"{"jsonrpc":"2.0","id":\#(id),"method":"tools/call","params":{"name":"\#(tool)"}}"#.utf8))
         feed(rest)
     }
 
@@ -226,6 +236,28 @@ actor Stdio: Transport {
 final class Kept: @unchecked Sendable {
     private let lock = NSLock()
     private var kept: [String] = []
+    private var waiting: [(matches: @Sendable (String) -> Bool, resume: CheckedContinuation<String, Never>)] = []
     var lines: [String] { lock.withLock { kept } }
-    func append(_ line: String) { lock.withLock { kept.append(line) } }
+
+    func append(_ line: String) {
+        let woken = lock.withLock {
+            kept.append(line)
+            let (woken, still) = (waiting.filter { $0.matches(line) }, waiting.filter { !$0.matches(line) })
+            waiting = still
+            return woken
+        }
+        woken.forEach { $0.resume.resume(returning: line) }
+    }
+
+    /// The first line kept that `matches`, waiting for it if none has come yet.
+    func first(where matches: @escaping @Sendable (String) -> Bool) async -> String {
+        await withCheckedContinuation { resume in
+            let found: String? = lock.withLock {
+                if let line = kept.first(where: matches) { return line }
+                waiting.append((matches, resume))
+                return nil
+            }
+            if let found { resume.resume(returning: found) }
+        }
+    }
 }

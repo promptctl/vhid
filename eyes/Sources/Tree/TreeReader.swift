@@ -1,5 +1,5 @@
 import ApplicationServices
-import Eyes
+import Seeing
 import Grants
 
 /// Reads the screen through the accessibility tree: every on-screen window in the region,

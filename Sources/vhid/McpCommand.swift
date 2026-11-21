@@ -1,11 +1,14 @@
 import ArgumentParser
 import Darwin
+import struct EyesVerbs.Entry
 import Foundation
 import Input
 import Installations
 import MCP
 import Signals
 import System
+import Telemetry
+import Turns
 import Version
 
 /// The verbs as MCP tools, over stdio, for an agent that drives a Mac in one session
@@ -20,62 +23,66 @@ struct McpCommand: AsyncParsableCommand {
             They take what the verbs of the same name take and answer with what those verbs \
             print.
 
-            Tool calls run one at a time, even when a client sends them together, but calls sent \
-            together run in no promised order: a call that must follow another, a type after the \
-            click that focuses a field, is sent once the first one's answer is back. Each call \
-            connects to the daemon and disconnects when it returns. The daemon serves \
+            Calls that reach the daemon run one at a time, even when a client sends them together, \
+            but calls sent together run in no promised order: a call that must follow another, a \
+            type after the click that focuses a field, is sent once the first one's answer is back. \
+            Each such call connects to the daemon and disconnects when it returns. The daemon serves \
             one client at a time, so a session that held its connection open would refuse every other \
             caller for as long as it ran: a vhid click from a shell, and every other agent's session. \
             Between calls, this session holds nothing.
 
-            Nothing here reads the screen beyond where the cursor is. What is at a point is the \
-            caller's to know.
+            look reads the screen in this process and asks nothing of the daemon, so it waits \
+            behind no other call, and a click sent beside a look that is waiting for text is not delayed by it.
             """)
 
     @OptionGroup var service: ServiceOption
 
-    /// How this server pairs with eyes', as both say it at initialize: the
-    /// shared screen points and the look-act-look loop. A copy of docs/mcp-instructions.txt,
-    /// which eyes' server carries too: the packages link nothing of each other's, so each
-    /// holds the text, and a test in each holds it to the file. [LAW:one-source-of-truth]
-    static let pairing = """
-        vhid and eyes are two MCP servers that work as a pair. eyes reads the screen: what is in front, and where text is. vhid drives a virtual keyboard and mouse that macOS takes for hardware. A client with only one of them is half the pair; both come with vhid, served by `vhid mcp` and `eyes mcp`.
+    /// How the tools work together, as the server says it at initialize: one screen point
+    /// for every tool, and the look-act-look loop. A copy of docs/mcp-instructions.txt, which
+    /// the plugin's skill opens with too, and a test holds each to the file.
+    /// [LAW:one-source-of-truth]
+    static let guidance = """
+        vhid is one MCP server that sees the screen and drives a virtual keyboard and mouse that macOS takes for hardware. `look` reads the screen: the displays, the windows front to back, and the text in a place, with the point `click` takes for each run. `type`, `press`, `gesture`, `click`, `move`, `scroll` and `drag` act through the devices, and `play` runs a timed script of them.
 
-        Every point either server prints or takes is the same screen point. The point eyes `find` prints is the point vhid `click` takes, as printed: no scaling, no offset, negative on a display left of or above the main one. From 0.5.0, beside each point, eyes prints a box around the text that holds the point, as x,y,width,height in the same points: the form eyes' `rect` takes, and vhid `click`, `move` and `scroll` take it too, as `box`, and `drag` as `from` or `to`, pressing a point drawn inside it as a hand lands somewhere on a button rather than on its exact centre.
+        Every point a tool prints or takes is the same screen point. The point `look` prints beside a run is the point `click` takes, as printed: no scaling, no offset, negative on a display left of or above the main one. Beside each point `look` prints a box around the text that holds the point, as x,y,width,height in the same points: the form `look`'s `rect` takes, and `click`, `move` and `scroll` take it too, as `box`, and `drag` as `from` or `to`, pressing a point drawn inside it as a hand lands somewhere on a button rather than on its exact centre.
 
-        Neither server decides anything. `click` presses whatever is at the point it is given, `type` types into whatever has keyboard focus, and `find` reports what is on screen, not whether an act did what was meant. So work in a loop:
+        No tool decides anything. `click` presses whatever is at the point it is given, `type` types into whatever has keyboard focus, and `look` reports what is on screen, not whether an act did what was meant. So work in a loop:
 
-        1. Look with eyes: `windows` for what is in front, `find` for where the text is.
-        2. Act with vhid on what you saw.
-        3. Look again at the same place. `find` with `until` and a `timeout` waits for the change; do not sleep and retry.
+        1. Look: `look` with no arguments for what is in front, with `text` for where the text is.
+        2. Act on what you saw.
+        3. Look again at the same place. `look` with `text`, `until` and a `timeout` waits for the change; do not sleep and retry.
 
         Done means a look after the act showed the change. An act's answer says the act happened, not what it did.
         """
 
-    /// What a client's initialize tells it: the pairing, then which server and version it
+    /// What a client's initialize tells it: the guidance, then which server and version it
     /// is talking to. The model reads a server's instructions, not its `serverInfo`, so the
     /// version is said here too, from the one the binary was stamped with, and an agent
-    /// can tell which of the pairing's arguments it can pass. [LAW:one-source-of-truth]
-    static let instructions = pairing + "\n\nThis is vhid \(Version.current)."
+    /// can tell which of the guidance's arguments it can pass. [LAW:one-source-of-truth]
+    static let instructions = guidance + "\n\nThis is vhid \(Version.current)."
 
     /// The server as a client's initialize finds it, with `tools` attached to run against
-    /// `installation`, each call held `underway` on the transport it will be started on,
-    /// carried by `flights` until it and its record are done, and recorded as one
-    /// invocation to `export` - after its answer, which does not wait on a collector.
+    /// `installation`, each call held `underway` on the transport it will be started on and
+    /// recorded as one unit of work of its own trace - its record handed to the outbox before
+    /// its answer goes, and sent without the answer waiting on a collector.
     static func server(_ tools: [VerbTool] = Tools.all, on installation: Installation, over transport: AnsweringTransport,
-                       recordingTo export: EventExport, stoppedBy signals: FirstSignal? = nil, carriedBy flights: Flights) async -> Server {
+                       stoppedBy signals: FirstSignal? = nil) async -> Server {
         let server = Server(name: "vhid", version: Version.current, instructions: instructions,
                             capabilities: .init(tools: .init(listChanged: false)))
+        // The SDK runs every request in a task of its own, so two calls sent together - a
+        // click and a type in one turn of an agent's - would reach for the daemon at once,
+        // and it serves one client: the second came back refused as busy, by this very
+        // process. Taking turns makes the session one client again. A look asks nothing of
+        // the daemon, and takes no turn.
         let turns = Turns()
         await server.withMethodHandler(ListTools.self) { _ in .init(tools: tools.map(\.tool)) }
-        let hand: @Sendable (InvocationRecord) async -> Void = { record in await flights.launch { await export.export(record) } }
-        await server.withMethodHandler(CallTool.self) { request in try await flights.carry {
+        await server.withMethodHandler(CallTool.self) { request in
             let arrived = ContinuousClock.now
             // Recorded under the method, not the name: a name the client made up is not a
             // verb, and would make one event per made-up name. The error says which.
             guard let verb = tools.first(where: { $0.tool.name == request.name }) else {
                 let refusal = MCPError.invalidParams("there is no tool called \(request.name.debugDescription)")
-                return try await Invocation.record(CallTool.name, via: .mcp, stoppedBy: signals, to: hand) { _ in throw refusal }
+                return try await dispatched(CallTool.name, stoppedBy: signals) { throw refusal }
             }
             // A verb that could not do what it was asked is a tool error, whose words the
             // model reads; a protocol error is for a request that named no tool at all. A
@@ -85,22 +92,28 @@ struct McpCommand: AsyncParsableCommand {
             // verb had already done when it was withdrawn. [LAW:no-silent-failure]
             return try await transport.underway {
                 do {
-                    let said = try await Invocation.record(request.name, via: .mcp, stoppedBy: signals, to: hand) { _ in
-                        try await turns.take {
-                            Invocation.set(.queuedMilliseconds, .double((ContinuousClock.now - arrived) / .milliseconds(1)))
-                            return try await verb.call(request.arguments ?? [:], on: installation)
-                        }
+                    let said = try await dispatched(request.name, stoppedBy: signals) {
+                        try await verb.call(request.arguments ?? [:], on: installation, taking: turns, arrived: arrived)
                     }
                     return .init(content: [.text(text: said, annotations: nil, _meta: nil)], isError: false)
-                } catch where Task.isCancelled {
+                } catch where error.isCancellation {
                     FileHandle.standardError.write(Data("vhid: \(request.name) withdrawn: \(error.reported)\n".utf8))
                     return .init(content: [.text(text: "withdrawn: \(error.reported)", annotations: nil, _meta: nil)], isError: true)
                 } catch {
                     return .init(content: [.text(text: error.reported, annotations: nil, _meta: nil)], isError: true)
                 }
             }
-        } }
+        }
         return server
+    }
+
+    /// Runs `work` as one call's unit of work, of a trace of its own: the tool it named,
+    /// through this dispatcher, and the signal that stopped the session, if one did.
+    static func dispatched<T>(_ name: String, stoppedBy signals: FirstSignal?, _ work: () async throws -> T) async throws -> T {
+        try await Entry.mcp(under: Vhid.self).unit(name, trace: .fresh) {
+            defer { signals?.noted() }
+            return try await work()
+        }
     }
 
     func run() async throws {
@@ -115,22 +128,22 @@ struct McpCommand: AsyncParsableCommand {
             throw Errno(rawValue: errno)
         }
 
-        try await Self.serve(on: installation, over: AnsweringTransport(StdioTransport(output: protocolOut)), recordingTo: .configured(),
-                             stoppedBy: Invocation.current?.signals)
+        try await Self.serve(on: installation, over: AnsweringTransport(StdioTransport(output: protocolOut)), stoppedBy: Vhid.signals)
     }
 
     /// Serves `tools` over `transport` until the client hangs up or the serving task is
     /// cancelled, as Control-C and SIGTERM cancel it. A cancel withdraws every call owed,
     /// so each one stops as a client's cancel would stop it, and ends the session. Returns
-    /// once every call has ended and every record is sent, throwing if it was cancelled.
+    /// once every call the transport received has been answered, or, once cancelled, once
+    /// every call running has stopped - each record in the outbox by then, which the
+    /// process drains at exit - throwing if it was cancelled.
     /// Each call's record names the signal in `signals` that stopped the session, if one did.
     ///
     /// The cancel has to be carried in by hand: the SDK serves from a task of its own,
     /// which no cancel of this one reaches.
     static func serve(_ tools: [VerbTool] = Tools.all, on installation: Installation, over transport: AnsweringTransport,
-                      recordingTo export: EventExport, stoppedBy signals: FirstSignal? = nil) async throws {
-        let flights = Flights()
-        let server = await server(tools, on: installation, over: transport, recordingTo: export, stoppedBy: signals, carriedBy: flights)
+                      stoppedBy signals: FirstSignal? = nil) async throws {
+        let server = await server(tools, on: installation, over: transport, stoppedBy: signals)
         try await server.start(transport: transport)
         await withTaskCancellationHandler {
             await server.waitUntilCompleted()
@@ -140,84 +153,7 @@ struct McpCommand: AsyncParsableCommand {
                 await server.stop()
             }
         }
-        await flights.landed()
+        await transport.everyCallStopped()
         try Task.checkCancellation()
-    }
-}
-
-/// What the server has under way and must see done before the process exits: tool calls
-/// still running when the client hung up, and the records of calls already answered.
-///
-/// [LAW:nothing-unseen] Without it, a client that closed stdin mid-`type` would end the
-/// process under the keystrokes still going out, and they would leave no record.
-actor Flights {
-    private var underway = 0
-    private var waiting: [CheckedContinuation<Void, Never>] = []
-
-    /// Runs `body`, counted as under way until it returns.
-    nonisolated func carry<T: Sendable>(_ body: @Sendable () async throws -> T) async throws -> T {
-        await depart()
-        do {
-            let done = try await body()
-            await arrive()
-            return done
-        } catch {
-            await arrive()
-            throw error
-        }
-    }
-
-    /// Starts `work` in a task of its own, counted as under way until it finishes.
-    func launch(_ work: @escaping @Sendable () async -> Void) {
-        depart()
-        Task { await work(); arrive() }
-    }
-
-    /// Returns once nothing is under way.
-    func landed() async {
-        guard underway > 0 else { return }
-        await withCheckedContinuation { waiting.append($0) }
-    }
-
-    private func depart() { underway += 1 }
-
-    private func arrive() {
-        underway -= 1
-        guard underway == 0 else { return }
-        waiting.forEach { $0.resume() }
-        waiting = []
-    }
-}
-
-/// One tool call at a time.
-///
-/// **Why: the SDK runs every request in a task of its own.** Two calls sent together - a
-/// click and a type in one turn of an agent's - would reach for the daemon at once, and it
-/// serves one client: the second came back refused as busy, by this very process. Taking
-/// turns makes the session one client again, and no two calls interleave report by report.
-///
-/// **Not the order they were sent in.** A call's turn is taken when its handler reaches
-/// this actor, and the SDK's handlers race here from the shared pool, so two calls sent
-/// together can take their turns either way round. JSON-RPC promises no order among
-/// requests in flight together, and neither does this: a caller that needs one call after
-/// another waits for the first one's answer, which is the one order a client can see.
-/// [LAW:no-ambient-temporal-coupling] Exclusion is this actor's to own; order is the caller's.
-actor Turns {
-    private var last: Task<Void, Never>?
-
-    /// Runs `call` once every call that took its turn before this one has finished. A
-    /// cancelled caller cancels its call, waiting or running.
-    func take<T: Sendable>(_ call: @escaping @Sendable () async throws -> T) async throws -> T {
-        let before = last
-        // A caller cancelled before its turn is taken never starts its call: the turn's task
-        // is its own, and the cancel would reach it only after it had begun.
-        try Task.checkCancellation()
-        let turn = Task {
-            await before?.value
-            try Task.checkCancellation()
-            return try await call()
-        }
-        last = Task { _ = await turn.result }
-        return try await withTaskCancellationHandler { try await turn.value } onCancel: { turn.cancel() }
     }
 }

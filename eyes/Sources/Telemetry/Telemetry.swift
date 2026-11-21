@@ -1,235 +1,246 @@
 import Foundation
 import Synchronization
 
-/// One unit of work's record: everything known about it, emitted once, when it ends.
-/// [LAW:nothing-unseen] The field names are the default set every codebase starts from;
-/// eyes adds `facts`, and renames none of them.
-public struct Event: Sendable, Equatable, Encodable {
-    public let event: String
-    public let traceID: String
-    public let service: String
-    public let startedAt: Date
-    public let durationMs: Double
-    public let outcome: String
-    /// Absent when the unit ended well.
-    public let error: String?
-    /// Every count the unit keeps, zeros included: a zero is a fact, not a gap.
-    public let counts: [String: Int]
-    /// What else the unit said about itself: which reader, shared or taken.
-    public let facts: [String: String]
-
-    enum CodingKeys: String, CodingKey {
-        case event, service, outcome, error, counts, facts
-        case traceID = "trace_id", startedAt = "started_at", durationMs = "duration_ms"
+/// How a unit of work ended: returned, threw, or was withdrawn. What it found - matched,
+/// landed, held - is its `result`, an attribute, so every record answers "did it fail?" in
+/// these three words whichever half of the binary it came from. [LAW:one-source-of-truth]
+extension Telemetry {
+    public enum Outcome: String, Sendable {
+        case ok, failed, cancelled
     }
 }
 
-/// An event as it left the process, carrying where it went.
-///
-/// [LAW:types-are-the-program] `sinkError` is present only when the collector was
-/// configured and could not take the event; a file record with no collector configured was
-/// never a failure, so the count of undelivered events is the count of records carrying it.
-public struct Exported: Sendable, Equatable, Encodable {
-    public enum Sink: String, Sendable, Encodable { case otlp, file }
+/// An error that stopped a run because something else failed under it, carrying that
+/// failure. Each layer that wraps a cause declares this beside it, so the cause chain -
+/// and with it whether a run was cancelled - is read the same way everywhere.
+public protocol Caused: Error {
+    var cause: any Error { get }
+}
 
-    public let event: Event
-    public let sink: Sink
-    public let sinkError: String?
+public extension Error {
+    /// This error and every cause under it, outermost first.
+    var causes: [any Error] {
+        Array(sequence(first: self as any Error) { ($0 as? any Caused)?.cause })
+    }
 
-    enum CodingKeys: String, CodingKey { case sink, sinkError = "sink_error" }
+    /// Whether the run ended because it was cancelled: a cancellation among its causes,
+    /// however many layers wrapped it on the way out. What the work threw says how it ended,
+    /// not whether a cancel happened to arrive meanwhile: a run refused as the cancel landed
+    /// failed. [LAW:single-enforcer] The one cancellation rule, for every record and every
+    /// caller that has to tell a withdrawal from a failure.
+    var isCancellation: Bool {
+        causes.contains { $0 is CancellationError }
+    }
+}
+
+public extension Error {
+    /// What a report calls this failure.
+    ///
+    /// Every failure here says what it is, except the one the language supplies:
+    /// `CancellationError` has no description of its own, so interpolating it prints
+    /// `CancellationError()` at the front of a sentence an operator reads. It is the one
+    /// stop that is not a failure at all - the caller asked for it - so it is named as the
+    /// thing that happened. [LAW:comments-carry-meaning]
+    ///
+    /// This is the one place that translation happens, so a cancelled typing run, chord,
+    /// click and replay all report it the same way. [LAW:one-source-of-truth]
+    var reported: String {
+        self is CancellationError ? "the run was cancelled" : "\(self)"
+    }
+}
+
+/// One unit of work's record: everything known about it, made once, when it ends.
+/// [LAW:nothing-unseen] [LAW:types-are-the-program]
+public struct Record: Sendable, Equatable {
+    public let event: String
+    public let service: String
+    /// W3C trace and span ids: 16 and 8 random bytes, as lowercase hex.
+    public let traceID: String
+    public let spanID: String
+    /// The span of the unit this one ran inside, or of the process that started this one;
+    /// absent for a unit that began its trace.
+    public let parentSpanID: String?
+    public let startedAt: Date
+    public let duration: Duration
+    public let outcome: Telemetry.Outcome
+    /// Absent when the unit ended well, or when what it ended in had no words to record.
+    public let error: String?
+    /// Every count the unit keeps, zeros included: a zero is a fact, not a gap.
+    public let counts: [String: Int]
+    public let attributes: [String: JSON]
+
+    /// The record as named fields, the one rendering both the file's line and the
+    /// collector's attributes are made from. [LAW:one-source-of-truth]
+    public func fields(sink: Sink) -> [String: JSON] {
+        var fields: [String: JSON] = [
+            "event": .string(event),
+            "service": .string(service),
+            "trace_id": .string(traceID),
+            "span_id": .string(spanID),
+            "started_at": .string(startedAt.formatted(Date.ISO8601FormatStyle(includingFractionalSeconds: true))),
+            "duration_ms": .double(duration / .milliseconds(1)),
+            "outcome": .string(outcome.rawValue),
+            "counts": .object(counts.mapValues(JSON.int)),
+            "attributes": .object(attributes),
+        ]
+        fields["parent_span_id"] = parentSpanID.map(JSON.string)
+        fields["error"] = error.map(JSON.string)
+        switch sink {
+        case .otlp: fields["sink"] = "otlp"
+        case .file: fields["sink"] = "file"
+        case .fileAfter(let failure): (fields["sink"], fields["sink_error"]) = ("file", .string(failure))
+        }
+        return fields
+    }
+}
+
+/// Where a record went: to the collector, or to the file - because no collector is
+/// configured, or because the one configured could not take it, which the record then
+/// says on itself, there being no later moment in a process that records and exits.
+public enum Sink: Sendable, Equatable {
+    case otlp
+    case file
+    case fileAfter(collectorFailure: String)
+}
+
+/// A JSON value: what a record's attributes are made of.
+public enum JSON: Sendable, Equatable, Encodable, ExpressibleByStringLiteral, ExpressibleByIntegerLiteral {
+    case string(String)
+    case int(Int)
+    case double(Double)
+    case array([JSON])
+    case object([String: JSON])
+
+    public init(stringLiteral value: String) { self = .string(value) }
+    public init(integerLiteral value: Int) { self = .int(value) }
 
     public func encode(to encoder: any Encoder) throws {
-        try event.encode(to: encoder)
-        var c = encoder.container(keyedBy: CodingKeys.self)
-        try c.encode(sink, forKey: .sink)
-        try c.encodeIfPresent(sinkError, forKey: .sinkError)
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .string(let value): try container.encode(value)
+        case .int(let value): try container.encode(value)
+        case .double(let value): try container.encode(value)
+        case .array(let value): try container.encode(value)
+        case .object(let value): try container.encode(value)
+        }
+    }
+
+    /// One line of JSON, keys sorted.
+    public var line: Data {
+        get throws {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+            return try encoder.encode(self) + Data("\n".utf8)
+        }
     }
 }
 
 public enum Telemetry {
-    public typealias Export = @Sendable (Event) async -> Void
+    public typealias Export = @Sendable (Record) async -> Void
 
-    /// Where every event goes. The process's outbox by default; a test binds a collector.
+    /// Where every record goes. The process's outbox by default; a test binds a collector.
+    /// [LAW:single-enforcer] The one seam between a unit and the edge.
     @TaskLocal public static var export: Export = { Outbox.standard.add($0) }
 
-    /// Waits for every event still on its way out. The process calls it once, before it
-    /// exits, so an event in flight is not lost with the process. [LAW:no-silent-failure]
+    /// Waits for every record still on its way out. Each executable's main calls it once,
+    /// before it exits, so a record in flight is not lost with the process.
+    /// [LAW:no-silent-failure]
     public static func drained() async { await Outbox.standard.drained() }
 
-    /// The unit underway, which `note` and `count` annotate. A unit started inside another
-    /// shares its trace, so a look and the grant readings it waited on read as one.
+    /// The unit underway, which the mutators below annotate. Absent outside one: code
+    /// called from a test, or from anything that opened no unit, has no record to add to.
     @TaskLocal static var current: Recorder?
 
-    /// Runs `work` as one unit of work and emits its event when it ends - returned, thrown
-    /// or cancelled alike. `outcome` names how a returned value ended. [LAW:nothing-unseen]
+    /// Which trace a unit belongs to.
+    public enum Trace: Sendable {
+        /// The trace of the unit it runs inside, as a child of that unit's span; outside
+        /// any, the trace `TRACEPARENT` names, or a trace of its own when none is named.
+        case joined
+        /// A trace of its own: a call a long-lived server answers is its own piece of work,
+        /// not a part of the hours-long session it arrived in.
+        case fresh
+    }
+
+    /// Runs `work` as one unit of work and records it when it ends - returned, thrown or
+    /// cancelled alike. `result` names what a returned value found; `said` gives an error's
+    /// words, which the record carries as `error`, empty or nil for none. [LAW:nothing-unseen]
     public static func unit<T, Failure: Error>(
-        _ name: String, isolation: isolated (any Actor)? = #isolation,
-        outcome: (T) -> String = { _ in "ok" }, _ work: () async throws(Failure) -> T
+        _ name: String, trace: Trace = .joined, isolation: isolated (any Actor)? = #isolation,
+        result: (T) -> String? = { _ in nil }, said: (any Error) -> String? = { "\($0)" },
+        _ work: () async throws(Failure) -> T
     ) async throws(Failure) -> T {
-        let recorder = Recorder(trace: current?.trace ?? Self.newTrace())
-        let clock = ContinuousClock(), start = clock.now, startedAt = Date()
-        func emit(_ outcome: String, _ error: String?) async {
-            let (counts, facts) = recorder.taken()
-            let took = clock.now - start
-            let ms = Double(took.components.seconds) * 1000 + Double(took.components.attoseconds) / 1e15
-            await export(Event(event: name, traceID: recorder.trace, service: "eyes", startedAt: startedAt,
-                               durationMs: ms, outcome: outcome, error: error, counts: counts, facts: facts))
+        let parent: (trace: String, span: String)? = switch trace {
+        case .joined: current.map { ($0.trace, $0.span) } ?? inherited
+        case .fresh: nil
         }
+        let recorder = Recorder(name, trace: parent?.trace ?? hex(bytes: 16), parent: parent?.span)
+        let startedAt = Date(), started = ContinuousClock.now
         let ran: Result<T, Failure> = await $current.withValue(recorder) {
             do throws(Failure) { return .success(try await work()) } catch { return .failure(error) }
         }
+        let ending: (Telemetry.Outcome, String?)
         switch ran {
         case .success(let value):
-            await emit(outcome(value), nil)
-            return value
+            recorder.note(.result, result(value).map(JSON.string))
+            ending = (.ok, nil)
         case .failure(let error):
-            await emit(Task.isCancelled ? "cancelled" : "error", "\(error)")
-            throw error
+            ending = (error.isCancellation ? .cancelled : .failed, recorder.words(for: error, said: said))
         }
+        await export(recorder.record(startedAt: startedAt, duration: .now - started, outcome: ending.0, error: ending.1))
+        return try ran.get()
     }
 
-    /// Adds a fact to the unit underway; outside one it has nowhere to go and is dropped,
-    /// which only a caller with no unit around it can do.
-    public static func note(_ key: String, _ value: String) { current?.note(key, value) }
+    /// Names the unit underway, for a dispatcher that learns which verb it runs only once
+    /// its arguments are parsed, inside the unit parsing belongs to.
+    public static func name(_ name: String) { current?.name(name) }
+
+    /// Sets an attribute on the unit underway; `nil` removes it.
+    public static func note(_ key: Attribute, _ value: JSON?) { current?.note(key, value) }
 
     /// Sets a count on the unit underway.
-    public static func count(_ key: String, _ value: Int) { current?.count(key, value) }
+    public static func count(_ key: Count, _ value: Int) { current?.count(key, value) }
 
     /// Adds to a count on the unit underway, so a unit that ends early still says how far
     /// it got, and a unit that does a thing many times says its total.
-    public static func tally(_ key: String, by amount: Int = 1) { current?.tally(key, by: amount) }
+    public static func tally(_ key: Count, by amount: Int = 1) { current?.tally(key, by: amount) }
 
-    /// A W3C trace id: 16 random bytes, as hex.
-    private static func newTrace() -> String {
-        (0..<16).map { _ in String(format: "%02x", UInt8.random(in: 0...255)) }.joined()
-    }
-}
+    /// Says the unit underway handles text it was given, which can be meant for a password
+    /// field. Its record then names the kinds of the error it ended in rather than quoting
+    /// the words, which can quote the text.
+    public static func withholdErrorWords() { current?.withhold() }
 
-final class Recorder: Sendable {
-    let trace: String
-    private let state = Mutex<([String: Int], [String: String])>(([:], [:]))
-
-    init(trace: String) { self.trace = trace }
-
-    func note(_ key: String, _ value: String) { state.withLock { $0.1[key] = value } }
-    func count(_ key: String, _ value: Int) { state.withLock { $0.0[key] = value } }
-    func tally(_ key: String, by amount: Int) { state.withLock { $0.0[key, default: 0] += amount } }
-    func taken() -> ([String: Int], [String: String]) { state.withLock { $0 } }
-}
-
-/// Events on their way out of the process, each sent in a task of its own.
-///
-/// [LAW:nothing-unseen] The hot path never waits on the pipeline: a look or a gate hands its
-/// event over and returns, and a collector slow to answer slows no reading. The send is
-/// detached, so a unit withdrawn by cancellation still delivers its event, not a refusal.
-final class Outbox: Sendable {
-    static let standard = Outbox(Edge.standard)
-
-    private let edge: Edge
-    private let sending = Mutex<[UUID: Task<Void, Never>]>([:])
-
-    init(_ edge: Edge) { self.edge = edge }
-
-    func add(_ event: Event) {
-        let id = UUID()
-        // Registered under the lock the task removes itself under, so it cannot leave first.
-        sending.withLock {
-            $0[id] = Task.detached { [self] in
-                await edge.send(event)
-                _ = sending.withLock { $0.removeValue(forKey: id) }
-            }
-        }
+    /// `environment` with `TRACEPARENT` naming the unit underway, for a child process whose
+    /// own records belong under it. [LAW:one-source-of-truth] The one place the W3C header
+    /// is written, as `inherited` is the one place it is read.
+    public static func childEnvironment(_ environment: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
+        var environment = environment
+        environment["TRACEPARENT"] = current.map { "00-\($0.trace)-\($0.span)-01" }
+        return environment
     }
 
-    func drained() async {
-        while let next = sending.withLock({ $0.values.first }) { await next.value }
-    }
-}
+    /// The trace and span `TRACEPARENT` names, read once: what every `.joined` unit begun
+    /// outside another joins. A header that is not version, 32 and 16 hex digits and flags is no parent.
+    static let inherited: (trace: String, span: String)? = traceparent(ProcessInfo.processInfo.environment["TRACEPARENT"])
 
-/// The one place an event leaves the process. [LAW:single-enforcer]
-///
-/// OTLP to the collector `OTEL_EXPORTER_OTLP_ENDPOINT` names; with none named, or one that
-/// cannot take it, a line of JSON appended to `file`. An event is never dropped for want
-/// of a collector.
-public struct Edge: Sendable {
-    public let collector: URL?
-    public let file: URL
-
-    public init(collector: URL?, file: URL) {
-        self.collector = collector
-        self.file = file
+    static func traceparent(_ header: String?) -> (trace: String, span: String)? {
+        let parts = (header ?? "").split(separator: "-", omittingEmptySubsequences: false).map(String.init)
+        func isHex(_ s: String, _ count: Int) -> Bool { s.count == count && s.allSatisfy { $0.isHexDigit && !$0.isUppercase } }
+        // An id of all zeros is the header's own word for none.
+        func isID(_ s: String, _ count: Int) -> Bool { isHex(s, count) && s.contains { $0 != "0" } }
+        guard parts.count == 4, isHex(parts[0], 2), parts[0] != "ff", isID(parts[1], 32), isID(parts[2], 16), isHex(parts[3], 2)
+        else { return nil }
+        return (parts[1], parts[2])
     }
 
-    static let standard = Edge(
-        collector: ProcessInfo.processInfo.environment["OTEL_EXPORTER_OTLP_ENDPOINT"].flatMap(URL.init(string:)),
-        file: FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library/Logs/eyes/events.jsonl"))
+    /// What a record says in place of refused arguments' words, which quote them back: an
+    /// argument can hold text meant for a password field. The caller saw them; the record,
+    /// which outlives the terminal and the conversation, says only that they were refused.
+    public static let refusedArguments = "the arguments were refused; what they said is not recorded"
 
-    /// Sends one event, and says where it went.
-    @discardableResult
-    public func send(_ event: Event) async -> Exported {
-        if let collector {
-            do {
-                try await Self.post(event, to: collector)
-                return Exported(event: event, sink: .otlp, sinkError: nil)
-            } catch {
-                return appended(Exported(event: event, sink: .file, sinkError: "\(error)"))
-            }
-        }
-        return appended(Exported(event: event, sink: .file, sinkError: nil))
-    }
+    /// The name records from this process are filed under: the executable's own.
+    public static let service = ProcessInfo.processInfo.processName
 
-    /// Appends the record to the file as one write to a descriptor opened for appending, so
-    /// lines sent at once, from this process or another, land whole and never over each
-    /// other. A file that cannot be written is the last place left to say anything, so it
-    /// is said on stderr, which stdout under `eyes mcp` is not.
-    private func appended(_ exported: Exported) -> Exported {
-        do {
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .iso8601
-            encoder.outputFormatting = .sortedKeys
-            let line = try encoder.encode(exported) + [0x0A]
-            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-            let fd = open(file.path, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0o644)
-            guard fd >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
-            defer { close(fd) }
-            let wrote = line.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
-            guard wrote == line.count else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
-        } catch {
-            FileHandle.standardError.write(Data("eyes: event \(exported.event.event) not recorded at \(file.path): \(error)\n".utf8))
-        }
-        return exported
-    }
-
-    private struct Refused: Error, CustomStringConvertible { let description: String }
-
-    private static func post(_ event: Event, to collector: URL) async throws {
-        var request = URLRequest(url: collector.appending(path: "v1/logs"), timeoutInterval: 2)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try otlp(event)
-        let (_, response) = try await URLSession.shared.data(for: request)
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard (200..<300).contains(status) else { throw Refused(description: "\(collector) answered \(status)") }
-    }
-
-    /// The event as one OTLP/HTTP JSON log record. [LAW:effects-at-boundaries]
-    static func otlp(_ event: Event) throws -> Data {
-        func attribute(_ key: String, _ value: String) -> [String: Any] { ["key": key, "value": ["stringValue": value]] }
-        func attribute(_ key: String, _ value: Int) -> [String: Any] { ["key": key, "value": ["intValue": "\(value)"]] }
-        let attributes: [[String: Any]] = [
-            attribute("event", event.event), attribute("outcome", event.outcome),
-            ["key": "duration_ms", "value": ["doubleValue": event.durationMs]],
-        ] + (event.error.map { [attribute("error", $0)] } ?? [])
-            + event.counts.sorted { $0.key < $1.key }.map { attribute("counts.\($0.key)", $0.value) }
-            + event.facts.sorted { $0.key < $1.key }.map { attribute($0.key, $0.value) }
-        let nanos = UInt64(event.startedAt.timeIntervalSince1970 * 1e9)
-        let body: [String: Any] = ["resourceLogs": [[
-            "resource": ["attributes": [attribute("service.name", event.service)]],
-            "scopeLogs": [["logRecords": [[
-                "timeUnixNano": "\(nanos)", "traceId": event.traceID,
-                "body": ["stringValue": event.event], "attributes": attributes,
-            ]]]],
-        ]]]
-        return try JSONSerialization.data(withJSONObject: body, options: .sortedKeys)
+    static func hex(bytes: Int) -> String {
+        (0..<bytes).map { _ in String(format: "%02x", UInt8.random(in: .min ... .max)) }.joined()
     }
 }
