@@ -116,7 +116,7 @@ same reason a `type` run's error names its kinds (`TypingStopped: UntypeableChar
 rather than quoting its words. An argument that could not be parsed
 is recorded as `vhid`, before the verb was known, and `--help` as `help`; an MCP call
 naming no tool is recorded as `tools/call`. An MCP call's
-`attributes.queued_ms` is how long it waited behind the calls before it, which its
+`counts.queued_ms` is how long it waited behind the calls before it, which its
 `duration_ms` includes.
 
 A verb that opens the devices records `attributes.seed`, the hex seed every pointer move

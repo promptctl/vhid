@@ -39,7 +39,7 @@ import Testing
         let spans = Set(records.map(\.spanID))
         #expect(records.allSatisfy { $0.parentSpanID.map(spans.contains) ?? true })
         // A look takes no turn, so it waited behind nothing to say.
-        #expect(call.attributes["queued_ms"] == nil)
+        #expect(call.counts["queued_ms"] == nil)
         #expect(stdio.sent.contains { $0.contains("1 display, main first") && $0.contains("Safari (pid 400) and what is in front of it") })
     }
 

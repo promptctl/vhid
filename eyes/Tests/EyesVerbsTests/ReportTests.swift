@@ -257,14 +257,17 @@ import Testing
         #expect(seen.map { $0.attributes["role"] } == [nil, nil, nil, nil])
         // A merge names each reader's reach, so a missing grant is told apart from a time budget.
         #expect(seen.map { $0.attributes["reach"] } == ["time_budget", "whole", nil, "tree_blind+pixels_time_budget"])
-        // Every reason an exclusion can have, zeros included.
-        let none = Dictionary(uniqueKeysWithValues: Exclusion.Reason.allCases.map { ("excluded_\($0.rawValue)", 0) })
-        #expect(seen[0].counts == none.merging(["excluded_outside": 3]) { $1 }.merging(
-            ["reads": 1, "examined": 5, "matched": 0, "matched_also": 0, "nearest": 0, "boxes_narrowed": 0, "boxes_unchecked_unanswered": 0,
-             "boxes_unchecked_elsewhere": 0, "boxes_unchecked_over_time": 0, "box_calls": 0, "box_ms": 0]) { $1 })
-        #expect(seen[1].counts.filter { $0.key != "box_ms" } == none.merging(
-            ["reads": 1, "examined": 9, "matched": 1, "matched_also": 0, "nearest": 0, "boxes_narrowed": 1,
-             "boxes_unchecked_unanswered": 0, "boxes_unchecked_elsewhere": 2, "boxes_unchecked_over_time": 0, "box_calls": 41]) { $1 })
+        // Every reason an exclusion, or an unchecked box, can have, zeros included.
+        let none = Dictionary(uniqueKeysWithValues: Exclusion.Reason.allCases.map { ($0.rawValue, JSON.int(0)) })
+        let checked = Dictionary(uniqueKeysWithValues: Unchecked.allCases.map { ($0.rawValue, JSON.int(0)) })
+        #expect(seen[0].attributes["excluded"] == .object(none.merging(["outside": 3]) { $1 }))
+        #expect(seen[0].attributes["boxes_unchecked"] == .object(checked))
+        #expect(seen[1].attributes["excluded"] == .object(none))
+        #expect(seen[1].attributes["boxes_unchecked"] == .object(checked.merging(["elsewhere": 2]) { $1 }))
+        #expect(seen[0].counts == ["reads": 1, "examined": 5, "matched": 0, "matched_also": 0, "nearest": 0, "boxes_narrowed": 0,
+                                   "box_calls": 0, "box_ms": 0])
+        #expect(seen[1].counts.filter { $0.key != "box_ms" } ==
+            ["reads": 1, "examined": 9, "matched": 1, "matched_also": 0, "nearest": 0, "boxes_narrowed": 1, "box_calls": 41])
         #expect((seen[1].counts["box_ms"] ?? 0) >= 20)
         #expect(seen[1].attributes["until"] == "present")
         #expect(seen[2].error != nil && seen[2].counts == ["reads": 1, "box_ms": 0])

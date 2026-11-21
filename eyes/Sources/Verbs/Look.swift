@@ -484,11 +484,11 @@ extension Report {
     private static func count(_ reading: Reading, _ query: Query) {
         Telemetry.count(.examined, reading.scope.examined)
         Telemetry.count(.boxesNarrowed, reading.scope.boxes.narrowed)
-        for (why, count) in reading.scope.boxes.unchecked { Telemetry.count(Telemetry.Count("boxes_unchecked_\(why.rawValue)"), count) }
+        Telemetry.note(.boxesUnchecked, .object(Dictionary(uniqueKeysWithValues: reading.scope.boxes.unchecked.map { ($0.key.rawValue, JSON.int($0.value)) })))
         Telemetry.count(.boxCalls, reading.scope.boxes.calls)
-        for why in Exclusion.Reason.allCases {
-            Telemetry.count(Telemetry.Count("excluded_\(why.rawValue)"), reading.scope.excluded.first { $0.reason == why }?.count ?? 0)
-        }
+        Telemetry.note(.excluded, .object(Dictionary(uniqueKeysWithValues: Exclusion.Reason.allCases.map { why in
+            (why.rawValue, JSON.int(reading.scope.excluded.first { $0.reason == why }?.count ?? 0))
+        })))
         // How many processes' windows a front look took in; every other region reads them all.
         if case .only(let pids) = reading.scope.owners { Telemetry.count(.owners, pids.count) }
         Telemetry.note(.reach, .string(reading.scope.reach.kind))

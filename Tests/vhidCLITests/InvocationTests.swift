@@ -34,7 +34,7 @@ import Testing
 
     private static func scroll(vertical: Int, horizontal: Int, clock: ManualClock = ManualClock(), on devices: Devices) async throws -> String {
         try await ScrollCommand.scroll(at: .point(at), vertical: vertical, horizontal: horizontal, holding: .none,
-                                       with: Pointer(mouse: devices.mouse, cursor: { at }, displays: { .vast }, clock: clock, randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: Telemetry.traced), devices.keyboard)
+                                       with: Pointer(mouse: devices.mouse, cursor: { at }, displays: { .vast }, clock: clock, randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: devices.trail.traced), devices.keyboard)
     }
 
     private static func only(_ collected: Collected) throws -> [String: Any] {
@@ -119,7 +119,7 @@ import Testing
         _ = try await Self.mcp("type", into: collected) {
             try await Self.against { devices in
                 try await TypeCommand.type("Ab", on: VerbTests.us, into: .anywhere,
-                                           with: Typist(keyboard: devices.keyboard, clock: ManualClock(), randomness: RandomSource(seed: 1), traced: Telemetry.typed),
+                                           with: Typist(keyboard: devices.keyboard, clock: ManualClock(), randomness: RandomSource(seed: 1), traced: devices.trail.typed),
                                            front: { nil })
             }
         }
@@ -143,7 +143,7 @@ import Testing
         _ = try await Self.mcp("type", into: collected) {
             try await Self.against { devices in
                 try await TypeCommand.type(text, on: VerbTests.us, into: .anywhere,
-                                           with: Typist(keyboard: devices.keyboard, clock: ManualClock(), randomness: RandomSource(seed: 1), traced: Telemetry.typed),
+                                           with: Typist(keyboard: devices.keyboard, clock: ManualClock(), randomness: RandomSource(seed: 1), traced: devices.trail.typed),
                                            front: { nil })
             }
         }
@@ -238,7 +238,7 @@ import Testing
         #expect(record["event"] as? String == "click")
         #expect((record["attributes"] as? [String: Any])?["entry"] as? String == "mcp")
         #expect(record["outcome"] as? String == "ok")
-        #expect((record["attributes"] as? [String: Any])?["queued_ms"] is Double)
+        #expect((record["counts"] as? [String: Int])?["queued_ms"] != nil)
     }
 
     /// One call to `click` against `tools`, served the way `vhid mcp` serves it: the

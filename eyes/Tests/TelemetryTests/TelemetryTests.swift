@@ -16,14 +16,14 @@ import Testing
         let collected = Collected()
         await Telemetry.$export.withValue(collected.export) {
             _ = await Telemetry.unit("ok", result: { $0 ? "yes" : "no" }) {
-                Telemetry.note(Telemetry.Attribute("who"), "me"); Telemetry.count(Telemetry.Count("seen"), 0); return true
+                Telemetry.note(.app, "me"); Telemetry.count(.pages, 0); return true
             }
             await #expect(throws: Refusal.self) { try await Telemetry.unit("fails") { throw Refusal() } }
         }
         let records = collected.all
         #expect(records.map(\.event) == ["ok", "fails"])
         #expect(records[0].outcome == .ok && records[0].error == nil)
-        #expect(records[0].attributes == ["who": "me", "result": "yes"] && records[0].counts == ["seen": 0])
+        #expect(records[0].attributes == ["app": "me", "result": "yes"] && records[0].counts == ["pages": 0])
         #expect(records[1].outcome == .failed && records[1].error == "Refusal()")
         #expect(records.allSatisfy { $0.traceID.count == 32 && $0.spanID.count == 16 && $0.duration >= .zero })
         #expect(records[0].traceID != records[1].traceID)
@@ -84,7 +84,7 @@ import Testing
         let unit = Task {
             await Telemetry.$export.withValue(collected.export) {
                 try? await Telemetry.unit("withdrawn") {
-                    Telemetry.tally(Telemetry.Count("reads")); Telemetry.tally(Telemetry.Count("reads"))
+                    Telemetry.tally(.reads); Telemetry.tally(.reads)
                     started.continuation.finish()
                     do { try await Task.sleep(for: .seconds(60)) } catch { throw Wrapped(cause: error) }
                 }

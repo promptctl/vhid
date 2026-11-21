@@ -35,6 +35,10 @@ struct Devices {
     /// The typist these keys are typed by, timed on the pointer's clock and drawing from
     /// its random source, so the seed on a verb's record draws its keys again too.
     let typist: Typist
+    /// What the pointer and the typist trace to: the pauses and moves noted on the verb's
+    /// record when these devices are handed back. A pointer or typist a test builds over
+    /// these devices traces here too, so its record is the one a verb's would be.
+    let trail: Trail
 
     /// Runs `body` with the devices over a connection to this installation's daemon, and
     /// hands them back when it returns.
@@ -58,7 +62,8 @@ struct Devices {
         let queue = DeviceQueue()
         // [LAW:nothing-unseen] Every report a verb sends passes here, so here is where they
         // are counted, from zero: a verb that opened the devices and sent nothing says so.
-        for count in Telemetry.Count.sent { Telemetry.count(count, 0) }
+        for count in Telemetry.Count.allCases where count.isSent { Telemetry.count(count, 0) }
+        let trail = Trail()
         let mouse = TalliedMouse(mouse: QueuedMouse(pointing: helper.mouse, queue: queue))
         let cursor = cursor(helper, on: queue)
         let randomness = RandomSource(seed: UInt64.random(in: .min ... .max))
@@ -76,36 +81,27 @@ struct Devices {
         let keyboard = TalliedKeyboard(keyboard: QueuedKeyboard(keyboard: helper.keyboard, queue: queue))
         let devices = Devices(keyboard: keyboard, mouse: mouse, cursor: cursor, front: front(helper, on: queue),
                               pointer: Pointer(mouse: mouse, cursor: cursor, displays: displays(helper, on: queue), clock: ContinuousClock(),
-                                               randomness: randomness, hand: Hand(doubleClickInterval: doubleClick), traced: Telemetry.traced),
+                                               randomness: randomness, hand: Hand(doubleClickInterval: doubleClick), traced: trail.traced),
                               typist: Typist(keyboard: keyboard, clock: ContinuousClock(), randomness: randomness,
-                                             cadence: Cadence(keyRepeatDelay: keyRepeatDelay), traced: Telemetry.typed))
-        let done: T
-        do {
-            done = try await body(devices)
-        } catch {
-            // What stopped the verb is what the caller needs to hear. The leave still runs,
-            // because a connection that is working should hand the devices back rather
-            // than make the next client wait on its disconnection. When the leave fails
-            // too, it is almost always the same failure - the connection that just broke -
-            // and the disconnection that follows releases everything regardless. Said on
-            // stderr, as a leave after a verb that succeeded is, and never over the stop.
-            // [LAW:no-silent-failure]
-            do { try await queue.run { try helper.leave() } } catch let left {
-                FileHandle.standardError.write(Data("vhid: the devices were not handed back after the verb stopped: \(left.reported)\n".utf8))
-            }
-            throw error
-        }
-        // On the queue, behind the last report this verb sent. A leave that fails after the
-        // verb succeeded does not undo it, so it does not replace what the verb did: an
-        // error there would read as "nothing happened", and a caller that retried would
-        // click twice or type the text twice. [LAW:no-silent-failure] It is said on stderr,
-        // and the disconnection that follows releases the devices regardless.
+                                             cadence: Cadence(keyRepeatDelay: keyRepeatDelay), traced: trail.typed), trail: trail)
+        let ran: Result<T, any Error>
+        do { ran = .success(try await body(devices)) } catch { ran = .failure(error) }
+        trail.noted()
+        // On the queue, behind the last report this verb sent, however the verb ended: a
+        // connection that is working hands the devices back rather than make the next client
+        // wait on its disconnection. A leave that fails replaces nothing the verb did or why
+        // it stopped - an error there would read as "nothing happened", and a caller that
+        // retried would click twice or type the text twice - so it is noted beside it, on the
+        // record and on stderr, and the disconnection that follows releases the devices
+        // regardless. [LAW:no-silent-failure]
         do {
             try await queue.run { try helper.leave() }
         } catch {
-            FileHandle.standardError.write(Data("vhid: done, but the devices were not handed back: \(error.reported)\n".utf8))
+            Telemetry.note(.leaveFailed, .string(error.reported))
+            let ended = switch ran { case .success: "after the verb was done"; case .failure: "after the verb stopped" }
+            FileHandle.standardError.write(Data("vhid: the devices were not handed back \(ended): \(error.reported)\n".utf8))
         }
-        return done
+        return try ran.get()
     }
 
     /// The app in front, asked once the daemon has answered that the devices are up.

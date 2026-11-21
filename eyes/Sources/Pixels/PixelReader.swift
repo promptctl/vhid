@@ -7,11 +7,6 @@ import Telemetry
 import Turns
 import Vision
 
-extension Telemetry.Count {
-    /// How long a reading's recognitions waited for Vision's one turn, in all.
-    static let visionQueuedMilliseconds = Self("vision_queued_ms")
-}
-
 /// Reads the screen as pixels: captures the region, recognises its text on-device with
 /// Vision, and hands the runs to the one judge every reader shares.
 ///

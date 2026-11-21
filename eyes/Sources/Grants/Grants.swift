@@ -6,14 +6,6 @@ import Foundation
 import Responsibility
 import Telemetry
 
-extension Telemetry.Attribute {
-    /// The grant a gate asked about, whether its reading was taken or shared with one
-    /// already underway, and the executable a grant child was started from.
-    static let grant = Self("grant")
-    static let reading = Self("reading")
-    static let executable = Self("executable")
-}
-
 /// The two privacy grants eyes' readers need.
 ///
 /// macOS does not charge a grant to the process reading: it charges it to the process

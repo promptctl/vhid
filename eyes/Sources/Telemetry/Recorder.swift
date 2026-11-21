@@ -12,7 +12,6 @@ final class Recorder: Sendable {
         var name: String
         var counts: [Telemetry.Count: Int] = [:]
         var attributes: [Telemetry.Attribute: JSON] = [:]
-        var accumulated: [Telemetry.Attribute: any Accumulated] = [:]
         var withholds = false
     }
 
@@ -27,20 +26,6 @@ final class Recorder: Sendable {
     func tally(_ key: Telemetry.Count, by amount: Int) { state.withLock { $0.counts[key, default: 0] += amount } }
     func withhold() { state.withLock { $0.withholds = true } }
 
-    func accumulate<Value: Accumulated>(_ key: Telemetry.Attribute, _ change: (inout Value) -> Void) {
-        state.withLock {
-            // Taken out while it changes, so the change is made in place, not to a copy.
-            var value: Value
-            switch $0.accumulated.removeValue(forKey: key) {
-            case nil: value = Value()
-            case let kept as Value: value = kept
-            case let other?: preconditionFailure("\(key.rawValue) is built up as \(type(of: other)), not \(Value.self)")
-            }
-            change(&value)
-            $0.accumulated[key] = value
-        }
-    }
-
     /// What the record says of the error the unit ended in: the kinds of its causes, for a
     /// unit that withholds its words, or else what the dispatcher told its caller.
     func words(for error: any Error, said: (any Error) -> String?) -> String? {
@@ -50,11 +35,10 @@ final class Recorder: Sendable {
 
     func record(startedAt: Date, duration: Duration, outcome: Telemetry.Outcome, error: String?) -> Record {
         state.withLock {
-            let attributes = $0.attributes.merging($0.accumulated.mapValues(\.json)) { _, built in built }
-            return Record(event: $0.name, service: Telemetry.service, traceID: trace, spanID: span, parentSpanID: parent,
+            Record(event: $0.name, service: Telemetry.service, traceID: trace, spanID: span, parentSpanID: parent,
                           startedAt: startedAt, duration: duration, outcome: outcome, error: error,
                           counts: Dictionary(uniqueKeysWithValues: $0.counts.map { ($0.key.rawValue, $0.value) }),
-                          attributes: Dictionary(uniqueKeysWithValues: attributes.map { ($0.key.rawValue, $0.value) }))
+                          attributes: Dictionary(uniqueKeysWithValues: $0.attributes.map { ($0.key.rawValue, $0.value) }))
         }
     }
 }

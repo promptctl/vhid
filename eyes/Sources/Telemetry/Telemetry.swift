@@ -119,40 +119,6 @@ public enum JSON: Sendable, Equatable, Encodable, ExpressibleByStringLiteral, Ex
     }
 }
 
-/// A value a unit builds up as its work goes, which its record carries as one attribute.
-public protocol Accumulated: Sendable {
-    /// Before anything is added.
-    init()
-    var json: JSON { get }
-}
-
-extension Telemetry {
-    /// The name of a count a record keeps. Each is declared once, as a static member beside
-    /// the code that keeps it, in either half of the binary, so a typo is a compile error
-    /// rather than a second key no reader looks for. [LAW:types-are-the-program]
-    /// [LAW:one-source-of-truth] One vocabulary for every record, whichever half made it.
-    public struct Count: RawRepresentable, Hashable, Sendable {
-        public let rawValue: String
-        public init(rawValue: String) { self.rawValue = rawValue }
-        public init(_ rawValue: String) { self.rawValue = rawValue }
-    }
-
-    /// The name of an attribute a record carries: a fact that is not a count, an id among them.
-    /// Declared once each, as `Count` is.
-    public struct Attribute: RawRepresentable, Hashable, Sendable {
-        public let rawValue: String
-        public init(rawValue: String) { self.rawValue = rawValue }
-        public init(_ rawValue: String) { self.rawValue = rawValue }
-    }
-}
-
-extension Telemetry.Attribute {
-    /// Which dispatcher the unit came through: `cli` or `mcp`.
-    public static let entry = Self("entry")
-    /// What a returned unit found - matched, landed, held - beside how it ended.
-    public static let result = Self("result")
-}
-
 public enum Telemetry {
     public typealias Export = @Sendable (Record) async -> Void
 
@@ -214,13 +180,6 @@ public enum Telemetry {
 
     /// Sets an attribute on the unit underway; `nil` removes it.
     public static func note(_ key: Attribute, _ value: JSON?) { current?.note(key, value) }
-
-    /// Changes a value the unit underway builds up as the work goes - a list, a running
-    /// total - kept as its own type until the record is made, when it becomes the attribute
-    /// `key`. A key built up as two types is a fault, said at once. [LAW:types-are-the-program]
-    public static func accumulate<Value: Accumulated>(_ key: Attribute, _ change: (inout Value) -> Void) {
-        current?.accumulate(key, change)
-    }
 
     /// Sets a count on the unit underway.
     public static func count(_ key: Count, _ value: Int) { current?.count(key, value) }
