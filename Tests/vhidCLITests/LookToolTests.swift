@@ -61,10 +61,10 @@ import Testing
         for await _ in began { break }
         stdio.call(2, "look", then: [])
         _ = await stdio.answer(to: 2)
-        #expect(!stdio.sent.contains { $0.contains(#""id":1"#) }, "the click answered before it was let go")
+        #expect(!stdio.sent.contains { Stdio.answers($0, 1) }, "the click answered before it was let go")
         release.yield()
         stdio.feed([.end])
         try await session.value
-        #expect(stdio.sent.contains { $0.contains(#""id":1"#) && $0.contains("clicked") })
+        #expect(stdio.sent.contains { Stdio.answers($0, 1) && $0.contains("clicked") })
     }
 }

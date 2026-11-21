@@ -62,16 +62,22 @@ public struct Display: Sendable, Hashable {
 }
 
 public extension Geometry {
+    /// The shape of `CGGetActiveDisplayList`: room for so many ids, where to put them, and how
+    /// many there are.
+    typealias DisplayList = (UInt32, UnsafeMutablePointer<CGDirectDisplayID>?, UnsafeMutablePointer<UInt32>?) -> CGError
+
     /// Every active display, main first - sorted so, because under mirroring the display
     /// list puts the largest drawable display first, not the main one. One reading for every caller, so the displays `eyes displays` lists are the
     /// ones a region is checked against. [LAW:one-source-of-truth] A list the window server
     /// would not give is said, never taken for no display active. [LAW:no-silent-failure]
-    static func displays() throws(CannotReadDisplays) -> [Display] {
+    ///
+    /// `list` is the window server's `CGGetActiveDisplayList`, or a test's.
+    static func displays(list: DisplayList = CGGetActiveDisplayList) throws(CannotReadDisplays) -> [Display] {
         var count: UInt32 = 0
-        var error = CGGetActiveDisplayList(0, nil, &count)
+        var error = list(0, nil, &count)
         guard error == .success else { throw CannotReadDisplays(error: error) }
         var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
-        error = CGGetActiveDisplayList(count, &ids, &count)
+        error = list(count, &ids, &count)
         guard error == .success else { throw CannotReadDisplays(error: error) }
         return ids.prefix(Int(count)).map { id in
             // Both widths from the mode, which is unrotated; the bounds are rotated, and a

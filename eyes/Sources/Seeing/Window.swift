@@ -211,7 +211,7 @@ public struct CannotReadWindows: Error, CustomStringConvertible {
     public var description: String { "the window server would not list its windows" }
 }
 
-public struct CannotReadDisplays: Error, CustomStringConvertible {
+public struct CannotReadDisplays: Error, Equatable, CustomStringConvertible {
     public let error: CGError
     public var description: String { "the window server would not list its displays (CGError \(error.rawValue))" }
 }

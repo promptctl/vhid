@@ -204,7 +204,10 @@ actor Stdio: Transport {
     private nonisolated let kept = Kept()
     nonisolated var sent: [String] { kept.lines }
     /// The first message sent under `id`, once it is sent.
-    nonisolated func answer(to id: Int) async -> String { await kept.first { $0.contains(#""id":\#(id)"#) } }
+    nonisolated func answer(to id: Int) async -> String { await kept.first { Self.answers($0, id) } }
+
+    /// Whether `sent` answers `id`, read by the transport's own reading of an answer.
+    static func answers(_ sent: String, _ id: Int) -> Bool { Exchange.answered(in: Data(sent.utf8)).contains(.number(id)) }
     /// The first message sent, once one is.
     nonisolated func firstSent() async -> String { await kept.first { _ in true } }
     func connect() async throws {}

@@ -210,7 +210,7 @@ import Testing
         #expect(try logs.url.absoluteString == "http://l:4318/logs")
         // A scheme is case-insensitive (RFC 3986).
         #expect(try Edge.Collector(endpoint: .base("HTTPS://c:4318")).url.absoluteString == "HTTPS://c:4318/v1/logs")
-        #expect(Edge.configured([:], service: "eyes").file.path.hasSuffix("Library/Logs/eyes/events.jsonl"))
+        #expect(Edge.configured([:]).file.path.hasSuffix("Library/Logs/\(Telemetry.service)/events.jsonl"))
     }
 
     @Test func headersThatAreNotKeyValuePairsLeaveTheRecordInTheFileSayingWhy() async throws {

@@ -16,11 +16,11 @@ public struct Edge: Sendable {
         (self.collector, self.file, self.deliver) = (collector, file, deliver)
     }
 
-    /// The environment's collector, and `~/Library/Logs/<service>/events.jsonl`.
-    public static func configured(_ environment: [String: String] = ProcessInfo.processInfo.environment,
-                                  service: String = Telemetry.service) -> Edge {
+    /// The environment's collector, and `~/Library/Logs/<service>/events.jsonl`, filed under
+    /// the service every record names. [LAW:one-source-of-truth]
+    public static func configured(_ environment: [String: String] = ProcessInfo.processInfo.environment) -> Edge {
         Edge(collector: Collector(environment),
-             file: FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library/Logs/\(service)/events.jsonl"),
+             file: FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library/Logs/\(Telemetry.service)/events.jsonl"),
              deliver: post)
     }
 

@@ -6,8 +6,8 @@
 /// One space, named, rather than a pair of doubles whose meaning each caller remembers.
 ///
 /// The same space eyes reports text and window frames in. [LAW:one-source-of-truth]
-/// exception: Seeing's `ScreenPoint` says it too, from when the halves were two packages;
-/// the `vhid` executable links both, and the two are made one by their own change.
+/// exception: Seeing's `ScreenPoint` says it too, until vhid-one-server-4qe.nih, ranked next
+/// in this lane, makes the devices and the readers speak one screen-space vocabulary.
 public struct ScreenPoint: Hashable, Codable, Sendable, CustomStringConvertible {
     public let x: Double
     public let y: Double
