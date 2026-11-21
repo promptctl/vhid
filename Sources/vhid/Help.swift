@@ -259,5 +259,9 @@ enum Help {
         what was read on this Mac, and, indented under it, the step left for a person. Nothing \
         is fixed, and the devices are not taken from a client that holds them; a daemon launchd \
         has a job for but has not started is started by the question, as it would be by any verb.
+
+        Then whether Accessibility and Screen Recording are granted, which look reads by, and the \
+        app macOS charges them to - the app responsible for this process, which is the one to \
+        switch on. Read fresh, never prompting; ready or not is the devices' alone.
         """, commandLine: ["Exits 1 when any row has a step."])
 }

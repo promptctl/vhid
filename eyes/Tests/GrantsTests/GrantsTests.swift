@@ -54,6 +54,23 @@ import Testing
         #expect(ContinuousClock.now - start < .seconds(2))
     }
 
+    /// A reading withdrawn while its child runs is a cancellation, recorded as one, and its
+    /// child is gone with it.
+    @Test func aReadingWithdrawnWhileItsChildRunsIsCancelled() async throws {
+        let events = Collected()
+        let reading = Task {
+            try await Telemetry.$export.withValue(events.export) {
+                try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/sleep"), ["5"])
+            }
+        }
+        try await Task.sleep(for: .milliseconds(100))
+        let start = ContinuousClock.now
+        reading.cancel()
+        await #expect(throws: CancellationError.self) { try await reading.value }
+        #expect(ContinuousClock.now - start < .seconds(2))
+        #expect(events.all.map(\.outcome) == [.cancelled])
+    }
+
     /// The child reads nothing of this process's stdin, and a child that says more than a
     /// pipe holds still answers.
     @Test func theChildNeitherSharesStdinNorStallsOnAFullPipe() async throws {

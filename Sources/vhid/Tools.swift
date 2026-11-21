@@ -87,7 +87,7 @@ struct VerbTool: Sendable {
 /// Each is a CLI verb's core called with arguments read from JSON rather than from argv,
 /// so a tool and its verb cannot come to do different things. [LAW:one-source-of-truth]
 enum Tools {
-    static let all: [VerbTool] = [look(), type, press, gesture, click, move, scroll, drag, play, cursor, doctor]
+    static let all: [VerbTool] = [look(), type, press, gesture, click, move, scroll, drag, play, cursor, doctor()]
 
     private static let x = Parameter.number("x", Help.x + ", given with y unless box is").optional
     private static let y = Parameter.number("y", Help.y + ", given with x unless box is").optional
@@ -225,7 +225,10 @@ enum Tools {
 
     /// `vhid doctor` as a tool. A Mac that is not ready is an answer and not a failure of
     /// the call, so it comes back as what the verb prints, whose first line says it.
-    static let doctor: VerbTool = VerbTool(Help.doctor, readOnly: true, []) { _, installation in
-        DoctorCommand.doctor(try await reading { Readiness.read(for: installation, stoppedBy: $0) })
+    static func doctor(grants: @escaping @Sendable () async throws -> String = { try await GrantsVerb.answer() }) -> VerbTool {
+        VerbTool(Help.doctor, readOnly: true, []) { _, installation in
+            DoctorCommand.doctor(try await reading { Readiness.read(for: installation, stoppedBy: $0) },
+                                 grants: try await DoctorCommand.grants(grants))
+        }
     }
 }

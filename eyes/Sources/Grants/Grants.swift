@@ -179,13 +179,13 @@ public struct GrantReading: Sendable, Equatable {
     ///   milliseconds; a new binary's first launch is checked by macOS first.
     /// One event per child, however its gates end: how long the child took and why it failed,
     /// apart from how long any gate waited on it. [LAW:nothing-unseen]
-    public static func taken(by reader: URL, _ arguments: [String], within deadline: Duration = .seconds(10)) async throws(GrantReadingFailure) -> GrantReading {
-        try await Telemetry.unit("grant_child") { () async throws(GrantReadingFailure) -> GrantReading in
-            try await child(reader, arguments, within: deadline)
-        }
+    /// Throws `GrantReadingFailure`, or `CancellationError` when the reading was withdrawn,
+    /// which is a cancellation, recorded and passed on as one.
+    public static func taken(by reader: URL, _ arguments: [String], within deadline: Duration = .seconds(10)) async throws -> GrantReading {
+        try await Telemetry.unit("grant_child") { try await child(reader, arguments, within: deadline) }
     }
 
-    private static func child(_ reader: URL, _ arguments: [String], within deadline: Duration) async throws(GrantReadingFailure) -> GrantReading {
+    private static func child(_ reader: URL, _ arguments: [String], within deadline: Duration) async throws -> GrantReading {
         let command = ([reader.path] + arguments).joined(separator: " ")
         let process = Process()
         process.executableURL = reader
@@ -211,9 +211,8 @@ public struct GrantReading: Sendable, Equatable {
         }
         guard finished else {
             kill(process.processIdentifier, SIGKILL)
-            throw GrantReadingFailure(Task.isCancelled
-                ? "\(command) was withdrawn before it answered"
-                : "\(command) did not answer within \(deadline)")
+            if Task.isCancelled { throw CancellationError() }
+            throw GrantReadingFailure("\(command) did not answer within \(deadline)")
         }
         guard process.terminationReason == .exit, process.terminationStatus == 0 else {
             let complaint = await why.value

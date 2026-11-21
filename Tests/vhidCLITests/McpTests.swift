@@ -35,8 +35,11 @@ import Testing
     /// a service nothing registers, the verdict is always "not ready" - whatever Mac runs
     /// this - and a Mac that is not ready is an answer, not a failed call.
     @Test func theDoctorToolAnswersEveryRowUnderItsVerdict() async throws {
-        let said = try await Tools.doctor.call([:], on: Installation.nobody)
-        let lines = said.components(separatedBy: "\n")
+        let said = try await Tools.doctor { "the grants" }.call([:], on: Installation.nobody)
+        let sections = said.components(separatedBy: "\n\n")
+        // The grants after the rows, whatever the verdict: it is the devices' alone.
+        #expect(sections.last == "the grants")
+        let lines = sections[0].components(separatedBy: "\n")
         #expect(lines.first == "not ready")
         let rows = lines.dropFirst().filter { !$0.hasPrefix(" ") }
         #expect(rows.count == Requirement.Row.allCases.count, "\(said)")
@@ -44,7 +47,7 @@ import Testing
             #expect(line.hasPrefix(row.rawValue + ": "), "\(said)")
         }
         #expect(said.contains("\(Requirement.Row.launchdJob.rawValue): no job"), "\(said)")
-        #expect(await Self.refusal(Tools.doctor, ["service": "x"]) == "service is not an argument this tool takes, and it takes none")
+        #expect(await Self.refusal(Tools.doctor(), ["service": "x"]) == "service is not an argument this tool takes, and it takes none")
     }
 
     // MARK: arguments

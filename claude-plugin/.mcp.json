@@ -1,6 +1,5 @@
 {
   "mcpServers": {
-    "vhid": { "command": "/usr/local/bin/vhid", "args": ["mcp"] },
-    "eyes": { "command": "/usr/local/bin/eyes", "args": ["mcp"] }
+    "vhid": { "command": "/usr/local/bin/vhid", "args": ["mcp"] }
   }
 }

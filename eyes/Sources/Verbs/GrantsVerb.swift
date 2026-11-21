@@ -35,6 +35,13 @@ public struct GrantsVerb: AsyncParsableCommand {
         try await Telemetry.unit("grants") { (try await reading(), try await Holder.current()) }
     }
 
+    /// The grants as a fresh reading says them, with the app they are charged to: what
+    /// `vhid doctor` adds under its rows. Never prompts.
+    public static func answer() async throws -> String {
+        let (reading, holder) = try await look()
+        return report(reading, holder: holder, asked: [])
+    }
+
     /// A fresh reading, from a child of this process: this executable, `vhid` or `eyes`, run
     /// as `read-grants`. [LAW:no-ambient-temporal-coupling] A long-lived MCP server keeps its
     /// first Screen Recording answer, so it never reads its own; a child asks tccd anew every time.
@@ -50,7 +57,7 @@ public struct GrantsVerb: AsyncParsableCommand {
     /// [LAW:one-source-of-truth] [LAW:effects-at-boundaries]
     static func report(_ reading: GrantReading, holder: Holder, asked: [Grant]) -> String {
         let scope = "\(Grant.allCases.count) grants, read before any dialog."
-            + " macOS charges them to \(holder.name) (\(holder.path)), the app responsible for this eyes;"
+            + " macOS charges them to \(holder.name) (\(holder.path)), the app responsible for this process;"
             + " that is the app to switch on."
         // The dialog comes once per app, so one that never appears is the pane's to change.
         // [LAW:no-silent-failure]
