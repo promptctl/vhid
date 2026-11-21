@@ -3,12 +3,13 @@ import Keystrokes
 import Pointing
 import Testing
 @testable import Input
+import ScreenSpace
 
 /// Recordings made from tap events a test wrote, read back by the parser `vhid play`
 /// uses: what the recorder writes is judged by what a replay would do with it.
 /// [LAW:behavior-not-structure]
 @Suite struct RecorderTests {
-    static let start = ScreenPoint(x: 100, y: 100)!
+    static let start = try! ScreenPoint.at(100, 100)
     static let vhid: UInt64 = 4_297_410_007
     static let stopKeys: Set<Usage> = [.leftControl, .rightControl, Usage(rawValue: 0x06)]
 
@@ -16,7 +17,7 @@ import Testing
         TapEvent(at: .milliseconds(ms), sender: sender, location: location, kind: kind)
     }
 
-    private func point(_ x: Double, _ y: Double) -> ScreenPoint { ScreenPoint(x: x, y: y)! }
+    private func point(_ x: Double, _ y: Double) throws -> ScreenPoint { try ScreenPoint.at(x, y) }
 
     private func keys(_ usages: UInt16...) -> Play.Report { .keys(try! HeldKeys(Set(usages.map(Usage.init(rawValue:))))) }
 
@@ -45,14 +46,14 @@ import Testing
             event(40, .keyDown(keyCode: 34, autorepeat: false)),
             event(45, .keyUp(keyCode: 34)),
             event(50, .buttonDown(.left)),
-            event(58, .motion, at: point(110, 105.5)),
-            event(66, .motion, at: point(120, 110)),
-            event(70, .buttonUp(.left), at: point(120, 110)),
-        ] { recorder.take(event) }
+            event(58, .motion, at: try point(110, 105.5)),
+            event(66, .motion, at: try point(120, 110)),
+            event(70, .buttonUp(.left), at: try point(120, 110)),
+        ] { try recorder.take(event) }
         expect(try replayed(recorder, stoppedAt: 80), [
             (0, keys()), (10, keys(0xE1)), (20, keys(0x0B, 0xE1)), (30, keys(0xE1)), (35, keys()),
-            (40, keys(0x0C)), (45, keys()), (50, .buttons([.left])), (58, .at(point(110, 105.5))),
-            (66, .at(point(120, 110))), (70, .buttons([])), (80, keys()), (80, .buttons([])),
+            (40, keys(0x0C)), (45, keys()), (50, .buttons([.left])), (58, .at(try point(110, 105.5))),
+            (66, .at(try point(120, 110))), (70, .buttons([])), (80, keys()), (80, .buttons([])),
         ])
     }
 
@@ -60,24 +61,24 @@ import Testing
     /// stop, is. The script still ends with nothing held, at the stop.
     @Test func theStopChordIsTrimmedAndNothingElse() throws {
         var stopped = Recorder(start: Self.start, flags: 0, vhid: []) { _ in false }
-        stopped.take(event(10, .keyDown(keyCode: 0, autorepeat: false)))
-        stopped.take(event(20, .keyUp(keyCode: 0)))
-        stopped.take(event(100, .flagsChanged(keyCode: 59, flags: 0x40001)))
-        stopped.take(event(101, .keyDown(keyCode: 8, autorepeat: false)))
+        try stopped.take(event(10, .keyDown(keyCode: 0, autorepeat: false)))
+        try stopped.take(event(20, .keyUp(keyCode: 0)))
+        try stopped.take(event(100, .flagsChanged(keyCode: 59, flags: 0x40001)))
+        try stopped.take(event(101, .keyDown(keyCode: 8, autorepeat: false)))
         expect(try replayed(stopped, stoppedAt: 150), [
             (0, keys()), (10, keys(0x04)), (20, keys()), (100, keys()), (101, keys()), (150, keys()), (150, .buttons([])),
         ])
 
         // Let go before the stop took effect: the releases are the chord's too.
-        stopped.take(event(110, .keyUp(keyCode: 8)))
-        stopped.take(event(112, .flagsChanged(keyCode: 59, flags: 0)))
+        try stopped.take(event(110, .keyUp(keyCode: 8)))
+        try stopped.take(event(112, .flagsChanged(keyCode: 59, flags: 0)))
         expect(try replayed(stopped, stoppedAt: 150), [
             (0, keys()), (10, keys(0x04)), (20, keys()), (100, keys()), (101, keys()), (110, keys()), (112, keys()), (150, keys()), (150, .buttons([])),
         ])
 
         var cut = Recorder(start: Self.start, flags: 0, vhid: []) { _ in false }
-        cut.take(event(100, .flagsChanged(keyCode: 59, flags: 0x40001)))
-        cut.take(event(101, .keyDown(keyCode: 7, autorepeat: false)))
+        try cut.take(event(100, .flagsChanged(keyCode: 59, flags: 0x40001)))
+        try cut.take(event(101, .keyDown(keyCode: 7, autorepeat: false)))
         expect(try replayed(cut, stoppedAt: 90), [
             (0, keys()), (100, keys(0xE0)), (101, keys(0x1B, 0xE0)), (101, keys()), (101, .buttons([])),
         ])
@@ -87,40 +88,55 @@ import Testing
     /// points; its modifiers are in the session's flags, and are taken out of their keys.
     @Test func vhidsOwnEventsAreNotThePersons() throws {
         var recorder = Recorder(start: Self.start, flags: 0, vhid: [Self.vhid]) { $0.x >= 150 }
-        recorder.take(event(10, .motion, at: point(150, 100), from: Self.vhid))
-        recorder.take(event(20, .motion, at: point(160, 102)))
-        recorder.take(event(30, .flagsChanged(keyCode: 56, flags: 0x20002), at: point(160, 102), from: Self.vhid))
-        recorder.take(event(40, .keyDown(keyCode: 0, autorepeat: false), at: point(160, 102)))
-        recorder.take(event(50, .flagsChanged(keyCode: 56, flags: 0), at: point(160, 102), from: Self.vhid))
-        recorder.take(event(60, .keyDown(keyCode: 4, autorepeat: false), at: point(160, 102), from: Self.vhid))
-        recorder.take(event(70, .keyUp(keyCode: 0), at: point(160, 102)))
+        try recorder.take(event(10, .motion, at: try point(150, 100), from: Self.vhid))
+        try recorder.take(event(20, .motion, at: try point(160, 102)))
+        try recorder.take(event(30, .flagsChanged(keyCode: 56, flags: 0x20002), at: try point(160, 102), from: Self.vhid))
+        try recorder.take(event(40, .keyDown(keyCode: 0, autorepeat: false), at: try point(160, 102)))
+        try recorder.take(event(50, .flagsChanged(keyCode: 56, flags: 0), at: try point(160, 102), from: Self.vhid))
+        try recorder.take(event(60, .keyDown(keyCode: 4, autorepeat: false), at: try point(160, 102), from: Self.vhid))
+        try recorder.take(event(70, .keyUp(keyCode: 0), at: try point(160, 102)))
         expect(try replayed(recorder, stoppedAt: 80), [
-            (0, keys()), (20, .at(point(110, 102))), (40, keys(0x04)), (70, keys()), (80, keys()), (80, .buttons([])),
+            (0, keys()), (20, .at(try point(110, 102))), (40, keys(0x04)), (70, keys()), (80, keys()), (80, .buttons([])),
         ])
         #expect(recorder.vhidAtEdge == 1)
+    }
+
+    /// A person's move that vhid's own moves have carried past any place is no line of the
+    /// script, and is counted, so the record says how much of the person's motion it left
+    /// out. And an edge the layout cannot be read to tell stops the take, by name.
+    @Test func aPersonsMoveAtNoPlaceIsCountedNotWritten() throws {
+        var recorder = Recorder(start: Self.start, flags: 0, vhid: [Self.vhid]) { _ in false }
+        // vhid's move carries the offset most of a Double, so the person's move as far the
+        // other way, less the offset, is past any number.
+        try recorder.take(event(10, .motion, at: try point(1.7e308, 100), from: Self.vhid))
+        try recorder.take(event(30, .motion, at: try point(-1.7e308, 100)))
+        #expect(recorder.unplaced == 1)
+        expect(try replayed(recorder, stoppedAt: 40), [(0, keys()), (40, keys()), (40, .buttons([]))])
+        var unread = Recorder(start: Self.start, flags: 0, vhid: [Self.vhid]) { _ throws(LayoutUnreadable) in throw .noDisplay }
+        #expect(throws: LayoutUnreadable.noDisplay) { try unread.take(event(10, .motion, at: try point(150, 100), from: Self.vhid)) }
     }
 
     /// An earlier Control-C, and a Control-A whose A came up inside the stop chord, are the
     /// person's: only the stop's own presses come out.
     @Test func onlyTheStopsOwnPressesComeOut() throws {
         var earlier = Recorder(start: Self.start, flags: 0, vhid: []) { _ in false }
-        earlier.take(event(10, .flagsChanged(keyCode: 59, flags: 0x40001)))
-        earlier.take(event(11, .keyDown(keyCode: 8, autorepeat: false)))
-        earlier.take(event(12, .keyUp(keyCode: 8)))
-        earlier.take(event(13, .flagsChanged(keyCode: 59, flags: 0)))
-        earlier.take(event(20, .motion, at: point(101, 100)))
-        earlier.take(event(30, .flagsChanged(keyCode: 59, flags: 0x40001)))
-        earlier.take(event(31, .keyDown(keyCode: 8, autorepeat: false)))
+        try earlier.take(event(10, .flagsChanged(keyCode: 59, flags: 0x40001)))
+        try earlier.take(event(11, .keyDown(keyCode: 8, autorepeat: false)))
+        try earlier.take(event(12, .keyUp(keyCode: 8)))
+        try earlier.take(event(13, .flagsChanged(keyCode: 59, flags: 0)))
+        try earlier.take(event(20, .motion, at: try point(101, 100)))
+        try earlier.take(event(30, .flagsChanged(keyCode: 59, flags: 0x40001)))
+        try earlier.take(event(31, .keyDown(keyCode: 8, autorepeat: false)))
         expect(try replayed(earlier, stoppedAt: 40), [
             (0, keys()), (10, keys(0xE0)), (11, keys(0x06, 0xE0)), (12, keys(0xE0)), (13, keys()),
-            (20, .at(point(101, 100))), (30, keys()), (31, keys()), (40, keys()), (40, .buttons([])),
+            (20, .at(try point(101, 100))), (30, keys()), (31, keys()), (40, keys()), (40, .buttons([])),
         ])
 
         var controlA = Recorder(start: Self.start, flags: 0, vhid: []) { _ in false }
-        controlA.take(event(5, .flagsChanged(keyCode: 59, flags: 0x40001)))
-        controlA.take(event(10, .keyDown(keyCode: 0, autorepeat: false)))
-        controlA.take(event(20, .keyUp(keyCode: 0)))
-        controlA.take(event(30, .keyDown(keyCode: 8, autorepeat: false)))
+        try controlA.take(event(5, .flagsChanged(keyCode: 59, flags: 0x40001)))
+        try controlA.take(event(10, .keyDown(keyCode: 0, autorepeat: false)))
+        try controlA.take(event(20, .keyUp(keyCode: 0)))
+        try controlA.take(event(30, .keyDown(keyCode: 8, autorepeat: false)))
         expect(try replayed(controlA, stoppedAt: 40), [
             (0, keys()), (5, keys(0xE0)), (10, keys(0x04, 0xE0)), (20, keys()), (30, keys()), (40, keys()), (40, .buttons([])),
         ])
@@ -131,12 +147,12 @@ import Testing
     /// held to the line before.
     @Test func aSharedModifierIsThePersonsOnceVhidLetsGo() throws {
         var recorder = Recorder(start: Self.start, flags: 0, vhid: [Self.vhid]) { _ in false }
-        recorder.take(event(10, .flagsChanged(keyCode: 56, flags: 0x20002), from: Self.vhid))
-        recorder.take(event(20, .flagsChanged(keyCode: 56, flags: 0x20002)))
-        recorder.take(event(30, .flagsChanged(keyCode: 56, flags: 0x20002), from: Self.vhid))
-        recorder.take(event(40, .flagsChanged(keyCode: 56, flags: 0)))
-        recorder.take(event(50, .flagsChanged(keyCode: 56, flags: 0x20002)))
-        recorder.take(event(45, .flagsChanged(keyCode: 56, flags: 0)))
+        try recorder.take(event(10, .flagsChanged(keyCode: 56, flags: 0x20002), from: Self.vhid))
+        try recorder.take(event(20, .flagsChanged(keyCode: 56, flags: 0x20002)))
+        try recorder.take(event(30, .flagsChanged(keyCode: 56, flags: 0x20002), from: Self.vhid))
+        try recorder.take(event(40, .flagsChanged(keyCode: 56, flags: 0)))
+        try recorder.take(event(50, .flagsChanged(keyCode: 56, flags: 0x20002)))
+        try recorder.take(event(45, .flagsChanged(keyCode: 56, flags: 0)))
         expect(try replayed(recorder, stoppedAt: 60), [
             (0, keys()), (50, keys(0xE1)), (50, keys()), (60, keys()), (60, .buttons([])),
         ])
@@ -147,10 +163,10 @@ import Testing
     /// line, and comes up when it does.
     @Test func capsLockFnAndAModifierAlreadyDown() throws {
         var recorder = Recorder(start: Self.start, flags: 0x100008, vhid: []) { _ in false }
-        recorder.take(event(10, .flagsChanged(keyCode: 55, flags: 0)))
-        recorder.take(event(20, .flagsChanged(keyCode: 0x39, flags: 0x10000)))
-        recorder.take(event(30, .flagsChanged(keyCode: 63, flags: 0x800100)))
-        recorder.take(event(35, .flagsChanged(keyCode: 63, flags: 0)))
+        try recorder.take(event(10, .flagsChanged(keyCode: 55, flags: 0)))
+        try recorder.take(event(20, .flagsChanged(keyCode: 0x39, flags: 0x10000)))
+        try recorder.take(event(30, .flagsChanged(keyCode: 63, flags: 0x800100)))
+        try recorder.take(event(35, .flagsChanged(keyCode: 63, flags: 0)))
         expect(try replayed(recorder, stoppedAt: 40), [
             (0, keys(0xE3)), (10, keys()), (20, keys(0x39)), (20, keys()), (40, keys()), (40, .buttons([])),
         ])
@@ -160,10 +176,10 @@ import Testing
     /// A recording is a script `vhid play` schedules whole: at lines and all.
     @Test func aRecordingSchedules() throws {
         var recorder = Recorder(start: Self.start, flags: 0, vhid: []) { _ in false }
-        recorder.take(event(8, .motion, at: point(104, 100)))
-        recorder.take(event(16, .buttonDown(.left), at: point(104, 100)))
-        recorder.take(event(24, .buttonUp(.left), at: point(104, 100)))
-        let schedule = try Schedule(Play.parse(recorder.script(stoppedAt: .milliseconds(30), stopKeys: Self.stopKeys)))
+        try recorder.take(event(8, .motion, at: try point(104, 100)))
+        try recorder.take(event(16, .buttonDown(.left), at: try point(104, 100)))
+        try recorder.take(event(24, .buttonUp(.left), at: try point(104, 100)))
+        let schedule = try Schedule(Play.parse(recorder.script(stoppedAt: .milliseconds(30), stopKeys: Self.stopKeys)), on: .vast)
         #expect(schedule.calibration != nil)
         #expect(schedule.reports == 3)
     }

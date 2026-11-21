@@ -1,6 +1,7 @@
 import CoreGraphics
 import Testing
 @testable import Seeing
+import ScreenSpace
 
 /// What a reading can honestly claim, asked with no reader behind it.
 ///
@@ -8,16 +9,16 @@ import Testing
 /// "nothing matched" acts on it; a caller told that by a reader which saw nothing acts on
 /// a lie. [LAW:no-silent-failure]
 @Suite struct ReadingTests {
-    static let region = ScreenRect(x: 0, y: 0, width: 1512, height: 982)
+    static let region = try! ScreenRect(x: 0, y: 0, width: 1512, height: 982)
 
     private func reading(outcome: Outcome, examined: Int, reach: Reach) -> Reading {
         Reading(outcome: outcome, scope: Scope(region: Self.region, examined: examined, reach: reach))
     }
 
-    private func found(_ text: String) -> Found {
+    private func found(_ text: String) throws -> Found {
         Found(
             text: Text(text)!,
-            frame: ScreenRect(x: 10, y: 20, width: 30, height: 40),
+            frame: try ScreenRect(x: 10, y: 20, width: 30, height: 40),
             source: .pixels(confidence: Confidence(0.9)!)
         )
     }
@@ -55,19 +56,19 @@ import Testing
     }
 
     /// A reading that matched is not an absence, whatever else its scope says.
-    @Test func aReadingThatMatchedIsNotAnAbsence() {
-        let read = reading(outcome: .matched(Matches([found("Allow")])!), examined: 143, reach: .whole)
+    @Test func aReadingThatMatchedIsNotAnAbsence() throws {
+        let read = try reading(outcome: .matched(Matches([found("Allow")])!), examined: 143, reach: .whole)
         #expect(!read.provesAbsence)
     }
 
     /// Near misses travel on the failing arm, so a caller cannot read one as a match. The
     /// distance is the fact that separates a recogniser slipping from a different word
     /// being on the screen.
-    @Test func nearMissesTravelWithTheirDistanceAndNotAsMatches() {
+    @Test func nearMissesTravelWithTheirDistanceAndNotAsMatches() throws {
         let read = reading(
             outcome: .nearest([
-                Near(found: found("AlIow"), distance: 1),
-                Near(found: found("Cancel"), distance: 6),
+                try Near(found: found("AlIow"), distance: 1),
+                try Near(found: found("Cancel"), distance: 6),
             ]),
             examined: 47,
             reach: .whole
@@ -136,10 +137,10 @@ import Testing
     /// [LAW:parse-dont-validate] `matched` cannot carry an empty list, so it cannot mean
     /// "nothing matched" in the arm whose whole purpose is that the *other* arm means it.
     /// A reader with nothing to report has one way to say so.
-    @Test func aMatchThatMatchedNothingCannotBeSpelled() {
+    @Test func aMatchThatMatchedNothingCannotBeSpelled() throws {
         #expect(Matches([]) == nil)
-        #expect(Matches([found("Allow")])?.count == 1)
-        #expect(Matches([found("Allow"), found("Deny")])?.all.map(\.text.value) == ["Allow", "Deny"])
+        #expect(try Matches([found("Allow")])?.count == 1)
+        #expect(try Matches([found("Allow"), found("Deny")])?.all.map(\.text.value) == ["Allow", "Deny"])
     }
 
     /// The reason the arm matters: `provesAbsence` reads the arm and not a count, so an
@@ -184,22 +185,22 @@ import Testing
     /// Near misses print a box as matches do, so they are checked as matches are, a row
     /// whose check found nothing to cut keeps the very value it had, and each row's hit
     /// tests and reason it went unchecked are summed.
-    @Test func pressingChecksEveryPrintedRowAndCountsWhatItFound() {
-        let cut = ScreenRect(x: 12, y: 22, width: 20, height: 30)
+    @Test func pressingChecksEveryPrintedRowAndCountsWhatItFound() throws {
+        let cut = try ScreenRect(x: 12, y: 22, width: 20, height: 30)
         let press: (Found) -> Checked = {
             switch $0.text.value { case "Allow": Checked(.narrowed(cut), calls: 9); case "Deny": Checked(.unchecked(.overTime), calls: 0)
             default: Checked(.kept, calls: 5) }
         }
-        let near = reading(outcome: .nearest([Near(found: found("Allow"), distance: 1), Near(found: found("Deny"), distance: 2),
-                                              Near(found: found("Help"), distance: 3)]), examined: 3, reach: .whole).pressing(press)
+        let near = reading(outcome: .nearest([Near(found: try found("Allow"), distance: 1), Near(found: try found("Deny"), distance: 2),
+                                              Near(found: try found("Help"), distance: 3)]), examined: 3, reach: .whole).pressing(press)
         guard case .nearest(let rows) = near.outcome else { Issue.record("\(near)"); return }
-        #expect(rows.map(\.found.frame) == [cut, found("Deny").frame, found("Help").frame])
+        #expect(try rows.map(\.found.frame) == [cut, found("Deny").frame, found("Help").frame])
         #expect(rows.map(\.distance) == [1, 2, 3])
-        #expect(rows[2].found == found("Help"))
+        #expect(try rows[2].found == found("Help"))
         #expect(near.scope.boxes == Boxes(narrowed: 1, unchecked: [.overTime: 1], calls: 14))
         #expect(near.scope.boxes.unchecked == [.unanswered: 0, .elsewhere: 0, .overTime: 1])
-        let matched = reading(outcome: .matched(Matches([found("Allow")])!), examined: 1, reach: .whole).pressing(press)
-        #expect(matched.outcome == .matched(Matches([Found(text: Text("Allow")!, frame: cut, source: found("Allow").source)])!))
+        let matched = reading(outcome: .matched(Matches([try found("Allow")])!), examined: 1, reach: .whole).pressing(press)
+        #expect(try matched.outcome == .matched(Matches([Found(text: Text("Allow")!, frame: cut, source: found("Allow").source)])!))
         #expect(matched.scope.boxes == Boxes(narrowed: 1, calls: 9))
     }
 

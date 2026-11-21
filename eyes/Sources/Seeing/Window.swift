@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import ScreenSpace
 
 /// A window on screen: who owns it, where it is, and how high it is composited.
 ///
@@ -191,27 +192,18 @@ public enum Geometry {
     /// position was not readable. [LAW:no-silent-failure]
     ///
     /// [LAW:parse-dont-validate] This is the one door the window server's numbers come
-    /// through, so finiteness is established here and never asked about again. NaN
-    /// reaches it - `as? Double` bridges an `NSNumber` holding one without complaint -
-    /// and then passes every check downstream that looks like it would catch it: `NaN <=
-    /// 0` is false, so a NaN-sized window is not `isEmpty` and is kept, and the first
-    /// thing that touches it traps outright, because `Int(Double.nan)` is a fatal error
-    /// rather than a bad number. A window whose bounds are not numbers is an entry that
-    /// did not describe a window, which is what the `unreadable` count is for.
+    /// through, and they become a box here or nothing. NaN reaches it - `as? Double` bridges
+    /// an `NSNumber` holding one without complaint - and so can a negative side; bounds that
+    /// are no box are an entry that did not describe a window, which is what the `unreadable`
+    /// count is for.
     private static func rect(from bounds: [String: Any]) -> ScreenRect? {
         guard let x = bounds["X"] as? Double, let y = bounds["Y"] as? Double,
-              let width = bounds["Width"] as? Double, let height = bounds["Height"] as? Double,
-              x.isFinite, y.isFinite, width.isFinite, height.isFinite
+              let width = bounds["Width"] as? Double, let height = bounds["Height"] as? Double
         else { return nil }
-        return ScreenRect(x: x, y: y, width: width, height: height)
+        return try? ScreenRect(x: x, y: y, width: width, height: height)
     }
 }
 
 public struct CannotReadWindows: Error, CustomStringConvertible {
     public var description: String { "the window server would not list its windows" }
-}
-
-public struct CannotReadDisplays: Error, Equatable, CustomStringConvertible {
-    public let error: CGError
-    public var description: String { "the window server would not list its displays (CGError \(error.rawValue))" }
 }

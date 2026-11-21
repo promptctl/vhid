@@ -1,6 +1,7 @@
 import AppKit
 import ArgumentParser
 import CoreGraphics
+import ScreenSpace
 import Seeing
 import Grants
 import Pixels
@@ -201,8 +202,12 @@ public struct Where: ParsableArguments {
         return limit
     }
 
+    /// A rect to read: a box as eyes prints one, with area, since a capture of no area is no
+    /// image. The capture's need is this door's, not every box's. [LAW:single-enforcer]
     private static func parsedRect(_ spelled: String, as s: Spelling) throws -> ScreenRect {
-        guard let rect = ScreenRect(spelled: spelled) else { throw ValidationError("\(s("rect")) wants \(ScreenRect.spelling) - got \(spelled)") }
+        guard let rect = ScreenRect(spelled: spelled), !rect.isEmpty else {
+            throw ValidationError("\(s("rect")) wants \(ScreenRect.spelling), and some area - got \(spelled)")
+        }
         return rect
     }
 }
@@ -277,9 +282,8 @@ enum Report {
     /// The columns every row has in the same place - `then`, a near miss's distance, among
     /// them - before the element's other words, however many it says.
     private static func row(_ found: Found, then: [String] = []) -> String {
-        let at = clickPoint(found.frame.centre)
-        // The point as every point is spelled, which a frame too large or not finite cannot trap.
-        return (["\(ScreenPoint(x: at.x, y: at.y))", "\(box(found.frame, holding: at))", spelled(found.text.value), found.source.role?.rawValue ?? "pixels"]
+        let box = found.frame.integral
+        return (["\(clickPoint(in: box, nearest: found.frame.centre))", "\(box)", spelled(found.text.value), found.source.role?.rawValue ?? "pixels"]
             + then + found.source.also.map { "\($0.attribute.rawValue) \(spelled($0.text.value))" }).joined(separator: "\t")
     }
 
@@ -303,14 +307,12 @@ enum Report {
         return line
     }
 
-    /// The whole point a click is sent to: the frame's centre, rounded.
-    private static func clickPoint(_ p: ScreenPoint) -> CGPoint { CGPoint(x: p.x.rounded(), y: p.y.rounded()) }
-
-    /// The frame grown to cover the cell of the point printed beside it. The rounded point
-    /// can fall past the frame's right or bottom edge, which half-open containment counts as
-    /// outside, so the point is covered by construction rather than by luck of the rounding.
-    private static func box(_ frame: ScreenRect, holding at: CGPoint) -> ScreenRect {
-        ScreenRect(frame.cgRect.union(CGRect(origin: at, size: CGSize(width: 1, height: 1))))
+    /// The whole point a click is sent to: the whole point of the row's box, rounded out,
+    /// nearest the frame's centre. A rounded centre can fall on the box's right or bottom
+    /// edge, which the half-open rule counts as outside, so it is held to the last whole
+    /// point in: the point printed is inside the box printed beside it by construction.
+    private static func clickPoint(in box: ScreenRect, nearest centre: ScreenPoint) -> ScreenPoint {
+        box.nearest(min(centre.x.rounded(), box.maxX - 1), min(centre.y.rounded(), box.maxY - 1))
     }
 
     private static func wanted(_ match: Match) -> String {

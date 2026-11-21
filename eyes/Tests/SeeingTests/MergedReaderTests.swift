@@ -1,9 +1,10 @@
 import Testing
 @testable import Seeing
+import ScreenSpace
 
 /// A merged reader over two readers a test wrote, neither of which is the tree or pixels.
 @MainActor @Suite struct MergedReaderTests {
-    static let region = ScreenRect(x: 0, y: 0, width: 1000, height: 800)
+    static let region = try! ScreenRect(x: 0, y: 0, width: 1000, height: 800)
 
     struct Fake: Reader {
         let source: SourceKind
@@ -28,8 +29,8 @@ import Testing
     static let role = Source.tree(role: Role(rawValue: "AXButton"), also: [])
     static let seen = Source.pixels(confidence: Confidence(0.8)!)
 
-    private func at(_ text: String, _ x: Double, _ y: Double, _ source: Source, width: Double = 60) -> Found {
-        Found(text: Text(text)!, frame: ScreenRect(x: x, y: y, width: width, height: 20), source: source)
+    private func at(_ text: String, _ x: Double, _ y: Double, _ source: Source, width: Double = 60) throws -> Found {
+        Found(text: Text(text)!, frame: try ScreenRect(x: x, y: y, width: width, height: 20), source: source)
     }
 
     /// The region resolved without asking the host which displays it has. [LAW:effects-at-boundaries]
@@ -62,7 +63,7 @@ import Testing
         )
         let found = all(r)
         #expect(found.count == 1)
-        #expect(found.first?.frame == ScreenRect(x: 100, y: 100, width: 60, height: 20))
+        #expect(found.first?.frame == (try ScreenRect(x: 100, y: 100, width: 60, height: 20)))
         #expect(found.first?.source == .merged(Self.role, Self.seen))
         #expect(found.first?.source.kind == .merged)
         #expect(r.scope.excluded == [Exclusion(reason: .duplicate, count: 1)])
@@ -141,11 +142,11 @@ import Testing
     }
 
     /// A run as Vision places it: each word at its own spot along one line, from `x`.
-    private func run(_ text: String, _ x: Double, _ y: Double) -> Found {
-        let words = text.split(separator: " ").enumerated().map { i, w in
-            Word(text: Text(String(w))!, frame: ScreenRect(x: x + Double(i) * 50, y: y, width: 45, height: 20))
+    private func run(_ text: String, _ x: Double, _ y: Double) throws -> Found {
+        let words = try text.split(separator: " ").enumerated().map { i, w in
+            Word(text: Text(String(w))!, frame: try ScreenRect(x: x + Double(i) * 50, y: y, width: 45, height: 20))
         }
-        return Found(first: words[0], rest: Array(words.dropFirst()), source: Self.seen)
+        return try #require(Found(first: words[0], rest: Array(words.dropFirst()), source: Self.seen))
     }
 
     @Test func aContainsQueryFindsOneButtonOnceWhateverEachReaderDividedItInto() async throws {
@@ -188,9 +189,9 @@ import Testing
 
     @Test func theRegionIsWhereBothLooked() async throws {
         var clipped = Fake(source: .pixels, found: [])
-        clipped.region = ScreenRect(x: 0, y: 0, width: 500, height: 800)
+        clipped.region = try ScreenRect(x: 0, y: 0, width: 500, height: 800)
         let r = try await read(Fake(source: .tree, found: []), clipped)
-        #expect(r.scope.region == ScreenRect(x: 0, y: 0, width: 500, height: 800))
+        #expect(r.scope.region == (try ScreenRect(x: 0, y: 0, width: 500, height: 800)))
     }
 
     @Test func aWordOnlyTheSecondReaderSawIsNotCarriedAwayAsASlip() async throws {
@@ -253,13 +254,31 @@ import Testing
     /// Each reader checks the rows it placed: the tree's cut stands, and the pixels reader,
     /// asked after it, sees the cut row and leaves it.
     @Test func eachReaderChecksTheBoxesOfTheRowsItPlaced() async throws {
-        let cut = ScreenRect(x: 17, y: 15, width: 40, height: 12)
-        let tree = Fake(source: .tree, found: [at("Allow", 10, 10, Self.role), at("Deny", 100, 10, Self.role)],
+        let cut = try ScreenRect(x: 17, y: 15, width: 40, height: 12)
+        let tree = Fake(source: .tree, found: [try at("Allow", 10, 10, Self.role), try at("Deny", 100, 10, Self.role)],
                         press: { $0.text.value == "Allow" ? .narrowed(cut) : .unchecked(.elsewhere) }, calls: 4)
-        let pixels = Fake(source: .pixels, found: [at("Allow", 12, 11, Self.seen)],
+        let pixels = Fake(source: .pixels, found: [try at("Allow", 12, 11, Self.seen)],
                           press: { $0.source.role == nil ? .unchecked(.unanswered) : .kept })
         let r = try await read(tree, pixels)
-        #expect(all(r).map(\.frame) == [cut, ScreenRect(x: 100, y: 10, width: 60, height: 20)])
+        #expect(all(r).map(\.frame) == [cut, try ScreenRect(x: 100, y: 10, width: 60, height: 20)])
         #expect(r.scope.boxes == Boxes(narrowed: 1, unchecked: [.elsewhere: 1], calls: 8))
+    }
+
+    /// The merged region is what both readers read; two that read places sharing nothing
+    /// are refused by both, rather than one answer claiming either. Touching is sharing
+    /// nothing.
+    @Test func readersOfPlacesThatShareNothingAreRefused() async throws {
+        var left = Fake(source: .tree, found: [])
+        left.region = try ScreenRect(x: 0, y: 0, width: 600, height: 800)
+        var right = Fake(source: .pixels, found: [])
+        right.region = try ScreenRect(x: 400, y: 100, width: 600, height: 700)
+        let merged = try await MergedReader(left, right, locate: Self.here).look(Query(match: nil, region: .rect(Self.region)))
+        #expect(merged.region == (try ScreenRect(x: 400, y: 100, width: 200, height: 700)))
+        right.region = try ScreenRect(x: 600, y: 0, width: 400, height: 800)
+        await #expect(throws: ReadersApart(first: left.region, second: right.region)) {
+            try await MergedReader(left, right, locate: Self.here).look(Query(match: nil, region: .rect(Self.region)))
+        }
+        #expect(ReadersApart(first: left.region, second: right.region).description
+            == "the two readers read 0,0,600,800 and 600,0,400,800, which share nothing, so their answers are not of one place")
     }
 }

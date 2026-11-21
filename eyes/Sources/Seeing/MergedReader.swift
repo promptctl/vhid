@@ -1,3 +1,5 @@
+import ScreenSpace
+
 /// Two readers asked the same query, what they saw reconciled into one answer.
 ///
 /// It holds each as `any Reader` and nothing more, so neither the readers nor this type
@@ -65,6 +67,15 @@ public enum Attempt: Sendable {
     var seen: Candidates? { if case .looked(_, let c) = self { c } else { nil } }
 }
 
+/// The two readers of a merged read read regions that share nothing, so what each saw is of a
+/// different place and no one answer holds both.
+public struct ReadersApart: Error, Equatable, CustomStringConvertible {
+    public let first: ScreenRect
+    public let second: ScreenRect
+
+    public var description: String { "the two readers read \(first) and \(second), which share nothing, so their answers are not of one place" }
+}
+
 /// Neither reader of a merged read could look, so there is nothing to answer with. Both
 /// errors are kept as thrown, so a caller can still tell a missing grant by its type.
 public struct BothBlind: Error, CustomStringConvertible {
@@ -114,7 +125,7 @@ public extension Candidates {
                 // is one edit from "Downloads", and the badge only the pixels saw is lost.
                 let hit = (i..<words.count).flatMap { j in
                     let stretch = Found(first: words[i], rest: Array(words[(i + 1)..<(j + 1)]), source: run.source)
-                    return (0..<firsts).compactMap { k in kept[k].edits(to: stretch).map { (index: k, end: j, edits: $0) } }
+                    return (0..<firsts).compactMap { k in stretch.flatMap(kept[k].edits).map { (index: k, end: j, edits: $0) } }
                 }.min { ($0.edits, -$0.end) < ($1.edits, -$1.end) }
                 guard let (index, end, _) = hit else {
                     loose.append(words[i])
@@ -122,7 +133,7 @@ public extension Candidates {
                     continue
                 }
                 if merged.insert(index).inserted {
-                    kept[index] = Found(first: kept[index].first, rest: kept[index].rest, source: .merged(kept[index].source, run.source))
+                    kept[index] = kept[index].found(by: .merged(kept[index].source, run.source))
                 }
                 duplicates += 1
                 extra += Found(loose, source: run.source)
@@ -131,11 +142,16 @@ public extension Candidates {
             }
             extra += Found(loose, source: run.source)
         }
-        let regions = seen.map(\.region.cgRect)
-        let both = regions.dropFirst().reduce(regions[0]) { $0.intersection($1) }
+        // Where both looked. Readers asked one region read the same one, so two that share
+        // nothing read different screens, and no answer joins them. [LAW:no-silent-failure]
+        var region = seen[0].region
+        for other in seen.dropFirst().map(\.region) {
+            guard let shared = region.intersection(other) else { throw ReadersApart(first: region, second: other) }
+            region = shared
+        }
         return Candidates(
             found: (kept + extra).inReadingOrder,
-            region: both.isNull ? seen[0].region : ScreenRect(both),
+            region: region,
             examined: seen.map(\.examined).reduce(0, +),
             excluded: (seen.flatMap(\.excluded) + [Exclusion(reason: .duplicate, count: duplicates)]).summed,
             reach: a.part.isWhole && b.part.isWhole ? .whole : .stopped(.merged(a.part, b.part)),

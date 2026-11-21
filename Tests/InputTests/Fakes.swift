@@ -1,9 +1,11 @@
 import Foundation
+import Testing
 import Input
 import Keystrokes
 import Pointing
 import Synchronization
 import TestClock
+import ScreenSpace
 
 /// A keyboard that records what it was asked to do and refuses after a given number of
 /// calls, so a run can be stopped at any point inside a character.
@@ -147,7 +149,7 @@ final class FakeMouse: Mouse {
         try state.withLock {
             try record(&$0, "move \(delta.x.value) \(delta.y.value)")
             let gain = Self.gain(of: delta, stuck: $0.stuck)
-            $0.position = ScreenPoint(x: $0.position.x + Double(delta.x.value) * gain, y: $0.position.y + Double(delta.y.value) * gain)!
+            $0.position = try ScreenPoint.at($0.position.x + Double(delta.x.value) * gain, $0.position.y + Double(delta.y.value) * gain)
         }
     }
 
@@ -253,9 +255,9 @@ final class SteadyGainMouse: Mouse {
     func scroll(by delta: Scroll) throws { state.withLock { $0.log.append("scroll \(delta.vertical.value) \(delta.horizontal.value)") } }
 
     func move(by delta: Move) throws {
-        state.withLock {
+        try state.withLock {
             $0.log.append("move \(delta.x.value) \(delta.y.value)")
-            $0.position = ScreenPoint(x: $0.position.x + Double(delta.x.value) * gain, y: $0.position.y + Double(delta.y.value) * gain)!
+            $0.position = try ScreenPoint.at($0.position.x + Double(delta.x.value) * gain, $0.position.y + Double(delta.y.value) * gain)
         }
     }
 
@@ -265,5 +267,29 @@ final class SteadyGainMouse: Mouse {
 extension Displays {
     /// A screen whose edges are further than any test's path goes, for tests that are not
     /// about the edges.
-    static let vast = Displays(frames: [CGRect(x: -100_000, y: -100_000, width: 200_000, height: 200_000)])!
+    static let vast = Displays(try! DisplayLayout([OnlineDisplay(id: 1, bounds: CGRect(x: -100_000, y: -100_000, width: 200_000, height: 200_000), isActive: true)]))
+}
+
+extension Target {
+    /// A box target from a box a test writes, by the door a caller's box comes through: one
+    /// under a point a side fails the test there.
+    static func box(_ rect: ScreenRect) throws -> Target { .box(try #require(Target.Box(rect))) }
+}
+
+extension Trajectory {
+    /// A trajectory between places a test gives, placed on `displays` as a move places them:
+    /// a place no display shows fails the test there.
+    init(from start: ScreenPoint, toward target: Target, within displays: Displays, drawing generator: inout some RandomNumberGenerator) throws {
+        try self.init(from: displays.place(start), toward: displays.place(target), within: displays, drawing: &generator)
+    }
+}
+
+extension Pointer {
+    /// `home(on:within:)` onto `point`, placed on the displays this pointer reads, as a play
+    /// places its points.
+    @discardableResult
+    func home(on point: ScreenPoint) async throws -> Int {
+        let displays = try await self.displays()
+        return try await home(on: displays.place(point), within: displays)
+    }
 }

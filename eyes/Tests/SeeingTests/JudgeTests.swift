@@ -1,21 +1,22 @@
 import Testing
 @testable import Seeing
+import ScreenSpace
 
 /// What a reader's candidates become, asked with a list a test wrote.
 @Suite struct JudgeTests {
-    static let region = ScreenRect(x: 0, y: 0, width: 1512, height: 982)
+    static let region = try! ScreenRect(x: 0, y: 0, width: 1512, height: 982)
 
     /// A run as a reader places it: each word at its own spot along one line.
-    private func found(_ text: String, y: Double = 0) -> Found {
-        let words = text.split(separator: " ").enumerated().map { i, w in
-            Word(text: Text(String(w))!, frame: ScreenRect(x: 10 + Double(i) * 40, y: y, width: 30, height: 12))
+    private func found(_ text: String, y: Double = 0) throws -> Found {
+        let words = try text.split(separator: " ").enumerated().map { i, w in
+            Word(text: Text(String(w))!, frame: try ScreenRect(x: 10 + Double(i) * 40, y: y, width: 30, height: 12))
         }
-        return Found(first: words[0], rest: Array(words.dropFirst()), source: .pixels(confidence: Confidence(0.9)!))
+        return try #require(Found(first: words[0], rest: Array(words.dropFirst()), source: .pixels(confidence: Confidence(0.9)!)))
     }
 
-    private func judge(_ texts: [String], _ match: Match?, limit: Limit = .default) -> Reading {
+    private func judge(_ texts: [String], _ match: Match?, limit: Limit = .default) throws -> Reading {
         Reading.judging(
-            texts.enumerated().map { found($1, y: Double($0) * 20) },
+            try texts.enumerated().map { try found($1, y: Double($0) * 20) },
             query: Query(match: match, region: .rect(Self.region), limit: limit),
             region: Self.region,
             examined: texts.count,
@@ -28,39 +29,39 @@ import Testing
     /// Three "Remove" buttons, one per row, each beside its row's name - the probe page's.
     /// `pitch` is the step from row to row: 33 leaves the probe page's 6-point gap, 27 packs
     /// them edge to edge.
-    private func rows(near: String, limit: Limit = .default, pitch: Double = 33, match: String = "Remove") -> Reading {
+    private func rows(near: String, limit: Limit = .default, pitch: Double = 33, match: String = "Remove") throws -> Reading {
         let at = { (text: String, x: Double, row: Double, w: Double) in
-            Found(text: Text(text)!, frame: ScreenRect(x: x, y: 504 + row * pitch, width: w, height: 27),
+            Found(text: Text(text)!, frame: try ScreenRect(x: x, y: 504 + row * pitch, width: w, height: 27),
                   source: .tree(role: Role(rawValue: "AXStaticText"), also: []))
         }
-        let seen = [at("Alpha", 52, 0, 60), at("Remove", 192, 0, 84), at("Beta", 52, 1, 50),
-                    at("Remove", 192, 1, 84), at("Gamma", 52, 2, 70), at("Remove", 192, 2, 84)]
+        let seen = try [at("Alpha", 52, 0, 60), at("Remove", 192, 0, 84), at("Beta", 52, 1, 50),
+                    try at("Remove", 192, 1, 84), at("Gamma", 52, 2, 70), at("Remove", 192, 2, 84)]
         return Reading.judging(seen, query: Query(match: .exact(match), region: .rect(Self.region), limit: limit, near: .contains(near)),
                                region: Self.region, examined: seen.count, excluded: [], reach: .whole, owners: .every)
     }
 
     /// The Remove in Beta's row comes first, then the rows either side in reading order.
-    @Test func nearOrdersTheMatchesByTheRowTheyShare() {
-        guard case .matched(let m) = rows(near: "beta").outcome else { Issue.record("no match"); return }
+    @Test func nearOrdersTheMatchesByTheRowTheyShare() throws {
+        guard case .matched(let m) = try rows(near: "beta").outcome else { Issue.record("no match"); return }
         #expect(m.all.map(\.frame.y) == [537, 504, 570])
-        guard case .matched(let last) = rows(near: "Gamma", limit: Limit(1)!).outcome else { Issue.record("no match"); return }
+        guard case .matched(let last) = try rows(near: "Gamma", limit: Limit(1)!).outcome else { Issue.record("no match"); return }
         #expect(last.all.map(\.frame.y) == [570])
     }
 
     /// Rows packed edge to edge touch the row above as well as their own; the row's own
     /// shares the whole line, so it still comes first.
-    @Test func rowsPackedEdgeToEdgeStillPutTheAnchorsRowFirst() {
-        guard case .matched(let m) = rows(near: "Beta", limit: Limit(1)!, pitch: 27).outcome else { Issue.record("no match"); return }
+    @Test func rowsPackedEdgeToEdgeStillPutTheAnchorsRowFirst() throws {
+        guard case .matched(let m) = try rows(near: "Beta", limit: Limit(1)!, pitch: 27).outcome else { Issue.record("no match"); return }
         #expect(m.all.map(\.frame.y) == [531])
     }
 
     /// A label touching the link before it and the link after it names the one after:
     /// Safari reads "Release notes More · Pricing More" with " · Pricing " one run.
-    @Test func ofTwoMatchesTouchingTheTextTheOneAfterItIsNearer() {
+    @Test func ofTwoMatchesTouchingTheTextTheOneAfterItIsNearer() throws {
         let at = { (text: String, x: Double, w: Double) in
-            Found(text: Text(text)!, frame: ScreenRect(x: x, y: 368, width: w, height: 18), source: .tree(role: Role(rawValue: "AXLink"), also: []))
+            Found(text: Text(text)!, frame: try ScreenRect(x: x, y: 368, width: w, height: 18), source: .tree(role: Role(rawValue: "AXLink"), also: []))
         }
-        let seen = [at("Release notes", 200, 110), at("More", 310, 36), at(" · Pricing ", 346, 79), at("More", 425, 36)]
+        let seen = try [at("Release notes", 200, 110), at("More", 310, 36), at(" · Pricing ", 346, 79), at("More", 425, 36)]
         let read = Reading.judging(seen, query: Query(match: .exact("More"), region: .rect(Self.region), near: .contains("Pricing")),
                                    region: Self.region, examined: seen.count, excluded: [], reach: .whole, owners: .every)
         guard case .matched(let m) = read.outcome else { Issue.record("\(read)"); return }
@@ -70,31 +71,31 @@ import Testing
     /// Text to be near that is not on screen leaves every Remove unplaced: neither found -
     /// which one was meant is unknown - nor gone, since they are all there. The rows are
     /// the anchor's own near misses, since it is what was missing.
-    @Test func matchesWithTheirAnchorMissingAreNeitherFoundNorGone() {
-        let read = rows(near: "Bta")
+    @Test func matchesWithTheirAnchorMissingAreNeitherFoundNorGone() throws {
+        let read = try rows(near: "Bta")
         guard case .unanchored(let near) = read.outcome else { Issue.record("\(read)"); return }
         #expect(near.first?.found.text.value == "Beta")
         #expect(!read.provesAbsence)
     }
 
     /// Nothing matching is an absence whatever the anchor.
-    @Test func noMatchIsAnAbsenceWithOrWithoutItsAnchor() {
+    @Test func noMatchIsAnAbsenceWithOrWithoutItsAnchor() throws {
         for near in ["Beta", "Bta"] {
-            let read = rows(near: near, match: "Delete")
+            let read = try rows(near: near, match: "Delete")
             guard case .nearest = read.outcome else { Issue.record("\(read)"); continue }
             #expect(read.provesAbsence)
         }
     }
 
-    @Test func containsFindsTheQueryInsideALongerRunIgnoringCase() {
-        let read = judge(["File", "Save As…", "Close"], .contains("save"))
+    @Test func containsFindsTheQueryInsideALongerRunIgnoringCase() throws {
+        let read = try judge(["File", "Save As…", "Close"], .contains("save"))
         guard case .matched(let matches) = read.outcome else { Issue.record("\(read)"); return }
         #expect(matches.all.map(\.text.value) == ["Save"])
         #expect(read.scope.reach == .whole)
     }
 
-    @Test func exactRefusesARunThatOnlyContainsTheQuery() {
-        guard case .nearest(let near) = judge(["Save As…"], .exact("Save")).outcome else {
+    @Test func exactRefusesARunThatOnlyContainsTheQuery() throws {
+        guard case .nearest(let near) = try judge(["Save As…"], .exact("Save")).outcome else {
             Issue.record("matched"); return
         }
         #expect(near.map(\.distance) == [4])
@@ -102,30 +103,30 @@ import Testing
 
     /// The case the nearest rows exist for: a capital I read as a lowercase l is one edit
     /// away, and a caller seeing distance 1 knows to widen rather than give up.
-    @Test func aMisreadComesBackOneEditAwayAheadOfUnrelatedText() {
-        let read = judge(["Terminal", "Setlings", "Help"], .contains("Settings"))
+    @Test func aMisreadComesBackOneEditAwayAheadOfUnrelatedText() throws {
+        let read = try judge(["Terminal", "Setlings", "Help"], .contains("Settings"))
         guard case .nearest(let near) = read.outcome else { Issue.record("matched"); return }
         #expect(near.first?.found.text.value == "Setlings")
         #expect(near.first?.distance == 1)
         #expect(read.provesAbsence)
     }
 
-    @Test func withinToleratesTheEditsItWasGiven() {
-        guard case .matched = judge(["Setlings"], .within(edits: Edits(1)!, of: "Settings")).outcome else {
+    @Test func withinToleratesTheEditsItWasGiven() throws {
+        guard case .matched = try judge(["Setlings"], .within(edits: Edits(1)!, of: "Settings")).outcome else {
             Issue.record("did not match"); return
         }
     }
 
-    @Test func theNearestAreCappedToAHandful() {
-        guard case .nearest(let near) = judge((1...40).map { "run \($0)" }, .exact("absent")).outcome else {
+    @Test func theNearestAreCappedToAHandful() throws {
+        guard case .nearest(let near) = try judge((1...40).map { "run \($0)" }, .exact("absent")).outcome else {
             Issue.record("matched"); return
         }
         #expect(near.count == Reading.nearestShown)
     }
 
     /// Asking for nothing in particular is reading the region: everything matches.
-    @Test func noMatchReturnsEverythingInReadingOrder() {
-        guard case .matched(let matches) = judge(["a", "b", "c"], nil).outcome else {
+    @Test func noMatchReturnsEverythingInReadingOrder() throws {
+        guard case .matched(let matches) = try judge(["a", "b", "c"], nil).outcome else {
             Issue.record("nothing"); return
         }
         #expect(matches.all.map(\.text.value) == ["a", "b", "c"])
@@ -133,58 +134,58 @@ import Testing
 
     /// A cap that cut matches says so twice over: the reach stops short, so the reading
     /// proves nothing about what was cut, and the exclusion says how many.
-    @Test func aLimitThatCutMatchesDeclaresIt() {
-        let read = judge(["ok 1", "ok 2", "ok 3"], .contains("ok"), limit: Limit(2)!)
+    @Test func aLimitThatCutMatchesDeclaresIt() throws {
+        let read = try judge(["ok 1", "ok 2", "ok 3"], .contains("ok"), limit: Limit(2)!)
         guard case .matched(let matches) = read.outcome else { Issue.record("nothing"); return }
         #expect(matches.count == 2)
         #expect(read.scope.reach == .stopped(.resultLimit(Limit(2)!)))
         #expect(read.scope.excluded == [Exclusion(reason: .ranked, count: 1)])
     }
 
-    @Test func aBlankRegionProvesAbsenceWithNoNearest() {
-        let read = judge([], .contains("Cancel"))
+    @Test func aBlankRegionProvesAbsenceWithNoNearest() throws {
+        let read = try judge([], .contains("Cancel"))
         #expect(read.outcome == .nearest([]))
         #expect(read.provesAbsence)
     }
 
     /// Vision reads a row of menus as one run, and the centre of that run is on none of
     /// them. A `contains` match lands on the words that matched, not the run around them.
-    @Test func aContainsMatchPointsAtTheWordsThatMatched() {
-        let words = ["Shell", "Edit", "View"].enumerated().map { i, w in
-            Word(text: Text(w)!, frame: ScreenRect(x: Double(i) * 50, y: 0, width: 40, height: 20))
+    @Test func aContainsMatchPointsAtTheWordsThatMatched() throws {
+        let words = try ["Shell", "Edit", "View"].enumerated().map { i, w in
+            Word(text: Text(w)!, frame: try ScreenRect(x: Double(i) * 50, y: 0, width: 40, height: 20))
         }
-        let run = Found(first: words[0], rest: Array(words.dropFirst()), source: .pixels(confidence: Confidence(1)!))
+        let run = try #require(Found(first: words[0], rest: Array(words.dropFirst()), source: .pixels(confidence: Confidence(1)!)))
         let read = Reading.judging([run], query: Query(match: .contains("edit"), region: .rect(Self.region)),
                                    region: Self.region, examined: 1, excluded: [], reach: .whole, owners: .every)
         guard case .matched(let m) = read.outcome else { Issue.record("nothing"); return }
         #expect(m.first.text.value == "Edit")
-        #expect(m.first.frame.centre == ScreenPoint(x: 70, y: 10))
+        #expect(m.first.frame.centre == (try ScreenPoint.at(70, 10)))
     }
 
     /// Across two words the narrowing keeps both, and an exact match reports the whole run.
-    @Test func narrowingSpansWordsAndLeavesWholeMatchesWhole() {
-        let words = ["Save", "As…", "Cancel"].enumerated().map { i, w in
-            Word(text: Text(w)!, frame: ScreenRect(x: Double(i) * 50, y: 0, width: 40, height: 20))
+    @Test func narrowingSpansWordsAndLeavesWholeMatchesWhole() throws {
+        let words = try ["Save", "As…", "Cancel"].enumerated().map { i, w in
+            Word(text: Text(w)!, frame: try ScreenRect(x: Double(i) * 50, y: 0, width: 40, height: 20))
         }
-        let run = Found(first: words[0], rest: Array(words.dropFirst()), source: .pixels(confidence: Confidence(1)!))
+        let run = try #require(Found(first: words[0], rest: Array(words.dropFirst()), source: .pixels(confidence: Confidence(1)!)))
         #expect(Match.contains("save as").narrowing(run, by: .drawn(0)).map(\.text.value) == ["Save As…"])
         #expect(Match.exact("Save As… Cancel").narrowing(run, by: .drawn(0)) == [run])
     }
 
     /// A near miss printed one off must match when the caller widens by one edit - inside
     /// a longer run too, which is where Vision puts a menu item.
-    @Test func wideningByTheDistanceShownFindsTheNearMiss() {
-        let near = judge(["Terminal Shell Setlings Help"], .contains("Settings"))
+    @Test func wideningByTheDistanceShownFindsTheNearMiss() throws {
+        let near = try judge(["Terminal Shell Setlings Help"], .contains("Settings"))
         guard case .nearest(let n) = near.outcome else { Issue.record("matched"); return }
         #expect(n.first?.distance == 1)
-        let widened = judge(["Terminal Shell Setlings Help"], .within(edits: Edits(1)!, of: "Settings"))
+        let widened = try judge(["Terminal Shell Setlings Help"], .within(edits: Edits(1)!, of: "Settings"))
         guard case .matched(let m) = widened.outcome else { Issue.record("still nothing"); return }
         #expect(m.all.map(\.text.value) == ["Setlings"])
     }
 
     /// A run holding the query twice is two matches, not one with the other dropped.
-    @Test func aRunHoldingTheQueryTwiceIsTwoMatches() {
-        guard case .matched(let m) = judge(["Save Save All Revert"], .contains("save")).outcome else {
+    @Test func aRunHoldingTheQueryTwiceIsTwoMatches() throws {
+        guard case .matched(let m) = try judge(["Save Save All Revert"], .contains("save")).outcome else {
             Issue.record("nothing"); return
         }
         #expect(m.all.map(\.text.value) == ["Save", "Save"])
@@ -192,8 +193,8 @@ import Testing
 
     /// A reader that stopped short stays stopped when the limit also cuts: its own stop is
     /// the earlier cause, and either way the reading proves no absence.
-    @Test func aReadersOwnStopOutlastsTheLimit() {
-        let read = Reading.judging(["OK", "OK"].enumerated().map { found($1, y: Double($0) * 20) },
+    @Test func aReadersOwnStopOutlastsTheLimit() throws {
+        let read = Reading.judging(try ["OK", "OK"].enumerated().map { try found($1, y: Double($0) * 20) },
                                    query: Query(match: nil, region: .rect(Self.region), limit: Limit(1)!),
                                    region: Self.region, examined: 2, excluded: [], reach: .stopped(.unread), owners: .every)
         #expect(read.scope.reach == .stopped(.unread))
@@ -202,7 +203,7 @@ import Testing
 
     // MARK: role and the element's other words
 
-    private static let at = ScreenRect(x: 160, y: 417, width: 18, height: 18)
+    private static let at = try! ScreenRect(x: 160, y: 417, width: 18, height: 18)
     private static let button = Role(rawValue: "AXButton")
 
     private func tree(_ text: String, _ role: String = "AXButton", at frame: ScreenRect = at, also: [Words] = []) -> Found {
@@ -222,17 +223,17 @@ import Testing
     /// answers whole at its own place, its row still the "+" it shows.
     @Test func aButtonIsFoundByWhatItIsCalled() throws {
         let plus = tree("+", also: [Words(.description, Text("Add")!)])
-        guard case .matched(let m) = judged([tree("+", "AXStaticText", at: ScreenRect(x: 140, y: 435, width: 10, height: 15)), plus],
+        guard case .matched(let m) = judged([tree("+", "AXStaticText", at: try ScreenRect(x: 140, y: 435, width: 10, height: 15)), plus],
                                              .exact("Add")).outcome else { Issue.record("not found"); return }
         #expect(m.all == [plus])
         #expect(Match?.some(.exact("Add")).fit(plus) == .also(Words(.description, Text("Add")!), 0))
     }
 
     /// The row's own text wins a tie, and is narrowed to its words as ever.
-    @Test func theRowsOwnTextWinsATie() {
-        let save = Found(first: Word(text: Text("Save")!, frame: ScreenRect(x: 0, y: 0, width: 30, height: 12)),
-                         rest: [Word(text: Text("As")!, frame: ScreenRect(x: 40, y: 0, width: 20, height: 12))],
-                         source: .tree(role: Self.button, also: [Words(.title, Text("Save it")!)]))
+    @Test func theRowsOwnTextWinsATie() throws {
+        let save = try #require(Found(first: Word(text: Text("Save")!, frame: try ScreenRect(x: 0, y: 0, width: 30, height: 12)),
+                                      rest: [Word(text: Text("As")!, frame: try ScreenRect(x: 40, y: 0, width: 20, height: 12))],
+                                      source: .tree(role: Self.button, also: [Words(.title, Text("Save it")!)])))
         #expect(Match?.some(.contains("save")).fit(save) == .drawn(0))
         guard case .matched(let m) = judged([save], .contains("save")).outcome else { Issue.record("not found"); return }
         #expect(m.all.map(\.text.value) == ["Save"])
@@ -249,10 +250,10 @@ import Testing
     /// Of three "Add"s, the role keeps the button. The label is of another role, told apart;
     /// the text pixels alone saw has no role anyone knows, so it could be the button, and the
     /// region was not read whole for the question.
-    @Test func aRoleKeepsItsOwnAndSaysWhatItSetAside() {
-        let r = judged([tree("Add"), tree("Add", "AXStaticText", at: ScreenRect(x: 0, y: 0, width: 30, height: 12)),
-                        pixels("Add", at: ScreenRect(x: 0, y: 100, width: 30, height: 12)),
-                        pixels("Cancel", at: ScreenRect(x: 0, y: 200, width: 30, height: 12))], .exact("Add"), role: Self.button)
+    @Test func aRoleKeepsItsOwnAndSaysWhatItSetAside() throws {
+        let r = judged([tree("Add"), tree("Add", "AXStaticText", at: try ScreenRect(x: 0, y: 0, width: 30, height: 12)),
+                        pixels("Add", at: try ScreenRect(x: 0, y: 100, width: 30, height: 12)),
+                        pixels("Cancel", at: try ScreenRect(x: 0, y: 200, width: 30, height: 12))], .exact("Add"), role: Self.button)
         guard case .matched(let m) = r.outcome else { Issue.record("not found"); return }
         #expect(m.all == [tree("Add")])
         #expect(r.scope.excluded == [Exclusion(reason: .otherRole, count: 1), Exclusion(reason: .roleUnknown, count: 1)])
@@ -282,16 +283,16 @@ import Testing
 
     /// What a role sets aside is counted a place at a time, as rows are: a cell and its own
     /// label are one other_role. A reader's duplicates and the judge's are one count.
-    @Test func whatIsSetAsideIsCountedOncePerPlace() {
-        let r = judged([tree("Inbox", "AXCell"), tree("Inbox", "AXStaticText"), tree("Inbox", at: ScreenRect(x: 0, y: 100, width: 40, height: 18)),
-                        tree("Inbox", at: ScreenRect(x: 0, y: 100, width: 40, height: 18))],
+    @Test func whatIsSetAsideIsCountedOncePerPlace() throws {
+        let r = judged([tree("Inbox", "AXCell"), tree("Inbox", "AXStaticText"), tree("Inbox", at: try ScreenRect(x: 0, y: 100, width: 40, height: 18)),
+                        tree("Inbox", at: try ScreenRect(x: 0, y: 100, width: 40, height: 18))],
                        .exact("Inbox"), role: Self.button, excluded: [Exclusion(reason: .duplicate, count: 2), Exclusion(reason: .wordless, count: 0)])
         #expect(r.scope.excluded == [Exclusion(reason: .duplicate, count: 3), Exclusion(reason: .otherRole, count: 1)])
     }
 
     /// A miss shows one place once: a cell and its own label are one near miss, not two of three.
-    @Test func aMissShowsOnePlaceOnce() {
-        let other = ScreenRect(x: 0, y: 100, width: 60, height: 12)
+    @Test func aMissShowsOnePlaceOnce() throws {
+        let other = try ScreenRect(x: 0, y: 100, width: 60, height: 12)
         guard case .nearest(let n) = judged([tree("Remove", "AXCell"), tree("Remove", "AXStaticText"), tree("Rename", at: other)],
                                             .exact("Removed")).outcome else { Issue.record("matched"); return }
         #expect(n.map(\.found.text.value) == ["Remove", "Rename"])
@@ -299,8 +300,8 @@ import Testing
 
     /// A role narrows the matches, never the text they are placed near: the anchor is any
     /// text on screen.
-    @Test func anAnchorIsAnyTextWhateverTheRole() {
-        let r = judged([tree("Beta", "AXStaticText", at: ScreenRect(x: 0, y: 417, width: 40, height: 18)), tree("Remove")],
+    @Test func anAnchorIsAnyTextWhateverTheRole() throws {
+        let r = judged([tree("Beta", "AXStaticText", at: try ScreenRect(x: 0, y: 417, width: 40, height: 18)), tree("Remove")],
                        .exact("Remove"), role: Self.button, near: .contains("Beta"))
         guard case .matched(let m) = r.outcome else { Issue.record("not placed"); return }
         #expect(m.all == [tree("Remove")])

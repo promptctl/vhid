@@ -1,3 +1,5 @@
+import ScreenSpace
+
 /// Where a click lands: the windows in front of one, and the system's hit test that settles
 /// what a frame alone cannot. One rule for the tree's walk and for which runs belong to the
 /// app a look reads, so "can this be seen" means one thing. [LAW:one-source-of-truth]
@@ -81,7 +83,7 @@ public struct Covers {
     /// overlaps only the middle says nothing of the rest. Unanswered is not hidden - what
     /// is under it is read, and each finding asks for itself.
     public func hide(_ rect: ScreenRect) -> Bool {
-        let whole = windows.filter { $0.frame.cgRect.contains(rect.cgRect) }
+        let whole = windows.filter { $0.frame.contains(rect) }
         guard !whole.isEmpty else { return false }
         guard !whole.contains(where: { $0.pid == owner }) else { return true }
         guard case .answered(let pid) = hit(rect.centre) else { return false }

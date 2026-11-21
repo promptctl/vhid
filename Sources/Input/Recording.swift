@@ -2,6 +2,7 @@ import Foundation
 import KeyboardLayouts
 import Keystrokes
 import Pointing
+import ScreenSpace
 
 /// One event as the session tap delivered it, reduced to what a recording reads: when,
 /// from which device, where the cursor was, and what happened.
@@ -48,8 +49,9 @@ public struct Recorder {
     /// them is vhid's, not the person's.
     public var vhid: Set<UInt64>
     public let start: ScreenPoint
-    /// Whether a point is on a screen's edge, where motion can be stopped short.
-    private let atEdge: @Sendable (ScreenPoint) -> Bool
+    /// Whether a point is on a display's edge, where motion can be stopped short: the rule
+    /// `Displays.isAtEdge`, over the layout as it is when asked, which may not be readable.
+    private let atEdge: @Sendable (ScreenPoint) throws(LayoutUnreadable) -> Bool
 
     private var lines: [Line]
     /// Keys the person holds, modifiers apart.
@@ -70,6 +72,10 @@ public struct Recorder {
     public private(set) var unmapped = 0
     /// Motion of vhid's that ended on a screen edge, after which the offset may be wrong.
     public private(set) var vhidAtEdge = 0
+    /// The person's moves that were at no place once vhid's motion was taken out of them: an
+    /// offset gone wrong, left out rather than written where the person was not.
+    /// [LAW:no-silent-failure]
+    public private(set) var unplaced = 0
 
     private enum Line {
         case keys(Duration, Set<Usage>)
@@ -86,7 +92,7 @@ public struct Recorder {
     /// A recording from `start`, with the session's modifier `flags` as they were then:
     /// the first keys line, at 0, is the modifiers already down. vhid holds nothing then,
     /// because recording refuses to start while it holds the devices.
-    public init(start: ScreenPoint, flags: UInt64, vhid: Set<UInt64>, atEdge: @escaping @Sendable (ScreenPoint) -> Bool) {
+    public init(start: ScreenPoint, flags: UInt64, vhid: Set<UInt64>, atEdge: @escaping @Sendable (ScreenPoint) throws(LayoutUnreadable) -> Bool) {
         self.start = start
         self.vhid = vhid
         self.atEdge = atEdge
@@ -96,14 +102,15 @@ public struct Recorder {
     }
 
     /// Takes one event, writing a line when it changed what the person holds or where
-    /// they put the cursor.
-    public mutating func take(_ event: TapEvent) {
+    /// they put the cursor. Throws when a move of vhid's needs the layout to tell an edge
+    /// and the layout cannot be read, which leaves the offset unknown from there.
+    public mutating func take(_ event: TapEvent) throws(LayoutUnreadable) {
         // Never before the line before it: the tap can hand two devices' events over a
         // hair out of order, and a script's times may not go backwards.
         let event = TapEvent(at: max(event.at, lines.last?.at ?? .zero), sender: event.sender, location: event.location, kind: event.kind)
         let held = self.held
         if vhid.contains(event.sender) {
-            takeVhid(event)
+            try takeVhid(event)
         } else {
             takePerson(event)
         }
@@ -131,11 +138,11 @@ public struct Recorder {
     /// What the person holds: their keys, and the session's modifiers less vhid's.
     private var held: Set<Usage> { keys.union(session.subtracting(vhidModifiers)) }
 
-    private mutating func takeVhid(_ event: TapEvent) {
+    private mutating func takeVhid(_ event: TapEvent) throws(LayoutUnreadable) {
         switch event.kind {
         case .motion:
             offset = (offset.x + event.location.x - last.x, offset.y + event.location.y - last.y)
-            vhidAtEdge += atEdge(event.location) ? 1 : 0
+            vhidAtEdge += try atEdge(event.location) ? 1 : 0
         case .flagsChanged(let code, let flags):
             session = Self.modifiers(in: flags)
             if let modifier = Usage(virtualKeyCode: code), let bit = Self.deviceBits[modifier] {
@@ -167,7 +174,11 @@ public struct Recorder {
         case .flagsChanged(_, let flags):
             session = Self.modifiers(in: flags)
         case .motion:
-            lines.append(.at(event.at, ScreenPoint(x: event.location.x - offset.x, y: event.location.y - offset.y) ?? event.location))
+            if let point = try? ScreenPoint.at(event.location.x - offset.x, event.location.y - offset.y) {
+                lines.append(.at(event.at, point))
+            } else {
+                unplaced += 1
+            }
         case .buttonDown(let button):
             buttons.insert(button)
             lines.append(.buttons(event.at, buttons))

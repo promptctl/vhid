@@ -7,6 +7,7 @@ import TestClock
 import Testing
 @testable import Helper
 @testable import vhid
+import ScreenSpace
 
 /// What a verb says when the daemon could not be reached or would not serve it: the service
 /// it dialled, which link failed, and a held key or button only when one could be.
@@ -53,7 +54,7 @@ import Testing
         func status(reply: @escaping (NSNumber?, Error?) -> Void) { respond { reply(nil, $0) } }
         func lastFailure(reply: @escaping (String?, Date?) -> Void) { reply(nil, nil) }
         func cursor(reply: @escaping (Double, Double, Error?) -> Void) { respond { reply(0, 0, $0) } }
-        func displays(reply: @escaping ([NSNumber], Error?) -> Void) { reply([0, 0, 1920, 1080].map { NSNumber(value: $0) }, nil) }
+        func displays(reply: @escaping ([NSNumber], Error?) -> Void) { reply([1, 0, 0, 1920, 1080, 1].map { NSNumber(value: $0) }, nil) }
 
         func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
             guard case .refusing = answer else { return false }
@@ -69,8 +70,8 @@ import Testing
 
     /// What `vhid type ab` against `far` says, and what `vhid click` at the cursor says,
     /// each against a far end of its own so neither counts the other's acts.
-    private static func said(_ far: FarEnd) async -> (typed: String, clicked: String) {
-        let at = ScreenPoint(x: 5, y: 5)!
+    private static func said(_ far: FarEnd) async throws -> (typed: String, clicked: String) {
+        let at = try ScreenPoint.at(5, 5)
         let typed = await failure(against: far) { try await TypeCommand.type("ab", on: VerbTests.us, into: .anywhere, with: $0.typist, front: $0.front) }
         let clicked = await failure(against: far) {
             try await ClickCommand.click(at: .point(at), button: .left, times: .single, holding: .none, with: Pointer(mouse: $0.mouse, cursor: { at }, displays: { .vast }, clock: ManualClock(), randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in }), $0.keyboard)
@@ -104,10 +105,10 @@ import Testing
     /// NSXPC fails one, because what a lookup of an unregistered name does is the
     /// machine's: this Mac answers 4099 at once, and the CI runner answered nothing until
     /// the deadline.
-    @Test func aServiceNobodyHoldsIsNamedAndNoKeyIsClaimedHeld() async {
+    @Test func aServiceNobodyHoldsIsNamedAndNoKeyIsClaimedHeld() async throws {
         let unreachable = "no launchd job answers \(Self.far) (NSCocoaErrorDomain 4099): vhidd is not installed or not loaded"
-        func helper() -> HelperConnection { HelperConnection(connection: Unanswered(), service: Self.far, replyTimeout: .seconds(20)) }
-        let at = ScreenPoint(x: 5, y: 5)!
+        func helper() throws -> HelperConnection { HelperConnection(connection: Unanswered(), service: Self.far, replyTimeout: .seconds(20)) }
+        let at = try ScreenPoint.at(5, 5)
         let typed = await Self.failure { try await Devices.using(helper()) { try await TypeCommand.type("ab", on: VerbTests.us, into: .anywhere, with: $0.typist, front: $0.front) } }
         let clicked = await Self.failure {
             try await Devices.using(helper()) { try await ClickCommand.click(at: .point(at), button: .left, times: .single, holding: .none, with: Pointer(mouse: $0.mouse, cursor: { at }, displays: { .vast }, clock: ManualClock(), randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in }), $0.keyboard) }
@@ -116,15 +117,15 @@ import Testing
         #expect(clicked == unreachable)
     }
 
-    @Test func aRefusedSignatureIsNamedAndNoKeyIsClaimedHeld() async {
-        let said = await Self.said(.unadmitting)
+    @Test func aRefusedSignatureIsNamedAndNoKeyIsClaimedHeld() async throws {
+        let said = try await Self.said(.unadmitting)
         let refused = "\(Self.far) ended the connection (NSCocoaErrorDomain 4097): vhidd refused this binary's signature, or exited while the call was in flight"
         #expect(said.typed == "\(refused). 0 of 2 characters had been posted and acknowledged before this, and the rest were not sent")
         #expect(said.clicked == refused)
     }
 
-    @Test func devicesNotUpAreSaidInTheDaemonsWordsAndNoKeyIsClaimedHeld() async {
-        let said = await Self.said(.refusing(after: 0, refusal: Self.devicesDown))
+    @Test func devicesNotUpAreSaidInTheDaemonsWordsAndNoKeyIsClaimedHeld() async throws {
+        let said = try await Self.said(.refusing(after: 0, refusal: Self.devicesDown))
         let refused = "\(Self.far) refused: devices not up: the driver extension is awaiting approval"
         #expect(said.typed == "\(refused). 0 of 2 characters had been posted and acknowledged before this, and the rest were not sent")
         #expect(said.clicked == refused)
@@ -141,8 +142,8 @@ import Testing
 
     /// Once the daemon has acknowledged an act, a failure of the devices after it may leave
     /// that key or button down, and the release that failed with it says so.
-    @Test func aFailureAfterTheDaemonActedKeepsTheHeldWarning() async {
-        let said = await Self.said(.refusing(after: 1, refusal: NSError(domain: Installation.refusalDomain, code: 1, userInfo: [NSLocalizedDescriptionKey: "the driver would not take the report"])))
+    @Test func aFailureAfterTheDaemonActedKeepsTheHeldWarning() async throws {
+        let said = try await Self.said(.refusing(after: 1, refusal: NSError(domain: Installation.refusalDomain, code: 1, userInfo: [NSLocalizedDescriptionKey: "the driver would not take the report"])))
         let refused = "\(Self.far) refused: the driver would not take the report"
         #expect(said.typed.hasSuffix("The keyboard was not released afterwards: \(refused). A key may be left held"), "\(said.typed)")
         #expect(said.clicked == "\(refused). The mouse was not released afterwards: \(refused). A button may be left held")

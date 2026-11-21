@@ -1,4 +1,5 @@
 import Foundation
+import ScreenSpace
 import Helper
 
 /// One admitted connection's way to the devices, which closes when it leaves.
@@ -113,11 +114,14 @@ final class Seat: NSObject, HelperService, @unchecked Sendable {
         }
     }
 
-    /// Where the displays are in the session in front, four numbers each. Claims nothing,
-    /// like `cursor`.
+    /// Where the displays are in the session in front, six numbers each, as
+    /// `HelperService.displays` says. Claims nothing, like `cursor`.
     func displays(reply: @escaping ([NSNumber], Error?) -> Void) {
         do {
-            reply(try screen.displays().flatMap { [$0.minX, $0.minY, $0.width, $0.height].map { NSNumber(value: Double($0)) } }, nil)
+            reply(try screen.displays().flatMap { display in
+                [Double(display.id), display.bounds.origin.x, display.bounds.origin.y, display.bounds.size.width, display.bounds.size.height,
+                 display.isActive ? 1 : 0].map { NSNumber(value: Double($0)) }
+            }, nil)
         } catch {
             reply([], refusal(error))
         }

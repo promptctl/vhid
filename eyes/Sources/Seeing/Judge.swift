@@ -1,3 +1,5 @@
+import ScreenSpace
+
 /// Turning what a reader saw into a `Reading`: which candidates match, which are nearest
 /// when none do, and what the limit cut.
 ///
@@ -208,8 +210,11 @@ extension Match {
         for span in spans where !chosen.contains(where: { $0.overlaps(span) }) {
             chosen.append(span)
         }
-        let narrowed = chosen.sorted { $0.lowerBound < $1.lowerBound }.map { span in
-            Found(first: words[span.lowerBound], rest: Array(words[span].dropFirst()), source: found.source)
+        // A stretch of all its words is the run, at the frame it was found at. A stretch's
+        // words lie inside the run's frame, so they have a box.
+        let narrowed = chosen.sorted { $0.lowerBound < $1.lowerBound }.compactMap { span in
+            span == words.indices.lowerBound...words.indices.upperBound - 1 ? found
+                : Found(first: words[span.lowerBound], rest: Array(words[span].dropFirst()), source: found.source)
         }
         return narrowed.isEmpty ? [found] : narrowed
     }

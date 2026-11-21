@@ -1,6 +1,7 @@
 import ChildProcess
 import CoreGraphics
 import Foundation
+import ScreenSpace
 import IOKit
 
 /// Where the cursor is and where the displays are, read in the session in front, whoever's
@@ -37,7 +38,7 @@ final class FrontScreen: ScreenSource, @unchecked Sendable {
     /// Something that reads the screen in one session, until it is stopped.
     protocol Reader: AnyObject {
         func cursor() throws -> (x: Double, y: Double)
-        func displays() throws -> [CGRect]
+        func displays() throws -> [OnlineDisplay]
         func stop()
     }
 
@@ -65,7 +66,7 @@ final class FrontScreen: ScreenSource, @unchecked Sendable {
 
     func cursor() throws -> (x: Double, y: Double) { try read { try $0.cursor() } }
 
-    func displays() throws -> [CGRect] { try read { try $0.displays() } }
+    func displays() throws -> [OnlineDisplay] { try read { try $0.displays() } }
 
     /// `question` asked of the front session's reader.
     private func read<Answer>(_ question: (any Reader) throws -> Answer) throws -> Answer {
@@ -142,7 +143,7 @@ struct WindowServerRefused: Error, CustomStringConvertible {
 /// Where the cursor is and where the displays are, as the daemon answers them.
 protocol ScreenSource: Sendable {
     func cursor() throws -> (x: Double, y: Double)
-    func displays() throws -> [CGRect]
+    func displays() throws -> [OnlineDisplay]
 }
 
 /// This executable, run as `--read-screen-in <audit session>`: a child in the session in
@@ -229,11 +230,12 @@ final class ChildReader: FrontScreen.Reader {
         return (fields[0], fields[1])
     }
 
-    func displays() throws -> [CGRect] {
+    func displays() throws -> [OnlineDisplay] {
         let line = try ask(.displays)
-        return try line.split(separator: ";").map { frame in
-            guard let fields = Self.numbers(frame), fields.count == 4 else { throw Failed(session: session, what: "answered '\(line)'") }
-            return CGRect(x: fields[0], y: fields[1], width: fields[2], height: fields[3])
+        return try line.split(separator: ";").map { display in
+            guard let fields = Self.numbers(display), fields.count == 6, let id = CGDirectDisplayID(exactly: fields[0]), [0, 1].contains(fields[5])
+            else { throw Failed(session: session, what: "answered '\(line)'") }
+            return OnlineDisplay(id: id, bounds: CGRect(x: fields[1], y: fields[2], width: fields[3], height: fields[4]), isActive: fields[5] == 1)
         }
     }
 

@@ -196,6 +196,7 @@ The devices' half, by layer. Lower rows depend on nothing above them.
 | `Keystrokes`, `Pointing` | key usages, key codes, buttons: plain values |
 | `Installations` | an installation's names, built from one string |
 | `ChildProcess` | starting a child and running a command to its deadline or its stop, for both halves |
+| `ScreenSpace` | the one screen space both halves speak: a point, a box, how each is spelled, and the display layout |
 | `Signals`, `Version` | catching signals, the build's version |
 
 The rest of the tree:

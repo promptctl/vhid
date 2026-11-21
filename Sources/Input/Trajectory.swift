@@ -1,5 +1,6 @@
 import Foundation
 import Pointing
+import ScreenSpace
 
 /// Where a person's aimed pointer movement is, moment by moment, from one point to another:
 /// a main movement that lands on the target, stops short, or overshoots, then as many
@@ -8,11 +9,11 @@ import Pointing
 /// tremor over the whole.
 /// Pure: every draw is taken when it is made. `docs/design/human.md`, "The path".
 public struct Trajectory: Sendable, Equatable {
-    public let start: ScreenPoint
+    public let start: Placed<ScreenPoint>
     /// The point drawn inside the target it was aimed at, where it ends.
-    public let target: ScreenPoint
+    public let target: Placed<ScreenPoint>
     /// The point or box it was aimed at, whose width its time was read off by Fitts' law.
-    public let toward: Target
+    public let toward: Placed<Target>
     /// How long the whole movement takes, by Fitts' law and a drawn pace.
     public let duration: Duration
     /// How much of each drawn deviation from the straight line the path kept to stay on the
@@ -143,8 +144,14 @@ public struct Trajectory: Sendable, Equatable {
     /// and always whole: at most 1.6 points, under the few the steering follows the path to,
     /// it swings toward every edge it runs beside, and checking it would cut every other
     /// deviation with it.
-    public init(from start: ScreenPoint, toward aimed: Target, within displays: Displays, drawing generator: inout some RandomNumberGenerator) {
-        let target = aimed.aim(from: start, drawing: &generator)
+    ///
+    /// [LAW:types-are-the-program] The start and the target are placed, so every distance
+    /// here is between two points of a layout whose diagonal is finite. A deviation drawn
+    /// past a Double is a point no display covers, so it is cut like any other off them.
+    public init(from placedStart: Placed<ScreenPoint>, toward placed: Placed<Target>, within displays: Displays, drawing generator: inout some RandomNumberGenerator) {
+        let (start, aimed) = (placedStart.value, placed.value)
+        let aim = placed.aim(from: placedStart, drawing: &generator)
+        let target = aim.value
         let pace = Self.pace.draw(using: &generator)
         let structure = Structure.draw(using: &generator)
         let (short, over) = (Self.short.draw(using: &generator), Self.over.draw(using: &generator))
@@ -181,18 +188,19 @@ public struct Trajectory: Sendable, Equatable {
         let straight = drawn(ends: 0, bow: 0)
         let depths = moments.map { displays.depth(of: straight.point(after: $0), upTo: Self.margin) }
         // The largest share whose chain is no nearer an edge than the straight line, and that
-        // chain. One is always found, at none if not before: the ends kept at none are the
-        // straight line itself, and the bow kept at none is the chain whose ends were kept.
+        // chain. None, the last share, is not checked, since it always holds: the ends kept at
+        // none are the straight line itself, and the bow kept at none is the chain whose ends
+        // were kept.
         func largest(_ keeping: @escaping (Double) -> Chain) -> (share: Double, chain: Chain) {
-            Self.shares.lazy.map { ($0, keeping($0)) }.first { _, kept in
+            Self.shares.dropLast().lazy.map { ($0, keeping($0)) }.first { _, kept in
                 zip(moments, depths).allSatisfy { moment, depth in depth.map { displays.covers(kept.point(after: moment), by: $0) } ?? true }
-            }!
+            } ?? (0, keeping(0))
         }
         let ends = largest { drawn(ends: $0, bow: 0) }.share
         let (bowKept, chosen) = largest { drawn(ends: ends, bow: $0) }
-        self.start = start
-        self.target = target
-        toward = aimed
+        self.start = placedStart
+        self.target = aim
+        toward = placed
         self.duration = duration
         kept = Kept(ends: ends, bow: bowKept)
         self.structure = structure
@@ -219,7 +227,8 @@ public struct Trajectory: Sendable, Equatable {
 
         init(_ strokes: [Submovement]) {
             self.strokes = strokes
-            begins = strokes.dropLast().reduce(into: [.zero]) { $0.append($0.last! + $1.duration) }
+            var begun = Duration.zero
+            begins = [.zero] + strokes.dropLast().map { begun += $0.duration; return begun }
         }
 
         /// Where the stroke under way at `elapsed`, the last one that has begun, is.

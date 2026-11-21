@@ -5,6 +5,7 @@ import Pointing
 import TestClock
 import Testing
 @testable import vhid
+import ScreenSpace
 
 /// What each verb does with the devices, and what it says afterwards. No daemon, no
 /// driver, no root: the devices record instead of acting. [LAW:behavior-not-structure]
@@ -107,7 +108,7 @@ import Testing
     @Test func clickReportsWhereTheButtonWentDownNotWhereItWasAimed() async throws {
         let mouse = FakeMouse(at: 0, 0, gain: 3)
         let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor }, displays: { .vast }, clock: ManualClock(), randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in })
-        let said = try await ClickCommand.click(at: .point(ScreenPoint(x: 100, y: 50)!), button: .left, times: .single, holding: .none, with: pointer, RecordingKeyboard())
+        let said = try await ClickCommand.click(at: .point(try ScreenPoint.at(100, 50)), button: .left, times: .single, holding: .none, with: pointer, RecordingKeyboard())
         #expect(said.contains("clicked left once at "))
         #expect(mouse.buttons == [.left])
         // Whatever it says it landed on is the cursor's own position by then.
@@ -117,7 +118,7 @@ import Testing
     @Test func clickPressesTheButtonAsManyTimesAsAsked() async throws {
         let mouse = FakeMouse(at: 10, 10)
         let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor }, displays: { .vast }, clock: ManualClock(), randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in })
-        let said = try await ClickCommand.click(at: .point(ScreenPoint(x: 10, y: 10)!), button: .right, times: .double, holding: .none, with: pointer, RecordingKeyboard())
+        let said = try await ClickCommand.click(at: .point(try ScreenPoint.at(10, 10)), button: .right, times: .double, holding: .none, with: pointer, RecordingKeyboard())
         #expect(mouse.buttons == [.right, .right])
         #expect(said.contains("clicked right 2 times"))
     }
@@ -128,7 +129,7 @@ import Testing
         let mouse = FakeMouse(at: 0, 0)
         let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor }, displays: { .vast }, clock: ManualClock(), randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in })
         let eight = try #require(Button(rawValue: 8))
-        let said = try await ClickCommand.click(at: .point(ScreenPoint(x: 0, y: 0)!), button: eight, times: .single, holding: .none, with: pointer, RecordingKeyboard())
+        let said = try await ClickCommand.click(at: .point(try ScreenPoint.at(0, 0)), button: eight, times: .single, holding: .none, with: pointer, RecordingKeyboard())
         #expect(mouse.buttons == [eight])
         #expect(said.contains("clicked 8 once"))
     }
@@ -139,7 +140,7 @@ import Testing
         let mouse = FakeMouse(at: 0, 0)
         let keyboard = RecordingKeyboard()
         let held = try HeldModifiers(spelled: "leftCommand+leftShift")
-        let said = try await ClickCommand.click(at: .point(ScreenPoint(x: 5, y: 5)!), button: .left, times: .single, holding: held, with: Pointer(mouse: mouse, cursor: { mouse.cursor }, displays: { .vast }, clock: ManualClock(), randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in }), keyboard)
+        let said = try await ClickCommand.click(at: .point(try ScreenPoint.at(5, 5)), button: .left, times: .single, holding: held, with: Pointer(mouse: mouse, cursor: { mouse.cursor }, displays: { .vast }, clock: ManualClock(), randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in }), keyboard)
         #expect(keyboard.down == held.pressed.usages)
         #expect(keyboard.releases == 1)
         #expect(mouse.buttons == [.left])
@@ -151,10 +152,10 @@ import Testing
         let mouse = FakeMouse(at: 0, 0)
         let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor }, displays: { .vast }, clock: ManualClock(), randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in })
         let command = try HeldModifiers(spelled: "leftCommand")
-        let scrolled = try await ScrollCommand.scroll(at: .point(ScreenPoint(x: 5, y: 5)!), vertical: 1, horizontal: 0, holding: command, with: pointer, RecordingKeyboard())
+        let scrolled = try await ScrollCommand.scroll(at: .point(try ScreenPoint.at(5, 5)), vertical: 1, horizontal: 0, holding: command, with: pointer, RecordingKeyboard())
         #expect(scrolled.hasPrefix("scrolled 1 tick vertically and 0 ticks horizontally holding leftCommand at "))
         let option = try HeldModifiers(spelled: "leftOption")
-        let dragged = try await DragCommand.drag(from: .point(ScreenPoint(x: 5, y: 5)!), to: .point(ScreenPoint(x: 9, y: 9)!), button: .left, holding: option, with: pointer, RecordingKeyboard())
+        let dragged = try await DragCommand.drag(from: .point(try ScreenPoint.at(5, 5)), to: .point(try ScreenPoint.at(9, 9)), button: .left, holding: option, with: pointer, RecordingKeyboard())
         #expect(dragged.hasPrefix("dragged left holding leftOption from "))
     }
 
@@ -163,7 +164,7 @@ import Testing
     @Test func moveGoesThereAndPressesNothing() async throws {
         let mouse = FakeMouse(at: 0, 0, gain: 3)
         let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor }, displays: { .vast }, clock: ManualClock(), randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in })
-        let said = try await MoveCommand.move(to: .point(ScreenPoint(x: 200, y: 120)!), with: pointer)
+        let said = try await MoveCommand.move(to: .point(try ScreenPoint.at(200, 120)), with: pointer)
         #expect(mouse.buttons.isEmpty)
         // Within a count's worth: at three points a count, that is as near as it can get.
         #expect(abs(mouse.cursor.x - 200) <= 3 && abs(mouse.cursor.y - 120) <= 3)
@@ -174,9 +175,9 @@ import Testing
     @Test func scrollSendsEveryTickAtThePlaceAsked() async throws {
         let mouse = FakeMouse(at: 0, 0)
         let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor }, displays: { .vast }, clock: ManualClock(), randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in })
-        let said = try await ScrollCommand.scroll(at: .point(ScreenPoint(x: 40, y: 30)!), vertical: -2, horizontal: 1, holding: .none, with: pointer, RecordingKeyboard())
+        let said = try await ScrollCommand.scroll(at: .point(try ScreenPoint.at(40, 30)), vertical: -2, horizontal: 1, holding: .none, with: pointer, RecordingKeyboard())
         #expect(mouse.scrolls == [Scroll(vertical: Count(clamping: -1), horizontal: Count(clamping: 1)), Scroll(vertical: Count(clamping: -1), horizontal: .zero)])
-        #expect(mouse.cursor == ScreenPoint(x: 40, y: 30)!)
+        #expect(mouse.cursor == (try ScreenPoint.at(40, 30)))
         #expect(said == "scrolled -2 ticks vertically and 1 tick horizontally at \(mouse.cursor)")
     }
 
@@ -185,7 +186,7 @@ import Testing
     @Test func dragPressesAtOneEndAndLetsGoAtTheOther() async throws {
         let mouse = FakeMouse(at: 0, 0, gain: 2)
         let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor }, displays: { .vast }, clock: ManualClock(), randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in })
-        let said = try await DragCommand.drag(from: .point(ScreenPoint(x: 10, y: 10)!), to: .point(ScreenPoint(x: 300, y: 200)!), button: .left, holding: .none, with: pointer, RecordingKeyboard())
+        let said = try await DragCommand.drag(from: .point(try ScreenPoint.at(10, 10)), to: .point(try ScreenPoint.at(300, 200)), button: .left, holding: .none, with: pointer, RecordingKeyboard())
         #expect(mouse.buttons == [.left])
         #expect(mouse.releases >= 1)
         #expect(abs(mouse.cursor.x - 300) < 1 && abs(mouse.cursor.y - 200) < 1)
@@ -194,7 +195,7 @@ import Testing
     }
 
     @Test func cursorSaysWhereTheCursorIs() async throws {
-        #expect(try await CursorCommand.cursor { ScreenPoint(x: -12.5, y: 40)! } == "the cursor is at \(ScreenPoint(x: -12.5, y: 40)!)")
+        #expect(try await CursorCommand.cursor { try ScreenPoint.at(-12.5, 40) } == "the cursor is at \(try ScreenPoint.at(-12.5, 40))")
     }
 }
 

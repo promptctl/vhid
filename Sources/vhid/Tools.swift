@@ -214,8 +214,8 @@ enum Tools {
     static let play: VerbTool = {
         let script = Parameter.text("script", Help.script)
         return VerbTool(Help.play, [script]) { arguments, installation in
-            let schedule = try PlayCommand.schedule(try arguments[script])
-            let played = try await Devices.using(installation) { try await PlayCommand.play(schedule, with: $0) }
+            let parsed = try Play.parse(try arguments[script])
+            let played = try await Devices.using(installation) { try await PlayCommand.play(parsed, with: $0) }
             return try PlayCommand.done(played)
         }
     }()

@@ -1,6 +1,7 @@
 import Seeing
 import Testing
 @testable import EyesVerbs
+import ScreenSpace
 
 /// The sentence the binary prints before its rows, asked with no screen behind it.
 ///
@@ -9,14 +10,14 @@ import Testing
 /// being told fifteen entries were left out cannot tell a filtered answer from a whole
 /// one, so what the sentence claims is a contract and is tested like one.
 @Suite struct WindowsCommandTests {
-    private func window(id: UInt32 = 1, owner: String = "Safari", layer: Int = 0) -> Window {
-        Window(id: id, owner: owner, pid: 400, frame: ScreenRect(x: 0, y: 33, width: 1512, height: 949), layer: layer)
+    private func window(id: UInt32 = 1, owner: String = "Safari", layer: Int = 0) throws -> Window {
+        Window(id: id, owner: owner, pid: 400, frame: try ScreenRect(x: 0, y: 33, width: 1512, height: 949), layer: layer)
     }
 
     /// Nothing filtered and nothing excluded says so by saying nothing extra: the counted
     /// clauses only appear when there is something to count.
-    @Test func awholeReadingClaimsNothingItDidNotDo() {
-        let listing = WindowListing(windows: [window(id: 1), window(id: 2)], excluded: [])
+    @Test func awholeReadingClaimsNothingItDidNotDo() throws {
+        let listing = try WindowListing(windows: [window(id: 1), window(id: 2)], excluded: [])
         let line = Windows.scope(shown: 2, listing: listing, frontmost: nil)
         #expect(line == "2 windows, front to back."
             + " On screen only: minimized, hidden and other-Space windows were never looked at."
@@ -27,13 +28,13 @@ import Testing
 
     /// The frontmost application is found by pid, not by row order: its menu at layer 101
     /// and the Dock at 20 sit above its window, and a row of it is marked wherever it falls.
-    @Test func theFrontmostApplicationsRowsAreMarkedByPidNotPosition() {
+    @Test func theFrontmostApplicationsRowsAreMarkedByPidNotPosition() throws {
         let rows = [
-            Window(id: 9, owner: "Safari", pid: 400, frame: ScreenRect(x: 10, y: 0, width: 200, height: 300), layer: 101),
-            Window(id: 8, owner: "Dock", pid: 90, frame: ScreenRect(x: 0, y: 900, width: 1512, height: 82), layer: 20),
-            Window(id: 7, owner: "Window Server", pid: 91, frame: ScreenRect(x: 0, y: 0, width: 1512, height: 33), layer: 24),
-            Window(id: 2, owner: "Finder", pid: 401, frame: ScreenRect(x: 0, y: 33, width: 800, height: 600), layer: 0),
-            Window(id: 1, owner: "Safari", pid: 400, frame: ScreenRect(x: 0, y: 33, width: 1512, height: 949), layer: 0),
+            Window(id: 9, owner: "Safari", pid: 400, frame: try ScreenRect(x: 10, y: 0, width: 200, height: 300), layer: 101),
+            Window(id: 8, owner: "Dock", pid: 90, frame: try ScreenRect(x: 0, y: 900, width: 1512, height: 82), layer: 20),
+            Window(id: 7, owner: "Window Server", pid: 91, frame: try ScreenRect(x: 0, y: 0, width: 1512, height: 33), layer: 24),
+            Window(id: 2, owner: "Finder", pid: 401, frame: try ScreenRect(x: 0, y: 33, width: 800, height: 600), layer: 0),
+            Window(id: 1, owner: "Safari", pid: 400, frame: try ScreenRect(x: 0, y: 33, width: 1512, height: 949), layer: 0),
         ]
         let lines = Windows.report(WindowListing(windows: rows, excluded: []), owner: nil,
                                    frontmost: Front.App(pid: 400, name: "Safari")).split(separator: "\n")
@@ -43,11 +44,11 @@ import Testing
 
     /// The frontmost application is named even with no row shown, and the scope tells a
     /// window the owner filter hid from an application with no window listed.
-    @Test func aFrontmostApplicationWithNoRowShownIsStillNamed() {
-        let listing = WindowListing(windows: [window(id: 1, owner: "Safari"), window(id: 2, owner: "Terminal")], excluded: [])
+    @Test func aFrontmostApplicationWithNoRowShownIsStillNamed() throws {
+        let listing = try WindowListing(windows: [window(id: 1, owner: "Safari"), window(id: 2, owner: "Terminal")], excluded: [])
         let absent = Windows.report(listing, owner: nil, frontmost: Front.App(pid: 77, name: "Float"))
         #expect(Windows.report(listing, owner: "terminal", frontmost: Front.App(pid: 999, name: "X")).contains("X (pid 999), with no window listed."))
-        #expect(Windows.report(WindowListing(windows: [window(id: 1)], excluded: []), owner: "zzz", frontmost: Front.App(pid: 400, name: "Safari"))
+        #expect(try Windows.report(WindowListing(windows: [window(id: 1)], excluded: []), owner: "zzz", frontmost: Front.App(pid: 400, name: "Safari"))
             .contains("Frontmost: Safari (pid 400), its rows hidden by the owner filter."))
         #expect(absent.contains("Frontmost: Float (pid 77), with no window listed."))
         #expect(!absent.contains("\tfront"))
@@ -58,9 +59,9 @@ import Testing
     /// package sees anything. Measured on one Mac: 29 on screen against 110 in all. A
     /// caller told "no Safari window" while Safari sits minimized was told something true
     /// about the screen and false about the question they asked.
-    @Test func everyReadingSaysItOnlyLookedAtWhatIsOnScreen() {
-        let whole = Windows.scope(shown: 2, listing: WindowListing(windows: [window()], excluded: []), frontmost: nil)
-        let narrowed = Windows.scope(
+    @Test func everyReadingSaysItOnlyLookedAtWhatIsOnScreen() throws {
+        let whole = try Windows.scope(shown: 2, listing: WindowListing(windows: [window()], excluded: []), frontmost: nil)
+        let narrowed = try Windows.scope(
             shown: 0,
             listing: WindowListing(windows: [window()], excluded: [WindowExclusion(reason: .invisible, count: 1)]), frontmost: nil)
         for line in [whole, narrowed] {
@@ -70,15 +71,15 @@ import Testing
     }
 
     /// One window is one window, not "1 windows".
-    @Test func theCountReadsAsEnglish() {
-        let listing = WindowListing(windows: [window()], excluded: [])
+    @Test func theCountReadsAsEnglish() throws {
+        let listing = try WindowListing(windows: [window()], excluded: [])
         #expect(Windows.scope(shown: 1, listing: listing, frontmost: nil).hasPrefix("1 window, front to back."))
     }
 
     /// The owner filter says how much it took away and out of what, because the rows below
     /// cannot show what is missing from them.
-    @Test func theOwnerFilterDeclaresWhatItTookAway() {
-        let listing = WindowListing(windows: (1...12).map { window(id: UInt32($0)) }, excluded: [])
+    @Test func theOwnerFilterDeclaresWhatItTookAway() throws {
+        let listing = try WindowListing(windows: (1...12).map { try window(id: UInt32($0)) }, excluded: [])
         let line = Windows.scope(shown: 2, listing: listing, frontmost: nil)
         #expect(line.contains("2 windows, front to back"))
         #expect(line.contains("10 of 12 filtered by owner"))
@@ -87,9 +88,9 @@ import Testing
     /// The measured case this line exists for: on a real Mac the window server listed 27
     /// entries and 15 of them were not windows. A reading that printed 12 rows and said
     /// nothing about the other 15 is the false negative nobody can detect.
-    @Test func everyEntryTheWindowServerListedIsAccountedFor() {
-        let listing = WindowListing(
-            windows: (1...12).map { window(id: UInt32($0)) },
+    @Test func everyEntryTheWindowServerListedIsAccountedFor() throws {
+        let listing = try WindowListing(
+            windows: (1...12).map { try window(id: UInt32($0)) },
             excluded: [
                 WindowExclusion(reason: .arealess, count: 2),
                 WindowExclusion(reason: .invisible, count: 12),
@@ -105,9 +106,9 @@ import Testing
 
     /// Both narrowings are reported together, because either one alone would make the
     /// count of rows look like the whole truth.
-    @Test func theFilterAndTheExclusionsAreBothReported() {
-        let listing = WindowListing(
-            windows: (1...12).map { window(id: UInt32($0)) },
+    @Test func theFilterAndTheExclusionsAreBothReported() throws {
+        let listing = try WindowListing(
+            windows: (1...12).map { try window(id: UInt32($0)) },
             excluded: [WindowExclusion(reason: .invisible, count: 3)]
         )
         let line = Windows.scope(shown: 4, listing: listing, frontmost: nil)
@@ -118,7 +119,7 @@ import Testing
     /// The layer is on every row, because it is the one fact that tells an open menu from
     /// an ordinary window and the tool no longer decides which of those a caller meant.
     @Test func theRowCarriesTheLayerAndTheCoordinatesVhidClicks() throws {
-        let frame = ScreenRect(x: 160, y: 33, width: 723, height: 949)
+        let frame = try ScreenRect(x: 160, y: 33, width: 723, height: 949)
         let row = Windows.row(Window(id: 104, owner: "System Settings", pid: 400, frame: frame, layer: 101))
         #expect(row == "104\tSystem Settings\tL101\t160,33,723,949")
         #expect(try printedRects(row) == [frame])
@@ -127,12 +128,12 @@ import Testing
     /// `kCGWindowOwnerName` is an optional key, so a window can be visible and clickable
     /// with nothing to call it by. It is named as unnamed rather than left blank, so the
     /// column cannot be read as an empty field.
-    @Test func aWindowWithNoOwnerNameStillGetsARow() {
+    @Test func aWindowWithNoOwnerNameStillGetsARow() throws {
         let row = Windows.row(Window(
             id: 7,
             owner: nil,
             pid: 400,
-            frame: ScreenRect(x: 0, y: 0, width: 100, height: 50),
+            frame: try ScreenRect(x: 0, y: 0, width: 100, height: 50),
             layer: 0
         ))
         #expect(row == "7\t(unnamed)\tL0\t0,0,100,50")

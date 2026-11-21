@@ -19,10 +19,11 @@ struct PlayCommand: AsyncParsableCommand {
     func run() async throws {
         let ending: Ending
         do {
-            // [LAW:parse-dont-validate] Parsed before anything is connected or moved, so a
-            // script that cannot be played whole moves nothing.
-            let schedule = try Self.schedule(String(decoding: FileHandle.standardInput.readDataToEndOfFile(), as: UTF8.self))
-            ending = .finished(try await Devices.using(try service.installation()) { try await Self.play(schedule, with: $0) })
+            // [LAW:parse-dont-validate] Parsed before anything is connected, and placed on the
+            // displays before anything moves, so a script that cannot be played whole moves
+            // nothing.
+            let script = try Play.parse(String(decoding: FileHandle.standardInput.readDataToEndOfFile(), as: UTF8.self))
+            ending = .finished(try await Devices.using(try service.installation()) { try await Self.play(script, with: $0) })
         } catch {
             // The reports that did go out are printed even for a run that stopped, so a
             // harness can see how far it got. [LAW:no-silent-failure]
@@ -32,14 +33,12 @@ struct PlayCommand: AsyncParsableCommand {
         for line in try Self.lines(of: ending) { print(line) }
     }
 
-    /// A script's text as what the player sends, refused whole or not at all.
-    static func schedule(_ text: String) throws -> Schedule {
-        try Schedule(Play.parse(text))
-    }
-
-    /// The verb itself, over devices from anywhere. [LAW:decomposition]
-    static func play(_ schedule: Schedule, with devices: Devices) async throws -> Played {
-        try await Player(pointer: devices.pointer, keyboard: devices.keyboard, wall: epochMicroseconds, lead: lead).play(schedule)
+    /// The verb itself, over devices from anywhere: the script placed on the displays read
+    /// for it, so a point no display holds is refused at its line before anything moves, then
+    /// played. [LAW:decomposition]
+    static func play(_ script: Play, with devices: Devices) async throws -> Played {
+        let schedule = try Schedule(script, on: try await devices.pointer.displays())
+        return try await Player(pointer: devices.pointer, keyboard: devices.keyboard, wall: epochMicroseconds, lead: lead).play(schedule)
     }
 
     /// What a play left behind: the reports that went out, and - only when it finished -

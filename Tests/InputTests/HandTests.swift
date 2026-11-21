@@ -4,17 +4,18 @@ import Synchronization
 import TestClock
 import Testing
 @testable import Input
+import ScreenSpace
 
 /// The pauses a pointer makes around its presses, on a fake clock: a rest before the
 /// button goes down, the button held, the clicks of a double click a gap apart, and the
 /// wheel's notches spaced. `docs/design/human.md`, "Clicks" and "Scrolling".
 @Suite @MainActor struct HandTests {
-    static let origin = ScreenPoint(x: 0, y: 0)!
+    static let origin = try! ScreenPoint.at(0, 0)
 
     /// A mouse that logs every report with the time on `clock` it went out at, in whole
     /// milliseconds, and a pointer over it whose pauses are collected as traced.
     final class Timed: Mouse {
-        let mouse = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
+        let mouse = FakeMouse(at: try! ScreenPoint.at(0, 0))
         let clock = ManualClock()
         private let state = Mutex<(log: [String], pauses: [Pause])>(([], []))
 
@@ -49,7 +50,7 @@ import Testing
         #expect(timed.log == ["\(rest / .milliseconds(1)) down", "\((rest + hold1) / .milliseconds(1)) up",
                               "\((rest + hold1 + gap) / .milliseconds(1)) down", "\((rest + hold1 + gap + hold2) / .milliseconds(1)) up"])
         #expect(timed.clock.now.offset == rest + hold1 + gap + hold2)
-        #expect(Self.ms(timed.pauses) == [258, 66, 96, 87])
+        #expect(Self.ms(timed.pauses) == [215, 113, 76, 86])
     }
 
     /// One seed draws one set of pauses, and another seed another.
@@ -114,7 +115,7 @@ import Testing
     /// before letting go.
     @Test func aDragRestsHoldsCarriesAndRestsBeforeLettingGo() async throws {
         let timed = Timed()
-        _ = try await timed.pointer().drag(from: .point(Self.origin), to: .point(ScreenPoint(x: 40, y: 0)!), button: .left)
+        _ = try await timed.pointer().drag(from: .point(Self.origin), to: .point(try ScreenPoint.at(40, 0)), button: .left)
         #expect(timed.pauses.map(\.kind) == [.hand(.rest), .hand(.dragHold), .hand(.rest)])
         let rest = timed.pauses[0].length
         #expect(timed.log.first == "\(rest / .milliseconds(1)) down")

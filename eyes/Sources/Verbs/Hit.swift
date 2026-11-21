@@ -1,5 +1,6 @@
 import AppKit
 import ArgumentParser
+import ScreenSpace
 import Seeing
 import Telemetry
 import Tree
@@ -34,8 +35,7 @@ public struct Hit: AsyncParsableCommand {
     /// Two numbers as a point, or the refusal: `inf` and `nan` are numbers a shell hands over.
     /// [LAW:parse-dont-validate] One rule for the verb and the MCP tool. [LAW:single-enforcer]
     static func point(_ x: Double, _ y: Double) throws -> ScreenPoint {
-        guard x.isFinite, y.isFinite else { throw ValidationError("(\(x), \(y)) is not a place on the screen") }
-        return ScreenPoint(x: x, y: y)
+        do { return try ScreenPoint.at(x, y) } catch { throw ValidationError("\(error)") }
     }
 
     /// Where a click at a point lands, or that nothing is there: the process in it, a fake in

@@ -1,5 +1,6 @@
 import Foundation
 import Pointing
+import ScreenSpace
 
 /// Points per count by report length, at one report interval: what macOS's acceleration
 /// made of reports that size, measured, and the reports that carry the cursor a given
@@ -60,22 +61,22 @@ public struct Steering: Hashable, Sendable {
         return samples[samples.count - 1].perCount
     }
 
-    /// The reports that carry the cursor from `from` to `to`, and where they are expected to
-    /// leave it. One report when the distance fits in one, and otherwise as many as it
-    /// takes, each as long as a report carries. What no whole count covers is left over
-    /// in the expected point, so the next line's reports make it up rather than lose it.
-    public func reports(from: ScreenPoint, to: ScreenPoint) -> (reports: [Move], lands: ScreenPoint) {
-        var at = (x: from.x, y: from.y)
+    /// The reports that carry the cursor `distance`, and what of it they are expected to
+    /// leave. One report when the distance fits in one, and otherwise as many as it takes,
+    /// each as long as a report carries. What no whole count covers is what is left, so the
+    /// next line's reports make it up rather than lose it.
+    public func reports(by distance: (x: Double, y: Double)) -> (reports: [Move], left: (x: Double, y: Double)) {
+        var left = distance
         var reports: [Move] = []
         while true {
-            let (move, counts, moved) = report(dx: to.x - at.x, dy: to.y - at.y)
+            let (move, counts, moved) = report(dx: left.x, dy: left.y)
             guard move != .none else { break }
             reports.append(move)
-            at = (at.x + moved.x, at.y + moved.y)
+            left = (left.x - moved.x, left.y - moved.y)
             // The longest report there is, in any direction, and still short: another.
             guard counts == Int(Count.limit) else { break }
         }
-        return (reports, ScreenPoint(x: at.x, y: at.y) ?? from)
+        return (reports, left)
     }
 
     /// The one report whose expected motion comes nearest `dx, dy`, its length in counts,
@@ -106,14 +107,15 @@ extension Pointer {
     ///
     /// `timeline` paces the bursts and the wait after them, so a test runs it on a clock of
     /// its own. [LAW:effects-at-boundaries]
-    func calibrate(_ calibration: Schedule.Calibration, from start: ScreenPoint) async throws -> Steering {
-        let away = hypot(calibration.toward.x - start.x, calibration.toward.y - start.y)
-        let unit = away > 0 ? ((calibration.toward.x - start.x) / away, (calibration.toward.y - start.y) / away) : (1.0, 0.0)
+    func calibrate(_ calibration: Schedule.Calibration, from start: Placed<ScreenPoint>, within displays: Displays) async throws -> Steering {
+        let (dx, dy) = (calibration.toward.value.x - start.value.x, calibration.toward.value.y - start.value.y)
+        let away = hypot(dx, dy)
+        let unit = away > 0 ? (dx / away, dy / away) : (1.0, 0.0)
         var samples: [Steering.Sample] = []
         for size in Self.ladder {
             let step = Move(x: Count(clamping: Int((unit.0 * Double(size)).rounded())), y: Count(clamping: Int((unit.1 * Double(size)).rounded())))
-            let long = try await run(step, times: Self.burst, from: start, every: calibration.interval)
-            let short = try await run(step, times: 1, from: start, every: calibration.interval)
+            let long = try await run(step, times: Self.burst, from: start, within: displays, every: calibration.interval)
+            let short = try await run(step, times: 1, from: start, within: displays, every: calibration.interval)
             // The screen is only known to go as far as the recording went. A burst carried
             // past its farthest point may have been stopped at a screen edge and measured
             // short, so it is not taken, and nothing longer is tried: the table holds the
@@ -129,16 +131,16 @@ extension Pointer {
     }
 
     /// How far `times` reports of `step`, `every` apart from `start`, carried the cursor.
-    private func run(_ step: Move, times: Int, from start: ScreenPoint, every interval: Duration) async throws -> Double {
-        try await home(on: start)
-        let before = try await cursor()
+    private func run(_ step: Move, times: Int, from start: Placed<ScreenPoint>, within displays: Displays, every interval: Duration) async throws -> Double {
+        try await home(on: start, within: displays)
+        let before = try await cursor(on: displays).value
         for _ in 0..<times {
             try Task.checkCancellation()
             try await mouse.move(by: step)
             try await timeline.sleep(timeline.now() + interval)
         }
         try await timeline.sleep(timeline.now() + Self.settle)
-        let after = try await cursor()
+        let after = try await cursor(on: displays).value
         return hypot(after.x - before.x, after.y - before.y)
     }
 }

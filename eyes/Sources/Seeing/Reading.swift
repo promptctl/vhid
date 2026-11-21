@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import ScreenSpace
 
 /// The most findings one reading may return, which is always at least one.
 ///
@@ -328,13 +329,17 @@ public struct Exclusion: Sendable, Hashable {
         /// front one, or beside it. Only a reader that sees what is on top meets these; the
         /// tree never walks another app's windows.
         case outside
+        /// Text a recogniser read but could not place: a box at no place or with no area, or
+        /// words further apart than a Double spans. Where it is drawn is unknown, so the region
+        /// was not read whole. [LAW:no-silent-failure]
+        case unlocated
 
         /// Whether a part set aside for this reason went unread, rather than being read and
         /// left out: then the region was not read whole, and an absence in it proves nothing.
         /// [LAW:single-enforcer] Every reader's reach is decided here.
         public var leavesUnread: Bool {
             switch self {
-            case .unanswered, .unwalked, .overlaid, .roleUnknown: true
+            case .unanswered, .unwalked, .overlaid, .roleUnknown, .unlocated: true
             case .wordless, .unplaced, .area, .covered, .duplicate, .ranked, .outside, .otherRole: false
             }
         }

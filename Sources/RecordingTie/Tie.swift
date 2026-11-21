@@ -21,8 +21,47 @@ public enum FromApp: Codable, Equatable, Sendable {
     case recording
     /// Something the person should hear about the recording, on stderr.
     case note(String)
+    /// How the recording ended and what it left out, said once, just before the script.
+    case summary(Summary)
     /// The recording, whole, as `vhid play` reads it. The last message.
     case script(String)
+}
+
+/// How a recording ended and what it left out, as the command keeps it on its record.
+/// [LAW:types-are-the-program] The ending is a case, not words, so a record says which
+/// ending it was the way a test can ask.
+public struct Summary: Codable, Equatable, Sendable {
+    public let ending: Ending
+    /// Key presses with no HID usage, fn among them, left out.
+    public let unmappedKeys: Int
+    /// Motion of vhid's that ended on a display's edge, after which the person's points may be off.
+    public let vhidAtEdge: Int
+    /// The person's moves that, with vhid's motion taken out, were at no place, left out.
+    public let unplacedMoves: Int
+
+    public init(ending: Ending, unmappedKeys: Int, vhidAtEdge: Int, unplacedMoves: Int) {
+        self.ending = ending
+        self.unmappedKeys = unmappedKeys
+        self.vhidAtEdge = vhidAtEdge
+        self.unplacedMoves = unplacedMoves
+    }
+
+    public enum Ending: String, Codable, Sendable {
+        /// Control-C, whose keys came out.
+        case stopped
+        /// Any other stop of the command's, which drops nothing.
+        case ended
+        /// macOS turned the tap off, so events were missed from there.
+        case tapOff = "tap_off"
+        /// An hour, as long as a script plays.
+        case hour
+        /// vhid's devices came back and could not be told apart again.
+        case devicesUntold = "devices_untold"
+        /// The tap gave an event at no place on the screen.
+        case tapAtNoPlace = "tap_at_no_place"
+        /// The display layout could not be read to tell an edge.
+        case layoutUnreadable = "layout_unreadable"
+    }
 }
 
 /// One end of the socket, as lines of messages.

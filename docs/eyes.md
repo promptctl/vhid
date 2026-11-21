@@ -51,8 +51,11 @@ accessibility tree gives the element (`AXButton`, `AXLink`, `AXTextField`, ...),
 is what tells a page's Settings button from a browser bookmark of the same name, or a
 field from its label. The box is `x,y,width,height` in the same points, the form `--rect`
 takes, rounded outward to whole points so it covers the run and holds the point printed
-beside it. Every rectangle eyes prints is in that form, a window's or display's bounds and
-a scope line's region too, so any of them can be passed back as `--rect`.
+beside it. A frame is printed as the app gave it, however large: a document's text area
+can be 1e20 points wide, and `click` presses such a box where a display shows it. Every
+rectangle eyes prints is in that form, a window's or display's bounds and a scope line's
+region too, so any of them can be passed back as `--rect`, and every number is written out
+whole, never as `1e+20`.
 
 A row the tree found is its element's first text in words, of its value, title and
 description. Whatever else the element says in words follows the role, each after the

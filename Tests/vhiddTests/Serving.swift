@@ -1,5 +1,6 @@
 import Foundation
 @testable import vhidd
+import ScreenSpace
 
 extension Readiness {
     /// Readiness whose one attempt brought `devices` up, as a seat finds it once vhidd serves.
@@ -33,7 +34,7 @@ final class RecordingDevices: NSObject, ServedDevices, @unchecked Sendable {
 /// never read it.
 struct FixedScreen: ScreenSource {
     var at = (x: 12.5, y: 40.0)
-    var frames = [CGRect(x: 0, y: 0, width: 1920, height: 1080)]
+    var online = [OnlineDisplay(id: 1, bounds: CGRect(x: 0, y: 0, width: 1920, height: 1080), isActive: true)]
     func cursor() throws -> (x: Double, y: Double) { at }
-    func displays() throws -> [CGRect] { frames }
+    func displays() throws -> [OnlineDisplay] { online }
 }

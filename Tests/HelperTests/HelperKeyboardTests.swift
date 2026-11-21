@@ -4,6 +4,7 @@ import OwnThread
 import Pointing
 import Testing
 @testable import Helper
+import ScreenSpace
 
 /// The client's side of the privilege seam, driven against a service of the test's own
 /// on the far end of a real XPC connection: an anonymous listener in this process, so
@@ -90,7 +91,7 @@ import Testing
         }
         func displays(reply: @escaping ([NSNumber], Error?) -> Void) {
             lock.lock(); pointing.append("displays"); lock.unlock()
-            respond { reply([0, 0, 1920, 1080, 1920, -200, 1280, 800].map { NSNumber(value: $0) }, $0) }
+            respond { reply([1, 0, 0, 1920, 1080, 1, 5, 1920, -200, 1280, 800, 0].map { NSNumber(value: $0) }, $0) }
         }
 
         func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
@@ -196,11 +197,13 @@ import Testing
         #expect(far.service.pointed == ["cursor"])
     }
 
-    /// The displays cross the wire as four numbers each and arrive as rectangles, a display
-    /// above the main one's top included, and the read leaves the connection unspoken.
-    @Test func theDisplaysAreReadAsRectangles() throws {
+    /// The displays cross the wire as six numbers each and arrive as online displays - each
+    /// its id, its bounds and whether it is active - a sleeping display above the main one's
+    /// top included, and the read leaves the connection unspoken.
+    @Test func theDisplaysAreReadAsOnlineDisplays() throws {
         let (helper, far) = helper(.acknowledge)
-        #expect(try helper.displays() == [CGRect(x: 0, y: 0, width: 1920, height: 1080), CGRect(x: 1920, y: -200, width: 1280, height: 800)])
+        #expect(try helper.displays() == [OnlineDisplay(id: 1, bounds: CGRect(x: 0, y: 0, width: 1920, height: 1080), isActive: true),
+                                          OnlineDisplay(id: 5, bounds: CGRect(x: 1920, y: -200, width: 1280, height: 800), isActive: false)])
         try helper.leave()
         #expect(far.service.pointed == ["displays"])
     }

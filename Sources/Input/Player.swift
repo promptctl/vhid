@@ -1,6 +1,7 @@
 import Foundation
 import Keystrokes
 import Pointing
+import ScreenSpace
 
 /// What `vhid play` sends and when: a `Play` as one act per device call, on one clock.
 ///
@@ -25,7 +26,10 @@ import Pointing
 /// table built up. Scripts of `move` lines have no steer and no calibration: their counts
 /// are the input.
 public struct Schedule: Hashable, Sendable {
-    public let start: ScreenPoint
+    public let start: Placed<ScreenPoint>
+    /// The displays it was placed on, the layout read for the play, which every closed loop
+    /// and calibration of it is kept on.
+    public let displays: Displays
     public let acts: [Act]
     /// What to measure before the clock starts, when the script has `at` lines.
     public let calibration: Calibration?
@@ -40,18 +44,19 @@ public struct Schedule: Hashable, Sendable {
         public let reach: Double
         /// The `at` point farthest from the start, which calibration heads for, so it moves
         /// the cursor where the recording went.
-        public let toward: ScreenPoint
+        public let toward: Placed<ScreenPoint>
 
         /// The gap assumed for a script with one `at` line, or all at one time: the 120 Hz
         /// a trackpad reports at.
         public static let pace: Duration = .microseconds(8333)
 
-        init(start: ScreenPoint, points: [(at: Duration, point: ScreenPoint)]) {
+        init(start: Placed<ScreenPoint>, points: [(at: Duration, point: Placed<ScreenPoint>)]) {
             let gaps = zip(points, points.dropFirst()).map { $1.at - $0.at }.filter { $0 > .zero }.sorted()
             interval = gaps.isEmpty ? Self.pace : gaps[gaps.count / 2]
             let path = [start] + points.map(\.point)
-            reach = zip(path, path.dropFirst()).map { hypot($1.x - $0.x, $1.y - $0.y) }.max() ?? 0
-            toward = path.max { hypot($0.x - start.x, $0.y - start.y) < hypot($1.x - start.x, $1.y - start.y) } ?? start
+            let far = { (a: Placed<ScreenPoint>, b: Placed<ScreenPoint>) in hypot(b.value.x - a.value.x, b.value.y - a.value.y) }
+            reach = zip(path, path.dropFirst()).map(far).max() ?? 0
+            toward = path.max { far(start, $0) < far(start, $1) } ?? start
         }
     }
 
@@ -72,13 +77,13 @@ public struct Schedule: Hashable, Sendable {
         case wheel(Scroll)
         /// The cursor should be here now: reports from the calibrated table, without
         /// reading the cursor.
-        case at(ScreenPoint)
+        case at(Placed<ScreenPoint>)
         /// The keys already held, said again so the daemon keeps them. Not a report: the
         /// driver is sent nothing while it still holds them.
         case keepAlive(HeldKeys)
         /// The pointer's closed loop onto this point, however many reports it takes. Not a
         /// report of the script's, and the time it takes pushes every later act back.
-        case steer(ScreenPoint)
+        case steer(Placed<ScreenPoint>)
 
         var isReport: Bool {
             switch self {
@@ -101,16 +106,24 @@ public struct Schedule: Hashable, Sendable {
         acts.prefix(count).contains { if case .keys = $0.report { true } else { false } }
     }
 
-    public init(_ play: Play) throws(Play.ScriptInvalid) {
+    /// `play` placed on `displays`, the layout read for it: a start or an `at` point no
+    /// display holds is refused at its line, before anything moves, never moved to an edge.
+    /// [LAW:no-silent-failure]
+    public init(_ play: Play, on displays: Displays) throws(Play.ScriptInvalid) {
+        func placed(_ point: ScreenPoint, line: Int) throws(Play.ScriptInvalid) -> Placed<ScreenPoint> {
+            do { return try displays.place(point) } catch { throw Play.ScriptInvalid(line: line, reason: "\(error)") }
+        }
+        let start = try placed(play.start, line: play.startLine)
         var keys = (held: HeldKeys.none, line: 0)
         var buttons: Set<Button> = []
         var acts: [Act] = []
-        let points = play.events.compactMap { event in if case .at(let point) = event.report { (event.at, point) } else { nil } }
+        var points: [(at: Duration, point: Placed<ScreenPoint>)] = []
+        let steers = play.events.contains { if case .at = $0.report { true } else { false } }
         // Where the steer before a click aims: the last at point, or the start before any.
-        var aim = play.start
+        var aim = start
         // [LAW:dataflow-not-control-flow] A script of move lines steers nowhere: its steers
         // are an empty list, not a branch around them.
-        let steer = { (at: Duration, line: Int) in points.isEmpty ? [] : [Act(at: at, report: .steer(aim), line: line)] }
+        let steer = { (at: Duration, line: Int) in steers ? [Act(at: at, report: .steer(aim), line: line)] : [] }
         for event in play.events {
             var quiet = acts.last?.at ?? .zero
             while !keys.held.usages.isEmpty, event.at - quiet > Self.keepAlive {
@@ -130,7 +143,9 @@ public struct Schedule: Hashable, Sendable {
                 acts += steer(event.at, event.line)
             case .move(let delta): report = .move(delta)
             case .wheel(let delta): report = .wheel(delta)
-            case .at(let point):
+            case .at(let given):
+                let point = try placed(given, line: event.line)
+                points.append((event.at, point))
                 aim = point
                 report = .at(point)
             }
@@ -139,9 +154,10 @@ public struct Schedule: Hashable, Sendable {
         guard let last = acts.last else {
             throw Play.ScriptInvalid(line: play.events[0].line, reason: "no line of this script sends a report")
         }
-        self.start = play.start
+        self.start = start
+        self.displays = displays
         self.acts = acts + steer(last.at, last.line)
-        self.calibration = points.isEmpty ? nil : Calibration(start: play.start, points: points)
+        self.calibration = points.isEmpty ? nil : Calibration(start: start, points: points)
     }
 }
 
@@ -187,16 +203,16 @@ public struct Player {
         // The act being waited on or played, which a stop names.
         var line: Int?
         do {
-            var reports = try await pointer.home(on: play.start)
+            var reports = try await pointer.home(on: play.start, within: play.displays)
             // Measured before the clock starts, from the start, and the cursor brought back
             // to it after. [LAW:no-ambient-temporal-coupling] The table exists before any
             // at act can ask for it.
             var course: Course?
             if let calibration = play.calibration {
-                let steering = try await pointer.calibrate(calibration, from: play.start)
-                reports += try await pointer.home(on: play.start)
+                let steering = try await pointer.calibrate(calibration, from: play.start, within: play.displays)
+                reports += try await pointer.home(on: play.start, within: play.displays)
                 // Read back: the loop stops beside a point it cannot land on.
-                course = Course(steering: steering, interval: calibration.interval, at: try await pointer.cursor())
+                course = Course(steering: steering, interval: calibration.interval, at: try await pointer.cursor(on: play.displays))
             }
             let started = timeline.now()
             let epoch = wall()
@@ -256,12 +272,12 @@ public struct Player {
                 case .steer(let point):
                     let current = try steered(course)
                     let began = timeline.now()
-                    try await pointer.home(on: point)
+                    try await pointer.home(on: point, within: play.displays)
                     delay += timeline.now() - began
-                    course = Course(steering: current.steering, interval: current.interval, at: try await pointer.cursor())
+                    course = Course(steering: current.steering, interval: current.interval, at: try await pointer.cursor(on: play.displays))
                 case .at(let point):
                     let current = try steered(course)
-                    let (moves, lands) = current.steering.reports(from: current.at, to: point)
+                    let (moves, left) = current.steering.reports(by: current.toward(point))
                     // A step longer than one report is paced as the table was measured, so
                     // macOS accelerates each report as the table says.
                     for (number, move) in moves.enumerated() {
@@ -269,7 +285,7 @@ public struct Player {
                         try await pointer.mouse.move(by: move)
                     }
                     sentReports = moves.count
-                    course = Course(steering: current.steering, interval: current.interval, at: lands)
+                    course = Course(steering: current.steering, interval: current.interval, at: point, left: left)
                 case .keys(let held), .keepAlive(let held): try await keyboard.hold(held)
                 case .buttons(let held): try await pointer.mouse.hold(held)
                 case .move(let delta): try await pointer.mouse.move(by: delta)
@@ -293,11 +309,19 @@ public struct Player {
         }
     }
 
-    /// Where the table thinks the cursor is, the table, and the pace it was measured at.
+    /// The table, the pace it was measured at, and where the table thinks the cursor is: the
+    /// last point it was steered to or read at, and what of the way there no whole count
+    /// covered, which the next line's reports make up rather than lose.
     private struct Course {
         let steering: Steering
         let interval: Duration
-        let at: ScreenPoint
+        let at: Placed<ScreenPoint>
+        var left: (x: Double, y: Double) = (0, 0)
+
+        /// How far the cursor has to go to reach `point`: finite, both points being placed.
+        func toward(_ point: Placed<ScreenPoint>) -> (x: Double, y: Double) {
+            (point.value.x - at.value.x + left.x, point.value.y - at.value.y + left.y)
+        }
     }
 
     /// The course of a schedule that has at or steer acts, which is one that was

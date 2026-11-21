@@ -1,4 +1,5 @@
 import Foundation
+import ScreenSpace
 
 /// What a pointer verb is aimed at: a point, pressed exactly, or a box, pressed at a point
 /// drawn inside it. `docs/design/human.md`, "Where a click lands".
@@ -8,7 +9,31 @@ import Foundation
 /// case rather than a box with a flag saying whether its size means anything.
 public enum Target: Hashable, Sendable, CustomStringConvertible {
     case point(ScreenPoint)
-    case box(ScreenRect)
+    case box(Box)
+
+    /// A box a click is pressed inside: a screen box at least a point a side, the least a
+    /// press needs, since a box thinner than that has no point of its own to land on.
+    /// [LAW:parse-dont-validate] A frame of any size is a `ScreenRect`; this is the
+    /// pointer's own rule, kept here and nowhere else. [LAW:single-enforcer]
+    public struct Box: Hashable, Sendable, CustomStringConvertible {
+        public let rect: ScreenRect
+
+        public init?(_ rect: ScreenRect) {
+            guard rect.width >= 1, rect.height >= 1 else { return nil }
+            self.rect = rect
+        }
+
+        /// A box as eyes prints one, `ScreenRect(spelled:)`'s form, a point a side or more.
+        public init?(spelled: String) {
+            guard let rect = ScreenRect(spelled: spelled) else { return nil }
+            self.init(rect)
+        }
+
+        /// What a box given to a pointer verb is.
+        public static let spelling = "\(ScreenRect.spelling), and each side at least a point"
+
+        public var description: String { rect.description }
+    }
 
     /// About a button's height or a line of text's, in points: the size taken for a target
     /// vhid is not told the size of, and the room a path keeps from an edge.
@@ -20,7 +45,7 @@ public enum Target: Hashable, Sendable, CustomStringConvertible {
     var width: Double {
         switch self {
         case .point: Self.button
-        case .box(let box): min(box.width, box.height)
+        case .box(let box): min(box.rect.width, box.rect.height)
         }
     }
 
@@ -54,7 +79,11 @@ public enum Target: Hashable, Sendable, CustomStringConvertible {
     /// its margin included, has no line of travel and aims
     /// at the scatter alone. Drawn again outside the aimable part. A point has no aimable
     /// width and is aimed at exactly. [LAW:dataflow-not-control-flow]
+    ///
+    /// The draw is a point of the box by the box's own rule, `nearest`: the aimable part lies
+    /// inside it, and `nearest` keeps the half-open edge a rounded centre can land on.
     func aim(from start: ScreenPoint, drawing generator: inout some RandomNumberGenerator) -> ScreenPoint {
+        guard case .box(let box) = self else { return extent.centre }
         let (centre, reach, half) = extent
         let scatter = Scatter(mean: (centre.x, centre.y), covariance: (pow(2 * half.x / Self.spreads, 2), 0, pow(2 * half.y / Self.spreads, 2)))
         let nearest = (x: min(max(start.x, centre.x - half.x), centre.x + half.x), y: min(max(start.y, centre.y - half.y), centre.y + half.y))
@@ -63,7 +92,7 @@ public enum Target: Hashable, Sendable, CustomStringConvertible {
         let over = abs(start.x - centre.x) <= reach.x && abs(start.y - centre.y) <= reach.y
         let held = over ? scatter : scatter.held(to: (start.x, start.y), across: (-dy / distance, dx / distance), straying: Self.directionalError * distance)
         let (x, y) = held.draw(within: (centre.x - half.x ... centre.x + half.x, centre.y - half.y ... centre.y + half.y), using: &generator)
-        return ScreenPoint(x: x, y: y)!
+        return box.rect.nearest(x, y)
     }
 
     /// The centre, how far either side of it on each axis the target reaches, and how far a
@@ -72,7 +101,9 @@ public enum Target: Hashable, Sendable, CustomStringConvertible {
     private var extent: (centre: ScreenPoint, reach: (x: Double, y: Double), aimable: (x: Double, y: Double)) {
         switch self {
         case .point(let point): (point, (0, 0), (0, 0))
-        case .box(let box): (box.centre, (box.width / 2, box.height / 2), (max(0, box.width / 2 - Self.margin), max(0, box.height / 2 - Self.margin)))
+        case .box(let box):
+            (box.rect.centre, (box.rect.width / 2, box.rect.height / 2),
+             (max(0, box.rect.width / 2 - Self.margin), max(0, box.rect.height / 2 - Self.margin)))
         }
     }
 

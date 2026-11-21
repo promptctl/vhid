@@ -6,6 +6,7 @@ import Installations
 import Keystrokes
 import Pointing
 import struct Seeing.Front
+import ScreenSpace
 import Telemetry
 
 /// The two devices an installation's daemon owns, as a client reaches them.
@@ -126,18 +127,18 @@ struct Devices {
     static func cursor(_ helper: HelperConnection, on queue: DeviceQueue) -> @Sendable () async throws -> ScreenPoint {
         {
             let at = try await queue.run { try helper.cursor() }
-            guard let point = ScreenPoint(x: at.x, y: at.y) else { throw CursorUnreadable() }
-            return point
+            do throws(NotAPlace) { return try ScreenPoint.at(at.x, at.y) } catch { throw CursorUnreadable.notAPlace(error) }
         }
     }
 
     /// The displays as the daemon reads them, in the session in front, for the reason the
-    /// cursor is read there. [LAW:single-enforcer] Every move reads them here.
+    /// cursor is read there: the one layout, parsed here from what the daemon read, and
+    /// refused by `LayoutUnreadable` when it is none. [LAW:single-enforcer] Every act reads
+    /// them here.
     static func displays(_ helper: HelperConnection, on queue: DeviceQueue) -> @Sendable () async throws -> Displays {
         {
-            let frames = try await queue.run { try helper.displays() }
-            guard let displays = Displays(frames: frames) else { throw DisplaysUnreadable(frames: frames) }
-            return displays
+            let online = try await queue.run { try helper.displays() }
+            return Displays(try DisplayLayout(online))
         }
     }
 }

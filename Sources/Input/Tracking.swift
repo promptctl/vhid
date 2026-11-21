@@ -1,5 +1,6 @@
 import Foundation
 import Pointing
+import ScreenSpace
 
 /// What steering a trajectory knows between ticks: where the cursor was last read, the
 /// reports sent that it has not yet shown, and the acceleration curve learned from those it
@@ -49,7 +50,7 @@ struct Tracking: Equatable {
     /// `Pointer.settle`, the time the closed loop gives one report. [LAW:one-source-of-truth]
     static let patience = Int((Pointer.settle / Pointer.tick).rounded(.up))
 
-    init(at cursor: ScreenPoint) { self.cursor = cursor }
+    init(at cursor: Placed<ScreenPoint>) { self.cursor = cursor.value }
 
     /// Points per count for a report `counts` long: `Pointer.Gain.assumed` before any report
     /// has shown, the curve between the lengths that have, and past the longest, the slope
@@ -73,7 +74,8 @@ struct Tracking: Equatable {
     /// more unseen reports whose expected motion sums closest to it; those are seen, and
     /// their mean length takes the gain the change over their counts shows. The rest stay
     /// unseen, except those older than `patience`, which moved nothing.
-    mutating func saw(_ read: ScreenPoint, on tick: Int) {
+    mutating func saw(_ placed: Placed<ScreenPoint>, on tick: Int) {
+        let read = placed.value
         let change = (x: read.x - cursor.x, y: read.y - cursor.y)
         let candidates = read == cursor || unseen.isEmpty ? 0 ... 0 : 1 ... unseen.count
         let covered = candidates.min { miss(unseen.prefix($0), change) < miss(unseen.prefix($1), change) } ?? 0

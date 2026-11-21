@@ -1,6 +1,7 @@
 import ArgumentParser
 import Input
 import Pointing
+import ScreenSpace
 
 /// Two coordinates from a command line as a place on the screen, or the refusal that says
 /// they are not one.
@@ -10,10 +11,7 @@ import Pointing
 /// [LAW:single-enforcer] Every verb that takes a place reads it through here, from both
 /// its `validate` and its `run`, so the refusal is worded one way everywhere.
 func place(_ x: Double, _ y: Double) throws -> ScreenPoint {
-    guard let point = ScreenPoint(x: x, y: y) else {
-        throw ValidationError("(\(x), \(y)) is not a place on the screen")
-    }
-    return point
+    do { return try ScreenPoint.at(x, y) } catch { throw ValidationError("\(error)") }
 }
 
 /// `count` places from a command line's words, in order: each a point as two numbers, `x y`,
@@ -21,13 +19,13 @@ func place(_ x: Double, _ y: Double) throws -> ScreenPoint {
 /// with a comma in it is a box, and any other starts a point.
 ///
 /// [LAW:single-enforcer] Every pointer verb reads its places through here, so a point is
-/// refused by `place` and a box by `ScreenRect(spelled:)`, as the MCP server refuses them.
+/// refused by `place` and a box by `Target.Box(spelled:)`, as the MCP server refuses them.
 func places(_ words: [String], count: Int) throws -> [Target] {
     var rest = words[...], read: [Target] = []
     while let word = rest.first {
         if word.contains(",") {
-            guard let box = ScreenRect(spelled: word) else {
-                throw ValidationError("\(word) is not a box: a box is x,y,width,height in points, finite, each side at least a point")
+            guard let box = Target.Box(spelled: word) else {
+                throw ValidationError("\(word) is not a box: a box is \(Target.Box.spelling)")
             }
             read.append(.box(box))
             rest = rest.dropFirst()

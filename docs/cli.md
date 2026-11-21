@@ -79,11 +79,16 @@ left of or above it has negative ones, which follow `--` after every option:
 `vhid click --button left -- -100 -40`.
 
 `click`, `move`, `scroll` and `drag` take each place as a point, two numbers `x y`, or as a
-box, one word `x,y,width,height`: the box `look` prints beside each point. A point is
-pressed where it is. In a box, the pointer lands on a point drawn inside it, spread about
-the centre as a person's clicks spread on a button and never within 2 points of its edge
-(a side too narrow for that is aimed at its centre, and one under a point is refused),
-and the move there takes as long as Fitts' law says a hand's would to a target that size.
+box, one word `x,y,width,height` in whole points: the box `look` prints beside each point.
+A point is pressed where it is, and one no display holds is refused, saying so, before
+anything moves. A box is pressed in the part of it the display showing most of it shows,
+so a document frame far wider than the screen is pressed where it is seen; a box no
+display shows a point a side of is refused. In that part, the pointer lands on a point
+drawn inside it, spread about the centre as a person's clicks spread on a button and never
+within 2 points of its edge (a side too narrow for that is aimed at its centre, and one
+under a point is refused), and the move there takes as long as Fitts' law says a hand's
+would to a target that size. A sleeping display is a display here: the cursor still moves
+on it. `play` refuses a script whose start or `at` point no display holds, at its line.
 The MCP tools take `box` in place of `x` and `y`, and `drag`'s `from` and `to` take the
 box as a string. [design/human.md](design/human.md#where-a-click-lands) has the model.
 
@@ -99,7 +104,15 @@ then dies by the signal; `doctor`, `driver` and `service` end the command they a
 running to read this Mac and start none after it, and `attributes.stopped` lists the
 commands ended, empty when none was running. `doctor` still waits out the daemon's status
 reply, which gives up after five seconds. `vhid record` answers
-the first one by finishing, and exits as the recording ended. A second signal ends any
+the first one by finishing, and exits as the recording ended. Its record's
+`attributes.recording` says how it ended, as `ending`: `stopped` by Control-C, `ended` by
+any other stop, `tap_off` when macOS turned the tap off, `hour` at an hour, as long as a
+script plays, `devices_untold` when vhid's devices came back and could not be told apart
+again, `tap_at_no_place` for an event at no place on the screen, or `layout_unreadable`
+when the display layout could not be read to tell an edge; and what it left out:
+`unmapped_keys`, presses with no HID usage such as fn, `vhid_at_edge`, moves of vhid's that
+ended at a display's edge, after which the person's points may be off, and
+`unplaced_moves`, the person's moves that came to no place once vhid's were taken out. A second signal ends any
 verb at once, unrecorded, and an MCP call `vhid mcp` was running when it was stopped
 names the signal too.
 
@@ -125,9 +138,9 @@ A verb that opens the devices records `attributes.seed`, the hex seed every poin
 it makes and every key it times is drawn from, and `attributes.paths` has one entry for each such move, in order,
 the move a failed verb stopped in included: `from` is where the cursor was when it began,
 `aimed` the point it aimed at, `x` and `y`, drawn inside the box from there when it was
-given one, `box` that box as `x,y,width,height` (absent
+given one, `box` the part of that box it was pressed in as `x,y,width,height` (absent
 for a point), `fitts_width` the target width its time was
-read from (the box's smaller side, or 20 for a point), `landed` where the cursor was read
+read from (that part's smaller side, or 20 for a point), `landed` where the cursor was read
 when it landed, absent for a move that stopped first, `planned_ms` is how long its trajectory was
 drawn to take, `structure` how it was built (`direct`, `undershoot`, `overshoot` or
 `two_corrections`), `bow` its drawn curve as a fraction of the distance, away from the

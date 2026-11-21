@@ -1,4 +1,5 @@
 import CoreGraphics
+import ScreenSpace
 
 /// A string with something in it other than blank space.
 ///
@@ -52,15 +53,25 @@ public struct Found: Sendable, Hashable {
 
     /// One run the reader places as a whole - what the accessibility tree reports.
     public init(text: Text, frame: ScreenRect, source: Source) {
-        self.init(first: Word(text: text, frame: frame), rest: [], source: source)
+        self.init(first: Word(text: text, frame: frame), rest: [], source: source, frame: frame)
     }
 
-    public init(first: Word, rest: [Word], source: Source) {
+    /// The words as one run, at the box holding them all; nil when no box does - words further
+    /// apart than a Double spans - which a reader counts rather than places. [LAW:no-silent-failure]
+    public init?(first: Word, rest: [Word], source: Source) {
+        guard let frame = first.frame.union(rest.map(\.frame)) else { return nil }
+        self.init(first: first, rest: rest, source: source, frame: frame)
+    }
+
+    private init(first: Word, rest: [Word], source: Source, frame: ScreenRect) {
         self.first = first
         self.rest = rest
         self.source = source
-        self.frame = ScreenRect(rest.reduce(first.frame.cgRect) { $0.union($1.frame.cgRect) })
+        self.frame = frame
     }
+
+    /// The same words at the same frame, said to have been found by `source`.
+    public func found(by source: Source) -> Found { Found(first: first, rest: rest, source: source, frame: frame) }
 
     public var words: [Word] { [first] + rest }
 

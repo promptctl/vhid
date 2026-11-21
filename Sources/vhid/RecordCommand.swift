@@ -5,6 +5,7 @@ import Foundation
 import Helper
 import Installations
 import RecordingTie
+import Telemetry
 
 /// Records the physical keyboard and mouse as a script `vhid play` replays.
 ///
@@ -52,18 +53,30 @@ struct RecordCommand: AsyncParsableCommand {
         // signal ends the process, whose exit the app's pid watch sees.
         let signals = Vhid.signals
         try await withTaskCancellationHandler {
-            while let message = try app.receive(FromApp.self) {
-                switch message {
-                case .note(let note): FileHandle.standardError.write(Data("vhid record: \(note)\n".utf8))
-                case .script(let script): print(script, terminator: ""); return
-                case .recording, .refused: throw TieFailure("the tap app said \(message) while recording")
-                }
+            let script = try Self.recorded(next: { try app.receive(FromApp.self) }) {
+                FileHandle.standardError.write(Data("vhid record: \($0)\n".utf8))
             }
-            throw TieFailure("the tap app ended without sending the recording")
+            print(script, terminator: "")
         } onCancel: {
             signals?.answer()
             try? app.send(signals?.taken == SIGINT ? ToApp.stop : ToApp.end)
         }
+    }
+
+    /// The app's messages from its start to its script: each note said by `say`, the summary
+    /// kept on the unit's record, and the script answered. [LAW:effects-at-boundaries] The
+    /// messages and where a note goes are handed in, so a test drives the loop with messages
+    /// it wrote and reads the record it leaves.
+    static func recorded(next: () throws -> FromApp?, say: (String) -> Void) throws -> String {
+        while let message = try next() {
+            switch message {
+            case .note(let note): say(note)
+            case .summary(let summary): Telemetry.note(.recording, summary.recorded)
+            case .script(let script): return script
+            case .recording, .refused: throw TieFailure("the tap app said \(message) while recording")
+            }
+        }
+        throw TieFailure("the tap app ended without sending the recording")
     }
 
     /// Why a recording cannot start, from what was read: who holds the devices, and the
@@ -138,5 +151,13 @@ enum RecordRefusal: Error, CustomStringConvertible, Equatable {
         case .app(let reason), .unreadable(let reason):
             reason
         }
+    }
+}
+
+extension Summary {
+    /// The summary as the record keeps it.
+    var recorded: JSON {
+        .object(["ending": .string(ending.rawValue), "unmapped_keys": .int(unmappedKeys),
+                 "vhid_at_edge": .int(vhidAtEdge), "unplaced_moves": .int(unplacedMoves)])
     }
 }

@@ -77,6 +77,9 @@ extension Telemetry {
         case stopped
         /// Why the devices were not handed back when the verb ended. Absent when they were.
         case leaveFailed = "leave_failed"
+        /// How a `vhid record` recording ended and what it left out. Absent for a recording
+        /// whose app sent no summary, and for every other verb.
+        case recording
 
         /// The double-click interval the pointer's hand was fitted to, and the delay until a
         /// held key repeats the typist's key holds were fitted to, as the HID system holds

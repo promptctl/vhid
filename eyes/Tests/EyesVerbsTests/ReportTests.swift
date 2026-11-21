@@ -6,20 +6,21 @@ import TelemetryTesting
 @testable import Tree
 import Testing
 @testable import EyesVerbs
+import ScreenSpace
 
 /// What `find` and `read` print, asked with a reading a test wrote.
 @Suite(.eventsKept) struct ReportTests {
-    static let display = ScreenRect(x: -2400, y: -300, width: 2400, height: 1600)
+    static let display = try! ScreenRect(x: -2400, y: -300, width: 2400, height: 1600)
 
-    private func found(_ text: String, x: Double) -> Found {
-        Found(text: Text(text)!, frame: ScreenRect(x: x, y: -60, width: 40, height: 20), source: .pixels(confidence: Confidence(1)!))
+    private func found(_ text: String, x: Double) throws -> Found {
+        Found(text: Text(text)!, frame: try ScreenRect(x: x, y: -60, width: 40, height: 20), source: .pixels(confidence: Confidence(1)!))
     }
 
     /// The done criterion for an absence: it carries where it looked, how much it read,
     /// that it read all of it, and what was nearest - each nearest with how far off.
-    @Test func anAbsenceSaysWhereItLookedHowMuchItReadAndWhatWasNear() {
+    @Test func anAbsenceSaysWhereItLookedHowMuchItReadAndWhatWasNear() throws {
         let query = Query(match: .contains("Settings"), region: .display(12))
-        let reading = Reading(
+        let reading = try Reading(
             outcome: .nearest([Near(found: found("Setlings", x: -1900), distance: 1)]),
             scope: Scope(region: Self.display, examined: 47, excluded: [Exclusion(reason: .duplicate, count: 3)], reach: .whole)
         )
@@ -47,8 +48,8 @@ import Testing
 
     /// Each row says what it is: the tree's role, kept through a merge, or `pixels` for text
     /// only pixels saw - so a page's button is told from a bookmark of the same name.
-    @Test func aRowNamesItsRole() {
-        let frame = ScreenRect(x: 0, y: 0, width: 40, height: 20)
+    @Test func aRowNamesItsRole() throws {
+        let frame = try ScreenRect(x: 0, y: 0, width: 40, height: 20)
         let button = Source.tree(role: Role(rawValue: "AXButton"), also: [])
         let rows = Report.rows(.matched(Matches([
             Found(text: Text("Settings")!, frame: frame, source: .tree(role: Role(rawValue: "AXLink"), also: [])),
@@ -60,8 +61,8 @@ import Testing
 
     /// A row keeps the text its element shows and then says what else the element says in
     /// words, each after its attribute: the "+" button found as "Add" still reads "+".
-    @Test func aRowSaysWhatElseItsElementSays() {
-        let frame = ScreenRect(x: 160, y: 417, width: 18, height: 18)
+    @Test func aRowSaysWhatElseItsElementSays() throws {
+        let frame = try ScreenRect(x: 160, y: 417, width: 18, height: 18)
         let plus = Found(text: Text("+")!, frame: frame, source: .tree(role: Role(rawValue: "AXButton"), also: [Words(.description, Text("Add")!)]))
         #expect(Report.rows(.matched(Matches([plus])!)) == ["169,426\t160,417,18,18\t+\tAXButton\tdescription Add"])
         let reading = Reading(outcome: .matched(Matches([plus])!), scope: Scope(region: frame, examined: 1, reach: .whole))
@@ -76,8 +77,8 @@ import Testing
 
     /// Every text a row prints is on one line, so a row is one element; a near miss says how
     /// far off it was in the column after its role, whatever else its element says.
-    @Test func aRowsTextsAreSpelledOnOneLineAndItsDistanceStaysPut() {
-        let frame = ScreenRect(x: 160, y: 417, width: 18, height: 18)
+    @Test func aRowsTextsAreSpelledOnOneLineAndItsDistanceStaysPut() throws {
+        let frame = try ScreenRect(x: 160, y: 417, width: 18, height: 18)
         let close = Found(text: Text("x")!, frame: frame, source: .tree(role: Role(rawValue: "AXImage"), also: [Words(.description, Text("Close\n(Esc)")!)]))
         #expect(Report.rows(.nearest([Near(found: close, distance: 2)])) == ["169,426\t160,417,18,18\tx\tAXImage\t2 off\tdescription Close (Esc)"])
     }
@@ -86,9 +87,9 @@ import Testing
     /// element's words than the one they show.
     @Test func aLookNotesItsRoleAndCountsMatchesByOtherWords() async throws {
         let events = Collected()
-        let frame = ScreenRect(x: 160, y: 417, width: 18, height: 18)
+        let frame = try ScreenRect(x: 160, y: 417, width: 18, height: 18)
         let plus = Found(text: Text("+")!, frame: frame, source: .tree(role: Role(rawValue: "AXButton"), also: [Words(.description, Text("Add")!)]))
-        let add = Found(text: Text("Add")!, frame: ScreenRect(x: 0, y: 0, width: 30, height: 18), source: .tree(role: Role(rawValue: "AXButton"), also: []))
+        let add = Found(text: Text("Add")!, frame: try ScreenRect(x: 0, y: 0, width: 30, height: 18), source: .tree(role: Role(rawValue: "AXButton"), also: []))
         let reading = Reading(outcome: .matched(Matches([plus, add])!), scope: Scope(region: frame, examined: 2, reach: .whole))
         _ = try await Telemetry.$export.withValue(events.export) {
             try await Report.text(Query(match: .contains("Add"), region: .rect(frame), role: Role(rawValue: "AXButton")), source: .tree) { _, _ in .standing(reading) }
@@ -109,29 +110,30 @@ import Testing
     /// A row's box covers its frame in whole points, takes the form `rect` takes, and holds
     /// the centre printed beside it - fractional frames and negative coordinates included,
     /// where rounding each number its own way would cut the frame or miss the centre, and
-    /// a frame narrower than a point, whose rounded centre falls on its right edge.
+    /// a frame narrower than a point, whose rounded centre would fall on the box's right edge
+    /// and is kept inside it.
     @Test(arguments: [
-        (ScreenRect(x: 10.4, y: 20.6, width: 80.3, height: 23.9), "10,20,81,25"),
-        (ScreenRect(x: -1900.7, y: -60.2, width: 40.5, height: 19.4), "-1901,-61,41,21"),
-        (ScreenRect(x: 0, y: 0, width: 40, height: 20), "0,0,40,20"),
-        (ScreenRect(x: 10.9, y: 20, width: 10, height: 10), "10,20,11,10"),
-        (ScreenRect(x: 10.5, y: 20, width: 0.4, height: 10), "10,20,2,10"),
+        (try ScreenRect(x: 10.4, y: 20.6, width: 80.3, height: 23.9), "10,20,81,25"),
+        (try ScreenRect(x: -1900.7, y: -60.2, width: 40.5, height: 19.4), "-1901,-61,41,21"),
+        (try ScreenRect(x: 0, y: 0, width: 40, height: 20), "0,0,40,20"),
+        (try ScreenRect(x: 10.9, y: 20, width: 10, height: 10), "10,20,11,10"),
+        (try ScreenRect(x: 10.5, y: 20, width: 0.4, height: 10), "10,20,1,10"),
     ])
     func aRowsBoxHoldsItsFrameAndItsCentre(frame: ScreenRect, box: String) throws {
         let found = Found(text: Text("Save")!, frame: frame, source: .tree(role: Role(rawValue: "AXButton"), also: []))
         let columns = try #require(Report.rows(.matched(Matches([found])!)).first).split(separator: "\t").map(String.init)
         #expect(columns[1] == box)
         let c = columns[0].split(separator: ",").compactMap { Double($0) }
-        let printed = try #require(try printedRects(columns.joined(separator: "\t")).first).cgRect
-        #expect(printed.contains(frame.cgRect))
-        #expect(printed.contains(CGPoint(x: c[0], y: c[1])))
+        let printed = try #require(try printedRects(columns.joined(separator: "\t")).first)
+        #expect(printed.contains(frame))
+        #expect(printed.contains(try ScreenPoint.at(c[0], c[1])))
         #expect(try Find.parse(["Save", "--rect", columns[1]]).place.rect == columns[1])
     }
 
     /// The scope says a match was ordered beside other text, and that a page was read.
-    @Test func theScopeNamesTheNearTextAndThePage() {
-        let page = ScreenRect(x: 22, y: 190, width: 1200, height: 688)
-        let reading = Reading(outcome: .matched(Matches([found("Remove", x: 100)])!), scope: Scope(region: page, examined: 9, reach: .whole))
+    @Test func theScopeNamesTheNearTextAndThePage() throws {
+        let page = try ScreenRect(x: 22, y: 190, width: 1200, height: 688)
+        let reading = Reading(outcome: .matched(Matches([try found("Remove", x: 100)])!), scope: Scope(region: page, examined: 9, reach: .whole))
         let query = Query(match: .contains("Remove"), region: .page(window: 219, frame: page), near: .contains("Beta"))
         #expect(Report.scope(reading, query: query, source: .tree)
             .hasPrefix("1 matched \"Remove\" near \"Beta\" in the page in window 219 22,190,1200,688 by the tree;"))
@@ -147,9 +149,9 @@ import Testing
     }
 
     /// A cut answer says it was cut, so the rows are never taken for all there was.
-    @Test func aCutReadingSaysItStoppedAtTheLimit() {
+    @Test func aCutReadingSaysItStoppedAtTheLimit() throws {
         let reading = Reading(
-            outcome: .matched(Matches([found("a", x: -2000)])!),
+            outcome: .matched(Matches([try found("a", x: -2000)])!),
             scope: Scope(region: Self.display, examined: 9, excluded: [Exclusion(reason: .ranked, count: 8)],
                          reach: .stopped(.resultLimit(Limit(1)!)))
         )
@@ -160,28 +162,28 @@ import Testing
 
     /// A read that stopped short says so in its first words, where a caller acting on a
     /// match or an absence reads, whatever it ended in; a cut answer read the whole region.
-    @Test func aPartialReadSaysSoInItsFirstWords() {
+    @Test func aPartialReadSaysSoInItsFirstWords() throws {
         let query = Query(match: .contains("Add"), region: .display(12))
         func head(_ outcome: Outcome, _ reach: Reach, near: Match? = nil) -> String {
             let line = Report.scope(Reading(outcome: outcome, scope: Scope(region: Self.display, examined: 3, reach: reach)),
                                     query: Query(match: query.match, region: query.region, near: near), source: .tree)
             return String(line.prefix { $0 != ";" })
         }
-        let matched = Outcome.matched(Matches([found("Add", x: -2000)])!)
+        let matched = Outcome.matched(Matches([try found("Add", x: -2000)])!)
         let partial = " in the part read of display 12 -2400,-300,2400,1600 by the tree"
-        #expect(head(matched, .stopped(.timeBudget(.seconds(5)))) == "1 matched \"Add\"" + partial)
-        #expect(head(.nearest([]), .stopped(.unread)) == "\"Add\" not found" + partial)
-        #expect(head(.unanchored([]), .stopped(.elementLimit(Limit(10)!)), near: .contains("Beta"))
+        #expect(try head(matched, .stopped(.timeBudget(.seconds(5)))) == "1 matched \"Add\"" + partial)
+        #expect(try head(.nearest([]), .stopped(.unread)) == "\"Add\" not found" + partial)
+        #expect(try head(.unanchored([]), .stopped(.elementLimit(Limit(10)!)), near: .contains("Beta"))
             == "\"Beta\" not found to place \"Add\" near" + partial)
-        #expect(head(.nearest([]), .stopped(.merged(.read(.tree, .whole), .read(.pixels, .stopped(.unread)))))
+        #expect(try head(.nearest([]), .stopped(.merged(.read(.tree, .whole), .read(.pixels, .stopped(.unread)))))
             .hasPrefix("\"Add\" not found in the part read of display 12"))
         // A merge with one reader blind read the place whole by the other, but not what only
         // the blind one sees: its match or absence is not complete, as provesAbsence says.
         let halfBlind = Report.scope(Reading(outcome: matched, scope: Scope(region: Self.display, examined: 3, reach: .stopped(.merged(
             .read(.tree, .whole), .blind(.pixels, "no grant", missingGrant: true))))), query: query, source: .merged)
         #expect(halfBlind.hasPrefix("1 matched \"Add\" in the part read of display 12 -2400,-300,2400,1600 by tree alone;"))
-        #expect(head(matched, .stopped(.resultLimit(Limit(1)!))) == "1 matched \"Add\" in display 12 -2400,-300,2400,1600 by the tree")
-        #expect(head(.nearest([]), .whole) == "\"Add\" not found in display 12 -2400,-300,2400,1600 by the tree")
+        #expect(try head(matched, .stopped(.resultLimit(Limit(1)!))) == "1 matched \"Add\" in display 12 -2400,-300,2400,1600 by the tree")
+        #expect(try head(.nearest([]), .whole) == "\"Add\" not found in display 12 -2400,-300,2400,1600 by the tree")
     }
 
     /// A merge that did not read whole names each reader's reach, a blind one on one line,
@@ -232,7 +234,7 @@ import Testing
         let events = Collected()
         let near = Reading(outcome: .nearest([]), scope: Scope(region: Self.display, examined: 5, excluded: [Exclusion(reason: .outside, count: 3)],
                                                                reach: .stopped(.timeBudget(.seconds(5)))))
-        let hit = Reading(outcome: .matched(Matches([found("OK", x: -100)])!),
+        let hit = Reading(outcome: .matched(Matches([try found("OK", x: -100)])!),
                           scope: Scope(region: Self.display, examined: 9, reach: .whole, boxes: Boxes(narrowed: 1, unchecked: [.elsewhere: 2], calls: 41)))
         let halfBlind = Reading(outcome: hit.outcome, scope: Scope(region: Self.display, examined: 9, reach: .stopped(.merged(
             .blind(.tree, "no grant", missingGrant: true), .read(.pixels, .stopped(.timeBudget(.seconds(5))))))))
@@ -302,7 +304,7 @@ import Testing
         let settings = Front.App(pid: 300, name: "System Settings")
         let finder = Front.App(pid: 500, name: "Finder")
         let display = Display(id: 2, frame: Self.display, isMain: true, scale: 2)
-        let window = Window(id: 3, owner: "System Settings", pid: 300, frame: ScreenRect(x: -1000, y: 0, width: 600, height: 400), layer: 0)
+        let window = Window(id: 3, owner: "System Settings", pid: 300, frame: try ScreenRect(x: -1000, y: 0, width: 600, height: 400), layer: 0)
         let desk = Desk(frontmost: finder, own: Front.Passed(pids: [80], name: "iTerm2"),
                         running: [Desk.Running(app: settings, regular: true), Desk.Running(app: finder, regular: true)],
                         listing: WindowListing(windows: [window], excluded: []), displays: [display])
@@ -329,7 +331,7 @@ import Testing
     /// near misses of - and their look ends unanchored, apart from not matched.
     @Test func anUnanchoredLookNamesTheAnchorAndSaysSo() async throws {
         let events = Collected()
-        let beta = Near(found: found("Beta", x: 52), distance: 1)
+        let beta = Near(found: try found("Beta", x: 52), distance: 1)
         let unanchored = Reading(outcome: .unanchored([beta]), scope: Scope(region: Self.display, examined: 6, reach: .whole))
         let query = Query(match: .exact("Remove"), region: .display(12), near: .contains("Bta"))
         let text = try await Telemetry.$export.withValue(events.export) {
@@ -345,7 +347,7 @@ import Testing
     /// pages it saw, and how far it got.
     @MainActor @Test func findingAPageIsOneEvent() async throws {
         let events = Collected()
-        let viewport = ScreenRect(x: 22, y: 190, width: 1200, height: 688)
+        let viewport = try ScreenRect(x: 22, y: 190, width: 1200, height: 688)
         try await Telemetry.$export.withValue(events.export) {
             let found = try await Where.Place.page(219).region { _ in Paged(pages: [viewport], examined: 40, stop: nil) }
             #expect(found == .page(window: 219, frame: viewport))

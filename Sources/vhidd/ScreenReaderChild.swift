@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import ScreenSpace
 
 /// The `--read-screen-in <audit session>` in argv, or nil when this is the daemon.
 func screenReaderArgument(_ arguments: [String]) -> au_asid_t? {
@@ -42,24 +43,19 @@ func readScreen(in session: au_asid_t) -> Never {
     while let line = readLine() {
         switch ScreenQuestion(rawValue: line) {
         case .cursor: print(CGEvent(source: nil).map { "\($0.location.x) \($0.location.y)" } ?? refusedAnswer)
-        case .displays: print(onlineDisplays())
+        case .displays: print((try? DisplayLayout.online()).map(spelled) ?? refusedAnswer)
         case nil: print("asked '\(line)', which is no question")
         }
     }
     exit(0)
 }
 
-/// The online displays' bounds, in the global space the cursor is read in, as `displays` is
-/// answered; `refusedAnswer` when the window server would not list them.
-///
-/// **Online, not active.** A display that has gone to sleep is not active, and the cursor
-/// still moves on it and its Dock still rises: on studious, its one display asleep, the
-/// active list was empty and the online list held it at (0, 0, 1600, 900). The members of a
-/// mirror set are all online with one frame, which only says that frame twice.
-private func onlineDisplays() -> String {
-    var count: UInt32 = 0
-    guard CGGetOnlineDisplayList(0, nil, &count) == .success else { return refusedAnswer }
-    var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
-    guard CGGetOnlineDisplayList(count, &ids, &count) == .success else { return refusedAnswer }
-    return ids.prefix(Int(count)).map(CGDisplayBounds).map { "\($0.minX) \($0.minY) \($0.width) \($0.height)" }.joined(separator: ";")
+/// The online displays as `displays` is answered: each its id, its bounds as given, and 1 when
+/// it is active, 0 when not, in the global space the cursor is read in. The one layout read's
+/// readings, `DisplayLayout.online`, so the daemon reads the displays as both halves do.
+/// [LAW:one-source-of-truth] The bounds are sent as read, never standardized: the client
+/// parses them, and refuses bounds that are no box by the display that gave them.
+private func spelled(_ displays: [OnlineDisplay]) -> String {
+    displays.map { "\($0.id) \($0.bounds.origin.x) \($0.bounds.origin.y) \($0.bounds.size.width) \($0.bounds.size.height) \($0.isActive ? 1 : 0)" }
+        .joined(separator: ";")
 }
