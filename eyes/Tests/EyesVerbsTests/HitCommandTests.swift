@@ -110,13 +110,14 @@ import Testing
         }
         let hits = events.all.filter { $0.event == "hit" }
         #expect(hits.map(\.outcome) == ["landed", "nothing", "error", "nothing"])
-        #expect(hits[0].facts == ["app": "System Settings", "standing": "front", "front": "System Settings", "end": "area"])
-        #expect(hits[0].counts == ["pid": 300, "window": 4127, "rows": 2, "calls": 3, "front_calls": 1])
-        #expect(hits[1].facts == ["end": "nothing"])
+        #expect(hits[0].attributes == ["app": "System Settings", "standing": "front", "front": "System Settings", "end": "area", "pid": "300", "window": "4127"])
+        #expect(hits[0].counts == ["rows": 2, "calls": 3, "front_calls": 1])
+        #expect(hits[1].attributes == ["end": "nothing"])
         #expect(hits[1].counts == ["rows": 0, "calls": 1])
         #expect(hits[2].error?.contains("hit test at 4,4") == true)
-        #expect(hits[2].facts == ["end": "unanswered"])
+        #expect(hits[2].attributes == ["end": "unanswered"])
         #expect(hits[2].counts == ["rows": 0, "calls": 1])
-        #expect(hits[3].counts == ["rows": 0, "calls": 1, "window": 4127])
+        #expect(hits[3].counts == ["rows": 0, "calls": 1])
+        #expect(hits[3].attributes == ["end": "nothing", "window": "4127"])
     }
 }

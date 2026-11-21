@@ -140,28 +140,29 @@ installation it is; it asks the value for the name it needs.
 
 `eyes/` holds the targets that read the screen. They link nothing of the devices', and
 the devices' targets link nothing of theirs; the `vhid` executable alone links both, for
-its MCP server ([development.md](development.md#two-halves)).
+`look` and its MCP server ([development.md](development.md#two-halves)).
 
 Inside, two readers answer the same query. The tree reader walks the accessibility tree
 ([`eyes/Sources/Tree/`](../eyes/Sources/Tree)). The pixels reader runs Vision's text
 recognition on a screen capture ([`eyes/Sources/Pixels/`](../eyes/Sources/Pixels)).
 `MergedReader` asks both and reports a thing they both saw once. Every reader hands its
 candidates to one pure `Judge`, so "matches" means the same thing whichever reader looked
-([`eyes/Sources/Eyes/`](../eyes/Sources/Eyes)). macOS charges a privacy grant to the
-*responsible* process, such as the terminal or the MCP client, not to `eyes`. So
+([`eyes/Sources/Seeing/Reader.swift`](../eyes/Sources/Seeing/Reader.swift)). macOS charges a privacy grant to the
+*responsible* process, such as the terminal or the MCP client, not to `vhid` or `eyes`. So
 [`Grants`](../eyes/Sources/Grants/Grants.swift) names that app in every answer, and a
 small C target, `Responsibility`, asks macOS which one it is.
 
 ## Every run leaves a record
 
 Each `vhid` run and each MCP tool call emits one event, with its outcome, duration, the
-reports it sent and why it failed. It goes to an OpenTelemetry collector when one is
-configured, and to `~/Library/Logs/vhid/events.jsonl` otherwise
-([`vhid/EventExport.swift`](../Sources/vhid/EventExport.swift)). The counts are taken
-where every report passes ([`vhid/Devices.swift`](../Sources/vhid/Devices.swift)), so a
-run that connected and sent nothing says zero. `eyes` does the same in its own
-[`Telemetry`](../eyes/Sources/Telemetry/Telemetry.swift) target. The daemon logs to the
-unified log under its installation's service name.
+reports it sent and why it failed. Each look, grant reading and hit inside it emits one
+too, under the call's trace id. Every record leaves a process by one edge
+([`Telemetry/Edge.swift`](../eyes/Sources/Telemetry/Edge.swift)): to an OpenTelemetry
+collector when one is configured, and to `~/Library/Logs/<process>/events.jsonl`
+otherwise, so `vhid`'s records and the looks inside them land together. The counts are
+taken where every report passes ([`vhid/Devices.swift`](../Sources/vhid/Devices.swift)),
+so a run that connected and sent nothing says zero. The daemon logs to the unified log
+under its installation's service name.
 
 ## Code map
 

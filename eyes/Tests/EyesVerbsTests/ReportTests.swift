@@ -93,7 +93,7 @@ import Testing
         _ = try await Telemetry.$export.withValue(events.export) {
             try await Report.text(Query(match: .contains("Add"), region: .rect(frame), role: Role(rawValue: "AXButton")), source: .tree) { _, _ in .standing(reading) }
         }
-        #expect(events.all.first?.facts["role"] == "AXButton")
+        #expect(events.all.first?.attributes["role"] == "AXButton")
         #expect(events.all.first?.counts["matched"] == 2)
         #expect(events.all.first?.counts["matched_also"] == 1)
     }
@@ -249,12 +249,12 @@ import Testing
         let seen = events.all
         #expect(seen.map(\.event) == ["look", "look", "look", "look"])
         #expect(seen.map(\.outcome) == ["not_matched", "settled", "error", "matched"])
-        #expect(seen.map { $0.facts["source"] } == ["tree", "pixels", "merged", "merged"])
-        #expect(seen.map { $0.facts["region"] } == ["display", "display", "display", "page"])
-        #expect(seen.map { $0.facts["order"] } == ["reading", "reading", "reading", "near"])
-        #expect(seen.map { $0.facts["role"] } == ["none", "none", "none", "none"])
+        #expect(seen.map { $0.attributes["source"] } == ["tree", "pixels", "merged", "merged"])
+        #expect(seen.map { $0.attributes["region"] } == ["display", "display", "display", "page"])
+        #expect(seen.map { $0.attributes["order"] } == ["reading", "reading", "reading", "near"])
+        #expect(seen.map { $0.attributes["role"] } == ["none", "none", "none", "none"])
         // A merge names each reader's reach, so a missing grant is told apart from a time budget.
-        #expect(seen.map { $0.facts["reach"] } == ["time_budget", "whole", nil, "tree_blind+pixels_time_budget"])
+        #expect(seen.map { $0.attributes["reach"] } == ["time_budget", "whole", nil, "tree_blind+pixels_time_budget"])
         // Every reason an exclusion can have, zeros included.
         let none = Dictionary(uniqueKeysWithValues: Exclusion.Reason.allCases.map { ("excluded_\($0.rawValue)", 0) })
         #expect(seen[0].counts == none.merging(["excluded_outside": 3]) { $1 }.merging(
@@ -264,7 +264,7 @@ import Testing
             ["reads": 1, "examined": 9, "matched": 1, "matched_also": 0, "nearest": 0, "boxes_narrowed": 1,
              "boxes_unchecked_unanswered": 0, "boxes_unchecked_elsewhere": 2, "boxes_unchecked_over_time": 0, "box_calls": 41]) { $1 })
         #expect((seen[1].counts["box_ms"] ?? 0) >= 20)
-        #expect(seen[1].facts["until"] == "present")
+        #expect(seen[1].attributes["until"] == "present")
         #expect(seen[2].error != nil && seen[2].counts == ["reads": 1, "box_ms": 0])
     }
 
@@ -279,7 +279,7 @@ import Testing
         }
         #expect(text.hasPrefix("\"Add\" not found in System Settings (pid 300) and what is in front of it, passing over iTerm2,"
             + " which eyes answers to, on display 2 -2400,-300,2400,1600 by the tree; 3 runs read;"))
-        #expect(events.all.first?.facts["region"] == "front")
+        #expect(events.all.first?.attributes["region"] == "front")
         #expect(events.all.first?.counts["owners"] == 2)
         // A display read takes in every process, which no count stands for.
         let display = Reading(outcome: .nearest([]), scope: Scope(region: Self.display, examined: 3, reach: .whole))
@@ -300,8 +300,8 @@ import Testing
         #expect(region == .front(front))
         let event = try #require(events.all.first)
         #expect(event.event == "front")
-        #expect(event.facts["front_app"] == "System Settings" && event.facts["passed_over"] == "iTerm2")
-        #expect(event.counts["front_pid"] == 300 && event.counts["display"] == 2 && event.counts["own_pids"] == 1)
+        #expect(event.attributes["front_app"] == "System Settings" && event.attributes["passed_over"] == "iTerm2")
+        #expect(event.attributes["front_pid"] == "300" && event.attributes["display"] == "2" && event.counts == ["own_pids": 1])
     }
 
     @Test func namingNoPlaceReadsWhatIsInFront() throws {
@@ -328,7 +328,7 @@ import Testing
             })
         }
         #expect(region == .front(mail))
-        #expect(events.all.first?.facts["named"] == "Mail")
+        #expect(events.all.first?.attributes["named"] == "Mail")
     }
 
     /// An app is one more place, so it is refused beside another, and an empty name - an
@@ -369,7 +369,7 @@ import Testing
         #expect(seen.map(\.event) == ["page", "page", "page"])
         #expect(seen.map(\.outcome) == ["ok", "error", "error"])
         #expect(seen.map(\.counts) == [["examined": 40, "pages": 1], ["examined": 52, "pages": 2], ["examined": 4000, "pages": 0]])
-        #expect(seen.map { $0.facts["reach"] } == ["whole", "whole", "element_limit"])
+        #expect(seen.map { $0.attributes["reach"] } == ["whole", "whole", "element_limit"])
         #expect(seen[1].error?.contains("2 web pages") == true)
     }
 }

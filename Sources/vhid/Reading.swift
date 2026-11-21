@@ -1,5 +1,6 @@
 import DriverExtension
 import Foundation
+import Telemetry
 
 /// Takes a reading of this Mac that blocks on the commands it runs, and ends the command
 /// running when the task is cancelled: Control-C or SIGTERM on the command line, a

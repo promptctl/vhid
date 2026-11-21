@@ -6,6 +6,7 @@ import Installations
 import MCP
 import Signals
 import System
+import Telemetry
 import Version
 
 /// The verbs as MCP tools, over stdio, for an agent that drives a Mac in one session
@@ -59,15 +60,13 @@ struct McpCommand: AsyncParsableCommand {
 
     /// The server as a client's initialize finds it, with `tools` attached to run against
     /// `installation`, each call held `underway` on the transport it will be started on,
-    /// carried by `flights` until it and its record are done, and recorded as one
-    /// invocation to `export` - after its answer, which does not wait on a collector.
+    /// carried by `flights` until it is done, and recorded as one invocation handed to `hand`.
     static func server(_ tools: [VerbTool] = Tools.all, on installation: Installation, over transport: AnsweringTransport,
-                       recordingTo export: EventExport, stoppedBy signals: FirstSignal? = nil, carriedBy flights: Flights) async -> Server {
+                       recordingTo hand: @escaping Invocation.Hand, stoppedBy signals: FirstSignal? = nil, carriedBy flights: Flights) async -> Server {
         let server = Server(name: "vhid", version: Version.current, instructions: instructions,
                             capabilities: .init(tools: .init(listChanged: false)))
         let turns = Turns()
         await server.withMethodHandler(ListTools.self) { _ in .init(tools: tools.map(\.tool)) }
-        let hand: @Sendable (InvocationRecord) async -> Void = { record in await flights.launch { await export.export(record) } }
         await server.withMethodHandler(CallTool.self) { request in try await flights.carry {
             let arrived = ContinuousClock.now
             // Recorded under the method, not the name: a name the client made up is not a
@@ -114,22 +113,23 @@ struct McpCommand: AsyncParsableCommand {
             throw Errno(rawValue: errno)
         }
 
-        try await Self.serve(on: installation, over: AnsweringTransport(StdioTransport(output: protocolOut)), recordingTo: .configured(),
+        try await Self.serve(on: installation, over: AnsweringTransport(StdioTransport(output: protocolOut)), recordingTo: { Telemetry.send($0.record) },
                              stoppedBy: Invocation.current?.signals)
     }
 
     /// Serves `tools` over `transport` until the client hangs up or the serving task is
     /// cancelled, as Control-C and SIGTERM cancel it. A cancel withdraws every call owed,
     /// so each one stops as a client's cancel would stop it, and ends the session. Returns
-    /// once every call has ended and every record is sent, throwing if it was cancelled.
+    /// once every call has ended, throwing if it was cancelled. The records are the
+    /// outbox's, which the process drains before it exits.
     /// Each call's record names the signal in `signals` that stopped the session, if one did.
     ///
     /// The cancel has to be carried in by hand: the SDK serves from a task of its own,
     /// which no cancel of this one reaches.
     static func serve(_ tools: [VerbTool] = Tools.all, on installation: Installation, over transport: AnsweringTransport,
-                      recordingTo export: EventExport, stoppedBy signals: FirstSignal? = nil) async throws {
+                      recordingTo hand: @escaping Invocation.Hand, stoppedBy signals: FirstSignal? = nil) async throws {
         let flights = Flights()
-        let server = await server(tools, on: installation, over: transport, recordingTo: export, stoppedBy: signals, carriedBy: flights)
+        let server = await server(tools, on: installation, over: transport, recordingTo: hand, stoppedBy: signals, carriedBy: flights)
         try await server.start(transport: transport)
         await withTaskCancellationHandler {
             await server.waitUntilCompleted()
@@ -145,7 +145,7 @@ struct McpCommand: AsyncParsableCommand {
 }
 
 /// What the server has under way and must see done before the process exits: tool calls
-/// still running when the client hung up, and the records of calls already answered.
+/// still running when the client hung up.
 ///
 /// [LAW:nothing-unseen] Without it, a client that closed stdin mid-`type` would end the
 /// process under the keystrokes still going out, and they would leave no record.
@@ -164,12 +164,6 @@ actor Flights {
             await arrive()
             throw error
         }
-    }
-
-    /// Starts `work` in a task of its own, counted as under way until it finishes.
-    func launch(_ work: @escaping @Sendable () async -> Void) {
-        depart()
-        Task { await work(); arrive() }
     }
 
     /// Returns once nothing is under way.

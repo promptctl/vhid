@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import Telemetry
 import Helper
 import Input
 import Installations

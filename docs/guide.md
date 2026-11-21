@@ -211,10 +211,12 @@ fixes it. The menu bar item shows the same lines, and clicking one copies it.
 
 From 0.5.0, every `vhid` command, and every tool call an agent makes, appends one line to
 `~/Library/Logs/vhid/events.jsonl`: which command it was, whether it worked, how long it
-took and how many key and pointer reports it sent. `eyes` keeps its own in
+took and how many key and pointer reports it sent. A `look` adds a line for each
+reading it made. The `eyes` command keeps its own log in
 `~/Library/Logs/eyes/events.jsonl`. Neither records the text you typed. If you run an
 [OpenTelemetry](https://opentelemetry.io) collector, set `OTEL_EXPORTER_OTLP_ENDPOINT`
-and the records go there instead. [cli.md](cli.md#what-each-run-leaves-behind) describes
+and the records go there instead. Both read the standard OpenTelemetry exporter
+variables the same way, `OTEL_SDK_DISABLED=true` among them. [cli.md](cli.md#what-each-run-leaves-behind) describes
 the fields.
 
 A bug report is most useful with the output of `vhid doctor` in it.

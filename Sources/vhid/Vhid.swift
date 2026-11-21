@@ -65,7 +65,7 @@ struct Vhid: AsyncParsableCommand {
             DispatchQueue.global().async { task?.cancel() }
         }
         let invocation = Task {
-            try await Invocation.record(_commandName, via: .commandLine, stoppedBy: first, to: EventExport.configured().export) {
+            try await Invocation.record(_commandName, via: .commandLine, stoppedBy: first, to: { Telemetry.send($0.record) }) {
                 try await run(nil, in: $0)
             }
         }
@@ -74,8 +74,8 @@ struct Vhid: AsyncParsableCommand {
             if first.taken != nil { invocation.cancel() }
         }
         let ending = await invocation.result
-        // A look's events are still on their way out when the server's stdin closes.
-        // [LAW:no-silent-failure]
+        // Every record, this invocation's and every MCP call's and look's inside it, can still
+        // be on its way out. [LAW:no-silent-failure]
         await Telemetry.drained()
         withExtendedLifetime(watch) {}
         switch (ending, first.unanswered) {

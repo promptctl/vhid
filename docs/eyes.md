@@ -121,7 +121,4 @@ the app eyes answers to, are refused saying so.
 ## Events
 
 Every look (`find`, `read`, and each wait), every `hit`, every grant check a reader makes, and every
-grants reading taken from a child emits one JSON event, from the verbs and vhid's `look` alike; under `look`, each carries the trace id of the vhid call that ran it. Events go to the OTLP collector that
-`OTEL_EXPORTER_OTLP_ENDPOINT` names. With no collector set, or one that can't take them,
-they're appended to `~/Library/Logs/eyes/events.jsonl`. An event appended because the
-collector failed carries `sink_error`.
+grants reading taken from a child emits one JSON event, from the verbs and vhid's `look` alike. Each carries its counts in `counts` and everything else it noted, ids among them, in `attributes`. Events leave by the same edge as vhid's records and read the OpenTelemetry exporter variables the same way. Under `look`, they land with the vhid call's record and carry its trace id. From the `eyes` command they land in `~/Library/Logs/eyes/events.jsonl` when no collector is set or the collector can't take them. An event appended because the collector failed carries `sink_error`. A grant reading's child joins the reading's trace through `TRACEPARENT`.

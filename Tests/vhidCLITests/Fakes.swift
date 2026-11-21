@@ -4,6 +4,7 @@ import Installations
 import Keystrokes
 import Pointing
 import Synchronization
+import Telemetry
 import TestClock
 import Testing
 @testable import vhid
@@ -107,21 +108,26 @@ extension Installation {
     static let nobody = Installation(service: "ai.promptctl.vhid.tests.nobody")!
 }
 
-extension EventExport {
-    /// An export to a file of its own under the temporary directory, and no collector, so
-    /// a test's records never reach the operator's log.
-    static func scratch() -> EventExport {
-        EventExport(collector: nil, file: FileManager.default.temporaryDirectory.appending(path: "vhid-tests-\(UUID().uuidString)/events.jsonl"),
-                    deliver: { _ in Issue.record("a scratch export has no collector to deliver to") })
-    }
+/// An edge to a file of its own under the temporary directory, and no collector, so a
+/// test's records never reach the operator's log.
+struct Scratch: Sendable {
+    let edge = Edge(service: "vhid", collector: nil,
+                    file: FileManager.default.temporaryDirectory.appending(path: "vhid-tests-\(UUID().uuidString)/events.jsonl"),
+                    deliver: { _ in Issue.record("a scratch edge has no collector to deliver to") })
+
+    var file: URL { edge.file }
+
+    /// Hands an invocation's record straight to the edge, so it is written when the
+    /// invocation returns.
+    var hand: Invocation.Hand { { [edge] in await edge.send($0.record) } }
 
     /// Every record in the file, parsed back.
-    var written: [[String: Any]] {
-        get throws {
-            guard FileManager.default.fileExists(atPath: file.path) else { return [] }
-            return try String(contentsOf: file, encoding: .utf8).split(separator: "\n").map {
-                try #require(try JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any])
-            }
+    var written: [[String: Any]] { get throws { try Self.written(file) } }
+
+    static func written(_ file: URL) throws -> [[String: Any]] {
+        guard FileManager.default.fileExists(atPath: file.path) else { return [] }
+        return try String(contentsOf: file, encoding: .utf8).split(separator: "\n").map {
+            try #require(try JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any])
         }
     }
 }

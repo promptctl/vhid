@@ -60,15 +60,15 @@ public struct Hit: AsyncParsableCommand {
             case .nothing(let calls, let window):
                 Telemetry.note("end", "nothing")
                 Telemetry.count("calls", calls)
-                if let window { Telemetry.count("window", Int(window.id)) }
+                if let window { Telemetry.note("window", String(window.id)) }
                 return ("nothing", report(at: point, struck))
             case .landed(let landed):
                 Telemetry.note("app", landed.app.name ?? "")
                 Telemetry.note("standing", landed.standing.said)
                 if let front = landed.standing.front { Telemetry.note("front", front.name ?? "") }
                 Telemetry.note("end", landed.end.said)
-                Telemetry.count("pid", Int(landed.app.pid))
-                if let window = landed.window { Telemetry.count("window", Int(window.id)) }
+                Telemetry.note("pid", String(landed.app.pid))
+                if let window = landed.window { Telemetry.note("window", String(window.id)) }
                 Telemetry.count("rows", landed.elements.count)
                 Telemetry.count("calls", landed.calls)
                 Telemetry.count("front_calls", landed.frontCalls)

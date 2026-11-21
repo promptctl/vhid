@@ -167,8 +167,8 @@ struct Where: ParsableArguments {
                 Telemetry.note("named", name ?? "")
                 let front = try await fronts(name)
                 Telemetry.note("front_app", front.app.name ?? "")
-                Telemetry.count("front_pid", Int(front.app.pid))
-                Telemetry.count("display", Int(front.display))
+                Telemetry.note("front_pid", String(front.app.pid))
+                Telemetry.note("display", String(front.display))
                 Telemetry.note("passed_over", front.passedOver ? front.own.name : "")
                 // How many processes were matched as the app eyes answers to: zero means none
                 // could be passed over or kept out, whatever is in front.

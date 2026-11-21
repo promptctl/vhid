@@ -186,8 +186,11 @@ public struct GrantReading: Sendable, Equatable {
         let process = Process()
         process.executableURL = reader
         process.arguments = arguments
+        // The child's own record joins the trace of the reading that started it. [LAW:nothing-unseen]
+        process.environment = Telemetry.childEnvironment
         let output = Pipe(), complaint = Pipe()
-        // Under `eyes mcp` this process's stdin is the client's JSON-RPC stream.
+        // Under `vhid mcp` this process's stdin is the client's JSON-RPC stream, which the
+        // child must not read from.
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = output
         process.standardError = complaint

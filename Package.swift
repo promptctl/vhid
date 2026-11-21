@@ -161,9 +161,9 @@ let package = Package(
         // DriverExtension is for `vhid driver`, which reads the machine and not the
         // daemon, so scripts/virtual-hid-driver can ask it on a Mac with no daemon yet.
         // Doctor is for `vhid doctor`, which reads both and says what is left to do.
-        // EyesVerbs is for `look`, the one tool that reads the screen rather than drive it:
-        // the MCP server is where the two halves meet, and nowhere else. Telemetry, so a
-        // look's readings join the trace of the call that ran them. [LAW:one-way-deps]
+        // EyesVerbs is for `look`, the one verb that reads the screen rather than drive it:
+        // this executable is where the two halves meet, and nowhere else. Telemetry is the
+        // one edge every record leaves by, a call's and the look's inside it. [LAW:one-way-deps]
         .executableTarget(
             name: "vhid",
             dependencies: [
@@ -181,6 +181,7 @@ let package = Package(
             name: "vhidCLITests",
             dependencies: [
                 "vhid", "Input", "Helper", "Installations", "Keystrokes", "Pointing", "Doctor", "DriverExtension", "Version", "OwnThread", "TestClock", "Signals",
+                "Telemetry", "TelemetryTesting",
                 .product(name: "MCP", package: "swift-sdk"),
             ]
         ),
@@ -202,9 +203,9 @@ let package = Package(
 
         // eyes: reading the screen, so that input can be aimed - where the windows are, and
         // where text is, in the points the devices press. Its targets live under eyes/ and
-        // link nothing above: no device, no daemon, no input. What links both halves is
-        // the vhid binary alone, whose MCP server reads with these and presses with those.
-        // [LAW:one-way-deps]
+        // link nothing of the devices': no device, no daemon, no input. What links both
+        // halves is the vhid binary alone, whose `look` reads with these and whose acts press
+        // with those. [LAW:one-way-deps]
         //
         // The vocabulary both readers speak and the protocol both conform to. It links
         // nothing - not Vision, not ApplicationServices - so the tree and the pixels
@@ -231,8 +232,9 @@ let package = Package(
         // The calls tccd's attribution rests on, which libSystem exports and the SDK has no
         // header for. A header of its own, so they are linked and type-checked, not looked up.
         .target(name: "Responsibility", path: "eyes/Sources/Responsibility"),
-        // One event per unit of work and the one edge it leaves by. Links nothing of
-        // eyes', so every target can report through it. [LAW:nothing-unseen]
+        // One record per unit of work and the one edge every record leaves a process by,
+        // vhid's invocations and eyes' units alike. Links nothing, so every target can report
+        // through it. [LAW:nothing-unseen]
         .target(name: "Telemetry", path: "eyes/Sources/Telemetry"),
         // What every test target that runs units of work shares: a collector for their
         // events, and the trait that keeps them off the real edge.

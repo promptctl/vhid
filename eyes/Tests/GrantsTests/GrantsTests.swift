@@ -113,7 +113,7 @@ struct GrantMappingTests {
             let gate = Task { try await Telemetry.$export.withValue(events.export) { try await shared.holds(.accessibility) } }
             gate.cancel()
             await #expect(throws: CancellationError.self) { try await gate.value }
-            return events.all.first?.facts["reading"]
+            return events.all.first?.attributes["reading"]
         }
     }
 
@@ -177,8 +177,8 @@ struct GrantMappingTests {
     let seen = events.all
     #expect(seen.map(\.event) == ["grant_reading", "grant_reading", "grant_reading"])
     #expect(seen.map(\.outcome) == ["held", "not_held", "error"])
-    #expect(seen.map { $0.facts["reading"] } == ["taken", "shared", "taken"])
-    #expect(seen.map { $0.facts["grant"] } == ["accessibility", "screenRecording", "accessibility"])
+    #expect(seen.map { $0.attributes["reading"] } == ["taken", "shared", "taken"])
+    #expect(seen.map { $0.attributes["grant"] } == ["accessibility", "screenRecording", "accessibility"])
     #expect(seen[2].error == "no child")
 }
 
@@ -200,7 +200,7 @@ struct GrantMappingTests {
     let events = Collected()
     let holder = try await Telemetry.$export.withValue(events.export) { try await Holder.current() }
     #expect(events.all.map(\.event) == ["holder"])
-    let executable = try #require(events.all.first?.facts["executable"])
+    let executable = try #require(events.all.first?.attributes["executable"])
     #expect(executable.hasPrefix("/"))
     #expect(FileManager.default.isExecutableFile(atPath: executable))
     #expect(executable.hasPrefix(holder.path))
