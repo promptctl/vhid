@@ -61,11 +61,11 @@ import Testing
     static let systemSettings = Front(app: Front.App(pid: 300, name: "System Settings"), display: 1,
                                       own: Front.Passed(pids: [80], name: "iTerm2"), passedOver: true)
     static let mail = Front(app: Front.App(pid: 500, name: "Mail"), display: 1, own: Front.Passed(pids: [80], name: "iTerm2"), passedOver: false)
-    static let fronts: Where.Place.Fronts = { name in
-        switch name {
-        case nil: systemSettings
-        case "Mail": mail
-        case let name?: throw AppUnread(app: name, why: .notRunning(["Mail"]))
+    static let fronts: Where.Place.Fronts = { which in
+        switch which {
+        case .inFront: systemSettings
+        case .named("Mail"): mail
+        case .named(let name): throw AppUnread(.notRunning(name, ordinary: ["Mail"]))
         }
     }
 
@@ -138,23 +138,24 @@ import Testing
     @Test func aPointAnswersWithWhatAClickThereLandsOn() async throws {
         #expect(try await Self.answer(try Self.question(x: 169, y: 426.5)) == Hit.report(at: ScreenPoint(x: 169, y: 426.5), .landed(HitCommandTests.button)))
         #expect(try await Self.answer(try Self.question(x: 2, y: 2)) == Hit.report(at: ScreenPoint(x: 2, y: 2), .nothing(calls: 1, window: nil)))
-        await #expect { try await Self.answer(try Self.question(x: 3, y: 3)) } throws: { "\($0)" == "\(TreeError.noGrant)" + Look.grantNote }
+        await #expect { try await Self.answer(try Self.question(x: 3, y: 3)) } throws: { "\($0)" == "\(TreeError.noGrant)" }
         await #expect { try await Self.answer(try Self.question(x: 4, y: 4)) } throws: {
             "\($0)" == "\(HitUnheard(point: ScreenPoint(x: 4, y: 4), why: .unanswered, calls: 1))"
         }
     }
 
     /// Each reader's missing grant, and a merge with neither, is a refusal naming the grant
-    /// and the app that holds it, never an empty answer. [LAW:no-silent-failure]
+    /// and the app that holds it, never an empty answer. [LAW:no-silent-failure] An overview
+    /// still leads with the displays and windows, the places a caller can name instead.
     @Test func aMissingGrantIsARefusalNamingWhereItIsHeld() async throws {
-        let note = Look.grantNote
-        for (question, expected): (Look.Question, String) in [
-            (try Self.question(display: 668), "Neither reader could look. \(TreeError.noGrant)\(note) \(PixelsError.noGrant)\(note)"),
-            (try Self.question(source: "tree", display: 667), "\(TreeError.noGrant)\(note)"),
-            (try Self.question(display: 666), "\(PixelsError.noGrant)\(note)"),
-            (try Self.question(text: "Save", display: 666), "\(PixelsError.noGrant)\(note)"),
+        let picture = [Displays.report(DisplaysCommandTests.desk), Windows.report(Self.listing, owner: nil, frontmost: Self.frontmost)]
+        for (question, expected): (Look.Question, [String]) in [
+            (try Self.question(display: 668), picture + ["Neither reader could look. \(TreeError.noGrant) \(PixelsError.noGrant)"]),
+            (try Self.question(source: "tree", display: 667), picture + ["\(TreeError.noGrant)"]),
+            (try Self.question(display: 666), picture + ["\(PixelsError.noGrant)"]),
+            (try Self.question(text: "Save", display: 666), ["\(PixelsError.noGrant)"]),
         ] {
-            await #expect { try await Self.answer(question) } throws: { "\($0)" == expected }
+            await #expect { try await Self.answer(question) } throws: { "\($0)" == expected.joined(separator: "\n\n") }
         }
     }
 
@@ -162,7 +163,7 @@ import Testing
     @Test func aMergeWithOneReaderBlindAnswersAndNamesWhereItsGrantIsHeld() async throws {
         let said = try await Self.answer(try Self.question(display: 669))
         #expect(said.contains("by pixels alone"))
-        #expect(said.contains("tree could not look (\(TreeError.noGrant)\(Look.grantNote))"))
+        #expect(said.contains("tree could not look (\(TreeError.noGrant))"))
     }
 
     /// A wait answers with the report of the read it ended on, led by how the wait went;
@@ -178,7 +179,7 @@ import Testing
     /// An absence a blind reader cannot prove is a refusal naming where its grant is held.
     @Test func anAbsenceWaitOnABlindReaderNamesWhereItsGrantIsHeld() async throws {
         await #expect { try await Self.answer(try Self.question(text: "Save", display: 670, until: "absent")) } throws: {
-            "\($0)".hasPrefix("pixels could not look, so an absence cannot be proven") && "\($0)".hasSuffix(Look.grantNote)
+            "\($0)".hasPrefix("pixels could not look, so an absence cannot be proven") && "\($0)".contains("responsible for this process")
         }
     }
 
@@ -188,7 +189,7 @@ import Testing
         _ = try await Self.answer(try Self.question(text: "Save", page: 219))
         #expect(await Self.asked.queries.last?.region == .page(window: 219, frame: Self.viewport))
         await #expect { try await Self.answer(try Self.question(text: "Save", page: 220)) } throws: { "\($0)".contains("2 web pages") }
-        await #expect { try await Self.answer(try Self.question(page: 221)) } throws: { "\($0)" == "\(TreeError.noGrant)\(Look.grantNote)" }
+        await #expect { try await Self.answer(try Self.question(page: 221)) } throws: { "\($0)".hasSuffix("\(TreeError.noGrant)") }
     }
 
     /// With nothing but the app eyes answers to on screen, a look naming no place is refused
@@ -197,12 +198,20 @@ import Testing
     @Test func noAppToReadIsARefusalNamingWhy() async throws {
         let events = Collected()
         try await Telemetry.$export.withValue(events.export) {
-            await #expect { try await Self.answer(try Self.question(text: "Save"), front: { _ in throw NoFront(own: "iTerm2", why: .onlyOwn) }) } throws: {
-                "\($0)".contains("no app but iTerm2, which eyes answers to, has a window on screen")
+            await #expect { try await Self.answer(try Self.question(text: "Save"), front: { _ in throw AppUnread(.onlyOwn("iTerm2")) }) } throws: {
+                "\($0)" == "\(AppUnread(.onlyOwn("iTerm2")))"
             }
-            await #expect { try await Self.answer(try Self.question(app: "Notes")) } throws: { $0 as? AppUnread == AppUnread(app: "Notes", why: .notRunning(["Mail"])) }
+            await #expect { try await Self.answer(try Self.question(app: "Notes", text: "Save")) } throws: {
+                "\($0)" == "\(AppUnread(.notRunning("Notes", ordinary: ["Mail"])))"
+            }
+            // An overview the app in front cannot be read for still lists the displays and
+            // windows, the places a caller can name instead.
+            await #expect { try await Self.answer(try Self.question(), front: { _ in throw AppUnread(.onlyOwn("iTerm2")) }) } throws: {
+                "\($0)" == [Displays.report(DisplaysCommandTests.desk), Windows.report(Self.listing, owner: nil, frontmost: Self.frontmost),
+                              "\(AppUnread(.onlyOwn("iTerm2")))"].joined(separator: "\n\n")
+            }
         }
-        #expect(events.all.filter { $0.event == "front" }.map(\.outcome) == ["error", "error"])
+        #expect(events.all.filter { $0.event == "front" }.map(\.outcome) == ["error", "error", "error"])
     }
 
     /// What a look will not act on is refused in a caller's words, by the verbs' own rules.

@@ -295,17 +295,18 @@ import Testing
         let events = Collected()
         let front = Front(app: Front.App(pid: 300, name: "System Settings"), display: 2, own: Front.Passed(pids: [80], name: "iTerm2"), passedOver: true)
         let region = try await Telemetry.$export.withValue(events.export) {
-            try await Where.Place.front(nil).region(front: { _ in front })
+            try await Where.Place.app(.inFront).region(front: { _ in front })
         }
         #expect(region == .front(front))
         let event = try #require(events.all.first)
         #expect(event.event == "front")
         #expect(event.attributes["front_app"] == "System Settings" && event.attributes["passed_over"] == "iTerm2")
         #expect(event.attributes["front_pid"] == "300" && event.attributes["display"] == "2" && event.counts == ["own_pids": 1])
+        #expect(event.attributes["named"] == nil)
     }
 
     @Test func namingNoPlaceReadsWhatIsInFront() throws {
-        guard case .front(nil) = try Where.place(app: nil, display: nil, window: nil, page: nil, rect: nil, as: .flag) else {
+        guard case .app(.inFront) = try Where.place(app: nil, display: nil, window: nil, page: nil, rect: nil, as: .flag) else {
             Issue.record("no place named is not the front"); return
         }
         guard case .region(.display(4)) = try Where.place(app: nil, display: 4, window: nil, page: nil, rect: nil, as: .flag) else {
@@ -316,14 +317,14 @@ import Testing
     /// An app named is read as the app in front is, by the same rule and the same event,
     /// which says which app was asked for. [LAW:nothing-unseen]
     @Test func anAppNamedIsReadAsTheAppInFrontIsAndItsEventNamesIt() async throws {
-        guard case .front("Mail") = try Where.place(app: "Mail", display: nil, window: nil, page: nil, rect: nil, as: .argument) else {
+        guard case .app(.named("Mail")) = try Where.place(app: "Mail", display: nil, window: nil, page: nil, rect: nil, as: .argument) else {
             Issue.record("an app named is not that app"); return
         }
         let events = Collected()
         let mail = Front(app: Front.App(pid: 500, name: "Mail"), display: 1, own: Front.Passed(pids: [80], name: "iTerm2"), passedOver: false)
         let region = try await Telemetry.$export.withValue(events.export) {
-            try await Where.Place.front("Mail").region(front: { name in
-                #expect(name == "Mail")
+            try await Where.Place.app(.named("Mail")).region(front: { which in
+                #expect(which == .named("Mail"))
                 return mail
             })
         }

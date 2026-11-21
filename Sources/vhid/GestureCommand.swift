@@ -1,4 +1,5 @@
 import ArgumentParser
+import EyesVerbs
 import CoreFoundation
 import Input
 import KeyboardLayouts
@@ -7,7 +8,7 @@ import KeyboardLayouts
 struct GestureCommand: AsyncParsableCommand {
     static let configuration = Help.gesture.configuration
 
-    @Argument(help: Help.sentence(Help.gestureName))
+    @Argument(help: .sentence(Help.gestureName))
     var gesture: Gesture
 
     @OptionGroup var layoutOption: LayoutOption

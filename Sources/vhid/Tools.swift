@@ -7,6 +7,7 @@ import Installations
 import KeyboardLayouts
 import MCP
 import Pointing
+import Turns
 
 /// One verb as an MCP tool: what a client is shown, and what a call does.
 ///
@@ -15,10 +16,27 @@ import Pointing
 struct VerbTool: Sendable {
     let tool: Tool
     private let parameters: [any DeclaredParameter]
-    private let perform: @Sendable (Arguments, Installation) async throws -> String
+    private let perform: Perform
+
+    /// What a call reaches, which decides whether it waits its turn. [LAW:types-are-the-program]
+    private enum Perform: Sendable {
+        /// The daemon, which serves one client at a time, so calls to it take turns.
+        case daemon(@Sendable (Arguments, Installation) async throws -> String)
+        /// The screen, through readers in this process that ask nothing of the daemon, so a
+        /// look waiting on a change holds up no act.
+        case screen(@Sendable (Arguments) async throws -> String)
+    }
 
     init(_ help: VerbHelp, readOnly: Bool = false, _ parameters: [any DeclaredParameter],
          perform: @escaping @Sendable (Arguments, Installation) async throws -> String) {
+        self.init(help, readOnly: readOnly, parameters, .daemon(perform))
+    }
+
+    init(_ help: VerbHelp, _ parameters: [any DeclaredParameter], reading: @escaping @Sendable (Arguments) async throws -> String) {
+        self.init(help, readOnly: true, parameters, .screen(reading))
+    }
+
+    private init(_ help: VerbHelp, readOnly: Bool, _ parameters: [any DeclaredParameter], _ perform: Perform) {
         tool = Tool(
             name: help.name, description: help.tool,
             inputSchema: .object([
@@ -41,10 +59,21 @@ struct VerbTool: Sendable {
     /// `vhid click` between two calls finds it free, and so does a second agent's session.
     /// [LAW:no-ambient-temporal-coupling] The holding is a scope, not a policy.
     ///
-    /// Every argument is read before the scope opens, so an argument that is refused never
-    /// reaches the daemon at all.
-    func call(_ given: [String: Value], on installation: Installation) async throws -> String {
-        try await perform(try Arguments(given, for: parameters), installation)
+    /// Every argument is read before the scope opens, or a turn is taken, so an argument that
+    /// is refused never waits on or reaches the daemon at all. A call to the daemon waits for
+    /// those to it ahead of it in `turns`, and says how long it waited.
+    func call(_ given: [String: Value], on installation: Installation, taking turns: Turns) async throws -> String {
+        let arguments = try Arguments(given, for: parameters)
+        switch perform {
+        case .screen(let read):
+            return try await read(arguments)
+        case .daemon(let act):
+            let asked = ContinuousClock.now
+            return try await turns.take {
+                Invocation.set(.queuedMilliseconds, .double((ContinuousClock.now - asked) / .milliseconds(1)))
+                return try await act(arguments, installation)
+            }
+        }
     }
 }
 
@@ -97,7 +126,7 @@ enum Tools {
         let until = Parameter.text("until", Said.until).optional
         let timeout = Parameter.number("timeout", Said.timeout).optional
         let parameters: [any DeclaredParameter] = [app, text, exact, edits, near, role, source, limit, display, window, page, rect, x, y, until, timeout]
-        return VerbTool(Help.look, readOnly: true, parameters) { arguments, _ in
+        return VerbTool(Help.look, parameters) { arguments in
             let question = try Look.question(
                 app: try arguments[app], text: try arguments[text], exact: try arguments[exact], edits: try arguments[edits],
                 near: try arguments[near], role: try arguments[role], source: try arguments[source], limit: try arguments[limit],
@@ -190,6 +219,6 @@ enum Tools {
     /// `vhid doctor` as a tool. A Mac that is not ready is an answer and not a failure of
     /// the call, so it comes back as what the verb prints, whose first line says it.
     static let doctor: VerbTool = VerbTool(Help.doctor, readOnly: true, []) { _, installation in
-        DoctorCommand.doctor(try await reading { Readiness.read(for: installation, stoppedBy: $0) }, grants: await GrantsVerb.reported())
+        DoctorCommand.doctor(try await reading { Readiness.read(for: installation, stoppedBy: $0) }, grants: try await GrantsVerb.reported())
     }
 }

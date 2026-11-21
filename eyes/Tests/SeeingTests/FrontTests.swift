@@ -22,7 +22,7 @@ import Testing
         window(4, "Safari", pid: 400),
     ], excluded: [])
 
-    static func choose(frontmost: Front.App?, listing: WindowListing = desk) throws(NoFront) -> Front {
+    static func choose(frontmost: Front.App?, listing: WindowListing = desk) throws(AppUnread) -> Front {
         try Front.choose(frontmost: frontmost, own: terminal, regular: [80, 300, 400], names: [300: "System Settings", 400: "Safari"],
                          listing: listing, displays: [main, left])
     }
@@ -65,25 +65,35 @@ import Testing
         #expect(try Self.choose(frontmost: Front.App(pid: 500, name: "1Password"), listing: listing).display == 1)
     }
 
-    @Test func anAppWithNoWindowOnScreenIsReadOnTheMainDisplay() throws {
-        #expect(try Self.choose(frontmost: Front.App(pid: 500, name: "Finder")).display == 1)
+    /// An app in front with no window on screen is refused as the same app named is, never
+    /// read as an empty display. [LAW:no-silent-failure]
+    @Test func anAppInFrontWithNoWindowOnScreenIsRefusedAsWhenNamed() {
+        #expect(throws: AppUnread(.noWindow("Finder (pid 500)"))) { try Self.choose(frontmost: Front.App(pid: 500, name: "Finder")) }
+    }
+
+    /// A window across two displays is read on the one holding most of it, as macOS gives a
+    /// window the screen it mostly lies on; its centre, at the seam, decides nothing.
+    @Test func aWindowAcrossTwoDisplaysIsReadOnTheOneHoldingMostOfIt() throws {
+        let across = WindowListing(windows: [Window(id: 3, owner: "System Settings", pid: 300,
+                                                    frame: ScreenRect(x: -400, y: 40, width: 600, height: 400), layer: 0)], excluded: [])
+        #expect(try Self.choose(frontmost: Front.App(pid: 300, name: "System Settings"), listing: across).display == 2)
     }
 
     /// Nothing but the agent's own terminal: no place it could mean, so a refusal naming it.
     @Test func onlyTheAppEyesAnswersToOnScreenIsARefusal() {
         let alone = WindowListing(windows: [Self.menuBar, Self.window(2, "iTerm2", pid: 80)], excluded: [])
-        #expect(throws: NoFront(own: "iTerm2", why: .onlyOwn)) { try Self.choose(frontmost: Front.App(pid: 80, name: "iTerm2"), listing: alone) }
-        #expect(NoFront(own: "iTerm2", why: .onlyOwn).description.contains("no app but iTerm2, which eyes answers to, has a window on screen"))
+        #expect(throws: AppUnread(.onlyOwn("iTerm2"))) { try Self.choose(frontmost: Front.App(pid: 80, name: "iTerm2"), listing: alone) }
+        #expect(AppUnread(.onlyOwn("iTerm2")).description.contains("no app but iTerm2, which eyes answers to, has a window on screen"))
     }
 
-    /// With no display attached - one unplugged mid-read - the refusal says so, and not that
-    /// nothing else is on screen.
-    @Test func noDisplayIsARefusalSayingSo() {
-        #expect(throws: NoFront(own: "iTerm2", why: .noDisplay)) {
+    /// With no display holding the app's front window - one unplugged mid-read - the refusal
+    /// says so, and not that nothing else is on screen.
+    @Test func noDisplayHoldingTheWindowIsARefusalSayingSo() {
+        #expect(throws: AppUnread(.offDisplays("System Settings (pid 300)"))) {
             try Front.choose(frontmost: Front.App(pid: 300, name: "System Settings"), own: Self.terminal, regular: [300],
                              names: [:], listing: Self.desk, displays: [])
         }
-        #expect(NoFront(own: "iTerm2", why: .noDisplay).description == "no display is attached, so there is no screen to read")
+        #expect(AppUnread(.offDisplays("Mail")).description == "no attached display holds Mail's front window, as when a display is unplugged mid-read")
     }
 
     /// The app, and whatever is in front of its front window that a click there lands in - a
@@ -136,29 +146,30 @@ import Testing
         let panel = WindowListing(windows: [Self.menuBar, Self.window(9, "Open and Save Panel Service", pid: 900), Self.window(3, "System Settings", pid: 300),
                                             Self.window(4, "Safari", pid: 400), Self.window(2, "iTerm2", pid: 80)], excluded: [])
         let landsInPanel: (ScreenPoint) -> Heard<Int32> = { _ in .answered(900) }
-        let standing = { (pid: Int32, front: Front?) in
+        let standing = { (pid: Int32, front: Result<Front, AppUnread>) in
             Front.standing(of: pid, at: ScreenPoint(x: 100, y: 100), own: Self.terminal, front: front, in: panel,
                            displays: [Self.main, Self.left], hit: landsInPanel)
         }
-        #expect(standing(300, front) == .front(settings))
-        #expect(standing(900, front) == .overFront(settings))
-        #expect(standing(80, front) == .own("iTerm2"))
-        #expect(standing(81, front) == .own("iTerm2"))
-        #expect(standing(400, front) == .behind(settings))
-        // With nothing but the terminal on screen there is no front to read.
-        #expect(standing(80, nil) == .own("iTerm2"))
-        #expect(standing(400, nil) == .behind(nil))
+        #expect(standing(300, .success(front)) == .front(settings))
+        #expect(standing(900, .success(front)) == .overFront(settings))
+        #expect(standing(80, .success(front)) == .own("iTerm2"))
+        #expect(standing(81, .success(front)) == .own("iTerm2"))
+        #expect(standing(400, .success(front)) == .behind(settings))
+        // A front look that would be refused reads no app, and the refusal says why.
+        let alone = AppUnread(.onlyOwn("iTerm2"))
+        #expect(standing(80, .failure(alone)) == .own("iTerm2"))
+        #expect(standing(400, .failure(alone)) == .unread(alone))
         // A front look reads one display: a hit on another is not read, the front app's own
         // window there included.
         let onLeft = { (pid: Int32) in
-            Front.standing(of: pid, at: ScreenPoint(x: -500, y: 100), own: Self.terminal, front: front, in: panel,
+            Front.standing(of: pid, at: ScreenPoint(x: -500, y: 100), own: Self.terminal, front: .success(front), in: panel,
                            displays: [Self.main, Self.left], hit: landsInPanel)
         }
         #expect(onLeft(300) == .otherDisplay(settings, 1))
         #expect(onLeft(900) == .otherDisplay(settings, 1))
         #expect(onLeft(80) == .own("iTerm2"))
         // The front app's menu bar is no window of its own, which that look never walks.
-        #expect(Front.standing(of: 300, at: ScreenPoint(x: 100, y: 10), own: Self.terminal, front: front, in: panel,
+        #expect(Front.standing(of: 300, at: ScreenPoint(x: 100, y: 10), own: Self.terminal, front: .success(front), in: panel,
                                displays: [Self.main, Self.left], hit: landsInPanel) == .noWindow(settings))
     }
 
@@ -167,11 +178,13 @@ import Testing
         #expect(Owners.only([1]).union(.every) == .every)
     }
 
+    /// The ordinary apps, and a menu-bar utility, which is running but not one of them.
     static let running = [Front.App(pid: 80, name: "iTerm2"), Front.App(pid: 300, name: "System Settings"),
-                          Front.App(pid: 400, name: "Safari"), Front.App(pid: 500, name: "Mail")]
+                          Front.App(pid: 400, name: "Safari"), Front.App(pid: 500, name: "Mail"), Front.App(pid: 600, name: "Bartender")]
+    static let regular: Set<Int32> = [80, 300, 400, 500]
 
     static func named(_ name: String, listing: WindowListing = desk) throws(AppUnread) -> Front {
-        try Front.named(name, own: terminal, running: running, listing: listing, displays: [main, left])
+        try Front.named(name, own: terminal, running: running, regular: regular, listing: listing, displays: [main, left])
     }
 
     /// An app named is read on the display of its own front window, wherever it is stacked:
@@ -183,28 +196,43 @@ import Testing
 
     /// Exact, as vhid's `into` matches: a name that is part of another's names no app.
     @Test func aNameMatchesExactlyOrIsRefusedNamingTheRunningApps() {
-        #expect(throws: AppUnread(app: "safari", why: .notRunning(["Mail", "Safari", "System Settings", "iTerm2"]))) { try Self.named("safari") }
-        #expect(throws: AppUnread(app: "Settings", why: .notRunning(["Mail", "Safari", "System Settings", "iTerm2"]))) { try Self.named("Settings") }
-        #expect(AppUnread(app: "Notes", why: .notRunning(["Mail", "Safari"])).description
-            == "no app called \"Notes\" is running; names are matched exactly, and the running apps are Mail, Safari")
+        #expect(throws: AppUnread(.notRunning("safari", ordinary: ["Mail", "Safari", "System Settings", "iTerm2"]))) { try Self.named("safari") }
+        #expect(throws: AppUnread(.notRunning("Settings", ordinary: ["Mail", "Safari", "System Settings", "iTerm2"]))) { try Self.named("Settings") }
+        #expect(AppUnread(.notRunning("Notes", ordinary: ["Mail", "Safari"])).description
+            == "no app called \"Notes\" is running; names are matched exactly, and the ordinary apps running are Mail, Safari")
+    }
+
+    /// An app that is running but not an ordinary one - a menu-bar utility - is found by its
+    /// name like any other, and refused for its windows, not as not running.
+    @Test func anAppRunningThatIsNotAnOrdinaryOneIsFoundByName() throws {
+        #expect(throws: AppUnread(.noWindow("Bartender"))) { try Self.named("Bartender") }
+        let panel = WindowListing(windows: [Self.window(9, "Bartender", pid: 600)], excluded: [])
+        #expect(try Self.named("Bartender", listing: panel).app.pid == 600)
     }
 
     @Test func anAppRunningWithNoWindowOnScreenIsRefusedSayingWhereItsWindowsMayBe() {
-        #expect(throws: AppUnread(app: "Mail", why: .noWindow)) { try Self.named("Mail") }
-        #expect(AppUnread(app: "Mail", why: .noWindow).description == "Mail is running with no window on screen: minimized, hidden, or on another Space")
+        #expect(throws: AppUnread(.noWindow("Mail"))) { try Self.named("Mail") }
+        #expect(AppUnread(.noWindow("Mail")).description == "Mail is running with no window on screen: minimized, hidden, or on another Space")
     }
 
     /// The agent's own terminal shows the text it asks for, so naming it reads nothing that
     /// could be trusted: it is refused rather than read empty. [LAW:no-silent-failure]
     @Test func theAppEyesAnswersToIsRefusedWhenNamed() {
-        #expect(throws: AppUnread(app: "iTerm2", why: .own)) { try Self.named("iTerm2") }
+        #expect(throws: AppUnread(.own("iTerm2"))) { try Self.named("iTerm2") }
+    }
+
+    /// Of two processes of one name, one the app eyes answers to, the other is read.
+    @Test func ofTwoProcessesOfOneNameTheOneEyesDoesNotAnswerToIsRead() throws {
+        let twice = WindowListing(windows: [Self.window(2, "iTerm2", pid: 80), Self.window(7, "iTerm2", pid: 90)], excluded: [])
+        let running = Self.running + [Front.App(pid: 90, name: "iTerm2")]
+        #expect(try Front.named("iTerm2", own: Self.terminal, running: running, regular: Self.regular, listing: twice, displays: [Self.main]).app.pid == 90)
     }
 
     /// Two processes of one name: the one whose window is frontmost is read.
     @Test func ofTwoProcessesOfOneNameTheOneInFrontIsRead() throws {
         let twice = WindowListing(windows: [Self.window(8, "Safari", pid: 401), Self.window(4, "Safari", pid: 400)], excluded: [])
         let running = Self.running + [Front.App(pid: 401, name: "Safari")]
-        #expect(try Front.named("Safari", own: Self.terminal, running: running, listing: twice, displays: [Self.main]).app.pid == 401)
+        #expect(try Front.named("Safari", own: Self.terminal, running: running, regular: Self.regular, listing: twice, displays: [Self.main]).app.pid == 401)
     }
 }
 

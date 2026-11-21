@@ -10,24 +10,24 @@ struct LookCommand: AsyncParsableCommand {
 
     typealias Said = EyesVerbs.Help
 
-    @Option(help: Help.sentence(Said.app)) var app: String?
-    @Option(help: Help.sentence(Said.text)) var text: String?
-    @Flag(help: Help.sentence(Said.exact)) var exact = false
-    @Option(help: Help.sentence(Said.edits)) var edits: Int?
-    @Option(help: Help.sentence(Said.near)) var near: String?
-    @Option(help: Help.sentence(Said.role)) var role: String?
-    @Option(help: Help.sentence(Said.source)) var source: String?
-    @Option(help: Help.sentence(Said.limit)) var limit: Int?
-    @Option(help: Help.sentence(Said.display)) var display: UInt32?
-    @Option(help: Help.sentence(Said.window)) var window: UInt32?
-    @Option(help: Help.sentence(Said.page)) var page: UInt32?
+    @Option(help: .sentence(Said.app)) var app: String?
+    @Option(help: .sentence(Said.text)) var text: String?
+    @Flag(help: .sentence(Said.exact)) var exact = false
+    @Option(help: .sentence(Said.edits)) var edits: Int?
+    @Option(help: .sentence(Said.near)) var near: String?
+    @Option(help: .sentence(Said.role)) var role: String?
+    @Option(help: .sentence(Said.source)) var source: String?
+    @Option(help: .sentence(Said.limit)) var limit: Int?
+    @Option(help: .sentence(Said.display)) var display: UInt32?
+    @Option(help: .sentence(Said.window)) var window: UInt32?
+    @Option(help: .sentence(Said.page)) var page: UInt32?
     /// Taken whatever it starts with: a box or a point left of or above the main display
     /// starts with a minus, which would otherwise read as a flag.
-    @Option(parsing: .unconditional, help: Help.sentence(Said.rect)) var rect: String?
-    @Option(parsing: .unconditional, help: Help.sentence(Help.lookX)) var x: Double?
-    @Option(parsing: .unconditional, help: Help.sentence(Help.lookY)) var y: Double?
-    @Option(help: Help.sentence(Said.until)) var until: String?
-    @Option(help: Help.sentence(Said.timeout)) var timeout: Double?
+    @Option(parsing: .unconditional, help: .sentence(Said.rect)) var rect: String?
+    @Option(parsing: .unconditional, help: .sentence(Help.lookX)) var x: Double?
+    @Option(parsing: .unconditional, help: .sentence(Help.lookY)) var y: Double?
+    @Option(help: .sentence(Said.until)) var until: String?
+    @Option(help: .sentence(Said.timeout)) var timeout: Double?
 
     func validate() throws { _ = try question() }
 

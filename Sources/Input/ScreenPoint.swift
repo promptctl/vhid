@@ -6,10 +6,10 @@
 /// One space, named, rather than a pair of doubles whose meaning each caller remembers.
 ///
 /// The same space `eyes` reports text and window frames in, and said twice on purpose:
-/// the devices and the eyes halves link none of each other's targets by design, so each
-/// states the space it speaks rather than one depending on the other to define it. A shared definition would be the
-/// dependency this separation exists to avoid; two definitions of one fixed system
-/// coordinate space cannot drift, because neither is free to choose.
+/// the devices and the eyes halves link none of each other's targets, so each states the
+/// space it speaks. A shared definition would be the dependency that separation exists to
+/// avoid; two definitions of one fixed system coordinate space cannot drift, because
+/// neither is free to choose. Only the `vhid` executable sees both.
 public struct ScreenPoint: Hashable, Codable, Sendable, CustomStringConvertible {
     public let x: Double
     public let y: Double

@@ -1,3 +1,4 @@
+import ArgumentParser
 import Foundation
 import MCP
 import Testing
@@ -104,7 +105,7 @@ import Testing
         }).sorted { $0.name < $1.name }
     }
 
-    private static func sentence(_ phrase: String) -> String { Help.sentence(phrase).abstract }
+    private static func sentence(_ phrase: String) -> String { ArgumentHelp.sentence(phrase).abstract }
 
     /// Both surfaces show `Help.press`, so its key names reach both in natural order.
     @Test func pressListsTheKeyNamesInNaturalOrder() {

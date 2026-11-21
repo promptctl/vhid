@@ -10,33 +10,33 @@ public struct Find: AsyncParsableCommand {
         discussion: "Case never matters. With nothing found, prints the nearest runs and how many edits off each is."
     )
 
-    @Argument(help: Help.sentence(Help.text))
+    @Argument(help: .sentence(Help.text))
     var text: String
 
-    @Flag(help: Help.sentence(Help.exact))
+    @Flag(help: .sentence(Help.exact))
     var exact = false
 
-    @Option(help: Help.sentence(Help.edits))
+    @Option(help: .sentence(Help.edits))
     var edits: Int?
 
-    @Option(help: Help.sentence(Help.limit))
+    @Option(help: .sentence(Help.limit))
     var limit = Limit.default.count
 
-    @Option(help: Help.sentence(Help.near))
+    @Option(help: .sentence(Help.near))
     var near: String?
 
     @OptionGroup var place: Where
 
-    @Option(help: Help.sentence(Help.source))
+    @Option(help: .sentence(Help.source))
     var source = SourceKind.merged
 
-    @Option(help: Help.sentence(Help.role))
+    @Option(help: .sentence(Help.role))
     var role: String?
 
-    @Option(help: Help.sentence(Help.until))
+    @Option(help: .sentence(Help.until))
     var until: Until?
 
-    @Option(help: Help.sentence(Help.timeout))
+    @Option(help: .sentence(Help.timeout))
     var timeout: Double?
 
     public func validate() throws {
@@ -110,15 +110,15 @@ public struct Read: AsyncParsableCommand {
         abstract: "Print the text in a region, one run per row, with the point vhid clicks to hit it and the box around it."
     )
 
-    @Option(help: Help.sentence(Help.limit))
+    @Option(help: .sentence(Help.limit))
     var limit = Limit.default.count
 
     @OptionGroup var place: Where
 
-    @Option(help: Help.sentence(Help.source))
+    @Option(help: .sentence(Help.source))
     var source = SourceKind.merged
 
-    @Option(help: Help.sentence(Help.role))
+    @Option(help: .sentence(Help.role))
     var role: String?
 
     public func validate() throws {

@@ -53,6 +53,20 @@ vhid_doctor ready running 0
 run
 [ "$status" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ] || fail "ready: exited $status, said '$out', '$err'; should say nothing"
 
+# Ready with a screen grant missing, or unread: said, with the row that names the step.
+stub '[ "$1" = doctor ] || exit 0' "printf 'ready\\n\\n2 grants, read before any dialog.\\nScreen Recording\\tnot granted\\tpixels\\tturn on iTerm2 in Privacy\\n'"
+run
+said "vhid is ready to type and click, but not every screen grant is held" "grant missing"
+said "turn on iTerm2 in Privacy" "grant missing"
+stub '[ "$1" = doctor ] || exit 0' "printf 'ready\\n\\nThe grants could not be read: no child\\n'"
+run
+said "vhid is ready to type and click, but not every screen grant is held" "grants unread"
+said "The grants could not be read: no child" "grants unread"
+# Every grant held: nothing to say.
+stub '[ "$1" = doctor ] || exit 0' "printf 'ready\\n\\n2 grants, read before any dialog.\\nScreen Recording\\tgranted\\tpixels\\n'"
+run
+[ "$status" -eq 0 ] && [ -z "$out" ] || fail "grants held: exited $status, said '$out'; should say nothing"
+
 # Not ready: the doctor's reading, rows and all, that its tools will refuse to act, and
 # that look still reads.
 vhid_doctor "not ready" "awaiting approval" 1

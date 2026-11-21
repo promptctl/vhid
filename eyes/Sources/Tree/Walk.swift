@@ -455,8 +455,8 @@ public enum TreeError: ReaderError, CustomStringConvertible {
     public var description: String {
         switch self {
         case .noGrant:
-            "\(TreeReader.grant.name) is not granted to the app responsible for eyes, so no app's elements can be read."
-                + " Grant it in \(TreeReader.grant.pane)."
+            "\(TreeReader.grant.name) is not granted to the app responsible for this process, the terminal it runs in or the app that started its MCP server, so no app's elements can be read."
+                + " Grant it in \(TreeReader.grant.pane); vhid doctor names the app."
         }
     }
 }

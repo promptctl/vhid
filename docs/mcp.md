@@ -21,7 +21,8 @@ rule.
 
 Each call that drives connects to the daemon and leaves when it returns, so a session
 holds nothing between calls and a `vhid click` from a shell still gets through; `look`
-asks nothing of the daemon. Calls run one at a time, in the order they arrive. Stdout
+asks nothing of the daemon. Calls that drive run one at a time, in no promised order when
+sent together; a `look` runs beside them, so one waiting on a change holds up no act. Stdout
 carries only JSON-RPC; diagnostics go to stderr. An argument a tool will not act on comes
 back as a tool error naming it, before anything is connected.
 

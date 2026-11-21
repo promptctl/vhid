@@ -4,6 +4,7 @@ import Telemetry
 import Helper
 import Input
 import Installations
+import struct Seeing.Front
 import Keystrokes
 import Pointing
 
@@ -24,7 +25,7 @@ struct Devices {
     let keyboard: any Keyboard
     let mouse: any Mouse
     let cursor: @Sendable () async throws -> ScreenPoint
-    let front: @Sendable () async throws -> FrontApp?
+    let front: @Sendable () async throws -> Front.App?
     /// The pointer this mouse is steered by, reading the cursor back after every report -
     /// which is the only place the truth about where the pointer went lives, since macOS
     /// accelerates the counts the device sends. One per opening, so a verb's moves draw
@@ -110,10 +111,10 @@ struct Devices {
     /// `status` is answered once the daemon is listening, and refused while its devices
     /// are down, so a verb that gets past it has devices to send to. It is made on `queue`
     /// like every other call, and claims nothing. [LAW:no-ambient-temporal-coupling]
-    static func front(_ helper: HelperConnection, on queue: DeviceQueue) -> @Sendable () async throws -> FrontApp? {
+    static func front(_ helper: HelperConnection, on queue: DeviceQueue) -> @Sendable () async throws -> Front.App? {
         {
             _ = try await queue.run { try helper.status() }
-            return try await FrontApp.inFront()
+            return try await Front.App.inFront()
         }
     }
 

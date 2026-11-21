@@ -113,10 +113,11 @@ A reader that cannot look ends the wait with its error rather than reporting "go
 When `--timeout` runs out, the answer is the last reading, marked as timed out.
 
 `--app` reads a named app as a look with no place reads the app in front: its windows and
-what is over its front window, on the display holding that window, matched by the name
-exactly as macOS spells it and `eyes windows` prints it. A name no running app has is
-refused naming the apps that are running; an app running with no window on screen, and
-the app eyes answers to, are refused saying so.
+what is over its front window, on the display holding most of that window, matched by the
+name exactly as macOS spells it and `eyes windows` prints it. A name no running app has is
+refused naming the ordinary apps that are running; an app running with no window on
+screen, the app eyes answers to, and a front window no attached display holds are refused
+saying so, the app in front alike.
 
 ## Events
 

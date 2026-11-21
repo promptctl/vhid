@@ -19,7 +19,7 @@ struct DoctorCommand: AsyncParsableCommand {
     func run() async throws {
         let installation = try service.installation()
         let readiness = try await reading { Readiness.read(for: installation, stoppedBy: $0) }
-        print(Self.doctor(readiness, grants: await GrantsVerb.reported()))
+        print(Self.doctor(readiness, grants: try await GrantsVerb.reported()))
         guard readiness.ready else { throw ExitCode(1) }
     }
 

@@ -1,4 +1,6 @@
 import AppKit
+import EyesVerbs
+import Seeing
 import SystemConfiguration
 import ArgumentParser
 
@@ -17,12 +19,12 @@ enum Aim: Sendable, Equatable {
     /// Throws `NotInFront`, before a key has gone down, unless `front` is the app aimed at.
     /// `front` is read only when there is an app to compare it with, so keys aimed
     /// `anywhere` cost no question of the daemon or of macOS.
-    func admit(_ front: () async throws -> FrontApp?) async throws {
+    func admit(_ front: () async throws -> Front.App?) async throws {
         guard case .into(let app) = self else { return }
         let inFront = try await front()
-        // Exact: a name taken from eyes is spelled as macOS spells it, and a looser match
-        // would let "Notes" admit Sticky Notes. [LAW:parse-dont-validate]
-        guard inFront?.name == app else { throw NotInFront(aimed: app, front: inFront) }
+        // By the rule `look`'s `app` is matched by, so a name copied from a look admits the
+        // app that look read. [LAW:single-enforcer]
+        guard inFront?.isCalled(app) == true else { throw NotInFront(aimed: app, front: inFront) }
     }
 
     /// What a verb adds to its report: where the keys were checked to go, or nothing.
@@ -44,32 +46,21 @@ enum Aim: Sendable, Equatable {
     }
 }
 
-/// The application in front: where keys usually go.
-struct FrontApp: Sendable, Equatable, CustomStringConvertible {
-    let pid: Int32
-    let name: String?
-
-    var description: String { "\(name ?? "(unnamed)") (pid \(pid))" }
-
-    /// Asked of macOS on every call, never kept: what was in front a moment ago is the
-    /// question this exists to stop answering. [LAW:no-ambient-temporal-coupling]
-    ///
-    /// The same reading as eyes' `Frontmost` (eyes/Sources/Command/Windows.swift), the
-    /// name on its scope line, so a name copied from there matches. A window's owner
-    /// column is the window server's name for the app, which usually but not always reads
-    /// the same.
+extension Front.App {
+    /// The application in front, where keys usually go, asked of macOS on every call and
+    /// never kept: what was in front a moment ago is the question this exists to stop
+    /// answering. [LAW:no-ambient-temporal-coupling] Read as `look` reads it, the name on its
+    /// scope line, so a name copied from there matches. [LAW:one-source-of-truth]
     ///
     /// NSWorkspace answers for this user's session, and the keys go to the session in
     /// front. So the console's user is asked first, and when it is another, or the login
     /// window's, the answer here would be about a session the keys do not reach: that is
     /// refused rather than read. [LAW:no-silent-failure]
-    static let inFront: @Sendable () async throws -> FrontApp? = {
+    static let inFront: @Sendable () async throws -> Front.App? = {
         var console: uid_t = 0
         let user = SCDynamicStoreCopyConsoleUser(nil, &console, nil) as String?
         try AnotherSessionInFront.check(user: user, console: console, mine: getuid())
-        return await MainActor.run {
-            NSWorkspace.shared.frontmostApplication.map { FrontApp(pid: $0.processIdentifier, name: $0.localizedName) }
-        }
+        return await Front.App.now()
     }
 }
 
@@ -92,7 +83,7 @@ struct AnotherSessionInFront: Error, Equatable, CustomStringConvertible {
 /// Keys aimed into one app, when another was in front. Nothing was sent.
 struct NotInFront: Error, Equatable, CustomStringConvertible {
     let aimed: String
-    let front: FrontApp?
+    let front: Front.App?
 
     var description: String {
         "\(aimed) is not in front, so nothing was sent: " + (front.map { "\($0) is" } ?? "no application is")
@@ -101,7 +92,7 @@ struct NotInFront: Error, Equatable, CustomStringConvertible {
 
 /// `--into`, taken by `type` and `press`. [LAW:one-source-of-truth]
 struct AimOption: ParsableArguments {
-    @Option(name: .customLong("into"), help: Help.sentence(Help.into))
+    @Option(name: .customLong("into"), help: .sentence(Help.into))
     var app: String?
 
     func aim() throws -> Aim {

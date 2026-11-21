@@ -168,7 +168,7 @@ let package = Package(
             name: "vhid",
             dependencies: [
                 "Input", "Helper", "Installations", "KeyboardLayouts", "Keystrokes", "Pointing", "DriverExtension", "Doctor",
-                "Version", "RecordingTie", "Signals", "EyesVerbs", "Telemetry",
+                "Version", "RecordingTie", "Signals", "EyesVerbs", "Seeing", "Telemetry", "Turns",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "MCP", package: "swift-sdk"),
                 .product(name: "Logging", package: "swift-log"),
@@ -181,7 +181,7 @@ let package = Package(
             name: "vhidCLITests",
             dependencies: [
                 "vhid", "Input", "Helper", "Installations", "Keystrokes", "Pointing", "Doctor", "DriverExtension", "Version", "OwnThread", "TestClock", "Signals",
-                "Telemetry", "TelemetryTesting",
+                "Telemetry", "TelemetryTesting", "Seeing", "Turns",
                 .product(name: "MCP", package: "swift-sdk"),
             ]
         ),
@@ -217,7 +217,7 @@ let package = Package(
         // The pixel reader: the grant, the capture and Vision. Its own target so the
         // vocabulary above stays linking nothing, and the accessibility reader can sit
         // beside it without either linking the other.
-        .target(name: "Pixels", dependencies: ["Seeing", "Grants"], path: "eyes/Sources/Pixels"),
+        .target(name: "Pixels", dependencies: ["Seeing", "Grants", "Telemetry", "Turns"], path: "eyes/Sources/Pixels"),
         // How a capture is cut into pieces and put back together, with no capture at all.
         .testTarget(name: "PixelsTests", dependencies: ["Pixels", "Seeing", "Grants"], path: "eyes/Tests/PixelsTests"),
         // The tree reader: the accessibility grant and the element reads. Its own target
@@ -236,6 +236,10 @@ let package = Package(
         // vhid's invocations and eyes' units alike. Links nothing, so every target can report
         // through it. [LAW:nothing-unseen]
         .target(name: "Telemetry", path: "eyes/Sources/Telemetry"),
+        // Work that must never overlap, one piece after another: Vision's recognitions, and
+        // an MCP server's calls to the daemon. Links nothing, so either half can hold to it.
+        .target(name: "Turns", path: "eyes/Sources/Turns"),
+        .testTarget(name: "TurnsTests", dependencies: ["Turns"], path: "eyes/Tests/TurnsTests"),
         // What every test target that runs units of work shares: a collector for their
         // events, and the trait that keeps them off the real edge.
         .target(name: "TelemetryTesting", dependencies: ["Telemetry"], path: "eyes/Tests/TelemetryTesting"),

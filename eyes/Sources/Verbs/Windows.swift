@@ -128,7 +128,7 @@ public struct Windows: AsyncParsableCommand {
 extension Front.App {
     /// The frontmost application: usually where keystrokes go, and nothing eyes chooses.
     @MainActor
-    static func now() -> Front.App? {
+    public static func now() -> Front.App? {
         NSWorkspace.shared.frontmostApplication.map { Front.App(pid: $0.processIdentifier, name: $0.localizedName) }
     }
 }

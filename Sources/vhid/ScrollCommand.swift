@@ -1,22 +1,23 @@
 import ArgumentParser
+import EyesVerbs
 import Input
 
 /// Rolls the wheel at a place on the screen.
 struct ScrollCommand: AsyncParsableCommand {
     static let configuration = Help.scroll.configuration
 
-    @Argument(help: Help.sentence(Help.target))
+    @Argument(help: .sentence(Help.target))
     var place: [String]
 
     // [LAW:no-silent-failure] Unconditional, because a negative count is half of what this
     // takes and the default reads `-3` as a flag, refusing `--vertical -3` as missing.
-    @Option(parsing: .unconditional, help: Help.sentence(Help.vertical))
+    @Option(parsing: .unconditional, help: .sentence(Help.vertical))
     var vertical: Int = 0
 
-    @Option(parsing: .unconditional, help: Help.sentence(Help.horizontal))
+    @Option(parsing: .unconditional, help: .sentence(Help.horizontal))
     var horizontal: Int = 0
 
-    @Option(help: Help.sentence(Help.modifiers), transform: heldModifiers)
+    @Option(help: .sentence(Help.modifiers), transform: heldModifiers)
     var modifiers: HeldModifiers = .none
 
     @OptionGroup var service: ServiceOption

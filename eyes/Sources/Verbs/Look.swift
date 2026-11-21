@@ -51,8 +51,12 @@ public enum Help {
     public static let needs = Grant.allCases.sorted { $0.reader.rawValue > $1.reader.rawValue }
         .map { "the \($0.reader.rawValue) reader needs \($0.name)" }.joined(separator: " and ")
 
-    /// A phrase above as the command line shows it: capitalised, with a full stop.
-    static func sentence(_ phrase: String) -> ArgumentHelp {
+}
+
+extension ArgumentHelp {
+    /// A phrase of `Help`'s as the command line shows it: capitalised, with a full stop.
+    /// [LAW:one-source-of-truth] The one rule, for both halves' verbs.
+    public static func sentence(_ phrase: String) -> ArgumentHelp {
         ArgumentHelp(phrase.prefix(1).uppercased() + phrase.dropFirst() + ".")
     }
 }
@@ -70,7 +74,7 @@ extension SourceKind: ExpressibleByArgument {
     }
 
     /// Every reader's gate: a fresh reading, the one `eyes grants` prints, so a reader and
-    /// the grants tool cannot disagree - and a grant switched on under a running `eyes mcp`
+    /// the grants tool cannot disagree - and a grant switched on under a running `vhid mcp`
     /// is seen by its next read. [LAW:one-source-of-truth]
     static let granted: Gate = { try await readings.holds($0) }
     private static let readings = SharedReading(take: GrantsVerb.reading)
@@ -87,21 +91,21 @@ extension SourceKind: ExpressibleByArgument {
 
 /// Where `find` and `read` look, shared so the two verbs cannot disagree about it.
 struct Where: ParsableArguments {
-    @Option(help: Help.sentence(Help.display))
+    @Option(help: .sentence(Help.display))
     var display: UInt32?
 
-    @Option(help: Help.sentence(Help.window))
+    @Option(help: .sentence(Help.window))
     var window: UInt32?
 
     /// Takes the next argument whatever it starts with: a box on a display left of or
     /// above the main one starts with a minus, which would otherwise read as a flag.
-    @Option(parsing: .unconditional, help: Help.sentence(Help.rect))
+    @Option(parsing: .unconditional, help: .sentence(Help.rect))
     var rect: String?
 
-    @Option(help: Help.sentence(Help.page))
+    @Option(help: .sentence(Help.page))
     var page: UInt32?
 
-    @Option(help: Help.sentence(Help.app))
+    @Option(help: .sentence(Help.app))
     var app: String?
 
     public func validate() throws {
@@ -120,15 +124,22 @@ struct Where: ParsableArguments {
     /// the app it is working in, not every window on the desk. Naming an app reads that app
     /// the same way. The scope line names the app.
     static func place(app: String?, display: UInt32?, window: UInt32?, page: UInt32?, rect: String?, as s: Spelling) throws -> Place {
-        guard [app != nil, display != nil, window != nil, page != nil, rect != nil].filter({ $0 }).count <= 1 else {
-            throw ValidationError("give at most one of \(s("app")), \(s("display")), \(s("window")), \(s("page")), \(s("rect"))")
+        let named = places(app: app, display: display, window: window, page: page, rect: rect)
+        guard named.filter(\.value).count <= 1 else {
+            throw ValidationError("give at most one of \(named.map { s($0.key) }.joined(separator: ", "))")
         }
         guard app?.isEmpty != true else { throw ValidationError("\(s("app")) is empty, which names no app; leave it off to read the app in front") }
         return try page.map(Place.page)
             ?? rect.map { .region(.rect(try parsedRect($0, as: s))) }
             ?? window.map { .region(.window($0)) }
             ?? display.map { .region(.display($0)) }
-            ?? .front(app)
+            ?? .app(app.map(Place.Which.named) ?? .inFront)
+    }
+
+    /// The place arguments, each with whether it was given: the one list a refusal names them
+    /// from. [LAW:one-source-of-truth]
+    static func places(app: String?, display: UInt32?, window: UInt32?, page: UInt32?, rect: String?) -> KeyValuePairs<String, Bool> {
+        ["app": app != nil, "display": display != nil, "window": window != nil, "page": page != nil, "rect": rect != nil]
     }
 
     /// Where a verb was told to look: a region as spelled, a window's web page, whose frame
@@ -137,35 +148,44 @@ struct Where: ParsableArguments {
     enum Place {
         case region(Region)
         case page(UInt32)
-        case front(String?)
+        case app(Which)
+
+        /// Which app a look reads: the one in front, or the one named.
+        enum Which: Sendable, Equatable {
+            case inFront
+            case named(String)
+        }
 
         /// What a window's tree says of its pages: the tree in the process, a fake in a test.
         typealias Pages = @Sendable @MainActor (UInt32) async throws -> Paged
         static let tree: Pages = { try await TreeReader(granted: SourceKind.granted).pages(in: $0) }
 
-        /// The app a look reads now, the one in front or the one named: AppKit and the
-        /// responsibility call in the process, a fake in a test.
-        typealias Fronts = @Sendable @MainActor (String?) async throws -> Front
-        static let live: Fronts = { name in
+        /// The app a look reads now: AppKit and the responsibility call in the process, a fake
+        /// in a test.
+        typealias Fronts = @Sendable @MainActor (Which) async throws -> Front
+        static let live: Fronts = { which in
+            let frontmost = Front.App.now()
             let (own, listing, displays) = (try await Front.Passed.current(), try Geometry.onScreen(), Geometry.displays())
-            return try name.map { try Front.now(named: $0, own: own, listing: listing, displays: displays) }
-                ?? Front.now(own: own, listing: listing, displays: displays)
+            return switch which {
+            case .inFront: try Front.now(frontmost: frontmost, own: own, listing: listing, displays: displays)
+            case .named(let name): try Front.now(named: name, own: own, listing: listing, displays: displays)
+            }
         }
 
         @MainActor func region(pages: Pages = tree, front: Fronts = live) async throws -> Region {
             switch self {
             case .region(let region): region
             case .page(let id): try await Self.page(id, pages: pages)
-            case .front(let name): try await Self.front(name, front)
+            case .app(let which): try await Self.front(which, front)
             }
         }
 
-        /// [LAW:nothing-unseen] Choosing what is in front is a decision of its own, before any
-        /// look starts: which app, on which display, and which app it passed over.
-        @MainActor private static func front(_ name: String?, _ fronts: Fronts) async throws -> Region {
+        /// [LAW:nothing-unseen] Choosing the app is a decision of its own, before any look
+        /// starts: which app, on which display, and which app it passed over.
+        @MainActor private static func front(_ which: Which, _ fronts: Fronts) async throws -> Region {
             try await Telemetry.unit("front") {
-                Telemetry.note("named", name ?? "")
-                let front = try await fronts(name)
+                if case .named(let name) = which { Telemetry.note("named", name) }
+                let front = try await fronts(which)
                 Telemetry.note("front_app", front.app.name ?? "")
                 Telemetry.note("front_pid", String(front.app.pid))
                 Telemetry.note("display", String(front.display))
@@ -206,15 +226,13 @@ struct Where: ParsableArguments {
 /// What `find` and `read` print. Pure, so the sentences a caller trusts are tested.
 /// [LAW:effects-at-boundaries]
 enum Report {
-    /// `grantNote` follows each missing grant named: where the grant is held, when that is
-    /// not the process printing - an MCP server's host app.
-    static func lines(_ reading: Reading, query: Query, source: SourceKind, grantNote: String = "") -> [String] {
-        [scope(reading, query: query, source: source, grantNote: grantNote)] + rows(reading.outcome)
+    static func lines(_ reading: Reading, query: Query, source: SourceKind) -> [String] {
+        [scope(reading, query: query, source: source)] + rows(reading.outcome)
     }
 
     /// Names where it looked, how much it read, and every narrowing, before any row.
     /// [LAW:no-silent-failure]
-    static func scope(_ reading: Reading, query: Query, source: SourceKind, grantNote: String = "") -> String {
+    static func scope(_ reading: Reading, query: Query, source: SourceKind) -> String {
         let s = reading.scope
         let role = query.role.map { " as \($0.rawValue)" } ?? ""
         let asked = query.match.map { match in wanted(match) + role + (query.near.map { " near \(wanted($0))" } ?? "") }
@@ -235,7 +253,7 @@ enum Report {
             "\(s.examined) run\(s.examined == 1 ? "" : "s") read",
             s.excluded.isEmpty ? nil : s.excluded.map { "\($0.count) \($0.reason.rawValue)" }.joined(separator: ", "),
             boxes(s.boxes),
-            reach(s.reach, grantNote),
+            reach(s.reach),
             reading.outcome.misses.isEmpty ? nil : "nearest follow",
         ]
         return clauses.compactMap { $0 }.joined(separator: "; ") + ". Each row's point is its centre and its box holds it, x,y,width,height, in vhid click coordinates."
@@ -337,23 +355,23 @@ enum Report {
         return "by \((a.isBlind ? b : a).kind.rawValue) alone"
     }
 
-    private static func reach(_ reach: Reach, _ grantNote: String = "") -> String {
+    private static func reach(_ reach: Reach) -> String {
         switch reach {
         case .whole: "whole region read"
         case .stopped(.resultLimit(let l)): "stopped at the limit of \(l.count)"
         case .stopped(.elementLimit(let l)): "stopped at \(l.count) elements"
         case .stopped(.timeBudget(let d)): "stopped after \(d)"
         case .stopped(.unread): "parts left unread"
-        case .stopped(.merged(let a, let b)): "\(part(a, grantNote)), \(part(b, grantNote))"
+        case .stopped(.merged(let a, let b)): "\(part(a)), \(part(b))"
         }
     }
 
-    private static func part(_ part: Part, _ grantNote: String) -> String {
+    private static func part(_ part: Part) -> String {
         switch part {
-        case .read(let kind, let r): "\(kind.rawValue) \(reach(r, grantNote))"
+        case .read(let kind, let r): "\(kind.rawValue) \(reach(r))"
         // One line whatever the error printed, since the scope is one line.
-        case .blind(let kind, let why, let grant):
-            "\(kind.rawValue) could not look (\(why.split(whereSeparator: \.isNewline).joined(separator: " "))\(grant ? grantNote : ""))"
+        case .blind(let kind, let why, _):
+            "\(kind.rawValue) could not look (\(why.split(whereSeparator: \.isNewline).joined(separator: " ")))"
         }
     }
 
@@ -440,7 +458,7 @@ extension Report {
     /// with a wait, the read the wait ended on, its scope line led by how the wait went.
     /// [LAW:one-source-of-truth]
     static func text(
-        _ query: Query, source: SourceKind, wait: Wait? = nil, grantNote: String = "",
+        _ query: Query, source: SourceKind, wait: Wait? = nil,
         reading read: @Sendable (SourceKind, Query) async throws -> Judged
     ) async throws -> String {
         // [LAW:nothing-unseen] One event per look, from the one path every verb and tool
@@ -467,13 +485,13 @@ extension Report {
             guard let wait else {
                 let reading = try await counted(query).pressed()
                 Self.count(reading, query)
-                return (text: lines(reading, query: query, source: source, grantNote: grantNote).joined(separator: "\n"),
+                return (text: lines(reading, query: query, source: source).joined(separator: "\n"),
                         outcome: reading.outcome.said)
             }
             Telemetry.note("until", wait.until.rawValue)
             let waited = try await waiting(for: wait, on: query, read: counted)
             Self.count(waited.reading, query)
-            let said = lines(waited.reading, query: query, source: source, grantNote: grantNote)
+            let said = lines(waited.reading, query: query, source: source)
             return (text: ([waitedClause(waited, wait) + said[0]] + said.dropFirst()).joined(separator: "\n"),
                     outcome: waited.settled ? "settled" : "timed_out")
         }.text
@@ -535,22 +553,26 @@ extension Front.Passed {
     }
 }
 
+
 extension Front {
     /// The app a look naming one reads now, from the apps running and the windows on screen.
     @MainActor
     static func now(named name: String, own: Passed, listing: WindowListing, displays: [Display]) throws(AppUnread) -> Front {
-        let running = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
+        let running = NSWorkspace.shared.runningApplications
         return try named(name, own: own, running: running.map { App(pid: $0.processIdentifier, name: $0.localizedName) },
+                         regular: Set(running.filter { $0.activationPolicy == .regular }.map(\.processIdentifier)),
                          listing: listing, displays: displays)
     }
 
-    /// What a look with no place named reads now, with the app eyes answers to and the window
-    /// listing the caller already holds, so a hit judges the listing it found the window in.
+    /// What a look with no place named reads now, from the app that was frontmost and the
+    /// window listing the caller holds. The frontmost app is the caller's to read before the
+    /// listing, so an activation lands before the listing that reflects it, and a hit judges
+    /// the listing it found the window in. [LAW:no-ambient-temporal-coupling]
     @MainActor
-    static func now(own: Passed, listing: WindowListing, displays: [Display]) throws(NoFront) -> Front {
+    static func now(frontmost: App?, own: Passed, listing: WindowListing, displays: [Display]) throws(AppUnread) -> Front {
         let running = NSWorkspace.shared.runningApplications
         return try choose(
-            frontmost: App.now(),
+            frontmost: frontmost,
             own: own,
             regular: Set(running.filter { $0.activationPolicy == .regular }.map(\.processIdentifier)),
             names: Dictionary(running.compactMap { app in app.localizedName.map { (app.processIdentifier, $0) } }, uniquingKeysWith: { a, _ in a }),

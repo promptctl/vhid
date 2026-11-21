@@ -70,9 +70,19 @@ extension Parameter where Taken == Bool {
 }
 
 extension Parameter where Taken == UInt32 {
-    /// A window server's id for a display or a window, as the listings print it.
+    /// A window server's id for a display or a window, as the listings print it: 32 bits,
+    /// said in the schema, and a number beyond them refused naming the range rather than
+    /// read as some other id. [LAW:parse-dont-validate]
     static func id(_ name: String, _ expected: String) -> Self {
-        Self(name: name, expected: expected, schema: ["type": "integer", "minimum": 0], absent: nil) { $0.whole.flatMap(UInt32.init(exactly:)) }
+        let most = Int(UInt32.max)
+        return Self(name: name, expected: expected, schema: ["type": "integer", "minimum": 0, "maximum": .int(most)], absent: nil) { value in
+            try value.whole.map { whole in
+                guard let id = UInt32(exactly: whole) else {
+                    throw ArgumentRefused("\(name) is \(whole), and a window server's id runs from 0 to \(most)")
+                }
+                return id
+            }
+        }
     }
 }
 
@@ -215,7 +225,7 @@ private extension Value {
 /// Made only by `init(_:for:)`, which refuses an argument the tool does not take: a
 /// wrong name, `count` for `times`, would otherwise click once where three were asked for,
 /// and say it had. [LAW:no-silent-failure]
-struct Arguments {
+struct Arguments: Sendable {
     private let given: [String: Value]
 
     init(_ given: [String: Value], for parameters: [any DeclaredParameter]) throws(ArgumentRefused) {

@@ -3,6 +3,8 @@ import Seeing
 import Foundation
 import Grants
 import ImageIO
+import Telemetry
+import Turns
 import Vision
 
 /// Reads the screen as pixels: captures the region, recognises its text on-device with
@@ -40,8 +42,6 @@ public struct PixelReader: Reader {
         let owners = query.region.owners(in: listing, hit: hit)
         let image = try Self.capture(region)
         // A run with no words in it is nil: examined, and counted as wordless.
-        // One piece after another, never at once: measured, recognising the pieces in a
-        // task group segfaulted inside TextRecognition in 4 runs of 15.
         var runs: [Found?] = []
         var readable: [Piece] = []
         for (index, tile) in Self.tiles(of: region).enumerated() {
@@ -208,6 +208,22 @@ public struct PixelReader: Reader {
     /// piece is the rectangle each box is converted on - the one conversion, applied to a
     /// smaller display. [LAW:single-enforcer]
     nonisolated static func recognise(_ image: CGImage, of region: ScreenRect, in tile: ScreenRect) async throws -> [Found?] {
+        let asked = ContinuousClock.now
+        return try await recognitions.take {
+            // [LAW:nothing-unseen] Summed on the look's event across its pieces and a wait's
+            // polls, so a look queued behind another is told from a slow read.
+            Telemetry.tally("queued_ms", by: Int((ContinuousClock.now - asked) / .milliseconds(1)))
+            return try await recognised(image, of: region, in: tile)
+        }
+    }
+
+    /// Vision's recognitions in this process, one after another, never at once: measured, two
+    /// in flight together - the pieces of one capture in a task group, or two looks an MCP
+    /// server ran side by side - segfaulted inside TextRecognition in 4 runs of 15.
+    /// [LAW:single-enforcer] Held here, at the one call into Vision, so no caller can forget it.
+    nonisolated static let recognitions = Turns()
+
+    private nonisolated static func recognised(_ image: CGImage, of region: ScreenRect, in tile: ScreenRect) async throws -> [Found?] {
         var request = RecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.regionOfInterest = NormalizedRect(normalizedRect: tile.normalized(in: region))
@@ -262,8 +278,8 @@ public enum PixelsError: ReaderError, CustomStringConvertible {
     public var description: String {
         switch self {
         case .noGrant:
-            "\(PixelReader.grant.name) is not granted to the app responsible for eyes, so a capture would show only the wallpaper."
-                + " Grant it in \(PixelReader.grant.pane)."
+            "\(PixelReader.grant.name) is not granted to the app responsible for this process, the terminal it runs in or the app that started its MCP server, so a capture would show only the wallpaper."
+                + " Grant it in \(PixelReader.grant.pane); vhid doctor names the app."
         case .offScreen(let r):
             "\(r) is on no display, so there is nothing there to read"
         case .spansDisplays(let r):

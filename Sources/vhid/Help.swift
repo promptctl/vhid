@@ -49,11 +49,6 @@ enum Help {
     static let from = "where the button goes down"
     static let to = "where it comes up"
 
-    /// A phrase above as the command line shows it: capitalised, with a full stop.
-    static func sentence(_ phrase: String) -> ArgumentHelp {
-        ArgumentHelp(phrase.prefix(1).uppercased() + phrase.dropFirst() + ".")
-    }
-
     /// The one order that parses a negative coordinate: every option, then `--`, then the
     /// numbers. Each verb's example is kept as argv so a test parses exactly what the help
     /// prints. [LAW:one-source-of-truth]
@@ -246,8 +241,8 @@ enum Help {
         bringing it forward; display, window, rect or page read that place instead. text keeps \
         the runs containing it, near orders them by what sits beside them, and until with a \
         timeout waits for the text to appear or go. x and y, alone, ask what a click at that \
-        point would land on. The tree reader needs Accessibility and the pixels reader Screen \
-        Recording, both held by the app that runs this server; doctor says which are held.
+        point would land on. Of the readers, \(EyesVerbs.Help.needs), each grant held by the \
+        app that runs this server; doctor says which are held.
         """)
 
     static let lookX = EyesVerbs.Help.x + ", given with y and nothing else: what a click there would land on"

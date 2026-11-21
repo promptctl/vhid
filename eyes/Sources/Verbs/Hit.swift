@@ -18,10 +18,10 @@ public struct Hit: AsyncParsableCommand {
     /// What the verb and the MCP tool both say of it; the shell's `--` is the verb's alone.
     static let about = "Asks the system's own hit test at the point, as vhid click takes it, and reads each element up to the area holding it - a window, a list, a toolbar, a web page. Says whether a look with no place named reads that app. Needs Accessibility."
 
-    @Argument(help: Help.sentence(Help.x))
+    @Argument(help: .sentence(Help.x))
     var x: Double
 
-    @Argument(help: Help.sentence(Help.y))
+    @Argument(help: .sentence(Help.y))
     var y: Double
 
     public func validate() throws { _ = try Self.point(x, y) }
@@ -66,6 +66,7 @@ public struct Hit: AsyncParsableCommand {
                 Telemetry.note("app", landed.app.name ?? "")
                 Telemetry.note("standing", landed.standing.said)
                 if let front = landed.standing.front { Telemetry.note("front", front.name ?? "") }
+                if case .unread(let why) = landed.standing { Telemetry.note("unread", "\(why)") }
                 Telemetry.note("end", landed.end.said)
                 Telemetry.note("pid", String(landed.app.pid))
                 if let window = landed.window { Telemetry.note("window", String(window.id)) }
@@ -104,10 +105,10 @@ public struct Hit: AsyncParsableCommand {
         case .own: "the app eyes answers to, whose windows a look never reads: the agent's own terminal or app"
         case .otherDisplay(let front, let display):
             "on a display a look with no place named does not read: it reads \(front) on display \(display)"
-        case .behind(let front?): "not in front: a look with no place named reads \(front)"
+        case .behind(let front): "not in front: a look with no place named reads \(front)"
         case .noWindow(let front):
             "in no window of its own here - a menu bar, a menu - which a look with no place named never reads: it reads \(front)'s windows"
-        case .behind(nil): "not in front: only the app eyes answers to has an ordinary window open, so a look with no place named has no app to read"
+        case .unread(let why): "not in front: a look with no place named reads no app, since \(why)"
         }
     }
 
@@ -138,6 +139,9 @@ public struct Hit: AsyncParsableCommand {
     static func land(at point: ScreenPoint) async throws -> Struck {
         let displays = Geometry.displays()
         guard displays.contains(where: { $0.frame.contains(point) }) else { throw NoSuchPlace.pointOffScreen(point) }
+        // Before the listing, as a look's overview reads it, so an activation lands before the
+        // listing that reflects it. [LAW:no-ambient-temporal-coupling]
+        let frontmost = Front.App.now()
         let listing = try Geometry.onScreen()
         let climb: Landing.Climb
         switch try await TreeReader(granted: SourceKind.granted).climb(from: point, within: hitTesting) {
@@ -145,13 +149,10 @@ public struct Hit: AsyncParsableCommand {
         case .on(let climbed): climb = climbed
         }
         let own = try await Front.Passed.current()
-        // Nothing but the app eyes answers to on screen is an answer here, not a refusal: a hit on
-        // that app, with nothing else on screen, is the case most worth saying.
-        let front: Front?
-        do { front = try Front.now(own: own, listing: listing, displays: displays) } catch {
-            guard error.why == .onlyOwn else { throw error }
-            front = nil
-        }
+        // A look with no place that would be refused is an answer here, not a refusal: why
+        // is where the app hit stands, and a hit on the app eyes answers to, with nothing else
+        // on screen, is the case most worth saying.
+        let front = Result { () throws(AppUnread) in try Front.now(frontmost: frontmost, own: own, listing: listing, displays: displays) }
         let window = listing.windows.first { $0.pid == climb.pid && $0.frame.contains(point) }
         let name = NSRunningApplication(processIdentifier: climb.pid)?.localizedName ?? window?.owner
         // The front look's own hit tests, unbounded as that look's are: one cut off by time would

@@ -1,4 +1,5 @@
 import ArgumentParser
+import EyesVerbs
 import Input
 import Pointing
 
@@ -6,13 +7,13 @@ import Pointing
 struct DragCommand: AsyncParsableCommand {
     static let configuration = Help.drag.configuration
 
-    @Argument(help: Help.sentence(Help.from + ", then " + Help.to + ": each " + Help.targetForm))
+    @Argument(help: .sentence(Help.from + ", then " + Help.to + ": each " + Help.targetForm))
     var places: [String]
 
-    @Option(help: Help.sentence(Help.button))
+    @Option(help: .sentence(Help.button))
     var button: Button = .left
 
-    @Option(help: Help.sentence(Help.modifiers), transform: heldModifiers)
+    @Option(help: .sentence(Help.modifiers), transform: heldModifiers)
     var modifiers: HeldModifiers = .none
 
     @OptionGroup var service: ServiceOption

@@ -57,7 +57,13 @@ doctor=$("$vhid" doctor 2>&1)
 status=$?
 # Exit 1 is the doctor's "not ready" only when its verdict says so: ArgumentParser also
 # exits 1 for an error the doctor threw, which prints that error and no rows.
+# A ready doctor is still said when a screen grant is not held, or could not be read: the
+# tools type and click, and `look` reads less than the skills describe. The words are the
+# grant rows' own, printed by GrantsVerb.row and GrantsVerb.reported.
+tab=$(printf '\t')
 case "$status:$doctor" in
+  0:*"${tab}not granted${tab}"*|0:*"The grants could not be read: "*)
+    verdict="vhid is ready to type and click, but not every screen grant is held, so \`look\` reads less than the skills describe until it is. \`vhid doctor\` says:" ;;
   0:*) exit 0 ;;
   "1:not ready"*) verdict="vhid is installed but not ready, so the vhid tools will refuse to type or click until the row below that is not met is put right. \`vhid doctor\` says:" ;;
   *) verdict="vhid is installed, but \`vhid doctor\` failed with exit status $status, so whether its tools can type or click is unknown. It printed:" ;;
@@ -67,5 +73,5 @@ $verdict
 
 $doctor
 
-If the user asks for input on screen, tell them this and the step the row names. A driver extension can be turned on only by the person at the Mac. \`look\` reads the screen without the daemon, so it answers whatever state the daemon is in.
+If the user asks for input on screen or for what is on it, tell them this and the step the row names. A driver extension can be turned on only by the person at the Mac. \`look\` reads the screen without the daemon, so it answers whatever state the daemon is in.
 EOF

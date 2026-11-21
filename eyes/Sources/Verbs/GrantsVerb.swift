@@ -12,8 +12,8 @@ public struct GrantsVerb: AsyncParsableCommand {
         commandName: "grants",
         abstract: "Say whether Screen Recording and Accessibility are granted, and which app macOS charges them to.",
         discussion: """
-            Reads without prompting. The grants belong to the app responsible for eyes - the \
-            terminal, or the client running eyes mcp - and that is the app to switch on.
+            Reads without prompting. The grants belong to the app responsible for this process - \
+            the terminal it runs in, or the app running vhid mcp - and that is the app to switch on.
             """
     )
 
@@ -42,16 +42,19 @@ public struct GrantsVerb: AsyncParsableCommand {
         guard let own = Bundle.main.executableURL else {
             throw GrantReadingFailure("this process cannot name its own executable to start a reading")
         }
-        return try await GrantReading.taken(by: own, [ReadGrants.configuration.commandName!])
+        return try await GrantReading.taken(by: own, [ReadGrants.name])
     }
 
     /// A fresh reading as its report, asking for nothing: what `vhid doctor` says of the
     /// screen beside the devices. A reading that fails is said in its place, so it never
     /// takes the device rows with it. [LAW:no-silent-failure]
-    public static func reported() async -> String {
+    public static func reported() async throws -> String {
         do {
             let (reading, holder) = try await look()
             return report(reading, holder: holder, asked: [])
+        } catch is CancellationError {
+            // Not a reading that failed: the doctor that asked was stopped, and stops with it.
+            throw CancellationError()
         } catch {
             return "The grants could not be read: \(error)"
         }
@@ -89,7 +92,9 @@ public struct GrantsVerb: AsyncParsableCommand {
 public struct ReadGrants: ParsableCommand {
     public init() {}
 
-    public static let configuration = CommandConfiguration(commandName: "read-grants", shouldDisplay: false)
+    /// The name the child is started by, and the name it answers to. [LAW:one-source-of-truth]
+    static let name = "read-grants"
+    public static let configuration = CommandConfiguration(commandName: name, shouldDisplay: false)
 
     public func run() {
         print(GrantReading.here().line)

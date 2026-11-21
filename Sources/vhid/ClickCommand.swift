@@ -1,4 +1,5 @@
 import ArgumentParser
+import EyesVerbs
 import Input
 import Pointing
 
@@ -6,16 +7,16 @@ import Pointing
 struct ClickCommand: AsyncParsableCommand {
     static let configuration = Help.click.configuration
 
-    @Argument(help: Help.sentence(Help.target))
+    @Argument(help: .sentence(Help.target))
     var place: [String]
 
-    @Option(help: Help.sentence(Help.button))
+    @Option(help: .sentence(Help.button))
     var button: Button = .left
 
-    @Option(help: Help.sentence(Help.times))
+    @Option(help: .sentence(Help.times))
     var times: Clicks = .single
 
-    @Option(help: Help.sentence(Help.modifiers), transform: heldModifiers)
+    @Option(help: .sentence(Help.modifiers), transform: heldModifiers)
     var modifiers: HeldModifiers = .none
 
     @OptionGroup var service: ServiceOption

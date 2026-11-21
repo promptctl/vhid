@@ -4,6 +4,7 @@ import Foundation
 import Input
 import Installations
 import MCP
+import Turns
 import Signals
 import System
 import Telemetry
@@ -21,16 +22,14 @@ struct McpCommand: AsyncParsableCommand {
             They take what the verbs of the same name take and answer with what those verbs \
             print.
 
-            Tool calls run one at a time, even when a client sends them together, but calls sent \
-            together run in no promised order: a call that must follow another, a type after the \
-            click that focuses a field, is sent once the first one's answer is back. Each call \
-            connects to the daemon and disconnects when it returns. The daemon serves \
-            one client at a time, so a session that held its connection open would refuse every other \
-            caller for as long as it ran: a vhid click from a shell, and every other agent's session. \
-            Between calls, this session holds nothing.
-
-            Nothing here reads the screen beyond where the cursor is. What is at a point is the \
-            caller's to know.
+            Calls that reach the daemon run one at a time, even when a client sends them \
+            together; look asks nothing of it, so a look waiting on a change holds up no act. \
+            Calls sent together run in no promised order: a call that must follow another, a \
+            type after the click that focuses a field, is sent once the first one's answer is \
+            back. Each call connects to the daemon and disconnects when it returns. The daemon \
+            serves one client at a time, so a session that held its connection open would \
+            refuse every other caller for as long as it ran: a vhid click from a shell, and \
+            every other agent's session. Between calls, this session holds nothing.
             """)
 
     @OptionGroup var service: ServiceOption
@@ -65,10 +64,15 @@ struct McpCommand: AsyncParsableCommand {
                        recordingTo hand: @escaping Invocation.Hand, stoppedBy signals: FirstSignal? = nil, carriedBy flights: Flights) async -> Server {
         let server = Server(name: "vhid", version: Version.current, instructions: instructions,
                             capabilities: .init(tools: .init(listChanged: false)))
+        // Calls to the daemon, one at a time. The SDK runs every request in a task of its own,
+        // so two calls sent together - a click and a type in one turn of an agent's - would
+        // reach for the daemon at once, and it serves one client: the second came back refused
+        // as busy, by this very process. Taking turns makes the session one client again, and
+        // no two calls interleave report by report. Calls sent together run in no promised
+        // order: JSON-RPC promises none among requests in flight together.
         let turns = Turns()
         await server.withMethodHandler(ListTools.self) { _ in .init(tools: tools.map(\.tool)) }
         await server.withMethodHandler(CallTool.self) { request in try await flights.carry {
-            let arrived = ContinuousClock.now
             // Recorded under the method, not the name: a name the client made up is not a
             // verb, and would make one event per made-up name. The error says which.
             guard let verb = tools.first(where: { $0.tool.name == request.name }) else {
@@ -84,10 +88,7 @@ struct McpCommand: AsyncParsableCommand {
             return try await transport.underway {
                 do {
                     let said = try await Invocation.record(request.name, via: .mcp, stoppedBy: signals, to: hand) { _ in
-                        try await turns.take {
-                            Invocation.set(.queuedMilliseconds, .double((ContinuousClock.now - arrived) / .milliseconds(1)))
-                            return try await verb.call(request.arguments ?? [:], on: installation)
-                        }
+                        try await verb.call(request.arguments ?? [:], on: installation, taking: turns)
                     }
                     return .init(content: [.text(text: said, annotations: nil, _meta: nil)], isError: false)
                 } catch where Task.isCancelled {
@@ -179,38 +180,5 @@ actor Flights {
         guard underway == 0 else { return }
         waiting.forEach { $0.resume() }
         waiting = []
-    }
-}
-
-/// One tool call at a time.
-///
-/// **Why: the SDK runs every request in a task of its own.** Two calls sent together - a
-/// click and a type in one turn of an agent's - would reach for the daemon at once, and it
-/// serves one client: the second came back refused as busy, by this very process. Taking
-/// turns makes the session one client again, and no two calls interleave report by report.
-///
-/// **Not the order they were sent in.** A call's turn is taken when its handler reaches
-/// this actor, and the SDK's handlers race here from the shared pool, so two calls sent
-/// together can take their turns either way round. JSON-RPC promises no order among
-/// requests in flight together, and neither does this: a caller that needs one call after
-/// another waits for the first one's answer, which is the one order a client can see.
-/// [LAW:no-ambient-temporal-coupling] Exclusion is this actor's to own; order is the caller's.
-actor Turns {
-    private var last: Task<Void, Never>?
-
-    /// Runs `call` once every call that took its turn before this one has finished. A
-    /// cancelled caller cancels its call, waiting or running.
-    func take<T: Sendable>(_ call: @escaping @Sendable () async throws -> T) async throws -> T {
-        let before = last
-        // A caller cancelled before its turn is taken never starts its call: the turn's task
-        // is its own, and the cancel would reach it only after it had begun.
-        try Task.checkCancellation()
-        let turn = Task {
-            await before?.value
-            try Task.checkCancellation()
-            return try await call()
-        }
-        last = Task { _ = await turn.result }
-        return try await withTaskCancellationHandler { try await turn.value } onCancel: { turn.cancel() }
     }
 }
