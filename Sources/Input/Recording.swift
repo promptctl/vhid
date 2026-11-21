@@ -48,11 +48,14 @@ public struct Recorder {
     /// The registry IDs of the pqrs services vhid posts through: an event from one of
     /// them is vhid's, not the person's.
     public var vhid: Set<UInt64>
+    /// Where the recording starts: on `displays` as they were then, as a play of it places
+    /// its start.
     public let start: ScreenPoint
-    /// The displays as they are when asked, which may not be readable: what tells vhid's
-    /// motion stopped at an edge, and what places the person's points by the rule a play of
-    /// them places by, so the recorder writes no point its player refuses. [LAW:single-enforcer]
-    private let displays: @Sendable () throws(LayoutUnreadable) -> Displays
+    /// The displays as they are: what tells vhid's motion stopped at an edge, and what places
+    /// the person's points by the rule a play of them places by, so the recorder writes no
+    /// point its player refuses. [LAW:single-enforcer] A value, replaced by whoever hears the
+    /// layout change, so taking a move reads no window server. [LAW:effects-at-boundaries]
+    public var displays: Displays
 
     private var lines: [Line]
     /// Keys the person holds, modifiers apart.
@@ -92,9 +95,10 @@ public struct Recorder {
 
     /// A recording from `start`, with the session's modifier `flags` as they were then:
     /// the first keys line, at 0, is the modifiers already down. vhid holds nothing then,
-    /// because recording refuses to start while it holds the devices.
-    public init(start: ScreenPoint, flags: UInt64, vhid: Set<UInt64>, displays: @escaping @Sendable () throws(LayoutUnreadable) -> Displays) {
-        self.start = start
+    /// because recording refuses to start while it holds the devices. Refused when no display
+    /// holds `start`, since a play of the script would refuse it there.
+    public init(start: ScreenPoint, on displays: Displays, flags: UInt64, vhid: Set<UInt64>) throws(OffDisplays) {
+        self.start = try displays.place(start).value
         self.vhid = vhid
         self.displays = displays
         session = Self.modifiers(in: flags)
@@ -103,18 +107,16 @@ public struct Recorder {
     }
 
     /// Takes one event, writing a line when it changed what the person holds or where
-    /// they put the cursor. Throws when a move needs the layout - vhid's to tell an edge, the
-    /// person's to be placed - and the layout cannot be read, which leaves where the cursor
-    /// is in the recording unknown from there.
-    public mutating func take(_ event: TapEvent) throws(LayoutUnreadable) {
+    /// they put the cursor.
+    public mutating func take(_ event: TapEvent) {
         // Never before the line before it: the tap can hand two devices' events over a
         // hair out of order, and a script's times may not go backwards.
         let event = TapEvent(at: max(event.at, lines.last?.at ?? .zero), sender: event.sender, location: event.location, kind: event.kind)
         let held = self.held
         if vhid.contains(event.sender) {
-            try takeVhid(event)
+            takeVhid(event)
         } else {
-            try takePerson(event)
+            takePerson(event)
         }
         // A modifier vhid let go of while the person held it stays down in the session;
         // once its bit clears it is nobody's, and the person's next press of it is theirs.
@@ -140,11 +142,11 @@ public struct Recorder {
     /// What the person holds: their keys, and the session's modifiers less vhid's.
     private var held: Set<Usage> { keys.union(session.subtracting(vhidModifiers)) }
 
-    private mutating func takeVhid(_ event: TapEvent) throws(LayoutUnreadable) {
+    private mutating func takeVhid(_ event: TapEvent) {
         switch event.kind {
         case .motion:
             offset = (offset.x + event.location.x - last.x, offset.y + event.location.y - last.y)
-            vhidAtEdge += try displays().isAtEdge(event.location) ? 1 : 0
+            vhidAtEdge += displays.isAtEdge(event.location) ? 1 : 0
         case .flagsChanged(let code, let flags):
             session = Self.modifiers(in: flags)
             if let modifier = Usage(virtualKeyCode: code), let bit = Self.deviceBits[modifier] {
@@ -155,7 +157,7 @@ public struct Recorder {
         }
     }
 
-    private mutating func takePerson(_ event: TapEvent) throws(LayoutUnreadable) {
+    private mutating func takePerson(_ event: TapEvent) {
         switch event.kind {
         case .keyDown(_, autorepeat: true):
             break
@@ -176,8 +178,7 @@ public struct Recorder {
         case .flagsChanged(_, let flags):
             session = Self.modifiers(in: flags)
         case .motion:
-            let layout = try displays()
-            if let point = try? ScreenPoint.at(event.location.x - offset.x, event.location.y - offset.y), let placed = try? layout.place(point) {
+            if let point = try? ScreenPoint.at(event.location.x - offset.x, event.location.y - offset.y), let placed = try? displays.place(point) {
                 lines.append(.at(event.at, placed.value))
             } else {
                 unplaced += 1

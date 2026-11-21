@@ -213,7 +213,8 @@ public enum AppUnread: Error, Hashable, CustomStringConvertible {
     case noWindow(Front.App)
     /// The app's front window is on none of the displays that are active.
     case offDisplays(Front.App)
-    /// No display is active: none attached, or every one asleep.
+    /// No display is active: every one asleep. None attached is the layout's own refusal,
+    /// `LayoutUnreadable.noDisplay`, said before any desk is read.
     case noDisplay
 
     public var description: String {
@@ -232,7 +233,7 @@ public enum AppUnread: Error, Hashable, CustomStringConvertible {
         case .offDisplays(let app):
             "\(app) has its front window on no active display, so there is nothing of it to read"
         case .noDisplay:
-            "no display is active - none is attached, or each is asleep - so there is no screen to read"
+            "no display is active - each is asleep - so there is no screen to read"
         }
     }
 }

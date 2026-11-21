@@ -133,11 +133,14 @@ extension Node {
     /// wordless element could never be a finding. [LAW:no-silent-failure]
     /// [LAW:effects-at-boundaries] Decided from facts and a hit test handed in, so every
     /// rule an element is kept or dropped by is tested with both written by a test.
-    func candidate(in clip: ScreenRect, under covers: Covers) -> Candidate {
+    func candidate(in clip: ScreenRect, on screen: [ScreenRect], under covers: Covers) -> Candidate {
         let leaf = if case .answered(let children) = children { children.isEmpty } else { false }
         guard leaf || !areas.contains(facts.role) else { return .excluded(.area) }
+        // On a display too: a window or a rect can hang off the screen, and a click there
+        // presses nothing - the devices refuse the point - so it is no row to print.
         if case .answered(let placed) = facts.frame {
-            guard let placed, !placed.isThin, clip.contains(placed.centre) else { return .excluded(.unplaced) }
+            guard let placed, !placed.isThin, clip.contains(placed.centre), screen.contains(where: { $0.contains(placed.centre) })
+            else { return .excluded(.unplaced) }
         }
         let words = facts.texts.compactMap { $0.answer??.words }
         let text = words.first?.text
@@ -357,13 +360,15 @@ struct Bounds {
 /// [LAW:dataflow-not-control-flow] An element that will not answer is a value the walk
 /// carries on past - counted, and its subtree unread - not an abort: the text is usually
 /// in another branch. `unwalked` counts on-screen windows in the region with no element to
-/// start from; they were never read, so the region was not read whole.
+/// start from; they were never read, so the region was not read whole. `screen` is the
+/// displays' frames, which a run's centre is on or the run is unplaced.
 ///
 /// Every accessibility call - the reads and the hit tests in each root's covers - is
 /// handed in, so the walk, its bounds and its counts are checked with no app to read
 /// from. [LAW:effects-at-boundaries]
 func walk<Element>(
     from roots: [Root<Element>],
+    on screen: [ScreenRect],
     unwalked: Int,
     within bounds: Bounds,
     elapsed: () -> Duration,
@@ -381,7 +386,7 @@ func walk<Element>(
             guard elapsed() < bounds.time else { stop = .timeBudget(bounds.time); break roots }
             let node = try read(root.element)
             examined += 1
-            let candidate = node.candidate(in: root.clip, under: root.covers)
+            let candidate = node.candidate(in: root.clip, on: screen, under: root.covers)
             // A probe not seen - off the clip, or with a frame that says nothing - was never
             // placed in the region: nothing to count, unless a read it needed failed, which
             // leaves unknown whether it was.

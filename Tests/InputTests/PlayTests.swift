@@ -338,9 +338,8 @@ import ScreenSpace
             try await Player(pointer: fake.pointer(on: clock), keyboard: fake.keyboard, wall: { Self.epoch }, lead: .zero).play(Schedule(play, on: .vast))
         }
         #expect(stopped.played.count == 1)
-        #expect(stopped.of == 5)
         #expect(stopped.causes.contains { $0 is Refused })
-        #expect("\(stopped)".contains("at line 3 after 1 of 5 reports"))
+        #expect("\(stopped)".contains("at line 3 after 1 report:"))
         #expect("\(stopped)".contains("A key may be left held"))
         #expect("\(stopped)".contains("A button may be left held"))
         #expect(fake.log == ["keys hold [e1]", "hold [1]", "keys up", "up"])
@@ -414,7 +413,6 @@ struct CostlyMouse: Mouse {
             Schedule.Act(at: .milliseconds(6), report: .keys(.none), line: 8),
             Schedule.Act(at: .milliseconds(7), report: .buttons([]), line: 9),
         ])
-        #expect(script.reports == 6)
     }
 
     /// A key held through a quiet stretch is said again every second of it, carrying the
@@ -440,7 +438,6 @@ struct CostlyMouse: Mouse {
             Schedule.Act(at: .seconds(3), report: .buttons([.right]), line: 6),
             Schedule.Act(at: .seconds(9), report: .buttons([]), line: 7),
         ])
-        #expect(script.reports == 6)
     }
 
     /// A script of at lines steers onto the last at point before every buttons line and at
@@ -466,7 +463,6 @@ struct CostlyMouse: Mouse {
             Schedule.Act(at: .milliseconds(30), report: .buttons([]), line: 6),
             Schedule.Act(at: .milliseconds(30), report: .steer(thirtyOne), line: 6),
         ])
-        #expect(script.reports == 5)
         #expect(script.calibration?.interval == .milliseconds(8))
         #expect(script.calibration?.reach == 30)
         #expect(script.calibration?.toward == fortyOne)

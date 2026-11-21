@@ -67,7 +67,7 @@ let package = Package(
         // The one read of that layout from the window server, apart from the values so what
         // only parses a layout - the daemon's wire, the devices' arithmetic - links no window
         // server. Linked by the processes that read it where they draw: vhidd's front-session
-        // reader, vhid-record and eyes. [LAW:effects-at-boundaries]
+        // reader, vhid-record, and eyes and vhid through Seeing. [LAW:effects-at-boundaries]
         .target(name: "DisplayReading", dependencies: ["ScreenSpace"]),
         .testTarget(name: "DisplayReadingTests", dependencies: ["DisplayReading", "ScreenSpace"]),
         // Answering a signal rather than obeying it, for the daemon that has an ending of

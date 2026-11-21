@@ -24,13 +24,18 @@ public extension OnlineDisplay {
         return try ids(online).map { OnlineDisplay(id: $0, bounds: CGDisplayBounds($0), isActive: drawn.contains($0)) }
     }
 
+    /// The ids a list holds, read whole in one ask: a list that fills the room it was given may
+    /// hold more, so it is asked again with more room, never taken as the whole. A count asked
+    /// first and filled second drops a display added between the two. [LAW:no-silent-failure]
     private static func ids(_ list: DisplayList) throws(LayoutUnreadable) -> [CGDirectDisplayID] {
-        var count: UInt32 = 0
-        var error = list(0, nil, &count)
-        guard error == .success else { throw .list(error) }
-        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
-        error = list(count, &ids, &count)
-        guard error == .success else { throw .list(error) }
-        return Array(ids.prefix(Int(count)))
+        var room: UInt32 = 16
+        while true {
+            var ids = [CGDirectDisplayID](repeating: 0, count: Int(room))
+            var count: UInt32 = 0
+            let error = list(room, &ids, &count)
+            guard error == .success else { throw .list(error) }
+            guard count == room else { return Array(ids.prefix(Int(count))) }
+            room *= 2
+        }
     }
 }

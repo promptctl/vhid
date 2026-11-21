@@ -540,7 +540,7 @@ public enum CursorUnreadable: Error, Equatable, CustomStringConvertible {
     public var description: String {
         switch self {
         case .notAPlace(let refused):
-            "the window server says the cursor is at \(Coordinate.spelled(refused.x)),\(Coordinate.spelled(refused.y)), which is not a place on the screen"
+            "the window server gave the cursor at no place: \(refused)"
         case .offDisplays(let at): "the window server says the cursor is at \(at), which no display holds"
         }
     }

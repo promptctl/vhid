@@ -28,6 +28,10 @@ public struct ScreenPoint: Hashable, Sendable, CustomStringConvertible {
         self.y = y
     }
 
+    /// The whole point this one lies in, each coordinate rounded down: whatever box with whole
+    /// edges holds this point - a box rounded out, a display - holds that one too.
+    public var whole: ScreenPoint { ScreenPoint(x.rounded(.down), y.rounded(.down)) }
+
     /// `x,y`, each as `Coordinate.spelled` spells it: the form `look` prints and `click` takes.
     public var description: String { "\(Coordinate.spelled(x)),\(Coordinate.spelled(y))" }
 }

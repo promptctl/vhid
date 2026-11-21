@@ -97,8 +97,6 @@ public struct Schedule: Hashable, Sendable {
     /// goes out late still lands well inside it.
     public static let keepAlive: Duration = HeldKeys.silenceLimit / 2
 
-    /// How many of the acts are reports, which is what a play that stops is counted against.
-    public var reports: Int { acts.filter(\.report.isReport).count }
 
     /// Whether any of the first `count` acts holds a key, and so whether a play stopped
     /// there has a keyboard to let go of.
@@ -304,7 +302,7 @@ public struct Player {
             // that were sent, as `Pointer.holding` chooses its own.
             let letGo: () async throws -> Void = play.holdsKeys(in: reached) ? { try await keyboard.releaseAll() } : {}
             let keys = await failure(of: letGo)
-            throw PlayStopped(played: went, of: play.reports, line: line,
+            throw PlayStopped(played: went, line: line,
                               cause: error, unreleasedKeys: keys, unreleasedButtons: await pointer.release())
         }
     }
@@ -380,11 +378,11 @@ public struct Lateness: Hashable, Sendable, Encodable {
     }
 }
 
-/// A play that stopped part way: the reports that went out before it did, of how many,
-/// and why, with whether each device was released afterwards.
+/// A play that stopped part way: the reports that went out before it did, the line it
+/// stopped at, which says how far through the script it got, and why, with whether each
+/// device was released afterwards.
 public struct PlayStopped: StoppedPartWay, CustomStringConvertible {
     public let played: [Played.Report]
-    public let of: Int
     /// The script line being played when it stopped, or nil when it stopped before the
     /// first act: on the way to the start, or calibrating.
     public let line: Int?
@@ -396,7 +394,7 @@ public struct PlayStopped: StoppedPartWay, CustomStringConvertible {
 
     public var description: String {
         let place = line.map { " at line \($0)" } ?? ""
-        return PointingStopped.unreleased(unreleasedButtons, after: TypingStopped.unreleased(unreleasedKeys, after: "the play stopped\(place) after \(played.count) of \(of) reports: \(cause.reported)"))
+        return PointingStopped.unreleased(unreleasedButtons, after: TypingStopped.unreleased(unreleasedKeys, after: "the play stopped\(place) after \(played.count) report\(played.count == 1 ? "" : "s"): \(cause.reported)"))
     }
 }
 

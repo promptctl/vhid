@@ -52,6 +52,7 @@ public struct TreeReader: Reader {
         let (roots, unwalked) = plan(visible, matched: try Self.match(visible.map(\.window)))
         let walked = try walk(
             from: roots,
+            on: try Geometry.displays().map(\.frame),
             unwalked: unwalked,
             within: Self.bounds,
             elapsed: { clock.now - start },

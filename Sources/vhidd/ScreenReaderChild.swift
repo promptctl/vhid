@@ -13,7 +13,7 @@ func screenReaderArgument(_ arguments: [String]) -> au_asid_t? {
 enum ScreenQuestion: String {
     /// Answered `x y`.
     case cursor
-    /// Answered `x y width height` for each online display, separated by `;`.
+    /// Answered with each online display's `OnlineDisplay.record`, as `spelled` writes it.
     case displays
 }
 

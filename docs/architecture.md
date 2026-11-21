@@ -204,7 +204,7 @@ The rest of the tree:
 
 | Path | What it is |
 |---|---|
-| `eyes/` | the half that reads the screen: `Seeing`, `Tree`, `Pixels`, `Grants`, `EyesVerbs` and the `eyes` command line, with `Telemetry` and `Turns`, which both halves use |
+| `eyes/` | the half that reads the screen: `Seeing`, `Tree`, `Pixels`, `Grants`, `EyesVerbs` and the `eyes` command line, with `Telemetry` and `Turns`, which both halves use, as they do `ChildProcess`, `ScreenSpace` and `DisplayReading` above |
 | `Tests/` | test targets, each named for what it tests (`Signals`, `Version` and the two apps have none); `OwnThread` and `TestClock` are helpers for tests |
 | `claude-plugin/`, `.claude-plugin/` | the Claude Code plugin: skills, the session-start check, the marketplace entry, and `VERSION`, the one place the version is written, which `scripts/version` reads for every build |
 | `pkg/`, `scripts/make-pkg`, `scripts/notarize` | building, signing and notarizing the package |

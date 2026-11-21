@@ -24,18 +24,24 @@ guard arguments.count == 3, let commandPID = pid_t(arguments[2]) else {
 
 // Connected before anything else, and the app exits if it cannot be: a tap nobody is
 // listening to is a tap nothing will ever stop.
+/// Exits for an error the command cannot be told: written where a run by hand shows it.
+/// [LAW:no-silent-failure]
+func fail(_ error: any Error) -> Never {
+    FileHandle.standardError.write(Data("vhid-record: \(error)\n".utf8))
+    exit(1)
+}
+
 let command: TieEnd
 do {
     command = try TieEnd.connect(to: arguments[1])
 } catch {
-    FileHandle.standardError.write(Data("vhid-record: \(error)\n".utf8))
-    exit(1)
+    fail(error)
 }
 // The command gone, however it went, ends the app: no tap outlives it.
 let watch = CommandWatch(pid: commandPID, queue: .main) { exit(1) }
 
 func refuse(_ reason: String) -> Never {
-    try? command.send(FromApp.refused(reason))
+    do { try command.send(FromApp.refused(reason)) } catch { fail(error) }
     exit(1)
 }
 
@@ -99,13 +105,15 @@ do {
 
 /// The displays the cursor can be on: the one layout, its sleeping displays included, as it is
 /// now.
-@Sendable func displays() throws(LayoutUnreadable) -> Displays { Displays(try DisplayLayout.read()) }
+func displays() throws(LayoutUnreadable) -> Displays { Displays(try DisplayLayout.read()) }
 
 // Read here, not through vhidd: a recording taps this session's events, so it only
 // records in the session it can read the cursor in.
 guard let startPoint = CGEvent(source: nil)?.location else { refuse("the cursor could not be read") }
 let start: ScreenPoint
 do { start = try ScreenPoint.at(startPoint.x, startPoint.y) } catch { refuse("the cursor's position: \(error)") }
+let startDisplays: Displays
+do { startDisplays = try displays() } catch { refuse("the displays: \(error)") }
 let clock = ContinuousClock()
 /// The tap's own clock at the start: nanoseconds since boot, which every event's
 /// timestamp is on. An event's time is when it happened, not when the tap handed it over.
@@ -143,7 +151,7 @@ func sinceStart() -> Duration { .nanoseconds(Int64(clock_gettime_nsec_np(CLOCK_U
                 try command.send(FromApp.recorded(summary, script: recorder.script(stoppedAt: stoppedAt, stopKeys: ending == .stopped ? stopKeys : [])))
                 exit(0)
             } catch {
-                exit(1)
+                fail(error)
             }
         }
         func wait() {
@@ -154,9 +162,29 @@ func sinceStart() -> Duration { .nanoseconds(Int64(clock_gettime_nsec_np(CLOCK_U
     }
 }
 
-let session = MainActor.assumeIsolated {
-    Session(recorder: Recorder(start: start, flags: CGEventSource.flagsState(.combinedSessionState).rawValue, vhid: initialSenders, displays: displays))
+let recorder: Recorder
+do {
+    recorder = try Recorder(start: start, on: startDisplays, flags: CGEventSource.flagsState(.combinedSessionState).rawValue, vhid: initialSenders)
+} catch {
+    refuse("the cursor: \(error)")
 }
+let session = MainActor.assumeIsolated { Session(recorder: recorder) }
+
+// The layout is read again only when it changes, never per event: the tap's callback must
+// keep up with the person's motion. [LAW:effects-at-boundaries] One that cannot be read
+// leaves where the cursor is in the recording unknown, so the recording ends there.
+CGDisplayRegisterReconfigurationCallback({ _, flags, _ in
+    guard !flags.contains(.beginConfigurationFlag) else { return }
+    DispatchQueue.main.async {
+        MainActor.assumeIsolated {
+            do {
+                session.recorder.displays = try displays()
+            } catch {
+                session.finish(.layoutUnreadable, notes: ["\(error), so where the cursor is in the recording is unknown and the recording ends there"])
+            }
+        }
+    }
+}, nil)
 
 /// A tap event as the recorder reads it, or nil for a kind it does not record; an event at
 /// no place is refused, since the events after it are of a cursor nobody knows the place of.
@@ -180,20 +208,11 @@ func tapEvent(_ type: CGEventType, _ event: CGEvent) throws(NotAPlace) -> TapEve
     return kind.map { TapEvent(at: max(at, .zero), sender: UInt64(bitPattern: event.getIntegerValueField(CGEventField(rawValue: 87)!)), location: place, kind: $0) }
 }
 
-/// Why an event the tap gave ends the recording. [LAW:types-are-the-program] The ending is
-/// chosen by the case, not read off words.
-enum TapStop: Error {
-    case notAPlace(NotAPlace)
-    case layout(LayoutUnreadable)
-}
-
 /// One event of the tap's, taken: the hour ends the recording, and the rest are the recorder's.
-@MainActor func take(_ type: CGEventType, _ event: CGEvent) throws(TapStop) {
-    let taken: TapEvent?
-    do { taken = try tapEvent(type, event) } catch { throw .notAPlace(error) }
-    guard let taken else { return }
+@MainActor func take(_ type: CGEventType, _ event: CGEvent) throws(NotAPlace) {
+    guard let taken = try tapEvent(type, event) else { return }
     guard taken.at <= hour else { return session.finish(.hour, notes: [hourNote]) }
-    do { try session.recorder.take(taken) } catch { throw .layout(error) }
+    session.recorder.take(taken)
 }
 
 let kinds: [CGEventType] = [
@@ -208,13 +227,10 @@ guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .tailAppendEve
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             session.finish(.tapOff, notes: ["macOS turned the tap off (\(type == .tapDisabledByTimeout ? "too slow" : "by user input")), so the recording ends there"])
         } else if session.taking {
-            do throws(TapStop) {
+            do throws(NotAPlace) {
                 try take(type, event)
             } catch {
-                switch error {
-                case .notAPlace(let refused): session.finish(.tapAtNoPlace, notes: ["the tap gave an event at no place (\(refused)), so the recording ends there"])
-                case .layout(let unreadable): session.finish(.layoutUnreadable, notes: ["\(unreadable), so where the cursor is in the recording is unknown and the recording ends there"])
-                }
+                session.finish(.tapAtNoPlace, notes: ["the tap gave an event at no place (\(error)), so the recording ends there"])
             }
         }
     }

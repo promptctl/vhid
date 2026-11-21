@@ -282,8 +282,10 @@ enum Report {
     /// The columns every row has in the same place - `then`, a near miss's distance, among
     /// them - before the element's other words, however many it says.
     private static func row(_ found: Found, then: [String] = []) -> String {
-        let box = found.frame.integral
-        return (["\(clickPoint(in: box, nearest: found.frame.centre))", "\(box)", spelled(found.text.value), found.source.role?.rawValue ?? "pixels"]
+        // The whole point the centre lies in, so inside the box rounded out and on the display
+        // the reader found the centre on, whose edges are whole too: rounded to the nearest, a
+        // centre on a display's last half point is printed off it. [LAW:types-are-the-program]
+        return (["\(found.frame.centre.whole)", "\(found.frame.integral)", spelled(found.text.value), found.source.role?.rawValue ?? "pixels"]
             + then + found.source.also.map { "\($0.attribute.rawValue) \(spelled($0.text.value))" }).joined(separator: "\t")
     }
 
@@ -305,14 +307,6 @@ enum Report {
             length += 1
         }
         return line
-    }
-
-    /// The whole point a click is sent to: the whole point of the row's box, rounded out,
-    /// nearest the frame's centre. A rounded centre can fall on the box's right or bottom
-    /// edge, which the half-open rule counts as outside, so it is held to the last whole
-    /// point in: the point printed is inside the box printed beside it by construction.
-    private static func clickPoint(in box: ScreenRect, nearest centre: ScreenPoint) -> ScreenPoint {
-        box.nearest(min(centre.x.rounded(), box.maxX - 1), min(centre.y.rounded(), box.maxY - 1))
     }
 
     private static func wanted(_ match: Match) -> String {
