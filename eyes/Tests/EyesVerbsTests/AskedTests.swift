@@ -1,5 +1,6 @@
 import ArgumentParser
 @testable import Seeing
+import ScreenSpace
 import Synchronization
 import Testing
 @testable import EyesVerbs
@@ -7,17 +8,17 @@ import Testing
 /// What `look` answers, asked of a screen a test wrote: the arguments read into one question,
 /// and the overview that shows the desk whatever the place came to.
 @Suite(.eventsKept) @MainActor struct AskedTests {
-    nonisolated static let main = Display(id: 1, frame: ScreenRect(x: 0, y: 0, width: 1512, height: 982), isMain: true, scale: 2)
+    nonisolated static let main = Display(id: 1, frame: ScreenRect(x: 0, y: 0, width: 1512, height: 982)!, isMain: true, scale: 2)
     static let safari = Front.App(pid: 400, name: "Safari")
     static let finder = Front.App(pid: 500, name: "Finder")
-    static let window = Window(id: 4, owner: "Safari", pid: 400, frame: ScreenRect(x: 0, y: 40, width: 600, height: 400), layer: 0)
+    static let window = Window(id: 4, owner: "Safari", pid: 400, frame: ScreenRect(x: 0, y: 40, width: 600, height: 400)!, layer: 0)
 
     /// Finder frontmost over the desktop, Safari's window behind it.
     static let desk = Desk(frontmost: finder, own: Front.Passed(pids: [80], name: "iTerm2"),
                            running: [Desk.Running(app: safari, regular: true), Desk.Running(app: finder, regular: true)],
                            listing: WindowListing(windows: [window], excluded: []), displays: [main])
 
-    nonisolated static let found = Found(text: Text("Reload")!, frame: ScreenRect(x: 20, y: 50, width: 40, height: 20), source: .tree(role: Role(rawValue: "AXButton"), also: []))
+    nonisolated static let found = Found(text: Text("Reload")!, frame: ScreenRect(x: 20, y: 50, width: 40, height: 20)!, source: .tree(role: Role(rawValue: "AXButton"), also: []))
 
     /// A reader that reads `Reload` wherever it is asked, keeping the regions it was asked for.
     final class Reader: Sendable {
@@ -97,6 +98,6 @@ import Testing
 
     @Test func aPointAsksWhatAClickThereLandsOn() throws {
         guard case .at(let point) = try Self.asked(x: -500, y: 300).question else { Issue.record("not a point"); return }
-        #expect(point == ScreenPoint(x: -500, y: 300))
+        #expect(point == ScreenPoint(x: -500, y: 300)!)
     }
 }

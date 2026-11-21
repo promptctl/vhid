@@ -1,5 +1,6 @@
 import ApplicationServices
 import Grants
+import ScreenSpace
 import Seeing
 
 /// What one accessibility read came back as, before anything is made of it.
@@ -95,9 +96,8 @@ enum Candidate: Equatable {
 /// One rule for an element's children and for a window the tree cannot walk, so "could
 /// anything there be seen" means one thing. [LAW:single-enforcer]
 func visible(_ frame: ScreenRect, in clip: ScreenRect, under covers: Covers) -> ScreenRect? {
-    let shared = frame.cgRect.intersection(clip.cgRect)
-    guard !shared.isNull, !shared.isEmpty, !covers.hide(ScreenRect(shared)) else { return nil }
-    return ScreenRect(shared)
+    guard let shared = frame.intersection(clip), !shared.isEmpty, !covers.hide(shared) else { return nil }
+    return shared
 }
 
 /// Roles whose frame is an area holding other elements. What such an element says names
@@ -225,7 +225,8 @@ func pages<Element>(
         // descending into the first finds its iframes, dropping the second could leave a
         // DevTools pane the one page or hand back the toolbar. [LAW:no-silent-failure]
         guard node.facts.named, !(clips.contains(node.facts.role) && node.facts.frame == .unanswered) else { unread = true; continue }
-        let inner = node.facts.bound(within: bound)
+        // Nothing under an element that clips to nowhere can be drawn, so no page is under it.
+        guard let inner = node.facts.bound(within: bound) else { continue }
         if node.facts.role == webArea {
             if case .answered(let placed?) = node.facts.frame, !placed.isEmpty, !inner.isThin { pages.append(inner) }
             continue
@@ -298,11 +299,11 @@ extension Facts {
     /// more. The walk's own bounds cap it, and say so in the reach.
     ///
     /// Where what this element holds can be drawn: `bound`, cut to its own frame when it
-    /// clips - the one rule the reading walk and the page search narrow by.
-    /// [LAW:single-enforcer]
-    func bound(within bound: ScreenRect) -> ScreenRect {
+    /// clips - the one rule the reading walk and the page search narrow by - or nowhere,
+    /// for an element that clips to a frame wholly outside `bound`. [LAW:single-enforcer]
+    func bound(within bound: ScreenRect) -> ScreenRect? {
         guard clips.contains(role), case .answered(let placed?) = frame, !placed.isEmpty else { return bound }
-        return ScreenRect(bound.cgRect.intersection(placed.cgRect))
+        return bound.intersection(placed)
     }
 
     /// The one place the descend, probe and prune decision is made. [LAW:single-enforcer]
@@ -311,7 +312,7 @@ extension Facts {
         let clipping = clips.contains(role)
         if let shown = visible(placed, in: clip, under: covers) {
             guard clipping else { return .descend(clip: clip, bound: bound) }
-            return .descend(clip: shown, bound: self.bound(within: bound))
+            return self.bound(within: bound).map { .descend(clip: shown, bound: $0) } ?? .prune
         }
         guard !clipping, placed.intersects(bound) else { return .prune }
         return named ? .probe : .unsure

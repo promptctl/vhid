@@ -1,5 +1,6 @@
 import Foundation
 import Pointing
+import ScreenSpace
 
 /// Points per count by report length, at one report interval: what macOS's acceleration
 /// made of reports that size, measured, and the reports that carry the cursor a given

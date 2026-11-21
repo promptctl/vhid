@@ -1,68 +1,44 @@
 import CoreGraphics
+import ScreenSpace
 
-/// A rectangle in the one coordinate space every reader answers in: global screen
-/// coordinates, top-left origin, points.
+/// What the readers do with a box in the one screen space: bridge it to CoreGraphics, cut,
+/// compare and merge it, and convert into it from Vision's image space.
 ///
-/// [LAW:types-are-the-program] A named type rather than a bare `CGRect`, because the
-/// failure this exists to prevent is one a `CGRect` cannot be checked for. Vision hands
-/// back normalized boxes in image space with the origin at the bottom-left; a display has
-/// a backing scale factor; a second display sits at its own origin in the global space,
-/// which is often negative. A reader that misses the flip, or the scale, or the display
-/// origin produces numbers that are still four plausible Doubles in the right order of
-/// magnitude, and clicking one lands somewhere else entirely. Nothing downstream can tell
-/// the two apart, so the conversion lives in one named place - `fromImageSpace` - rather
-/// than being a step each reader is trusted to have remembered.
+/// [LAW:types-are-the-program] The image-space conversion is the failure this file exists to
+/// prevent. Vision hands back normalized boxes in image space with the origin at the
+/// bottom-left; a display has a backing scale factor; a second display sits at its own
+/// origin in the global space, which is often negative. A reader that misses the flip, or
+/// the scale, or the display origin produces numbers that are still four plausible Doubles
+/// in the right order of magnitude, and clicking one lands somewhere else entirely. Nothing
+/// downstream can tell the two apart, so the conversion lives in one named place -
+/// `fromImageSpace` - rather than being a step each reader is trusted to have remembered.
 ///
 /// What that does and does not buy, stated plainly because the difference is where a bug
 /// would live: there is exactly one *conversion* from image space, so there is one
-/// implementation to get right and one to test. There is not a locked door. The
-/// memberwise `init` below is public and a reader that skips the conversion can hand it
-/// an unflipped Vision box and get four plausible Doubles. No type can prevent a producer
-/// from supplying wrong numbers in the right shape; what a type can do is make the right
-/// way the short way, and make the wrong way visible as a reader that names image-space
-/// values without calling the conversion. That is a review boundary rather than a
-/// compiler one, and calling it a compiler one would be the comment lying about the code.
-///
-/// The space is not a choice made here. It is the space `vhid click` consumes and the
-/// space the accessibility tree already answers in, so the centre of one of these is a
-/// click's target with no conversion at all. [LAW:one-source-of-truth]
-public struct ScreenRect: Sendable, Hashable {
-    /// Leftmost point, increasing to the right. Negative on a display left of the main one.
-    public let x: Double
-    /// Topmost point, increasing DOWNWARD. This is the axis that gets flipped by mistake.
-    public let y: Double
-    public let width: Double
-    public let height: Double
-
-    /// For a reader that already holds global, top-left, point coordinates - which the
-    /// accessibility tree does, and pixels do not.
-    public init(x: Double, y: Double, width: Double, height: Double) {
-        self.x = x
-        self.y = y
-        self.width = width
-        self.height = height
-    }
-
-    public init(_ rect: CGRect) {
+/// implementation to get right and one to test. There is not a locked door. `ScreenRect`'s
+/// init is public and a reader that skips the conversion can hand it an unflipped Vision
+/// box and get four plausible Doubles. That is a review boundary rather than a compiler one,
+/// and calling it a compiler one would be the comment lying about the code.
+public extension ScreenRect {
+    /// A CoreGraphics rectangle in global, top-left, point coordinates - which the
+    /// accessibility tree and the window server answer in, and pixels do not - or none for
+    /// one that is no place: CGRect's null, or a frame an app claims that is not finite.
+    init?(_ rect: CGRect) {
         self.init(x: rect.origin.x, y: rect.origin.y, width: rect.width, height: rect.height)
     }
 
-    public var cgRect: CGRect { CGRect(x: x, y: y, width: width, height: height) }
+    var cgRect: CGRect { CGRect(x: x, y: y, width: width, height: height) }
 
-    /// Where a caller clicks to hit this, which is the only reason any of this is
-    /// measured. [LAW:one-source-of-truth] Derived rather than carried, so it cannot
-    /// disagree with the rectangle it came from.
-    public var centre: ScreenPoint { ScreenPoint(x: x + width / 2, y: y + height / 2) }
-
-    public var isEmpty: Bool { width <= 0 || height <= 0 }
-
-    public func contains(_ point: ScreenPoint) -> Bool {
+    func contains(_ point: ScreenPoint) -> Bool {
         point.x >= x && point.x < x + width && point.y >= y && point.y < y + height
     }
 
+    /// The part two boxes share, or none when they do not meet.
+    func intersection(_ other: ScreenRect) -> ScreenRect? { ScreenRect(cgRect.intersection(other.cgRect)) }
+
     /// Whether any part of the two overlap, which is how a merged reading tells one thing
     /// seen twice from two things seen once.
-    public func intersects(_ other: ScreenRect) -> Bool {
+    func intersects(_ other: ScreenRect) -> Bool {
         x < other.x + other.width && other.x < x + width
             && y < other.y + other.height && other.y < y + height
     }
@@ -77,44 +53,24 @@ public struct ScreenRect: Sendable, Hashable {
     ///
     /// Across is negative where the two share lines, by how much they share: rows packed
     /// edge to edge touch the row above as well as their own, and the row's own shares more.
-    func gap(to other: ScreenRect) -> Gap {
+    internal func gap(to other: ScreenRect) -> Gap {
         Gap(across: max(y, other.y) - min(y + height, other.y + other.height),
             along: max(0, max(x, other.x) - min(x + width, other.x + other.width)),
             leads: x < other.x)
     }
-}
 
-/// The space between two rectangles, ordered across lines first. See `ScreenRect.gap`.
-struct Gap: Comparable {
-    let across: Double
-    let along: Double
-    let leads: Bool
+    var area: Double { width * height }
 
-    static func < (a: Gap, b: Gap) -> Bool { (a.across, a.along, a.leads ? 1 : 0) < (b.across, b.along, b.leads ? 1 : 0) }
-}
-
-/// A point in the same space, top-left origin, points.
-public struct ScreenPoint: Sendable, Hashable {
-    public let x: Double
-    public let y: Double
-
-    public init(x: Double, y: Double) {
-        self.x = x
-        self.y = y
+    /// The area two rectangles share, zero when they do not meet - beside `intersects`, so
+    /// the two cannot disagree about what touching means.
+    func overlap(_ other: ScreenRect) -> Double {
+        guard intersects(other), let shared = intersection(other) else { return 0 }
+        return shared.area
     }
-}
 
-/// `x,y`, each as given: the form a row's point is printed in.
-extension ScreenPoint: CustomStringConvertible {
-    public var description: String { "\(Self.spelled(x)),\(Self.spelled(y))" }
-
-    private static func spelled(_ v: Double) -> String { Int(exactly: v).map(String.init) ?? String(v) }
-}
-
-public extension ScreenRect {
     /// The one conversion from image space into screen space, and the only place the flip
     /// and the display origin are applied. [LAW:single-enforcer] One implementation to
-    /// get right and one to test, rather than one per reader - see the type's header for
+    /// get right and one to test, rather than one per reader - see this file's header for
     /// what this enforces and what it only encourages.
     ///
     /// **The backing scale factor does not appear, and that is the point.** A normalized
@@ -136,16 +92,15 @@ public extension ScreenRect {
         // down from the top. A box's TOP edge is therefore its distance from the bottom
         // plus its own height, taken away from the whole.
         let top = display.y + (1 - normalized.origin.y - normalized.height) * display.height
+        // A unit box on a finite display is a finite box with a size, so none is refused.
         return ScreenRect(
             x: left,
             y: top,
             width: normalized.width * display.width,
             height: normalized.height * display.height
-        )
+        )!
     }
-}
 
-public extension ScreenRect {
     /// The inverse of `fromImageSpace`: where this rectangle sits in an image of `display`,
     /// as a unit rectangle with the origin at the bottom-left - the space Vision's region
     /// of interest is given in. Beside its inverse so the flip is written in one file and
@@ -160,48 +115,11 @@ public extension ScreenRect {
     }
 }
 
-/// `x,y,width,height` in whole points: the one spelling every rectangle `eyes` prints in
-/// and the one `rect` reads, so a rectangle printed for a place on a screen can be read back
-/// as one. An app's claimed frame - a document's text area, taller than any screen - prints
-/// past `limit`, which `rect` refuses: a capture is cut in whole points.
-/// [LAW:one-source-of-truth]
-extension ScreenRect: CustomStringConvertible {
-    /// The farthest from the origin any edge or size may be, in points.
-    static let limit = 1_000_000.0
+/// The space between two rectangles, ordered across lines first. See `ScreenRect.gap`.
+struct Gap: Comparable {
+    let across: Double
+    let along: Double
+    let leads: Bool
 
-    /// What a refusal names as the form wanted.
-    public static let spelling = "x,y,width,height in points - a positive size, nothing past \(Int(limit))"
-
-    /// The smallest whole-point rectangle covering this one: rounded outward, as
-    /// `CGRect.integral` rounds, so what is printed still holds every point of what was
-    /// found, and a negative coordinate is not moved toward zero.
-    public var description: String {
-        let r = cgRect.integral
-        return [r.minX, r.minY, r.width, r.height].map(Self.whole).joined(separator: ",")
-    }
-
-    /// A whole number of points in figures, however large: a document's frame can run past
-    /// what an `Int` holds, and printing one never traps.
-    static func whole(_ v: Double) -> String { Int(exactly: v).map(String.init) ?? String(format: "%.0f", v) }
-
-    /// A rectangle as `description` spells it, or none for anything that is not one.
-    public init?(spelled: String) {
-        let parts = spelled.split(separator: ",", omittingEmptySubsequences: false)
-            .map { Double($0.trimmingCharacters(in: .whitespaces)) }
-        guard parts.count == 4, let x = parts[0], let y = parts[1], let w = parts[2], let h = parts[3],
-              [x, y, w, h].allSatisfy({ abs($0) <= Self.limit }), w > 0, h > 0
-        else { return nil }
-        self.init(x: x, y: y, width: w, height: h)
-    }
-}
-
-public extension ScreenRect {
-    var area: Double { width * height }
-
-    /// The area two rectangles share, zero when they do not meet - beside `intersects`, so
-    /// the two cannot disagree about what touching means.
-    func overlap(_ other: ScreenRect) -> Double {
-        guard intersects(other) else { return 0 }
-        return cgRect.intersection(other.cgRect).width * cgRect.intersection(other.cgRect).height
-    }
+    static func < (a: Gap, b: Gap) -> Bool { (a.across, a.along, a.leads ? 1 : 0) < (b.across, b.along, b.leads ? 1 : 0) }
 }

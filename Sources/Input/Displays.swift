@@ -1,4 +1,5 @@
 import Foundation
+import ScreenSpace
 
 /// The displays: the rectangles of screen space they show, in `ScreenPoint`'s space. The
 /// cursor goes nowhere else, and macOS acts on it at their edges - an auto-hidden Dock

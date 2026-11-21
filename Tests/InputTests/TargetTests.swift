@@ -1,4 +1,5 @@
 import Foundation
+import ScreenSpace
 import TestClock
 import Testing
 @testable import Input
@@ -6,9 +7,14 @@ import Testing
 /// Where a click lands, `docs/design/human.md`: a point exactly, and a box at a point drawn
 /// inside it and clear of its edge, spread about its centre and held to the line the hand
 /// sets out on, the move timed by its size.
+/// A box to press, as a test writes one down.
+private func box(_ x: Double, _ y: Double, _ width: Double, _ height: Double) -> Target.Box {
+    Target.Box(ScreenRect(x: x, y: y, width: width, height: height)!)!
+}
+
 @Suite struct TargetTests {
     static let start = ScreenPoint(x: 100, y: 300)!
-    static let button = ScreenRect(x: 800, y: 290, width: 80, height: 24)!
+    static let button = box(800, 290, 80, 24)
 
     static func aims(at target: Target, from start: ScreenPoint = start, seeds: Range<UInt64> = 0 ..< 2000) -> [ScreenPoint] {
         seeds.map { seed in
@@ -35,8 +41,8 @@ import Testing
     /// Every point drawn in a box is at least the margin inside its edge, and they differ:
     /// over 2000 seeds, no two the same.
     @Test func aBoxIsAimedInsideItsMarginAtVariedPoints() {
-        let box = Self.button
-        let aims = Self.aims(at: .box(box))
+        let box = Self.button.frame
+        let aims = Self.aims(at: .box(Self.button))
         #expect(aims.allSatisfy { (box.x + 2 ... box.x + box.width - 2).contains($0.x) && (box.y + 2 ... box.y + box.height - 2).contains($0.y) })
         #expect(Set(aims).count == aims.count)
     }
@@ -62,7 +68,7 @@ import Testing
     /// aims keep to the start's line by its directional error, 5% of the distance, not
     /// over the row to its centre. The row and start are the probe page's Bravo, under Menu.
     @Test func acrossTheTravelTheAimsKeepToTheStartsLine() {
-        let row = ScreenRect(x: 1101, y: 305, width: 238, height: 40)!
+        let row = box(1101, 305, 238, 40)
         let start = ScreenPoint(x: 1118, y: 252)!
         let aims = Self.aims(at: .box(row), from: start)
         let (mean, deviation) = Self.spread(aims.map(\.x))
@@ -97,7 +103,7 @@ import Testing
 
     /// A box no wider than twice the margin on an axis is aimed at its centre on that axis.
     @Test func aBoxTooThinToStrayInIsAimedAtItsCentre() {
-        let line = ScreenRect(x: 10, y: 20, width: 200, height: 3)!
+        let line = box(10, 20, 200, 3)
         let aims = Self.aims(at: .box(line))
         #expect(aims.allSatisfy { $0.y == 21.5 })
         #expect(Set(aims.map(\.x)).count == aims.count)
@@ -114,22 +120,23 @@ import Testing
         let distance = hypot(path.target.x - Self.start.x, path.target.y - Self.start.y)
         #expect(path.toward.width == 24)
         #expect(path.duration == (Duration.milliseconds(50) + .milliseconds(150) * log2(distance / 24 + 1)) * pace)
-        let wide = ScreenRect(x: 700, y: 200, width: 280, height: 200)!
-        let small = ScreenRect(x: 836, y: 296, width: 8, height: 8)!
+        let wide = box(700, 200, 280, 200)
+        let small = box(836, 296, 8, 8)
         var a = SeededGenerator(seed: 3), b = SeededGenerator(seed: 3)
         #expect(Trajectory(from: Self.start, toward: .box(wide), within: .vast, drawing: &a).duration
             < Trajectory(from: Self.start, toward: .box(small), within: .vast, drawing: &b).duration)
     }
 
-    /// A box is what eyes prints, and nothing that is not one is read as one.
-    @Test func aBoxIsSpelledAsEyesPrintsIt() {
-        #expect(ScreenRect(spelled: "800,290,80,24") == Self.button)
-        #expect(ScreenRect(spelled: " -5 ,2.5,1,1") == ScreenRect(x: -5, y: 2.5, width: 1, height: 1))
-        #expect(Self.button.description == "800,290,80,24")
-        let typed = ScreenRect(x: 1234.567, y: -0.125, width: 30, height: 40)!
-        #expect(ScreenRect(spelled: typed.description) == typed, "\(typed)")
-        for refused in ["", "1,2,3", "1,2,3,4,5", "1,2,0,4", "1,2,3,-4", "1,2,0.5,4", "0,0,1e-320,10", "1,,3,4", "a,2,3,4", "1,2,inf,4", "1e308,0,1e308,1"] {
-            #expect(ScreenRect(spelled: refused) == nil, "\(refused)")
+    /// A box to press is one eyes prints, and a frame with a side under a point is none: the
+    /// cursor cannot be put inside it.
+    @Test func aBoxToPressHasEachSideAtLeastAPoint() {
+        #expect(Target.Box(spelled: "800,290,80,24") == Self.button)
+        #expect(Target.Box(spelled: " -5 ,2.5,1,1") == box(-5, 2.5, 1, 1))
+        #expect(Target.box(Self.button).description == "the box 800,290,80,24")
+        #expect(Target.Box(ScreenRect(x: 0, y: 0, width: 0.5, height: 10)!) == nil)
+        #expect(Target.Box(ScreenRect(x: 0, y: 0, width: 10, height: 0)!) == nil)
+        for refused in ["", "1,2,3", "1,2,0,4", "1,2,0.5,4", "0,0,1e-320,10", "1,2,inf,4"] {
+            #expect(Target.Box(spelled: refused) == nil, "\(refused)")
         }
     }
 

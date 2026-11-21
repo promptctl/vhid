@@ -4,6 +4,7 @@ import Installations
 import Keystrokes
 import MCP
 import Pointing
+import ScreenSpace
 import Synchronization
 import TestClock
 import Testing

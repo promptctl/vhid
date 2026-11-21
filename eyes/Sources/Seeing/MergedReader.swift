@@ -1,3 +1,4 @@
+import ScreenSpace
 /// Two readers asked the same query, what they saw reconciled into one answer.
 ///
 /// It holds each as `any Reader` and nothing more, so neither the readers nor this type
@@ -131,11 +132,10 @@ public extension Candidates {
             }
             extra += Found(loose, source: run.source)
         }
-        let regions = seen.map(\.region.cgRect)
-        let both = regions.dropFirst().reduce(regions[0]) { $0.intersection($1) }
+        let both = seen.dropFirst().reduce(seen[0].region as ScreenRect?) { $0?.intersection($1.region) }
         return Candidates(
             found: (kept + extra).inReadingOrder,
-            region: both.isNull ? seen[0].region : ScreenRect(both),
+            region: both ?? seen[0].region,
             examined: seen.map(\.examined).reduce(0, +),
             excluded: (seen.flatMap(\.excluded) + [Exclusion(reason: .duplicate, count: duplicates)]).summed,
             reach: a.part.isWhole && b.part.isWhole ? .whole : .stopped(.merged(a.part, b.part)),

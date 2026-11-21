@@ -2,6 +2,7 @@ import Input
 import KeyboardLayouts
 import Keystrokes
 import Pointing
+import ScreenSpace
 import TestClock
 import Testing
 @testable import vhid

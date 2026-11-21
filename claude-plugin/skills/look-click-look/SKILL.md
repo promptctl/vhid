@@ -55,7 +55,7 @@ Done means a look after the act showed the change. An act's answer says the act 
    title, the new text, the button gone. To wait for it, pass `until` (`present` or
    `absent`) and a `timeout` with the `text`, which re-reads until it happens.
 
-A `click` that answered "clicked left once at (812, 604) after 1 motion report" is an
+A `click` that answered "clicked left once at 812,604 after 1 motion report" is an
 act that happened, not an outcome: the press landed on that point, and what sat there
 may have been something else. When the user asked for an outcome, such as a file
 saved, a field filled or a sheet dismissed, you have it only once a look after the act
@@ -111,7 +111,7 @@ look {}                              -> 1 display, main first. ...
                                         4521	TextEdit	L0	412,180,620,440	front    a save sheet on it
 
                                         (a scope line, then) 812,604	790,594,44,20	Save	AXButton
-click {"x": 812, "y": 604}           -> clicked left once at (812, 604) after 1 motion report
+click {"x": 812, "y": 604}           -> clicked left once at 812,604 after 1 motion report
 look {"text": "Save", "exact": true, "window": 4521,
       "until": "absent", "timeout": 5}
                                      -> absent after 2 reads in 0.6s: the sheet changed
@@ -124,7 +124,7 @@ it, makes Save go too. The look at the window after it is the look that shows th
 Not this:
 
 ```
-click {"x": 812, "y": 604}           -> clicked left once at (812, 604) after 1 motion report
+click {"x": 812, "y": 604}           -> clicked left once at 812,604 after 1 motion report
 "Clicked Save."                       (no look before, no look after:
                                       nobody knows what was pressed)
 ```

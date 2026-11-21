@@ -1,3 +1,4 @@
+import ScreenSpace
 import Seeing
 
 /// What one element says of itself for a row to be found by it, or for a climb to list it.
@@ -176,21 +177,21 @@ private final class Check<Element> {
             return inside
         }
         let (halfWidth, halfHeight) = (frame.width / 2, frame.height / 2)
-        let left = try reach(halfWidth) { ScreenPoint(x: centre.x - $0, y: centre.y) }
-        let right = try reach(halfWidth) { ScreenPoint(x: centre.x + $0, y: centre.y) }
-        let up = try reach(halfHeight) { ScreenPoint(x: centre.x, y: centre.y - $0) }
-        let down = try reach(halfHeight) { ScreenPoint(x: centre.x, y: centre.y + $0) }
+        let left = try reach(halfWidth) { ScreenPoint(x: centre.x - $0, y: centre.y)! }
+        let right = try reach(halfWidth) { ScreenPoint(x: centre.x + $0, y: centre.y)! }
+        let up = try reach(halfHeight) { ScreenPoint(x: centre.x, y: centre.y - $0)! }
+        let down = try reach(halfHeight) { ScreenPoint(x: centre.x, y: centre.y + $0)! }
         // The share of the diagonal to a corner of that box a click presses the element along.
         func corner(_ dx: Double, _ dy: Double) throws -> Double {
             let length = (dx * dx + dy * dy).squareRoot()
-            return length == 0 ? 1 : try reach(length) { ScreenPoint(x: centre.x + dx * $0 / length, y: centre.y + dy * $0 / length) } / length
+            return length == 0 ? 1 : try reach(length) { ScreenPoint(x: centre.x + dx * $0 / length, y: centre.y + dy * $0 / length)! } / length
         }
         let (upLeft, upRight) = (try corner(-left, -up), try corner(right, -up))
         let (downLeft, downRight) = (try corner(-left, down), try corner(right, down))
         let (l, r) = (left * min(upLeft, downLeft), right * min(upRight, downRight))
         let (u, d) = (up * min(upLeft, upRight), down * min(downLeft, downRight))
         guard (l, r, u, d) == (halfWidth, halfWidth, halfHeight, halfHeight) else {
-            return .narrowed(ScreenRect(x: centre.x - l, y: centre.y - u, width: l + r, height: u + d))
+            return .narrowed(ScreenRect(x: centre.x - l, y: centre.y - u, width: l + r, height: u + d)!)
         }
         return .kept
     }

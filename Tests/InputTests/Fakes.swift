@@ -2,6 +2,7 @@ import Foundation
 import Input
 import Keystrokes
 import Pointing
+import ScreenSpace
 import Synchronization
 import TestClock
 

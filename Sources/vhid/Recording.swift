@@ -1,5 +1,6 @@
 import Foundation
 import Input
+import ScreenSpace
 import Signals
 import Synchronization
 import Telemetry
@@ -88,7 +89,7 @@ final class Trail: Sendable {
         path["landed"] = move.landed.map(point)
         // The box the aim was drawn inside, which with the seed and `from` draws the path
         // again; a point target is `aimed` itself.
-        if case .box(let box) = move.toward { path["box"] = .array([box.x, box.y, box.width, box.height].map(JSON.double)) }
+        if case .box(let box) = move.toward { path["box"] = .array([box.frame.x, box.frame.y, box.frame.width, box.frame.height].map(JSON.double)) }
         kept.withLock { $0.moves.append(.object(path)) }
     }
 

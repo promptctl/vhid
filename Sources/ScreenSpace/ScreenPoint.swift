@@ -1,13 +1,10 @@
 /// A point on the screen in global coordinates: points, origin at the top left of the
-/// main display, y growing downward.
+/// main display, y growing downward, negative on a display left of or above the main one.
 ///
-/// The space the window server reports the cursor in, so a target read off the screen is
-/// a target the pointer can be sent to with no conversion between. [FRAMING:representation]
-/// One space, named, rather than a pair of doubles whose meaning each caller remembers.
-///
-/// The same space eyes reports text and window frames in. [LAW:one-source-of-truth]
-/// exception: Seeing's `ScreenPoint` says it too, until vhid-one-server-4qe.nih, ranked next
-/// in this lane, makes the devices and the readers speak one screen-space vocabulary.
+/// The space the window server reports the cursor in and the accessibility tree reports
+/// frames in, so a point eyes reads off the screen is a point the pointer can be sent to
+/// with no conversion between. [FRAMING:representation] One space, named once, for the
+/// devices and the readers alike. [LAW:one-source-of-truth]
 public struct ScreenPoint: Hashable, Codable, Sendable, CustomStringConvertible {
     public let x: Double
     public let y: Double
@@ -41,5 +38,12 @@ public struct ScreenPoint: Hashable, Codable, Sendable, CustomStringConvertible 
         self = point
     }
 
-    public var description: String { String(format: "(%g, %g)", x, y) }
+    /// `x,y`, each the shortest digits that read back as it and a whole number without its
+    /// `.0`: the form eyes prints a row's point in, so a point printed is the point passed on.
+    public var description: String {
+        [x, y].map { coordinate in
+            let digits = "\(coordinate)"
+            return digits.hasSuffix(".0") ? String(digits.dropLast(2)) : digits
+        }.joined(separator: ",")
+    }
 }

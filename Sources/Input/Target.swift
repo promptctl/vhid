@@ -1,4 +1,5 @@
 import Foundation
+import ScreenSpace
 
 /// What a pointer verb is aimed at: a point, pressed exactly, or a box, pressed at a point
 /// drawn inside it. `docs/design/human.md`, "Where a click lands".
@@ -8,7 +9,34 @@ import Foundation
 /// case rather than a box with a flag saying whether its size means anything.
 public enum Target: Hashable, Sendable, CustomStringConvertible {
     case point(ScreenPoint)
-    case box(ScreenRect)
+    case box(Box)
+
+    /// A box a press can land inside.
+    public struct Box: Hashable, Sendable, CustomStringConvertible {
+        public let frame: ScreenRect
+
+        /// [LAW:parse-dont-validate] The one place a frame becomes a box to press, and the one
+        /// place a frame too small for that is refused: a side under a point. The closing loop
+        /// lands within half a point, so a narrower box is not one the cursor can be put
+        /// inside, and Fitts' law read off it would take a move without end. A frame eyes
+        /// found, a box a caller spelled, both come through here.
+        public init?(_ frame: ScreenRect) {
+            guard frame.width >= 1, frame.height >= 1 else { return nil }
+            self.frame = frame
+        }
+
+        /// A box as eyes prints it, read as `ScreenRect(spelled:)` reads one and then as a box
+        /// to press. [LAW:single-enforcer] The command line and the MCP server read through here.
+        public init?(spelled: String) {
+            guard let frame = ScreenRect(spelled: spelled) else { return nil }
+            self.init(frame)
+        }
+
+        /// What a refusal names as the form wanted.
+        public static let spelling = "x,y,width,height in points - each side at least a point, nothing past \(Int(ScreenRect.limit))"
+
+        public var description: String { "\(frame)" }
+    }
 
     /// About a button's height or a line of text's, in points: the size taken for a target
     /// vhid is not told the size of, and the room a path keeps from an edge.
@@ -20,7 +48,7 @@ public enum Target: Hashable, Sendable, CustomStringConvertible {
     var width: Double {
         switch self {
         case .point: Self.button
-        case .box(let box): min(box.width, box.height)
+        case .box(let box): min(box.frame.width, box.frame.height)
         }
     }
 
@@ -72,7 +100,7 @@ public enum Target: Hashable, Sendable, CustomStringConvertible {
     private var extent: (centre: ScreenPoint, reach: (x: Double, y: Double), aimable: (x: Double, y: Double)) {
         switch self {
         case .point(let point): (point, (0, 0), (0, 0))
-        case .box(let box): (box.centre, (box.width / 2, box.height / 2), (max(0, box.width / 2 - Self.margin), max(0, box.height / 2 - Self.margin)))
+        case .box(let box): (box.frame.centre, (box.frame.width / 2, box.frame.height / 2), (max(0, box.frame.width / 2 - Self.margin), max(0, box.frame.height / 2 - Self.margin)))
         }
     }
 

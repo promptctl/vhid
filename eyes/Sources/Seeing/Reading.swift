@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import ScreenSpace
 
 /// The most findings one reading may return, which is always at least one.
 ///

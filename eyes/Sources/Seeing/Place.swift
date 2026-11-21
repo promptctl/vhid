@@ -1,4 +1,5 @@
 import CoreGraphics
+import ScreenSpace
 
 public extension Region {
     /// The rectangle this region names, in the one screen space, or a refusal naming what
@@ -84,7 +85,7 @@ public extension Geometry {
             // portrait display divided by them reads 1.78x instead of 1x.
             let mode = CGDisplayCopyDisplayMode(id)
             return Display(
-                id: id, frame: ScreenRect(CGDisplayBounds(id)), isMain: CGDisplayIsMain(id) != 0,
+                id: id, frame: ScreenRect(CGDisplayBounds(id))!, isMain: CGDisplayIsMain(id) != 0,
                 scale: mode.flatMap { $0.width > 0 ? Double($0.pixelWidth) / Double($0.width) : nil })
         }.sorted { $0.isMain && !$1.isMain }
     }

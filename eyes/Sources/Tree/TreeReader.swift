@@ -1,4 +1,5 @@
 import ApplicationServices
+import ScreenSpace
 import Seeing
 import Grants
 
@@ -295,8 +296,8 @@ public struct TreeReader: Reader {
     /// [LAW:parse-dont-validate]
     static func frame(_ position: CFTypeRef?, _ size: CFTypeRef?) -> ScreenRect? {
         unboxed(position, as: .cgPoint, CGPoint.zero).flatMap { origin in
-            unboxed(size, as: .cgSize, CGSize.zero).map { ScreenRect(CGRect(origin: origin, size: $0)) }
-        }.flatMap { [$0.x, $0.y, $0.width, $0.height].allSatisfy(\.isFinite) ? $0 : nil }
+            unboxed(size, as: .cgSize, CGSize.zero).flatMap { ScreenRect(CGRect(origin: origin, size: $0)) }
+        }
     }
 
     private static func bounded(_ element: AXUIElement) -> AXUIElement {

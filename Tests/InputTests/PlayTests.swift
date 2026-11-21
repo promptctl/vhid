@@ -1,5 +1,6 @@
 import Keystrokes
 import Pointing
+import ScreenSpace
 import Synchronization
 import TestClock
 import Testing

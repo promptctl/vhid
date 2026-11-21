@@ -1,4 +1,5 @@
 import CoreGraphics
+import ScreenSpace
 
 /// The app a look reads: the one it was told, or with no app named, the one a person sees
 /// in front.
@@ -117,8 +118,8 @@ public struct Front: Sendable, Hashable {
         let front = listing.front(of: app.pid)
         let over = front.map { i in
             listing.windows[..<i].filter { window in
-                let shared = window.frame.cgRect.intersection(listing.windows[i].frame.cgRect)
-                return !shared.isNull && !shared.isEmpty && hit(ScreenRect(shared).centre) == .answered(window.pid)
+                guard let shared = window.frame.intersection(listing.windows[i].frame), !shared.isEmpty else { return false }
+                return hit(shared.centre) == .answered(window.pid)
             }
         } ?? []
         return Set(over.map(\.pid)).union([app.pid]).subtracting(own.pids)

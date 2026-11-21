@@ -1,4 +1,5 @@
 import CoreGraphics
+import ScreenSpace
 import Testing
 @testable import Seeing
 
@@ -48,7 +49,7 @@ import Testing
     @Test func anApplicationWindowKeepsItsOwnerAndItsBounds() {
         let listing = Geometry.listing(from: [entry(id: 7, owner: "Xcode", x: 14, y: 47, width: 1400, height: 900)])
         #expect(listing.windows == [
-            Window(id: 7, owner: "Xcode", pid: 400, frame: ScreenRect(x: 14, y: 47, width: 1400, height: 900), layer: 0),
+            Window(id: 7, owner: "Xcode", pid: 400, frame: ScreenRect(x: 14, y: 47, width: 1400, height: 900)!, layer: 0),
         ])
         #expect(listing.excluded.isEmpty)
     }

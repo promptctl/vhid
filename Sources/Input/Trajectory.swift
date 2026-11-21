@@ -1,5 +1,6 @@
 import Foundation
 import Pointing
+import ScreenSpace
 
 /// Where a person's aimed pointer movement is, moment by moment, from one point to another:
 /// a main movement that lands on the target, stops short, or overshoots, then as many

@@ -1,4 +1,5 @@
 import CoreGraphics
+import ScreenSpace
 
 /// A string with something in it other than blank space.
 ///
@@ -59,7 +60,7 @@ public struct Found: Sendable, Hashable {
         self.first = first
         self.rest = rest
         self.source = source
-        self.frame = ScreenRect(rest.reduce(first.frame.cgRect) { $0.union($1.frame.cgRect) })
+        self.frame = ScreenRect(rest.reduce(first.frame.cgRect) { $0.union($1.frame.cgRect) })!
     }
 
     public var words: [Word] { [first] + rest }

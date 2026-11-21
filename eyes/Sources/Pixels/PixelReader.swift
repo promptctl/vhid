@@ -3,6 +3,7 @@ import CoreGraphics
 import Foundation
 import Grants
 import ImageIO
+import ScreenSpace
 import Seeing
 import Telemetry
 import Turns
@@ -97,7 +98,7 @@ public struct PixelReader: Reader {
         }
         let (w, h) = (min(tileSide, region.width), min(tileSide, region.height))
         return starts(region.y, region.height).flatMap { y in
-            starts(region.x, region.width).map { x in ScreenRect(x: x, y: y, width: w, height: h) }
+            starts(region.x, region.width).map { x in ScreenRect(x: x, y: y, width: w, height: h)! }
         }
     }
 
@@ -163,7 +164,7 @@ public struct PixelReader: Reader {
         // while the reading claimed the whole region, so it is refused by name instead.
         guard seen.count <= 1 else { throw PixelsError.spansDisplays(rect) }
         guard let only = seen.first else { throw PixelsError.offScreen(rect) }
-        return ScreenRect(only.integral)
+        return ScreenRect(only.integral)!
     }
 
     /// Captures exactly `region` with `screencapture`, in points of the global space it

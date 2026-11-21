@@ -7,6 +7,7 @@ import KeyboardLayouts
 import Keystrokes
 import Pointing
 import RecordingTie
+import ScreenSpace
 
 // The tap app `vhid record` launches: `vhid-record <socket> <command pid>`.
 //

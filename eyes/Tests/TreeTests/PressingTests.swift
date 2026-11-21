@@ -1,4 +1,5 @@
 import CoreGraphics
+import ScreenSpace
 import Testing
 import Seeing
 import Grants
@@ -13,12 +14,12 @@ import Grants
 
     /// Target B of the probe page as Safari answered on studious: the button's frame
     /// 813,620,97,34, the element the page hit-tests 820,625,87,26, its label inside it.
-    static let frame = ScreenRect(x: 813, y: 620, width: 97, height: 34)
-    static let element = ScreenRect(x: 820, y: 625, width: 87, height: 26)
-    static let text = ScreenRect(x: 825, y: 629, width: 78, height: 18)
+    static let frame = ScreenRect(x: 813, y: 620, width: 97, height: 34)!
+    static let element = ScreenRect(x: 820, y: 625, width: 87, height: 26)!
+    static let text = ScreenRect(x: 825, y: 629, width: 78, height: 18)!
 
     static let lineages: [Int: Lineage<Int>] = [
-        0: Lineage(role: page, frame: ScreenRect(x: 0, y: 105, width: 1500, height: 795), parent: nil),
+        0: Lineage(role: page, frame: ScreenRect(x: 0, y: 105, width: 1500, height: 795)!, parent: nil),
         1: Lineage(role: button, frame: frame, parent: 0),
         2: Lineage(role: label, frame: text, parent: 1),
     ]
@@ -85,7 +86,7 @@ import Grants
             Issue.record("not narrowed"); return
         }
         let corners = [(cut.x, cut.y), (cut.x + cut.width, cut.y), (cut.x, cut.y + cut.height), (cut.x + cut.width, cut.y + cut.height)]
-        #expect(corners.allSatisfy { onPill(ScreenPoint(x: $0.0, y: $0.1)) })
+        #expect(corners.allSatisfy { onPill(ScreenPoint(x: $0.0, y: $0.1)!) })
         #expect(cut.width > Self.frame.width - 2 * radius && cut.height > radius)
     }
 
@@ -103,7 +104,7 @@ import Grants
     /// own ancestors - one parent read - never to the top of the tree.
     @Test func aClimbFromBesideStopsAtTheElementsAncestor() throws {
         var lineages = Self.lineages
-        lineages[0] = Lineage(role: Self.page, frame: ScreenRect(x: 0, y: 105, width: 1500, height: 795), parent: 10)
+        lineages[0] = Lineage(role: Self.page, frame: ScreenRect(x: 0, y: 105, width: 1500, height: 795)!, parent: 10)
         for at in 10..<20 { lineages[at] = Lineage(role: Self.page, frame: nil, parent: at == 19 ? nil : at + 1) }
         lineages[3] = Lineage(role: Self.label, frame: nil, parent: 0)
         var beside = 0
@@ -129,7 +130,7 @@ import Grants
     /// no part of the frame is claimed for it.
     @Test func aRowWhosePointLandsOnSomethingElseIsUnchecked() throws {
         var lineages = Self.lineages
-        lineages[9] = Lineage(role: Self.page, frame: ScreenRect(x: 0, y: 0, width: 1500, height: 900), parent: nil)
+        lineages[9] = Lineage(role: Self.page, frame: ScreenRect(x: 0, y: 0, width: 1500, height: 900)!, parent: nil)
         #expect(try probe(hit: { _ in .answered(9) }, lineages: lineages).press(row()) == Checked(.unchecked(.elsewhere), calls: 2))
         #expect(try probe(hit: { _ in .answered(nil) }).press(row()) == Checked(.unchecked(.elsewhere), calls: 1))
     }

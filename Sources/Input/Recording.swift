@@ -2,6 +2,7 @@ import Foundation
 import KeyboardLayouts
 import Keystrokes
 import Pointing
+import ScreenSpace
 
 /// One event as the session tap delivered it, reduced to what a recording reads: when,
 /// from which device, where the cursor was, and what happened.

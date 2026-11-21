@@ -1,6 +1,7 @@
 import ArgumentParser
 import Input
 import Pointing
+import ScreenSpace
 import Testing
 @testable import vhid
 
@@ -124,7 +125,7 @@ import Testing
 
 /// Places on a command line: a point as two words, a box as one, as eyes prints it.
 @Suite struct PlacesTests {
-    static let box = Target.box(ScreenRect(x: -10, y: 20, width: 30, height: 40)!)
+    static let box = Target.box(Target.Box(ScreenRect(x: -10, y: 20, width: 30, height: 40)!)!)
 
     @Test func aBoxIsOneWordAndAPointTwo() throws {
         #expect(try places(["-10,20,30,40"], count: 1) == [Self.box])

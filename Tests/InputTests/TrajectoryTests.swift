@@ -1,6 +1,7 @@
 import Foundation
 import OwnThread
 import Pointing
+import ScreenSpace
 import Synchronization
 import TestClock
 import Testing
@@ -190,7 +191,7 @@ import Testing
     /// toward the elbow, and the whole move's speed peaks at a spread of shares of its time.
     @Test func aHundredMovesAreNotBuiltFromTheSameParts() {
         var generator = SeededGenerator(seed: 1)
-        let box = Target.box(ScreenRect(x: 820, y: 596, width: 83, height: 26)!)
+        let box = Target.box(Target.Box(ScreenRect(x: 820, y: 596, width: 83, height: 26)!)!)
         let start = ScreenPoint(x: 120, y: 250)!
         var bows: [Double] = [], peaks: [Double] = []
         for _ in 0 ..< 100 {

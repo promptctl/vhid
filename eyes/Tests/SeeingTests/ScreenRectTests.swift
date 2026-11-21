@@ -1,4 +1,5 @@
 import CoreGraphics
+import ScreenSpace
 import Testing
 @testable import Seeing
 
@@ -11,7 +12,7 @@ import Testing
 /// right order of magnitude, and the click just goes somewhere else.
 @Suite struct ScreenRectTests {
     /// Measured on the owner's Mac from the window list: the main display, in points.
-    static let main = ScreenRect(x: 0, y: 0, width: 1512, height: 982)
+    static let main = ScreenRect(x: 0, y: 0, width: 1512, height: 982)!
 
     private func expect(_ got: Double, _ want: Double, _ what: String) {
         #expect(abs(got - want) < 0.001, "\(what): got \(got), wanted \(want)")
@@ -68,7 +69,7 @@ import Testing
     /// ignored the origin would return coordinates on the wrong monitor - which, unlike a
     /// flip, still looks entirely reasonable.
     @Test func aDisplayAtANegativeOriginPutsFindingsAtNegativeCoordinates() {
-        let secondary = ScreenRect(x: -1512, y: 0, width: 1512, height: 982)
+        let secondary = ScreenRect(x: -1512, y: 0, width: 1512, height: 982)!
         let box = CGRect(x: 0.8, y: 0.1, width: 0.15, height: 0.05)
         let rect = ScreenRect.fromImageSpace(normalized: box, on: secondary)
 
@@ -82,25 +83,25 @@ import Testing
     /// The centre is the only number a caller actually uses, so it is derived from the
     /// rectangle rather than carried beside it.
     @Test func theCentreIsTheMiddleOfTheRectangle() {
-        let rect = ScreenRect(x: 100, y: 200, width: 60, height: 40)
-        #expect(rect.centre == ScreenPoint(x: 130, y: 220))
+        let rect = ScreenRect(x: 100, y: 200, width: 60, height: 40)!
+        #expect(rect.centre == ScreenPoint(x: 130, y: 220)!)
         #expect(rect.contains(rect.centre))
     }
 
     /// Overlap is how a merged reading tells one thing seen by both readers from two
     /// things seen once each, so touching-but-not-overlapping must read as separate.
     @Test func rectanglesThatOnlyTouchDoNotIntersect() {
-        let left = ScreenRect(x: 0, y: 0, width: 10, height: 10)
-        #expect(!left.intersects(ScreenRect(x: 10, y: 0, width: 10, height: 10)))
-        #expect(left.intersects(ScreenRect(x: 9, y: 0, width: 10, height: 10)))
+        let left = ScreenRect(x: 0, y: 0, width: 10, height: 10)!
+        #expect(!left.intersects(ScreenRect(x: 10, y: 0, width: 10, height: 10)!))
+        #expect(left.intersects(ScreenRect(x: 9, y: 0, width: 10, height: 10)!))
     }
 
     /// A piece of a display, taken to Vision's space and back, is the same piece - on a
     /// display at a negative origin, where a missed offset shows. And the top of the screen
     /// is the top of the image, so its normalized box sits high.
     @Test func aPieceOfTheDisplayRoundTripsThroughImageSpace() {
-        let display = ScreenRect(x: -2400, y: -300, width: 2400, height: 1600)
-        let piece = ScreenRect(x: -2000, y: -300, width: 800, height: 400)
+        let display = ScreenRect(x: -2400, y: -300, width: 2400, height: 1600)!
+        let piece = ScreenRect(x: -2000, y: -300, width: 800, height: 400)!
         let normalized = piece.normalized(in: display)
         expect(normalized.maxY, 1, "a piece at the top of the display sits at the top of the image")
         let back = ScreenRect.fromImageSpace(normalized: normalized, on: display)
@@ -108,21 +109,5 @@ import Testing
         expect(back.y, piece.y, "y")
         expect(back.width, piece.width, "width")
         expect(back.height, piece.height, "height")
-    }
-
-    /// Rounded outward, so the whole points printed still cover what was found, and a
-    /// negative coordinate is not moved toward zero as truncation would move it.
-    @Test func aRectangleIsSpelledInWholePointsRoundedOutward() {
-        #expect(ScreenRect(x: -0.6, y: 10.5, width: 99.6, height: 20).description == "-1,10,100,21")
-    }
-
-    /// What is printed reads back as the rectangle it names, and anything else reads as none.
-    @Test func theSpellingReadsBack() {
-        let r = ScreenRect(x: -1920, y: -98, width: 1920, height: 1080)
-        #expect(ScreenRect(spelled: r.description) == r)
-        #expect(ScreenRect(spelled: " 1.5, 2 ,3,4") == ScreenRect(x: 1.5, y: 2, width: 3, height: 4))
-        for refused in ["1,2,3", "1,2,3,4,5", "1,2,3,4,", "1,,3,4", "1,2,0,4", "1,2,3,-4", "2000000,0,1,1", "0,0 10x10", ""] {
-            #expect(ScreenRect(spelled: refused) == nil, "\(refused)")
-        }
     }
 }

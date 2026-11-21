@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import ScreenSpace
 
 /// A window on screen: who owns it, where it is, and how high it is composited.
 ///
@@ -191,7 +192,7 @@ public enum Geometry {
     /// position was not readable. [LAW:no-silent-failure]
     ///
     /// [LAW:parse-dont-validate] This is the one door the window server's numbers come
-    /// through, so finiteness is established here and never asked about again. NaN
+    /// through, and `ScreenRect`'s refusal is what keeps a number that is no place out. NaN
     /// reaches it - `as? Double` bridges an `NSNumber` holding one without complaint -
     /// and then passes every check downstream that looks like it would catch it: `NaN <=
     /// 0` is false, so a NaN-sized window is not `isEmpty` and is kept, and the first
@@ -200,8 +201,7 @@ public enum Geometry {
     /// did not describe a window, which is what the `unreadable` count is for.
     private static func rect(from bounds: [String: Any]) -> ScreenRect? {
         guard let x = bounds["X"] as? Double, let y = bounds["Y"] as? Double,
-              let width = bounds["Width"] as? Double, let height = bounds["Height"] as? Double,
-              x.isFinite, y.isFinite, width.isFinite, height.isFinite
+              let width = bounds["Width"] as? Double, let height = bounds["Height"] as? Double
         else { return nil }
         return ScreenRect(x: x, y: y, width: width, height: height)
     }

@@ -1,5 +1,6 @@
 import Foundation
 import Pointing
+import ScreenSpace
 
 /// How many times a click clicks. At least one, because a click that does not click is a
 /// move and there is already a move. [LAW:parse-dont-validate]
