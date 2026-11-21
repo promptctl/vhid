@@ -98,17 +98,20 @@ public let waitInterval: Duration = .milliseconds(100)
 /// printed, so only its boxes are checked, in what is left of the timeout.
 ///
 /// Over a read and not a `Reader`, so any reader - or a server's serialised one - waits
-/// the same way. [LAW:composability]
-public func waiting(
-    for wait: Wait, on query: Query, every interval: Duration = waitInterval, read: (Query) async throws -> Judged
+/// the same way. [LAW:composability] Kept on `clock`, real time unless a test keeps it on
+/// one of its own, so the timeout and the pause between reads are one clock's.
+/// [LAW:no-ambient-temporal-coupling]
+public func waiting<C: Clock<Duration>>(
+    for wait: Wait, on query: Query, every interval: Duration = waitInterval, clock: C = ContinuousClock(),
+    read: (Query) async throws -> Judged
 ) async throws -> Waited {
-    let clock = ContinuousClock()
     let start = clock.now
+    func elapsed() -> Duration { start.duration(to: clock.now) }
     var reads = 0
     var inARow = 0
     var asked = query
     while true {
-        let began = clock.now
+        let began = elapsed()
         let judged = try await read(asked)
         let reading = judged.reading
         reads += 1
@@ -124,9 +127,12 @@ public func waiting(
         // The next read, taking as long as this one did, would end past the deadline: this
         // reading is the answer. Measured on studious, a whole-display read is most of a
         // second, so counting only the pause overshot a 2 s timeout by 0.6 s.
-        if settled || clock.now + interval + (clock.now - began) - start > wait.timeout {
-            return Waited(reading: try await judged.pressed(until: min(clock.now + hitTesting, start + wait.timeout)), reads: reads, took: clock.now - start, settled: settled)
+        if settled || elapsed() + interval + (elapsed() - began) > wait.timeout {
+            // The boxes are checked against the screen in real time, in what is left of
+            // the timeout.
+            let left = wait.timeout - elapsed()
+            return Waited(reading: try await judged.pressed(until: .now + min(hitTesting, left)), reads: reads, took: elapsed(), settled: settled)
         }
-        try await Task.sleep(for: interval)
+        try await clock.sleep(for: interval)
     }
 }

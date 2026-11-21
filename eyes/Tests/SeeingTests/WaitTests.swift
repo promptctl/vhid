@@ -1,11 +1,11 @@
-import OwnThread
+import TestClock
 import Testing
 @testable import Seeing
 
 /// The wait, over a fake read whose answer changes on its third read. The dangerous case
 /// is a false "gone", so most of what is here is absence: when it may be believed, and
 /// when a read that could not see must end the wait instead. [LAW:no-silent-failure]
-@Suite(.ownThread) struct WaitTests {
+@Suite struct WaitTests {
     static let region = ScreenRect(x: 0, y: 0, width: 800, height: 600)
 
     static let present = Reading(
@@ -37,7 +37,7 @@ import Testing
     }
 
     private func wait(_ until: Until, _ seconds: Double = 5, _ script: Script) async throws -> Waited {
-        try await waiting(for: Wait(until: until, seconds: seconds)!, on: Self.query, every: .milliseconds(1)) { try script.read($0) }
+        try await waiting(for: Wait(until: until, seconds: seconds)!, on: Self.query, every: .milliseconds(1), clock: ManualClock()) { try script.read($0) }
     }
 
     @Test func presentSettlesOnTheReadThatMatches() async throws {
@@ -55,7 +55,7 @@ import Testing
         let pressed = Pressed()
         let marked = Reading(outcome: Self.present.outcome, scope: Scope(region: Self.region, examined: 1, reach: .whole, boxes: Boxes(narrowed: 1)))
         let script = Script([Self.present, Self.present, Self.absent])
-        let waited = try await waiting(for: Wait(until: .absent, seconds: 5)!, on: Self.query, every: .milliseconds(1)) { query in
+        let waited = try await waiting(for: Wait(until: .absent, seconds: 5)!, on: Self.query, every: .milliseconds(1), clock: ManualClock()) { query in
             Judged(try script.read(query).reading) { reading, _ in pressed.readings.append(reading); return marked }
         }
         #expect(waited.reads == 4)
@@ -68,12 +68,11 @@ import Testing
     @Test func theBoxesAreCheckedWithinTheTimeout() async throws {
         final class Given: @unchecked Sendable { var deadline: ContinuousClock.Instant? }
         let given = Given()
-        let start = ContinuousClock.now
         let script = Script([Self.present])
-        _ = try await waiting(for: Wait(until: .absent, seconds: 0.05)!, on: Self.query, every: .milliseconds(1)) { query in
+        _ = try await waiting(for: Wait(until: .absent, seconds: 0.05)!, on: Self.query, every: .milliseconds(1), clock: ManualClock()) { query in
             Judged(try script.read(query).reading) { reading, deadline in given.deadline = deadline; return reading }
         }
-        #expect(given.deadline.map { $0 <= start + .milliseconds(60) } == true)
+        #expect(given.deadline.map { $0 <= .now + .milliseconds(50) } == true)
     }
 
     /// Gone from the third read on, and believed on the fourth: an absence is read twice
@@ -123,7 +122,7 @@ import Testing
         let query = Query(match: .contains("Remove"), region: .page(window: 219, frame: Self.region), limit: Limit(1)!,
                           near: .contains("Beta"))
         let script = Script([Self.present, Self.absent])
-        _ = try await waiting(for: Wait(until: .absent, seconds: 5)!, on: query, every: .milliseconds(1)) { try script.read($0) }
+        _ = try await waiting(for: Wait(until: .absent, seconds: 5)!, on: query, every: .milliseconds(1), clock: ManualClock()) { try script.read($0) }
         #expect(script.asked.first == query)
         #expect(script.asked.dropFirst().allSatisfy {
             $0 == Query(match: .contains("Remove"), region: .rect(Self.region), limit: Limit(1)!, near: .contains("Beta"))
@@ -143,7 +142,7 @@ import Testing
     @Test func aDisplayIsReadByItsIdEveryTime() async throws {
         let query = Query(match: .contains("Save"), region: .display(3))
         let script = Script([Self.present, Self.absent])
-        _ = try await waiting(for: Wait(until: .absent, seconds: 5)!, on: query, every: .milliseconds(1)) { try script.read($0) }
+        _ = try await waiting(for: Wait(until: .absent, seconds: 5)!, on: query, every: .milliseconds(1), clock: ManualClock()) { try script.read($0) }
         #expect(script.asked.allSatisfy { $0 == query })
     }
 
@@ -159,12 +158,10 @@ import Testing
 
     /// A timeout is an answer: the last reading, marked as not settled, not an error.
     @Test func aTimeoutAnswersWithTheLastReading() async throws {
-        let clock = ContinuousClock()
-        let started = clock.now
         let waited = try await wait(.absent, 0.2, Script([Self.present]))
         #expect(!waited.settled)
         #expect(waited.reading == Self.present)
-        #expect(clock.now - started < .seconds(1))
+        #expect(waited.took <= .milliseconds(200))
     }
 
     /// A reader that could not look mid-wait ends the wait with its error, never as "gone".

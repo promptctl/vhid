@@ -1,8 +1,10 @@
 import CoreGraphics
-import Seeing
 import Foundation
 import Grants
 import ImageIO
+import Seeing
+import Telemetry
+import Turns
 import Vision
 
 /// Reads the screen as pixels: captures the region, recognises its text on-device with
@@ -207,7 +209,24 @@ public struct PixelReader: Reader {
     /// Vision answers inside the region of interest as fractions of that region, so the
     /// piece is the rectangle each box is converted on - the one conversion, applied to a
     /// smaller display. [LAW:single-enforcer]
+    ///
+    /// One recognition at a time in the process: two in flight crash it inside Vision, and
+    /// two looks under one MCP server, or one look's tiles, would otherwise put two there.
+    /// The gate is here, at the one call into Vision, so nothing that recognises can go
+    /// round it; the time a recognition waited is counted on the unit underway.
+    /// [LAW:single-enforcer]
     nonisolated static func recognise(_ image: CGImage, of region: ScreenRect, in tile: ScreenRect) async throws -> [Found?] {
+        let asked = ContinuousClock.now
+        return try await vision.take {
+            Telemetry.tally("vision_queued_ms", by: Int((ContinuousClock.now - asked) / .milliseconds(1)))
+            return try await recognised(image, of: region, in: tile)
+        }
+    }
+
+    /// The one gate on Vision for this process.
+    nonisolated static let vision = Turns()
+
+    private nonisolated static func recognised(_ image: CGImage, of region: ScreenRect, in tile: ScreenRect) async throws -> [Found?] {
         var request = RecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.regionOfInterest = NormalizedRect(normalizedRect: tile.normalized(in: region))

@@ -7,6 +7,7 @@ import MCP
 import Signals
 import System
 import Telemetry
+import Turns
 import Version
 
 /// The verbs as MCP tools, over stdio, for an agent that drives a Mac in one session
@@ -67,6 +68,10 @@ struct McpCommand: AsyncParsableCommand {
                        stoppedBy signals: FirstSignal? = nil) async -> Server {
         let server = Server(name: "vhid", version: Version.current, instructions: instructions,
                             capabilities: .init(tools: .init(listChanged: false)))
+        // The SDK runs every request in a task of its own, so two calls sent together - a
+        // click and a type in one turn of an agent's - would reach for the daemon at once,
+        // and it serves one client: the second came back refused as busy, by this very
+        // process. Taking turns makes the session one client again.
         let turns = Turns()
         await server.withMethodHandler(ListTools.self) { _ in .init(tools: tools.map(\.tool)) }
         await server.withMethodHandler(CallTool.self) { request in
@@ -156,38 +161,5 @@ struct McpCommand: AsyncParsableCommand {
             }
         }
         try Task.checkCancellation()
-    }
-}
-
-/// One tool call at a time.
-///
-/// **Why: the SDK runs every request in a task of its own.** Two calls sent together - a
-/// click and a type in one turn of an agent's - would reach for the daemon at once, and it
-/// serves one client: the second came back refused as busy, by this very process. Taking
-/// turns makes the session one client again, and no two calls interleave report by report.
-///
-/// **Not the order they were sent in.** A call's turn is taken when its handler reaches
-/// this actor, and the SDK's handlers race here from the shared pool, so two calls sent
-/// together can take their turns either way round. JSON-RPC promises no order among
-/// requests in flight together, and neither does this: a caller that needs one call after
-/// another waits for the first one's answer, which is the one order a client can see.
-/// [LAW:no-ambient-temporal-coupling] Exclusion is this actor's to own; order is the caller's.
-actor Turns {
-    private var last: Task<Void, Never>?
-
-    /// Runs `call` once every call that took its turn before this one has finished. A
-    /// cancelled caller cancels its call, waiting or running.
-    func take<T: Sendable>(_ call: @escaping @Sendable () async throws -> T) async throws -> T {
-        let before = last
-        // A caller cancelled before its turn is taken never starts its call: the turn's task
-        // is its own, and the cancel would reach it only after it had begun.
-        try Task.checkCancellation()
-        let turn = Task {
-            await before?.value
-            try Task.checkCancellation()
-            return try await call()
-        }
-        last = Task { _ = await turn.result }
-        return try await withTaskCancellationHandler { try await turn.value } onCancel: { turn.cancel() }
     }
 }

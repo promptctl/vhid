@@ -168,7 +168,7 @@ let package = Package(
             name: "vhid",
             dependencies: [
                 "Input", "Helper", "Installations", "KeyboardLayouts", "Keystrokes", "Pointing", "DriverExtension", "Doctor",
-                "Version", "RecordingTie", "Signals", "Telemetry",
+                "Version", "RecordingTie", "Signals", "Telemetry", "Turns",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "MCP", package: "swift-sdk"),
                 .product(name: "Logging", package: "swift-log"),
@@ -181,7 +181,7 @@ let package = Package(
             name: "vhidCLITests",
             dependencies: [
                 "vhid", "Input", "Helper", "Installations", "Keystrokes", "Pointing", "Doctor", "DriverExtension", "Version", "OwnThread", "TestClock", "Signals",
-                "Telemetry", "TelemetryTesting",
+                "Telemetry", "TelemetryTesting", "Turns",
                 .product(name: "MCP", package: "swift-sdk"),
             ]
         ),
@@ -192,7 +192,7 @@ let package = Package(
         .testTarget(name: "OwnThreadTests", dependencies: ["OwnThread"]),
         // A clock that moves only when a test moves it or something sleeps on it, so a
         // verb that rests between reports is tested without waiting. A target of its own
-        // for OwnThread's reason: InputTests and vhidCLITests both sleep on it.
+        // for OwnThread's reason: InputTests, vhidCLITests and SeeingTests all sleep on it.
         .target(name: "TestClock", path: "Tests/TestClock"),
         // The authorization boundary of a root keystroke service, checked against the
         // test process's own identity and audit token: real code signing, no root.
@@ -212,14 +212,14 @@ let package = Package(
         // language without either linking the other.
         .target(name: "Seeing", path: "eyes/Sources/Seeing"),
         // Every type there is a value, so the vocabulary is exercised with no display, no
-        // capture and no grant. [LAW:effects-at-boundaries] OwnThread for the waits, whose
-        // timeouts are real time.
-        .testTarget(name: "SeeingTests", dependencies: ["Seeing", "OwnThread"], path: "eyes/Tests/SeeingTests"),
+        // capture and no grant. [LAW:effects-at-boundaries] The waits are kept on
+        // a test's clock.
+        .testTarget(name: "SeeingTests", dependencies: ["Seeing", "TestClock"], path: "eyes/Tests/SeeingTests"),
         // The pixel reader: the grant, the capture and Vision. Its own target, so the
         // vocabulary stays linking nothing and the tree reader sits beside it unlinked.
-        .target(name: "Pixels", dependencies: ["Seeing", "Grants"], path: "eyes/Sources/Pixels"),
+        .target(name: "Pixels", dependencies: ["Seeing", "Grants", "Telemetry", "Turns"], path: "eyes/Sources/Pixels"),
         // How a capture is cut into pieces and put back together, with no capture at all.
-        .testTarget(name: "PixelsTests", dependencies: ["Pixels", "Seeing", "Grants"], path: "eyes/Tests/PixelsTests"),
+        .testTarget(name: "PixelsTests", dependencies: ["Pixels", "Seeing", "Grants", "Turns"], path: "eyes/Tests/PixelsTests"),
         // The tree reader: the accessibility grant and the element reads, apart from Pixels
         // for the same reason.
         .target(name: "Tree", dependencies: ["Seeing", "Grants"], path: "eyes/Sources/Tree"),
@@ -232,6 +232,10 @@ let package = Package(
         // a header of its own, so they are linked and type-checked, not looked up.
         .target(name: "Responsibility", path: "eyes/Sources/Responsibility"),
         .testTarget(name: "GrantsTests", dependencies: ["Grants", "Seeing", "Telemetry", "TelemetryTesting", "OwnThread"], path: "eyes/Tests/GrantsTests"),
+        // One piece of work at a time, for what serves one: the daemon, and Vision. It links
+        // neither half, so each half's gate is the same rule.
+        .target(name: "Turns", path: "eyes/Sources/Turns"),
+        .testTarget(name: "TurnsTests", dependencies: ["Turns"], path: "eyes/Tests/TurnsTests"),
         // One record per unit of work, and the one edge every record leaves a process by.
         // It links neither half, so both record through it. [LAW:nothing-unseen]
         .target(name: "Telemetry", path: "eyes/Sources/Telemetry"),
