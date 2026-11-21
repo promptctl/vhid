@@ -45,6 +45,9 @@ admits this vhid, who holds the devices, and the Keyboard Setup Assistant answer
 with what it read on this Mac and the step left for you, and exits 1 while any row has a
 step. It fixes nothing and takes the devices from no client that holds them; a daemon
 launchd has a job for but has not started is started by its question, as by any verb.
+After the rows it says whether Screen Recording and Accessibility are granted, which
+`look` and `eyes` read the screen by, and the app macOS charges them to, the app to
+switch on; a missing grant does not make vhid `not ready`.
 
 The menu bar item shows the same reading at a glance, every five seconds: a keyboard when
 doctor would print `ready`, a warning triangle when it would not. Its menu lists doctor's

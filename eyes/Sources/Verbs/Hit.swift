@@ -101,7 +101,7 @@ public struct Hit: AsyncParsableCommand {
         switch standing {
         case .front: "the front app, which a look with no place named reads"
         case .overFront(let front): "a window over the front app \(front), which a look with no place named reads too"
-        case .own: "the app eyes answers to, whose windows a look never reads: the agent's own terminal or app"
+        case .own: "the agent's own app, whose windows a look never reads: its terminal or Claude app"
         case .otherDisplay(let front, let display):
             "on a display a look with no place named does not read: it reads \(front) on display \(display)"
         case .behind(let front): "not in front: a look with no place named reads \(front)"

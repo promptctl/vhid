@@ -8,10 +8,10 @@ import Telemetry
 
 /// The two privacy grants eyes' readers need.
 ///
-/// macOS does not charge a grant to eyes: it charges it to the process responsible for
-/// eyes - the terminal a command was typed into, the client that started `eyes mcp`. So
-/// every answer here names that app, because "grant it to eyes" is advice nobody can
-/// follow. Measured: from iTerm2, `CGPreflightScreenCaptureAccess()` answers for iTerm2
+/// macOS does not charge a grant to the process reading: it charges it to the process
+/// responsible for it - the terminal a command was typed into, the client that started
+/// `vhid mcp`. So every answer here names that app, because "grant it to vhid" is advice
+/// nobody can follow. Measured: from iTerm2, `CGPreflightScreenCaptureAccess()` answers for iTerm2
 /// even in an unsigned binary built a moment earlier.
 public enum Grant: String, CaseIterable, Sendable {
     case screenRecording

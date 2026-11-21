@@ -103,7 +103,7 @@ import Testing
         // No display active at all - the one attached asleep, as at the lock screen - is no
         // screen to read, whatever app it was.
         #expect(throws: AppUnread.noDisplay) { try Front.choose(on: Self.desk(Self.safari, displays: [])) }
-        #expect(AppUnread.noOrdinaryWindow(own: "iTerm2").description.contains("no app but iTerm2, which eyes answers to, has a window on screen"))
+        #expect(AppUnread.noOrdinaryWindow(own: "iTerm2").description.contains("no app but iTerm2, the agent's own, has a window on screen"))
     }
 
     /// An app named is matched by its name exactly, and each way it cannot be read is said.
@@ -118,7 +118,7 @@ import Testing
     }
 
     /// Of two instances under one name, the one with a window is read, frontmost first; one of
-    /// them being the app eyes answers to leaves the other to read.
+    /// them being the agent's own app leaves the other to read.
     @Test func ofTwoInstancesTheOneWithTheFrontmostWindowIsRead() throws {
         let second = Front.App(pid: 401, name: "Safari")
         let listing = WindowListing(windows: [Self.window(5, "Safari", pid: 401), Self.window(4, "Safari", pid: 400)], excluded: [])

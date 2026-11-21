@@ -280,7 +280,7 @@ import Testing
             try await Report.text(Query(match: .contains("Add"), region: .front(front)), source: .tree) { _, _ in .standing(reading) }
         }
         #expect(text.hasPrefix("\"Add\" not found in System Settings (pid 300) and what is in front of it, passing over iTerm2,"
-            + " which eyes answers to, on display 2 -2400,-300,2400,1600 by the tree; 3 runs read;"))
+            + " the agent's own, on display 2 -2400,-300,2400,1600 by the tree; 3 runs read;"))
         #expect(events.all.first?.attributes["region"] == "front")
         #expect(events.all.first?.counts["owners"] == 2)
         // A display read takes in every process, which no count stands for.

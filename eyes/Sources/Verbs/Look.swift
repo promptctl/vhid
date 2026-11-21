@@ -25,7 +25,7 @@ public enum LookHelp {
     public static let limit = "the most rows to answer with; defaults to \(Limit.default.count)"
     public static let display = "a display to read whole, every app on it, by its window-server id, which the display list gives and every scope line names."
         + " With no display, window, rect, page or app named, what is in front is read: the frontmost app's windows and what is stacked in front of them,"
-        + " or the app of the frontmost window behind when the frontmost app has no window open or is the one eyes answers to,"
+        + " or the app of the frontmost window behind when the frontmost app has no window open or is the agent's own,"
         + " such as the terminal running it"
     public static let window = "a window to read the bounds of, by the id the window list gives"
     public static let rect = "a rectangle to read: x,y,width,height in the points vhid clicks, the form every rectangle eyes prints is in: a row's box, a window's or display's bounds, a scope line's region"
@@ -69,9 +69,9 @@ extension SourceKind: ExpressibleByArgument {
         }
     }
 
-    /// Every reader's gate: a fresh reading, the one `eyes grants` prints, so a reader and
-    /// the grants tool cannot disagree - and a grant switched on under a running `eyes mcp`
-    /// is seen by its next read. [LAW:one-source-of-truth]
+    /// Every reader's gate: a fresh reading, the one `eyes grants` and `vhid doctor` print, so
+    /// a reader and the grants it is said to have cannot disagree - and a grant switched on
+    /// under a running `vhid mcp` is seen by its next read. [LAW:one-source-of-truth]
     static let granted: Gate = { try await readings.holds($0) }
     private static let readings = SharedReading(take: GrantsVerb.reading)
 
@@ -169,7 +169,7 @@ struct Where: ParsableArguments {
                 Telemetry.count("front_pid", Int(front.app.pid))
                 Telemetry.count("display", Int(front.display))
                 Telemetry.note("passed_over", front.passedOver.map { .string($0.said) })
-                // How many processes were matched as the app eyes answers to: zero means none
+                // How many processes were matched as the agent's own app: zero means none
                 // could be passed over or kept out, whatever is in front.
                 Telemetry.count("own_pids", front.own.pids.count)
                 return .front(front)
@@ -521,7 +521,7 @@ extension Report {
 extension Until: ExpressibleByArgument {}
 
 extension Front.Passed {
-    /// The app eyes answers to: every running process of the app responsible for this one,
+    /// The agent's own app: every running process of the app responsible for this one,
     /// matched by where it runs from, never by name - two apps can share one. The one place
     /// it is derived, for a front look and a hit alike. [LAW:one-source-of-truth]
     @MainActor
@@ -538,7 +538,7 @@ extension Front.PassedOver {
     /// The app passed over, as a scope line names it.
     var clause: String {
         switch self {
-        case .own(let name): "\(name), which eyes answers to"
+        case .own(let name): "\(name), the agent's own"
         case .windowless(let app): "\(app), which has no window open"
         }
     }

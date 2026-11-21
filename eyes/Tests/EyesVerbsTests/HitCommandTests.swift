@@ -51,10 +51,10 @@ import Testing
         let said = { (s: Standing) in Hit.report(at: ScreenPoint(x: 169, y: 426), .landed(landing(s))) }
         let panel = Front.App(pid: 900, name: "Open and Save Panel Service")
         #expect(said(.overFront(Self.settings)).contains("a window over the front app System Settings (pid 300), which a look with no place named reads too"))
-        #expect(said(.own("iTerm2")).contains("the app eyes answers to, whose windows a look never reads: the agent's own terminal or app"))
+        #expect(said(.own("iTerm2")).contains("the agent's own app, whose windows a look never reads: its terminal or Claude app"))
         #expect(said(.behind(panel)).contains("not in front: a look with no place named reads Open and Save Panel Service (pid 900)"))
         #expect(said(.unread(.noOrdinaryWindow(own: "iTerm2"))).contains(
-            "not in front: a look with no place named reads no app, as no app but iTerm2, which eyes answers to, has a window on screen"))
+            "not in front: a look with no place named reads no app, as no app but iTerm2, the agent's own, has a window on screen"))
         #expect(said(.noWindow(Self.settings)).contains("in no window of its own here - a menu bar, a menu - which a look with no place named never reads"))
         #expect(said(.otherDisplay(Self.settings, 1)).contains(
             "on a display a look with no place named does not read: it reads System Settings (pid 300) on display 1"))

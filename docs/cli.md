@@ -1,15 +1,20 @@
 # The vhid command line
 
-The verbs that type, click and replay, and the rules they share: keyboard layouts, coordinates, and which daemon a `vhid` talks to. `vhid help` lists every verb, and `vhid help <verb>` has each one's full text.
+The verbs that look, type, click and replay, and the rules they share: keyboard layouts, coordinates, and which daemon a `vhid` talks to. `vhid help` lists every verb, and `vhid help <verb>` has each one's full text.
 
 ```sh
+vhid look                    # the displays, the windows front to back, and the text in front
+vhid look --text Save        # where "Save" is: the point to click, its box, then the text
+vhid look --text Saving --window 4127 --until absent --timeout 30
+vhid look --app Safari       # Safari's windows and what is stacked in front of them
+vhid look --x 169 --y 426    # what a click at 169,426 lands on: the app, its window, the element
 vhid type "hello"
 vhid type --into TextEdit "hello"
 vhid press leftCommand+s
 vhid gesture mission-control
 vhid click 800 500 --button left --times 2
 vhid click 800 500 --modifiers leftCommand+leftShift
-vhid click 760,488,80,24     # inside the box eyes printed: x,y,width,height
+vhid click 760,488,80,24     # inside the box look printed: x,y,width,height
 vhid move 800 500
 vhid scroll 800 500 --vertical 3
 vhid drag 100 100 400 300
@@ -20,11 +25,31 @@ vhid doctor
 ```
 
 It types where the keyboard is pointed and clicks where it is told. There is no
-click-by-element, because nothing in vhid reads the screen — what is under a point is
-the caller's to know.
+click-by-element: `look` says what is on screen, and which point to press is the
+caller's to choose.
+
+`look` reads the screen, its options the `look` tool's arguments. With no `--text` it prints
+three blocks, a blank line between them: the displays, main first, each its id, main or
+secondary, bounds and scale; the windows front to back, each its id, owner, layer and
+bounds, the frontmost application's rows marked `front`; and the text read in the place,
+a scope line then a row per run, or `No text was read:` and why, with the first two still
+printed. With `--text` it prints the scope line and the rows that match, or the nearest
+runs and how many edits off each is; `--exact` matches only a run that is the text, and
+`--edits` sets how many edits off a run may be, not both. `--near` orders the matches by
+closeness to a run holding that text, and `--until present|absent` with `--timeout`
+(at most 600 seconds, 10 when left out) reads again until the text comes or goes. The
+place is at most one of `--display`, `--window`, `--page`, `--rect` and `--app`, and with
+none it is what is in front. `--limit` (50 when left out), `--source tree|pixels|merged`
+and `--role` narrow the rows. `--x` and `--y`, given together and with nothing else, say
+what a click at that point would land on. An option that does not fit is refused by name:
+`give at most one of display, window, page, rect, app`. [eyes.md](eyes.md) has how the
+place is read, what each row and scope line says, and the waits. A look asks nothing of
+the daemon, so it waits behind no device call. The tree needs Accessibility and pixels
+Screen Recording, granted to the app responsible for the process; `doctor` ends with
+whether each is held and names that app.
 
 `type` and `press` take `--into <app>` (the MCP tools, `into`): the app the keys are
-for, named as `eyes windows` prints the frontmost application on its first line. Just before the first key, the
+for, named as `look` prints the frontmost application in its windows block. Just before the first key, the
 verb asks macOS which app is in front and, when it is another, refuses with nothing
 sent, naming the app that was: `TextEdit is not in front, so nothing was sent: Terminal
 (pid 512) is`. It is asked once, so a window that comes forward while the keys are going
@@ -54,7 +79,7 @@ left of or above it has negative ones, which follow `--` after every option:
 `vhid click --button left -- -100 -40`.
 
 `click`, `move`, `scroll` and `drag` take each place as a point, two numbers `x y`, or as a
-box, one word `x,y,width,height`: the box `eyes find` prints beside each point. A point is
+box, one word `x,y,width,height`: the box `look` prints beside each point. A point is
 pressed where it is. In a box, the pointer lands on a point drawn inside it, spread about
 the centre as a person's clicks spread on a button and never within 2 points of its edge
 (a side too narrow for that is aimed at its centre, and one under a point is refused),

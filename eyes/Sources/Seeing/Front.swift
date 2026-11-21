@@ -4,7 +4,7 @@ import CoreGraphics
 /// in front.
 ///
 /// The frontmost app is where keys go, and with a window open it is what a person sees in
-/// front - unless it is the app eyes answers to, the agent's own terminal or Claude app,
+/// front - unless it is the agent's own app, its terminal or Claude app,
 /// which echoes on screen the very text it asks eyes to find. Then, and when the frontmost
 /// app has no window open - Finder over the desktop, an app whose last window closed - it
 /// gives way to the app of the frontmost ordinary window, which is what is in front to see.
@@ -16,7 +16,7 @@ public struct Front: Sendable, Hashable {
     public let app: App
     /// The display holding most of the app's front window, read whole and cut to the owners' windows.
     public let display: CGDirectDisplayID
-    /// The app eyes answers to: its windows are never read, wherever they are stacked - in
+    /// The agent's own app: its windows are never read, wherever they are stacked - in
     /// front and passed over, or a window over the front app's.
     public let own: Passed
     /// The frontmost app, when it gave way to the app behind it.
@@ -29,7 +29,7 @@ public struct Front: Sendable, Hashable {
         self.passedOver = passedOver
     }
 
-    /// Why the frontmost app gave way: it is the app eyes answers to, or it has no window open.
+    /// Why the frontmost app gave way: it is the agent's own app, or it has no window open.
     public enum PassedOver: Sendable, Hashable {
         case own(String)
         case windowless(App)
@@ -53,7 +53,7 @@ public struct Front: Sendable, Hashable {
         public func isCalled(_ name: String) -> Bool { self.name == name }
     }
 
-    /// The app eyes answers to: every process running from its bundle, and its name.
+    /// The agent's own app: every process running from its bundle, and its name.
     public struct Passed: Sendable, Hashable {
         public let pids: Set<Int32>
         public let name: String
@@ -78,7 +78,7 @@ public struct Front: Sendable, Hashable {
     }
 
     /// The app called `name` on `desk`: of the instances running under that name, other than
-    /// the app eyes answers to, the one whose window is frontmost.
+    /// the agent's own app, the one whose window is frontmost.
     public static func named(_ name: String, on desk: Desk) throws(AppUnread) -> Front {
         let called = desk.running.map(\.app).filter { $0.isCalled(name) }
         guard !called.isEmpty else {
@@ -104,7 +104,7 @@ public struct Front: Sendable, Hashable {
 
     /// The processes this read takes in, from the windows on screen now: the app, and every
     /// process with a window in front of the app's front window that a click there lands in -
-    /// a remote Open panel, a service's popover - less the app eyes answers to.
+    /// a remote Open panel, a service's popover - less the agent's own app.
     ///
     /// Listed above and over the front window is not enough: a frame says only where a window
     /// could be drawn. Notification Center holds one over the whole screen that draws nothing
@@ -150,7 +150,7 @@ public enum Standing: Sendable, Hashable {
     /// An app with a window over that app's front window where a click lands in it - an Open
     /// panel another process draws - which that look reads too.
     case overFront(Front.App)
-    /// The app eyes answers to, named: the agent's own terminal or Claude app, never read.
+    /// The agent's own app, named: its terminal or Claude app, never read.
     case own(String)
     /// In no window of its own listed at the point - a menu bar, a menu - which that look,
     /// walking windows, never reads; with the app it reads.
@@ -202,13 +202,13 @@ extension WindowListing {
 /// Why a look has no app to read: each state an app can be in that leaves nothing of it to
 /// read, built from what the desk said of it. [LAW:types-are-the-program] [LAW:no-silent-failure]
 public enum AppUnread: Error, Hashable, CustomStringConvertible {
-    /// No app but the one eyes answers to has a window on screen.
+    /// No app but the agent's own has a window on screen.
     case noOrdinaryWindow(own: String)
     /// No app has a window on screen at all.
     case nothingOnScreen
     /// No running app is called this; the ordinary apps that are running, by name.
     case notRunning(String, ordinary: [String])
-    /// The app named is the one eyes answers to, whose windows a look never reads.
+    /// The app named is the agent's own, whose windows a look never reads.
     case own(String)
     /// The app is running with no window on screen.
     case noWindow(Front.App)
@@ -220,14 +220,14 @@ public enum AppUnread: Error, Hashable, CustomStringConvertible {
     public var description: String {
         switch self {
         case .noOrdinaryWindow(let own):
-            "no app but \(own), which eyes answers to, has a window on screen; name a display to read every app on it"
+            "no app but \(own), the agent's own, has a window on screen; name a display to read every app on it"
         case .nothingOnScreen:
             "no app has a window on screen; name a display to read what is on it"
         case .notRunning(let name, let ordinary):
             "no running app is called \(name.debugDescription), named exactly as it is listed; running: "
                 + (ordinary.isEmpty ? "none" : ordinary.joined(separator: ", "))
         case .own(let name):
-            "\(name) is the app eyes answers to, the agent's own, whose windows a look never reads"
+            "\(name) is the agent's own app, whose windows a look never reads"
         case .noWindow(let app):
             "\(app) has no window on screen, so there is nothing of it to read"
         case .offDisplays(let app):

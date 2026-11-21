@@ -12,7 +12,7 @@ import SystemConfiguration
 /// going down still gets the rest of them.
 enum Aim: Sendable, Equatable {
     case anywhere
-    /// An application's name, as `eyes windows` prints the frontmost application.
+    /// An application's name, as `look` prints the frontmost application.
     case into(String)
 
     /// Throws `NotInFront`, before a key has gone down, unless `front` is the app aimed at.

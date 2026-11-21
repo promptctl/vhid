@@ -21,14 +21,14 @@ import Testing
         #expect(Tools.all.filter { $0.tool.annotations.readOnlyHint == true }.map(\.tool.name) == ["look", "cursor", "doctor"])
     }
 
-    /// The plugin's skill opens with the pairing as both servers word it at initialize, so a
-    /// client running a release whose servers send no instructions still reads it, and the
+    /// The plugin's skill opens with the guidance as the server words it at initialize, so a
+    /// client running a release whose server sends no instructions still reads it, and the
     /// two never become two versions. [LAW:one-source-of-truth]
     @Test func theSkillCarriesThePairingTheServersSend() throws {
         let root = URL(filePath: #filePath).deletingLastPathComponent().appending(path: "../..").standardized
-        let pairing = try String(contentsOf: root.appending(path: "docs/mcp-instructions.txt"), encoding: .utf8)
+        let guidance = try String(contentsOf: root.appending(path: "docs/mcp-instructions.txt"), encoding: .utf8)
         let skill = try String(contentsOf: root.appending(path: "claude-plugin/skills/look-click-look/SKILL.md"), encoding: .utf8)
-        #expect(skill.contains(pairing.trimmingCharacters(in: .newlines)))
+        #expect(skill.contains(guidance.trimmingCharacters(in: .newlines)))
     }
 
     /// The doctor tool answers with every row, in order, under a one-word verdict. Against

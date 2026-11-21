@@ -36,29 +36,29 @@ struct McpCommand: AsyncParsableCommand {
 
     @OptionGroup var service: ServiceOption
 
-    /// How this server pairs with eyes', as both say it at initialize: the
-    /// shared screen points and the look-act-look loop. A copy of docs/mcp-instructions.txt,
-    /// which eyes' server carries too: the packages link nothing of each other's, so each
-    /// holds the text, and a test in each holds it to the file. [LAW:one-source-of-truth]
-    static let pairing = """
-        vhid and eyes are two MCP servers that work as a pair. eyes reads the screen: what is in front, and where text is. vhid drives a virtual keyboard and mouse that macOS takes for hardware. A client with only one of them is half the pair; both come with vhid, served by `vhid mcp` and `eyes mcp`.
+    /// How the tools work together, as the server says it at initialize: one screen point
+    /// for every tool, and the look-act-look loop. A copy of docs/mcp-instructions.txt, which
+    /// the plugin's skill opens with too, and a test holds each to the file.
+    /// [LAW:one-source-of-truth]
+    static let guidance = """
+        vhid is one MCP server that sees the screen and drives a virtual keyboard and mouse that macOS takes for hardware. `look` reads the screen: the displays, the windows front to back, and the text in a place, with the point `click` takes for each run. `type`, `press`, `gesture`, `click`, `move`, `scroll` and `drag` act through the devices, and `play` runs a timed script of them.
 
-        Every point either server prints or takes is the same screen point. The point eyes `find` prints is the point vhid `click` takes, as printed: no scaling, no offset, negative on a display left of or above the main one. From 0.5.0, beside each point, eyes prints a box around the text that holds the point, as x,y,width,height in the same points: the form eyes' `rect` takes, and vhid `click`, `move` and `scroll` take it too, as `box`, and `drag` as `from` or `to`, pressing a point drawn inside it as a hand lands somewhere on a button rather than on its exact centre.
+        Every point a tool prints or takes is the same screen point. The point `look` prints beside a run is the point `click` takes, as printed: no scaling, no offset, negative on a display left of or above the main one. Beside each point `look` prints a box around the text that holds the point, as x,y,width,height in the same points: the form `look`'s `rect` takes, and `click`, `move` and `scroll` take it too, as `box`, and `drag` as `from` or `to`, pressing a point drawn inside it as a hand lands somewhere on a button rather than on its exact centre.
 
-        Neither server decides anything. `click` presses whatever is at the point it is given, `type` types into whatever has keyboard focus, and `find` reports what is on screen, not whether an act did what was meant. So work in a loop:
+        No tool decides anything. `click` presses whatever is at the point it is given, `type` types into whatever has keyboard focus, and `look` reports what is on screen, not whether an act did what was meant. So work in a loop:
 
-        1. Look with eyes: `windows` for what is in front, `find` for where the text is.
-        2. Act with vhid on what you saw.
-        3. Look again at the same place. `find` with `until` and a `timeout` waits for the change; do not sleep and retry.
+        1. Look: `look` with no arguments for what is in front, with `text` for where the text is.
+        2. Act on what you saw.
+        3. Look again at the same place. `look` with `text`, `until` and a `timeout` waits for the change; do not sleep and retry.
 
         Done means a look after the act showed the change. An act's answer says the act happened, not what it did.
         """
 
-    /// What a client's initialize tells it: the pairing, then which server and version it
+    /// What a client's initialize tells it: the guidance, then which server and version it
     /// is talking to. The model reads a server's instructions, not its `serverInfo`, so the
     /// version is said here too, from the one the binary was stamped with, and an agent
-    /// can tell which of the pairing's arguments it can pass. [LAW:one-source-of-truth]
-    static let instructions = pairing + "\n\nThis is vhid \(Version.current)."
+    /// can tell which of the guidance's arguments it can pass. [LAW:one-source-of-truth]
+    static let instructions = guidance + "\n\nThis is vhid \(Version.current)."
 
     /// The server as a client's initialize finds it, with `tools` attached to run against
     /// `installation`, each call held `underway` on the transport it will be started on and

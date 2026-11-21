@@ -93,7 +93,7 @@ public enum NoSuchPlace: Error, CustomStringConvertible {
         case .offScreen(let r): "\(r) is on no display, so there is nothing there to read"
         case .pointOffScreen(let p): "\(p) is on no display, so a click there hits nothing"
         case .display(let id): "no display with id \(id) is attached"
-        case .window(let id): "no on-screen window has id \(id); `eyes windows` lists the ones that do"
+        case .window(let id): "no on-screen window has id \(id); `look` with no arguments, or `eyes windows`, lists the ones that do"
         }
     }
 }

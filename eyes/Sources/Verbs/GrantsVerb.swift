@@ -13,7 +13,7 @@ public struct GrantsVerb: AsyncParsableCommand {
         abstract: "Say whether Screen Recording and Accessibility are granted, and which app macOS charges them to.",
         discussion: """
             Reads without prompting. The grants belong to the app responsible for eyes - the \
-            terminal, or the client running eyes mcp - and that is the app to switch on.
+            terminal, or the client running vhid mcp - and that is the app to switch on.
             """
     )
 

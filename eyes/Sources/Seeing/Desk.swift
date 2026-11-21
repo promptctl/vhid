@@ -1,4 +1,4 @@
-/// The screen as one answer reads it: which app is frontmost, which app eyes answers to,
+/// The screen as one answer reads it: which app is frontmost, which app is the agent's own,
 /// what is running, the windows on screen and the displays, read once, frontmost first -
 /// an activation lands before the listing that reflects it.
 ///

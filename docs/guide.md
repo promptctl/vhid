@@ -12,7 +12,7 @@ You now have two commands and a few things running behind them.
 - **`vhid`** is the hands. It types, presses shortcuts, moves and clicks the pointer,
   scrolls, drags, and records and replays your own input.
 - **`eyes`** is the eyes. It lists the windows and displays, and finds text on screen,
-  printing the point to click.
+  printing the point to click. `vhid look` reads the screen the same way, in one verb.
 - **A background service** (`vhidd`) owns the virtual keyboard and mouse. It runs as root,
   because the driver underneath takes commands only from root. `vhid` hands each key press to
   it, so you never run `sudo` yourself.
@@ -147,27 +147,33 @@ answers from that one and says which was missing.
 In a browser, `--page <window id>` reads only the web page, not the toolbar and
 bookmarks, so a bookmark named "Settings" isn't mistaken for the page's Settings button.
 
+`vhid look` takes the same options and answers with the displays, the windows and the
+text in front in one call; with `--text Save` it finds "Save", and with `--x` and `--y`
+it says what a click there would land on.
+
 [eyes.md](eyes.md) covers every option.
 
 ## Handing it to an AI agent
 
-Both commands also run as [MCP](https://modelcontextprotocol.io) servers, the standard
-way AI apps call outside tools. In Claude Code the plugin sets everything up:
+`vhid mcp` runs vhid as an [MCP](https://modelcontextprotocol.io) server, the standard
+way AI apps call outside tools: `look` reads the screen, and the rest type, click and
+scroll. In Claude Code the plugin sets everything up:
 
 ```
 /plugin marketplace add promptctl/vhid
 /plugin install vhid@vhid
 ```
 
-The plugin adds both servers and two skills. One teaches the agent to work in a loop: look
-with `eyes`, act with `vhid`, then look again to see whether the act worked. The other
+The plugin adds the server and two skills. One teaches the agent to work in a loop: look,
+act, then look again to see whether the act worked. The other
 reaches any app's menu items by name, through the Help menu's search. At the start of
 each session the plugin also checks `vhid doctor` and tells the agent what is missing, if
 anything is.
 
-The agent's `eyes` permissions belong to whichever app it runs in, such as your terminal
-app for Claude Code, or Claude itself for Claude Desktop.
-[mcp.md](mcp.md) shows how to add the servers to Claude Desktop or to Claude Code
+The agent's Accessibility and Screen Recording permissions belong to whichever app it
+runs in, such as your terminal app for Claude Code, or Claude itself for Claude Desktop;
+`vhid doctor` names that app.
+[mcp.md](mcp.md) shows how to add the server to Claude Desktop or to Claude Code
 without the plugin, and lists every tool.
 
 ## Where the input reaches
@@ -207,7 +213,8 @@ Start with `vhid doctor`. It prints `ready` or `not ready`, then one line for ea
 vhid needs: the driver, the background service, whether the service accepts this `vhid`,
 whether another program is holding the devices, and the keyboard type macOS asked about
 when the virtual keyboard first appeared. Any line with a problem names the step that
-fixes it. The menu bar item shows the same lines, and clicking one copies it.
+fixes it. After them it says whether Accessibility and Screen Recording are granted, and
+the app macOS charges them to, which is the one to switch on. The menu bar item shows the same lines, and clicking one copies it.
 
 From 0.5.0, every `vhid` command, and every tool call an agent makes, appends one line to
 `~/Library/Logs/vhid/events.jsonl`: which command it was, whether it worked, how long it
@@ -226,7 +233,7 @@ A bug report is most useful with the output of `vhid doctor` in it.
 |---|---|
 | [cli.md](cli.md) | every `vhid` command, keyboard layouts, coordinates, the event log |
 | [eyes.md](eyes.md) | every `eyes` command, waiting for text, browser pages |
-| [mcp.md](mcp.md) | the MCP servers, setting up AI apps, whose permissions count |
+| [mcp.md](mcp.md) | the MCP server, setting up AI apps, whose permissions count |
 | [installing.md](installing.md) | every installed file, `vhid doctor`, the menu bar item, uninstalling |
 | [security.md](security.md) | what runs as root, who may call it, what is logged |
 | [architecture.md](architecture.md) | how it works inside, for building and changing it |
