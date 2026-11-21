@@ -1,6 +1,8 @@
 import Input
 import MCP
 import Pointing
+import enum Seeing.SourceKind
+import enum Seeing.Until
 
 /// One argument a tool takes: its name, what it is in words, and how its JSON becomes the
 /// value a verb takes.
@@ -66,6 +68,36 @@ extension Parameter where Taken == Int {
 extension Parameter where Taken == String {
     static func text(_ name: String, _ expected: String) -> Self {
         Self(name: name, expected: expected, schema: ["type": "string"], absent: nil) { $0.stringValue }
+    }
+}
+
+extension Parameter where Taken == Bool {
+    /// A JSON boolean, as a flag on the command line is given or not.
+    static func flag(_ name: String, _ expected: String) -> Self {
+        Self(name: name, expected: expected, schema: ["type": "boolean"], absent: nil) { $0.boolValue }
+    }
+}
+
+extension Parameter where Taken == UInt32 {
+    /// A window server's id - a display's or a window's - which is 32 bits wide, so a larger
+    /// number is refused saying the range rather than read as some other id.
+    static func id(_ name: String, _ expected: String) -> Self {
+        Self(name: name, expected: expected, schema: ["type": "integer", "minimum": 0, "maximum": .int(Int(UInt32.max))], absent: nil) {
+            guard let whole = $0.whole else { return nil }
+            guard let id = UInt32(exactly: whole) else {
+                throw ArgumentRefused("\(name) is \(whole), which is no window-server id: those run from 0 to \(UInt32.max)")
+            }
+            return id
+        }
+    }
+}
+
+extension Parameter where Taken: CaseIterable & RawRepresentable & Sendable, Taken.RawValue == String {
+    /// One of a closed set of words, read by the set's own `init(rawValue:)`, as the command
+    /// line reads it. [LAW:single-enforcer]
+    static func choice(_ name: String, _ expected: String) -> Self {
+        Self(name: name, expected: expected, schema: ["type": "string", "enum": .array(Taken.allCases.map { .string($0.rawValue) })],
+             absent: nil) { $0.stringValue.flatMap(Taken.init(rawValue:)) }
     }
 }
 

@@ -1,4 +1,5 @@
 import ArgumentParser
+import EyesVerbs
 import Input
 import KeyboardLayouts
 import struct Seeing.Front
@@ -8,7 +9,7 @@ import Telemetry
 struct TypeCommand: AsyncParsableCommand {
     static let configuration = Help.type.configuration
 
-    @Argument(help: Help.sentence(Help.text))
+    @Argument(help: .sentence(Help.text))
     var text: String
 
     @OptionGroup var layoutOption: LayoutOption

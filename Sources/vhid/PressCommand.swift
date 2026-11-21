@@ -1,4 +1,5 @@
 import ArgumentParser
+import EyesVerbs
 import Input
 import KeyboardLayouts
 import struct Seeing.Front
@@ -7,7 +8,7 @@ import struct Seeing.Front
 struct PressCommand: AsyncParsableCommand {
     static let configuration = Help.press.configuration
 
-    @Argument(help: Help.sentence(Help.chords))
+    @Argument(help: .sentence(Help.chords))
     var chords: [String]
 
     @OptionGroup var layoutOption: LayoutOption

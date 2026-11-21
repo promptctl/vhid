@@ -29,6 +29,10 @@ struct VerbHelp: Sendable {
 enum Help {
     static let place = "screen points from the top left of the main display, the space cursor reports in; negative on a display left of or above it"
 
+    /// A point a look asks what a click would land on.
+    static let lookX = "the x of a point to say what a click there would land on - the app, its window and the element pressed - in " + place + "; given with y and nothing else"
+    static let lookY = "the y of that point, given with x"
+
     static let x = "the x coordinate, in " + place
     static let y = "the y coordinate, in " + place
     /// A place as a command line writes one.
@@ -48,11 +52,6 @@ enum Help {
     static let from = "where the button goes down"
     static let to = "where it comes up"
 
-    /// A phrase above as the command line shows it: capitalised, with a full stop.
-    static func sentence(_ phrase: String) -> ArgumentHelp {
-        ArgumentHelp(phrase.prefix(1).uppercased() + phrase.dropFirst() + ".")
-    }
-
     /// The one order that parses a negative coordinate: every option, then `--`, then the
     /// numbers. Each verb's example is kept as argv so a test parses exactly what the help
     /// prints. [LAW:one-source-of-truth]
@@ -66,6 +65,20 @@ enum Help {
     private static func negative(_ argv: [String]) -> String {
         "Negative coordinates follow --, after every option, as in: vhid \(argv.joined(separator: " "))."
     }
+
+    static let look = VerbHelp(name: "look", abstract: "Say what is on screen: the displays, the windows front to back, and the text in a place, each run with the point click takes and the box that holds it.", discussion: """
+        With no text, answers with the displays and the windows, then the text read in the \
+        place - what is in front when no place is named - or why it could not be read. With \
+        text, answers with the runs that match it, or the nearest when none does; with until, \
+        reads again until the text is present or absent. With x and y and nothing else, says \
+        what a click there would land on: the app, its window and the element pressed.
+
+        Text is read by the tree, which needs Accessibility, and by pixels, which need Screen \
+        Recording, each granted to the app responsible for this process: doctor names it. A \
+        look asks nothing of the daemon, so it waits behind no device call.
+        """, commandLine: [
+        "A negative coordinate follows its option as it is: vhid look --x -500 --y 300.",
+    ])
 
     static let type = VerbHelp(name: "type", abstract: "Type text on the virtual keyboard, which macOS sees as hardware.", discussion: """
         The text goes wherever keys would go if they were pressed now: nothing here chooses what \

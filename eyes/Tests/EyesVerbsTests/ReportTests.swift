@@ -227,8 +227,8 @@ import Testing
         #expect(merged.second.source == .pixels)
     }
 
-    /// Every look is one event: which reader, how it ended, and its counts, zeros included.
-    @Test func aLookIsOneEvent() async throws {
+    /// Every reading is one event: which reader, how it ended, and its counts, zeros included.
+    @Test func aReadingIsOneEvent() async throws {
         let events = Collected()
         let near = Reading(outcome: .nearest([]), scope: Scope(region: Self.display, examined: 5, excluded: [Exclusion(reason: .outside, count: 3)],
                                                                reach: .stopped(.timeBudget(.seconds(5)))))
@@ -247,7 +247,7 @@ import Testing
                                       source: .merged) { _, _ in .standing(halfBlind) }
         }
         let seen = events.all
-        #expect(seen.map(\.event) == ["look", "look", "look", "look"])
+        #expect(seen.map(\.event) == ["reading", "reading", "reading", "reading"])
         #expect(seen.map(\.outcome) == [.ok, .ok, .failed, .ok])
         #expect(seen.map { $0.attributes["result"] } == ["not_matched", "settled", nil, "matched"])
         #expect(seen.map { $0.attributes["source"] } == ["tree", "pixels", "merged", "merged"])
@@ -313,10 +313,10 @@ import Testing
     }
 
     @Test func namingNoPlaceReadsWhatIsInFront() throws {
-        guard case .front = try Where.place(display: nil, window: nil, page: nil, rect: nil, as: .flag) else {
+        guard case .front = try Where.place(display: nil, window: nil, page: nil, rect: nil, app: nil, as: .flag) else {
             Issue.record("no place named is not the front"); return
         }
-        guard case .region(.display(4)) = try Where.place(display: 4, window: nil, page: nil, rect: nil, as: .flag) else {
+        guard case .region(.display(4)) = try Where.place(display: 4, window: nil, page: nil, rect: nil, app: nil, as: .flag) else {
             Issue.record("a display named is not that display"); return
         }
     }

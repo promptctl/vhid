@@ -92,6 +92,7 @@ public struct Front: Sendable, Hashable {
 
     /// `app` on the display holding most of its front window.
     private init(_ app: App, passedOver: PassedOver?, on desk: Desk) throws(AppUnread) {
+        guard !desk.displays.isEmpty else { throw .noDisplay }
         guard let window = desk.listing.front(of: app.pid).map({ desk.listing.windows[$0] }) else { throw .noWindow(app) }
         let shown = { (display: Display) -> CGFloat in
             let shared = display.frame.cgRect.intersection(window.frame.cgRect)
@@ -211,8 +212,10 @@ public enum AppUnread: Error, Hashable, CustomStringConvertible {
     case own(String)
     /// The app is running with no window on screen.
     case noWindow(Front.App)
-    /// The app's front window is on no display attached.
+    /// The app's front window is on none of the displays that are active.
     case offDisplays(Front.App)
+    /// No display is active: none attached, or every one asleep.
+    case noDisplay
 
     public var description: String {
         switch self {
@@ -228,7 +231,9 @@ public enum AppUnread: Error, Hashable, CustomStringConvertible {
         case .noWindow(let app):
             "\(app) has no window on screen, so there is nothing of it to read"
         case .offDisplays(let app):
-            "\(app) has its front window on no display attached, so there is nothing of it to read"
+            "\(app) has its front window on no active display, so there is nothing of it to read"
+        case .noDisplay:
+            "no display is active - none is attached, or each is asleep - so there is no screen to read"
         }
     }
 }

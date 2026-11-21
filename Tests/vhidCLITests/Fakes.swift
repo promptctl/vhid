@@ -2,11 +2,20 @@ import Foundation
 import Input
 import Installations
 import Keystrokes
+import MCP
 import Pointing
 import Synchronization
 import TestClock
 import Testing
+import Turns
 @testable import vhid
+
+extension VerbTool {
+    /// One call alone, as a session with nothing else underway makes it: its turn is free.
+    func call(_ given: [String: MCP.Value], on installation: Installation) async throws -> String {
+        try await call(given, on: installation, taking: Turns(), arrived: .now)
+    }
+}
 
 /// A keyboard that records instead of typing, and can be told to fail at the nth key.
 ///

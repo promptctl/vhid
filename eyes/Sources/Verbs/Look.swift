@@ -9,41 +9,52 @@ import Tree
 
 /// How a caller spells an argument's name in a refusal: `--limit` on the command line,
 /// `limit` to an MCP client.
-enum Spelling {
+public enum Spelling: Sendable {
     case flag, argument
 
     func callAsFunction(_ name: String) -> String { self == .flag ? "--\(name)" : name }
 }
 
-/// What each argument means, said once for a verb's help and its MCP tool's schema.
+/// What each argument of a look means, said once as a phrase: a tool's schema shows it as it
+/// is, a refusal quotes it after "and it is", and the command line shows it as a sentence.
 /// [LAW:one-source-of-truth]
-enum Help {
-    static let text = "The text to look for. Matches any run that contains it."
-    static let exact = "Match only a run that is exactly this text."
-    static let edits = "Match a run within this many single-character edits of the text, for recogniser slips."
-    static let display = "Read this whole display, every app on it, by its window-server id, which `eyes displays` lists and every scope line names."
-        + " With no display, window, rect or page, eyes reads what is in front: the frontmost app's windows and what is stacked in front of them,"
+public enum LookHelp {
+    public static let text = "the text to find: any run that contains it matches, whatever its case"
+    public static let exact = "whether to match only a run that is exactly the text"
+    public static let edits = "how many single-character edits off the text a run may be and still match, for recogniser slips"
+    public static let limit = "the most rows to answer with; defaults to \(Limit.default.count)"
+    public static let display = "a display to read whole, every app on it, by its window-server id, which the display list gives and every scope line names."
+        + " With no display, window, rect, page or app named, what is in front is read: the frontmost app's windows and what is stacked in front of them,"
         + " or the app of the frontmost window behind when the frontmost app has no window open or is the one eyes answers to,"
-        + " such as the terminal running it."
-    static let window = "Read this window's bounds, by the id `eyes windows` prints."
-    static let rect = "Read this rectangle: x,y,width,height in the points vhid clicks, the form every rectangle eyes prints is in: a row's box, a window's or display's bounds, a scope line's region."
-    static let page = "Read the web page this window shows, by the id `eyes windows` prints: the page alone,"
-        + " not the browser's toolbar and bookmarks around it. Needs Accessibility, which finds the page."
-    static let near = "Order the matches by how close each sits to a run containing this text, nearest first:"
-        + " the Remove in Beta's row before the others. With nothing on screen containing it, no match is answered:"
-        + " which one was meant is unknown, and a wait settles neither present nor absent."
-    static let until = "Read again until the text is present or absent, then answer once with the last reading."
-        + " Absent counts only a region read whole, twice running."
-    static let timeout = "With until, the most seconds to wait: at most \(Int(Wait.longest)). A wait that runs out answers"
-        + " with its last reading and says it timed out. Defaults to \(Int(Wait.defaultSeconds))."
-    static let role = "Only rows of this accessibility role, as rows print it: AXButton for buttons, AXLink for links."
-        + " A role is the tree's, so text the pixels alone saw is set aside as role unknown, and the read is not whole."
-    static let source = "Which reader looks: tree (the accessibility tree: exact text and roles),"
+        + " such as the terminal running it"
+    public static let window = "a window to read the bounds of, by the id the window list gives"
+    public static let rect = "a rectangle to read: x,y,width,height in the points vhid clicks, the form every rectangle eyes prints is in: a row's box, a window's or display's bounds, a scope line's region"
+    public static let page = "a window whose web page to read, by the id the window list gives: the page alone,"
+        + " not the browser's toolbar and bookmarks around it. Needs Accessibility, which finds the page"
+    public static let app = "an app to read, its windows and what is stacked in front of them, named exactly as the window list names the frontmost app, e.g. Safari"
+    public static let near = "text to order the matches by closeness to, nearest first: the Remove in Beta's row before the others."
+        + " With nothing on screen containing it, no match is answered:"
+        + " which one was meant is unknown, and a wait settles neither present nor absent"
+    public static let until = "present or absent: read again until the text is, then answer once with the last reading."
+        + " Absent counts only a region read whole, twice running"
+    public static let timeout = "with until, the most seconds to wait: at most \(Int(Wait.longest)). A wait that runs out answers"
+        + " with its last reading and says it timed out. Defaults to \(Int(Wait.defaultSeconds))"
+    public static let role = "an accessibility role every row must be, as rows print it: AXButton for buttons, AXLink for links."
+        + " A role is the tree's, so text the pixels alone saw is set aside as role unknown, and the read is not whole"
+    public static let source = "which reader looks: tree (the accessibility tree: exact text and roles),"
         + " pixels (recognised text, anything drawn), or merged (both, each thing reported once;"
         + " answers with either grant, naming a reader that could not look). Defaults to merged. " + needs
     /// Which grant each reader needs, built from the one mapping. [LAW:one-source-of-truth]
-    static let needs = Grant.allCases.sorted { $0.reader.rawValue > $1.reader.rawValue }
-        .map { "The \($0.reader.rawValue) reader needs \($0.name)" }.joined(separator: " and ") + "."
+    public static let needs = Grant.allCases.sorted { $0.reader.rawValue > $1.reader.rawValue }
+        .map { "the \($0.reader.rawValue) reader needs \($0.name)" }.joined(separator: " and ")
+}
+
+extension ArgumentHelp {
+    /// A phrase as the command line shows it: capitalised, with a full stop. The one
+    /// rendering, for both halves' verbs. [LAW:one-source-of-truth]
+    public static func sentence(_ phrase: String) -> ArgumentHelp {
+        ArgumentHelp(phrase.prefix(1).uppercased() + phrase.dropFirst() + ".")
+    }
 }
 
 /// Which reader a verb or tool reads with: every kind a reader can be. [LAW:one-source-of-truth]
@@ -76,52 +87,59 @@ extension SourceKind: ExpressibleByArgument {
 
 /// Where `find` and `read` look, shared so the two verbs cannot disagree about it.
 struct Where: ParsableArguments {
-    @Option(help: .init(stringLiteral: Help.display))
+    @Option(help: .sentence(LookHelp.display))
     var display: UInt32?
 
-    @Option(help: .init(stringLiteral: Help.window))
+    @Option(help: .sentence(LookHelp.window))
     var window: UInt32?
 
     /// Takes the next argument whatever it starts with: a box on a display left of or
     /// above the main one starts with a minus, which would otherwise read as a flag.
-    @Option(parsing: .unconditional, help: .init(stringLiteral: Help.rect))
+    @Option(parsing: .unconditional, help: .sentence(LookHelp.rect))
     var rect: String?
 
-    @Option(help: .init(stringLiteral: Help.page))
+    @Option(help: .sentence(LookHelp.page))
     var page: UInt32?
 
+    @Option(help: .sentence(LookHelp.app))
+    var app: String?
+
     func validate() throws {
-        _ = try Self.place(display: display, window: window, page: page, rect: rect, as: .flag)
+        _ = try Self.place(display: display, window: window, page: page, rect: rect, app: app, as: .flag)
     }
 
     @MainActor var region: Region {
-        get async throws { try await Self.place(display: display, window: window, page: page, rect: rect, as: .flag).region() }
+        get async throws { try await Self.place(display: display, window: window, page: page, rect: rect, app: app, as: .flag).region() }
     }
 
-    /// The one place a region is spelled from its four arguments, for the verbs and the
-    /// MCP tools alike, each naming an argument the way its caller spells it.
+    /// The one place a region is spelled from its five arguments, for the verbs and the
+    /// MCP tool alike, each naming an argument the way its caller spells it.
     /// [LAW:single-enforcer]
     ///
     /// Naming no place reads what is in front: what a caller that did not say where means is
-    /// the app it is working in, not every window on the desk. The scope line names the app.
-    static func place(display: UInt32?, window: UInt32?, page: UInt32?, rect: String?, as s: Spelling) throws -> Place {
-        guard [display != nil, window != nil, page != nil, rect != nil].filter({ $0 }).count <= 1 else {
-            throw ValidationError("give at most one of \(s("display")), \(s("window")), \(s("page")), \(s("rect"))")
+    /// the app a person sees in front, not every window on the desk. The scope line names the app.
+    static func place(display: UInt32?, window: UInt32?, page: UInt32?, rect: String?, app: String?, as s: Spelling) throws -> Place {
+        let named = [("display", display != nil), ("window", window != nil), ("page", page != nil), ("rect", rect != nil), ("app", app != nil)]
+        guard named.filter(\.1).count <= 1 else {
+            throw ValidationError("give at most one of " + named.map { s($0.0) }.joined(separator: ", "))
         }
+        if let app, app.isEmpty { throw ValidationError("\(s("app")) is empty, which names no app") }
         return try page.map(Place.page)
             ?? rect.map { .region(.rect(try parsedRect($0, as: s))) }
             ?? window.map { .region(.window($0)) }
             ?? display.map { .region(.display($0)) }
+            ?? app.map(Place.app)
             ?? .front
     }
 
     /// Where a verb was told to look: a region as spelled, a window's web page, whose frame
-    /// only the tree can find, or what is in front - each found when the look is made, not
-    /// when the arguments are parsed.
-    enum Place {
+    /// only the tree can find, what is in front, or an app by name - each found when the look
+    /// is made, not when the arguments are parsed.
+    enum Place: Sendable {
         case region(Region)
         case page(UInt32)
         case front
+        case app(String)
 
         /// What a window's tree says of its pages: the tree in the process, a fake in a test.
         typealias Pages = @Sendable @MainActor (UInt32) async throws -> Paged
@@ -136,16 +154,17 @@ struct Where: ParsableArguments {
             switch self {
             case .region(let region): region
             case .page(let id): try await Self.page(id, pages: pages)
-            case .front: try await Self.front(desk)
+            case .front: try await Self.front(desk, "in_front") { try Front.choose(on: $0) }
+            case .app(let name): try await Self.front(desk, "named") { try Front.named(name, on: $0) }
             }
         }
 
-        /// [LAW:nothing-unseen] Choosing what is in front is a decision of its own, before any
-        /// look starts: which app, on which display, and which app it passed over.
-        @MainActor private static func front(_ desks: Desks) async throws -> Region {
+        /// [LAW:nothing-unseen] Choosing the app is a decision of its own, before any look
+        /// starts: which app, how it was chosen, on which display, and which app it passed over.
+        @MainActor private static func front(_ desks: Desks, _ chosen: String, by rule: (Desk) throws -> Front) async throws -> Region {
             try await Telemetry.unit("front") {
-                let desk = try await desks()
-                let front = try Front.choose(on: desk)
+                Telemetry.note("chosen", .string(chosen))
+                let front = try rule(try await desks())
                 Telemetry.note("front_app", .string(front.app.name ?? ""))
                 Telemetry.count("front_pid", Int(front.app.pid))
                 Telemetry.count("display", Int(front.display))
@@ -412,7 +431,7 @@ private extension Outcome {
 /// Reads with the chosen reader and prints. The one place the verbs meet the screen.
 @MainActor
 func look(_ query: Query, source: SourceKind, wait: Wait? = nil) async throws {
-    print(try await Report.text(query, source: source, wait: wait) { @MainActor in try await $0.reader.judged($1) })
+    print(try await Report.text(query, source: source, wait: wait, reading: Screen.live.read))
 }
 
 extension Report {
@@ -425,7 +444,7 @@ extension Report {
     ) async throws -> String {
         // [LAW:nothing-unseen] One event per look, from the one path every verb and tool
         // reads through: which reader, what it read, and how it ended.
-        try await Telemetry.unit("look", result: { $0.result }) {
+        try await Telemetry.unit("reading", result: { $0.result }) {
             Telemetry.note("source", .string(source.rawValue))
             Telemetry.note("region", .string(query.region.kind))
             Telemetry.note("order", .string(query.near == nil ? "reading" : "near"))

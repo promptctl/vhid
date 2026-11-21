@@ -90,7 +90,7 @@ struct NotInFront: Error, Equatable, CustomStringConvertible {
 
 /// `--into`, taken by `type` and `press`. [LAW:one-source-of-truth]
 struct AimOption: ParsableArguments {
-    @Option(name: .customLong("into"), help: Help.sentence(Help.into))
+    @Option(name: .customLong("into"), help: .sentence(Help.into))
     var app: String?
 
     func aim() throws -> Aim {

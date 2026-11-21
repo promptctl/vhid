@@ -22,16 +22,16 @@ struct McpCommand: AsyncParsableCommand {
             They take what the verbs of the same name take and answer with what those verbs \
             print.
 
-            Tool calls run one at a time, even when a client sends them together, but calls sent \
-            together run in no promised order: a call that must follow another, a type after the \
-            click that focuses a field, is sent once the first one's answer is back. Each call \
-            connects to the daemon and disconnects when it returns. The daemon serves \
+            Calls that reach the daemon run one at a time, even when a client sends them together, \
+            but calls sent together run in no promised order: a call that must follow another, a \
+            type after the click that focuses a field, is sent once the first one's answer is back. \
+            Each such call connects to the daemon and disconnects when it returns. The daemon serves \
             one client at a time, so a session that held its connection open would refuse every other \
             caller for as long as it ran: a vhid click from a shell, and every other agent's session. \
             Between calls, this session holds nothing.
 
-            Nothing here reads the screen beyond where the cursor is. What is at a point is the \
-            caller's to know.
+            look reads the screen in this process and asks nothing of the daemon, so it waits \
+            behind no other call, and a click sent beside a look that is waiting for text is not delayed by it.
             """)
 
     @OptionGroup var service: ServiceOption
@@ -71,7 +71,8 @@ struct McpCommand: AsyncParsableCommand {
         // The SDK runs every request in a task of its own, so two calls sent together - a
         // click and a type in one turn of an agent's - would reach for the daemon at once,
         // and it serves one client: the second came back refused as busy, by this very
-        // process. Taking turns makes the session one client again.
+        // process. Taking turns makes the session one client again. A look asks nothing of
+        // the daemon, and takes no turn.
         let turns = Turns()
         await server.withMethodHandler(ListTools.self) { _ in .init(tools: tools.map(\.tool)) }
         await server.withMethodHandler(CallTool.self) { request in
@@ -91,10 +92,7 @@ struct McpCommand: AsyncParsableCommand {
             return try await transport.underway {
                 do {
                     let said = try await dispatched(request.name, stoppedBy: signals) {
-                        try await turns.take {
-                            Telemetry.note(.queuedMilliseconds, .double((ContinuousClock.now - arrived) / .milliseconds(1)))
-                            return try await verb.call(request.arguments ?? [:], on: installation)
-                        }
+                        try await verb.call(request.arguments ?? [:], on: installation, taking: turns, arrived: arrived)
                     }
                     return .init(content: [.text(text: said, annotations: nil, _meta: nil)], isError: false)
                 } catch where Task.isCancelled {

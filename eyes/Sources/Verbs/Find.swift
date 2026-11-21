@@ -10,33 +10,33 @@ public struct Find: AsyncParsableCommand {
         discussion: "Case never matters. With nothing found, prints the nearest runs and how many edits off each is."
     )
 
-    @Argument(help: .init(stringLiteral: Help.text))
+    @Argument(help: .sentence(LookHelp.text))
     var text: String
 
-    @Flag(help: .init(stringLiteral: Help.exact))
+    @Flag(help: .sentence(LookHelp.exact))
     var exact = false
 
-    @Option(help: .init(stringLiteral: Help.edits))
+    @Option(help: .sentence(LookHelp.edits))
     var edits: Int?
 
-    @Option(help: "The most matches to print.")
+    @Option(help: .sentence(LookHelp.limit))
     var limit = Limit.default.count
 
-    @Option(help: .init(stringLiteral: Help.near))
+    @Option(help: .sentence(LookHelp.near))
     var near: String?
 
     @OptionGroup var place: Where
 
-    @Option(help: .init(stringLiteral: Help.source))
+    @Option(help: .sentence(LookHelp.source))
     var source = SourceKind.merged
 
-    @Option(help: .init(stringLiteral: Help.role))
+    @Option(help: .sentence(LookHelp.role))
     var role: String?
 
-    @Option(help: .init(stringLiteral: Help.until))
+    @Option(help: .sentence(LookHelp.until))
     var until: Until?
 
-    @Option(help: .init(stringLiteral: Help.timeout))
+    @Option(help: .sentence(LookHelp.timeout))
     var timeout: Double?
 
     public func validate() throws {
@@ -110,15 +110,15 @@ public struct Read: AsyncParsableCommand {
         abstract: "Print the text in a region, one run per row, with the point vhid clicks to hit it and the box around it."
     )
 
-    @Option(help: "The most runs to print.")
+    @Option(help: .sentence(LookHelp.limit))
     var limit = Limit.default.count
 
     @OptionGroup var place: Where
 
-    @Option(help: .init(stringLiteral: Help.source))
+    @Option(help: .sentence(LookHelp.source))
     var source = SourceKind.merged
 
-    @Option(help: .init(stringLiteral: Help.role))
+    @Option(help: .sentence(LookHelp.role))
     var role: String?
 
     public func validate() throws {

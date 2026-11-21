@@ -98,8 +98,11 @@ import Testing
         let alone = WindowListing(windows: [Self.menuBar, Self.window(2, "iTerm2", pid: 80)], excluded: [])
         #expect(throws: AppUnread.noOrdinaryWindow(own: "iTerm2")) { try Self.choose(Front.App(pid: 80, name: "iTerm2"), alone) }
         #expect(throws: AppUnread.nothingOnScreen) { try Self.choose(Self.finder, WindowListing(windows: [Self.menuBar], excluded: [])) }
-        // Unplugged mid-read: the window is on no display left.
-        #expect(throws: AppUnread.offDisplays(Self.safari)) { try Front.choose(on: Self.desk(Self.safari, displays: [])) }
+        // The display it was on unplugged mid-read: its window is on none left.
+        #expect(throws: AppUnread.offDisplays(Self.settings)) { try Front.named("System Settings", on: Self.desk(Self.safari, displays: [Self.main])) }
+        // No display active at all - the one attached asleep, as at the lock screen - is no
+        // screen to read, whatever app it was.
+        #expect(throws: AppUnread.noDisplay) { try Front.choose(on: Self.desk(Self.safari, displays: [])) }
         #expect(AppUnread.noOrdinaryWindow(own: "iTerm2").description.contains("no app but iTerm2, which eyes answers to, has a window on screen"))
     }
 

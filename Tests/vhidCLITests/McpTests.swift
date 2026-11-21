@@ -12,13 +12,13 @@ import Testing
 /// daemon: every refusal here is one that comes back before a connection is made.
 @Suite struct McpTests {
     @Test func theToolsAreListedInOrder() {
-        #expect(Tools.all.map(\.tool.name) == ["type", "press", "gesture", "click", "move", "scroll", "drag", "play", "cursor", "doctor"])
+        #expect(Tools.all.map(\.tool.name) == ["look", "type", "press", "gesture", "click", "move", "scroll", "drag", "play", "cursor", "doctor"])
     }
 
-    /// Only cursor and doctor promise to change nothing: cursor reaches no device, and
-    /// doctor asks the daemon a question that claims none.
-    @Test func onlyCursorAndDoctorAreReadOnly() {
-        #expect(Tools.all.filter { $0.tool.annotations.readOnlyHint == true }.map(\.tool.name) == ["cursor", "doctor"])
+    /// Only look, cursor and doctor promise to change nothing: look reads the screen, cursor
+    /// reaches no device, and doctor asks the daemon a question that claims none.
+    @Test func onlyLookCursorAndDoctorAreReadOnly() {
+        #expect(Tools.all.filter { $0.tool.annotations.readOnlyHint == true }.map(\.tool.name) == ["look", "cursor", "doctor"])
     }
 
     /// The plugin's skill opens with the pairing as both servers word it at initialize, so a

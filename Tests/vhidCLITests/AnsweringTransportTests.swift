@@ -208,9 +208,9 @@ actor Stdio: Transport {
 
     enum Line { case cancel(Int), end }
 
-    /// A tool call under `id` naming `click`, then `rest`, all in one go.
-    nonisolated func call(_ id: Int, then rest: [Line]) {
-        lines.yield(Data(#"{"jsonrpc":"2.0","id":\#(id),"method":"tools/call","params":{"name":"click"}}"#.utf8))
+    /// A tool call under `id` naming `tool`, then `rest`, all in one go.
+    nonisolated func call(_ id: Int, _ tool: String = "click", then rest: [Line]) {
+        lines.yield(Data(#"{"jsonrpc":"2.0","id":\#(id),"method":"tools/call","params":{"name":"\#(tool)"}}"#.utf8))
         feed(rest)
     }
 
