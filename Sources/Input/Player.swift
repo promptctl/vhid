@@ -1,6 +1,7 @@
 import Foundation
 import Keystrokes
 import Pointing
+import ScreenSpace
 
 /// What `vhid play` sends and when: a `Play` as one act per device call, on one clock.
 ///
@@ -24,36 +25,18 @@ import Pointing
 /// pointer's closed loop onto the last `at` point, which takes out whatever error the
 /// table built up. Scripts of `move` lines have no steer and no calibration: their counts
 /// are the input.
-public struct Schedule: Hashable, Sendable {
-    public let start: ScreenPoint
+///
+/// [LAW:parse-dont-validate] Its points are `Point`: a schedule is made from a script as
+/// `ScreenPoint`s, before anything is connected, and `placed(on:)` puts every one of them on
+/// the layout the play reads, before the first act, as `Placed<ScreenPoint>`s - the only
+/// kind `Player` plays.
+public struct Schedule<Point: Hashable & Sendable>: Hashable, Sendable {
+    public let start: Point
+    /// The script line the start was written on.
+    public let startLine: Int
     public let acts: [Act]
     /// What to measure before the clock starts, when the script has `at` lines.
     public let calibration: Calibration?
-
-    /// The measurement `Steering` is made from, read off the script.
-    public struct Calibration: Hashable, Sendable {
-        /// How far apart the script's `at` lines are, the median gap: acceleration depends
-        /// on the pace, so the table is measured at the pace it is used at.
-        public let interval: Duration
-        /// The longest step between two consecutive `at` points, in points: the ladder stops
-        /// at the first report length that covers it.
-        public let reach: Double
-        /// The `at` point farthest from the start, which calibration heads for, so it moves
-        /// the cursor where the recording went.
-        public let toward: ScreenPoint
-
-        /// The gap assumed for a script with one `at` line, or all at one time: the 120 Hz
-        /// a trackpad reports at.
-        public static let pace: Duration = .microseconds(8333)
-
-        init(start: ScreenPoint, points: [(at: Duration, point: ScreenPoint)]) {
-            let gaps = zip(points, points.dropFirst()).map { $1.at - $0.at }.filter { $0 > .zero }.sorted()
-            interval = gaps.isEmpty ? Self.pace : gaps[gaps.count / 2]
-            let path = [start] + points.map(\.point)
-            reach = zip(path, path.dropFirst()).map { hypot($1.x - $0.x, $1.y - $0.y) }.max() ?? 0
-            toward = path.max { hypot($0.x - start.x, $0.y - start.y) < hypot($1.x - start.x, $1.y - start.y) } ?? start
-        }
-    }
 
     public struct Act: Hashable, Sendable {
         public let at: Duration
@@ -72,13 +55,13 @@ public struct Schedule: Hashable, Sendable {
         case wheel(Scroll)
         /// The cursor should be here now: reports from the calibrated table, without
         /// reading the cursor.
-        case at(ScreenPoint)
+        case at(Point)
         /// The keys already held, said again so the daemon keeps them. Not a report: the
         /// driver is sent nothing while it still holds them.
         case keepAlive(HeldKeys)
         /// The pointer's closed loop onto this point, however many reports it takes. Not a
         /// report of the script's, and the time it takes pushes every later act back.
-        case steer(ScreenPoint)
+        case steer(Point)
 
         var isReport: Bool {
             switch self {
@@ -90,7 +73,7 @@ public struct Schedule: Hashable, Sendable {
 
     /// The longest a held key goes without a call: half vhidd's limit, so a keep-alive that
     /// goes out late still lands well inside it.
-    public static let keepAlive: Duration = HeldKeys.silenceLimit / 2
+    public static var keepAlive: Duration { HeldKeys.silenceLimit / 2 }
 
     /// How many of the acts are reports, which is what a play that stops is counted against.
     public var reports: Int { acts.filter(\.report.isReport).count }
@@ -101,6 +84,15 @@ public struct Schedule: Hashable, Sendable {
         acts.prefix(count).contains { if case .keys = $0.report { true } else { false } }
     }
 
+    init(start: Point, startLine: Int, acts: [Act], calibration: Calibration?) {
+        self.start = start
+        self.startLine = startLine
+        self.acts = acts
+        self.calibration = calibration
+    }
+}
+
+extension Schedule where Point == ScreenPoint {
     public init(_ play: Play) throws(Play.ScriptInvalid) {
         var keys = (held: HeldKeys.none, line: 0)
         var buttons: Set<Button> = []
@@ -139,9 +131,56 @@ public struct Schedule: Hashable, Sendable {
         guard let last = acts.last else {
             throw Play.ScriptInvalid(line: play.events[0].line, reason: "no line of this script sends a report")
         }
-        self.start = play.start
-        self.acts = acts + steer(last.at, last.line)
-        self.calibration = points.isEmpty ? nil : Calibration(start: play.start, points: points)
+        self.init(start: play.start, startLine: play.startLine, acts: acts + steer(last.at, last.line),
+                  calibration: points.isEmpty ? nil : Calibration(start: play.start, points: points))
+    }
+
+    /// Every point of the schedule on `displays`, by the rule every act is placed by, or the
+    /// line of the first that no display holds. [LAW:single-enforcer]
+    public func placed(on displays: Displays) throws(Play.ScriptInvalid) -> Schedule<Placed<ScreenPoint>> {
+        func place(_ point: ScreenPoint, _ line: Int) throws(Play.ScriptInvalid) -> Placed<ScreenPoint> {
+            do { return try displays.place(point) } catch { throw Play.ScriptInvalid(line: line, reason: error.description) }
+        }
+        var placed: [Schedule<Placed<ScreenPoint>>.Act] = []
+        for act in acts {
+            let report: Schedule<Placed<ScreenPoint>>.Report = switch act.report {
+            case .keys(let held): .keys(held)
+            case .buttons(let held): .buttons(held)
+            case .move(let delta): .move(delta)
+            case .wheel(let delta): .wheel(delta)
+            case .keepAlive(let held): .keepAlive(held)
+            case .at(let point): .at(try place(point, act.line))
+            case .steer(let point): .steer(try place(point, act.line))
+            }
+            placed.append(.init(at: act.at, report: report, line: act.line))
+        }
+        return Schedule<Placed<ScreenPoint>>(start: try place(start, startLine), startLine: startLine, acts: placed, calibration: calibration)
+    }
+}
+
+/// The measurement `Steering` is made from, read off a script, whatever its points have
+/// been placed on: it is distances and a direction.
+public struct Calibration: Hashable, Sendable {
+    /// How far apart the script's `at` lines are, the median gap: acceleration depends
+    /// on the pace, so the table is measured at the pace it is used at.
+    public let interval: Duration
+    /// The longest step between two consecutive `at` points, in points: the ladder stops
+    /// at the first report length that covers it.
+    public let reach: Double
+    /// The `at` point farthest from the start, which calibration heads for, so it moves
+    /// the cursor where the recording went.
+    public let toward: ScreenPoint
+
+    /// The gap assumed for a script with one `at` line, or all at one time: the 120 Hz
+    /// a trackpad reports at.
+    public static let pace: Duration = .microseconds(8333)
+
+    init(start: ScreenPoint, points: [(at: Duration, point: ScreenPoint)]) {
+        let gaps = zip(points, points.dropFirst()).map { $1.at - $0.at }.filter { $0 > .zero }.sorted()
+        interval = gaps.isEmpty ? Self.pace : gaps[gaps.count / 2]
+        let path = [start] + points.map(\.point)
+        reach = zip(path, path.dropFirst()).map { hypot($1.x - $0.x, $1.y - $0.y) }.max() ?? 0
+        toward = path.max { hypot($0.x - start.x, $0.y - start.y) < hypot($1.x - start.x, $1.y - start.y) } ?? start
     }
 }
 
@@ -180,7 +219,10 @@ public struct Player {
         self.lead = lead
     }
 
-    public func play(_ play: Schedule, isolation: isolated (any Actor)? = #isolation) async throws -> Played {
+    /// Plays `script` once every point of it is placed on the one reading of the layout this
+    /// play makes: a line no display holds is refused by number before anything moves.
+    public func play(_ script: Schedule<ScreenPoint>, isolation: isolated (any Actor)? = #isolation) async throws -> Played {
+        let play = try script.placed(on: try await pointer.displays())
         let timeline = pointer.timeline
         var went: [Played.Report] = []
         var reached = 0
@@ -331,7 +373,9 @@ public struct Played: Hashable, Sendable {
         public let acked: Int64
     }
 
-    public var lateness: Lateness { Lateness(of: reports.map { $0.sent - $0.scheduled }) }
+    /// Nil for a play that sent no report: a script whose at lines all sat within a count
+    /// of the cursor sends none, and has no lateness to rank.
+    public var lateness: Lateness? { Lateness(of: reports.map { $0.sent - $0.scheduled }) }
 }
 
 /// How late reports went out, in microseconds, by nearest rank.
@@ -341,9 +385,9 @@ public struct Lateness: Hashable, Sendable, Encodable {
     public let p99: Int64
     public let max: Int64
 
-    /// [LAW:parse-dont-validate] A `Schedule` has at least one report, so a played one does too
-    /// and there is always a rank to read; the empty case is the caller's precondition.
-    init(of lateness: [Int64]) {
+    /// [LAW:parse-dont-validate] Nil for no reports, which have no rank to read.
+    init?(of lateness: [Int64]) {
+        guard !lateness.isEmpty else { return nil }
         let sorted = lateness.sorted()
         func rank(_ fraction: Double) -> Int64 { sorted[Swift.max(0, Int((fraction * Double(sorted.count)).rounded(.up)) - 1)] }
         p50 = rank(0.5)

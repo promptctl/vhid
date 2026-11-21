@@ -3,26 +3,28 @@ import Pointing
 import TestClock
 import Testing
 @testable import Input
+import ScreenSpace
+import ScreenSpaceTesting
 
 /// The pointer against a fake screen with a fake acceleration curve: what the loop posts,
 /// where the cursor ends up, and what it does when the cursor will not go.
 @Suite @MainActor struct PointerTests {
-    static let origin = ScreenPoint(x: 0, y: 0)!
+    static let origin = try! ScreenPoint(x: 0, y: 0)
 
     /// One step is the remaining distance over the gain, rounded toward zero and clamped to
     /// the report: the whole screen at gain one is a full report, and 160.5 at gain three
     /// asks for 53, not 54, so a known gain lands short and never past.
     @Test func aStepIsTheRemainingDistanceOverTheGainClampedToTheReport() {
-        #expect(Pointer.step(from: Self.origin, to: ScreenPoint(x: 541.5, y: 375)!, gain: Pointer.Gain(perCount: 1, upTo: .infinity)) == Move(x: Count(clamping: 127), y: Count(clamping: 127)))
-        #expect(Pointer.step(from: Self.origin, to: ScreenPoint(x: 160.5, y: -6)!, gain: Pointer.Gain(perCount: 3, upTo: .infinity)) == Move(x: Count(clamping: 53), y: Count(clamping: -2)))
-        #expect(Pointer.step(from: ScreenPoint(x: 100, y: 100)!, to: ScreenPoint(x: 90, y: 100)!, gain: Pointer.Gain(perCount: 1, upTo: .infinity)) == Move(x: Count(clamping: -10), y: .zero))
+        #expect(Pointer.step(from: Self.origin, to: try! ScreenPoint(x: 541.5, y: 375), gain: Pointer.Gain(perCount: 1, upTo: .infinity)) == Move(x: Count(clamping: 127), y: Count(clamping: 127)))
+        #expect(Pointer.step(from: Self.origin, to: try! ScreenPoint(x: 160.5, y: -6), gain: Pointer.Gain(perCount: 3, upTo: .infinity)) == Move(x: Count(clamping: 53), y: Count(clamping: -2)))
+        #expect(Pointer.step(from: try! ScreenPoint(x: 100, y: 100), to: try! ScreenPoint(x: 90, y: 100), gain: Pointer.Gain(perCount: 1, upTo: .infinity)) == Move(x: Count(clamping: -10), y: .zero))
     }
 
     /// Within half a point an axis is arrived and asks for nothing; outside it the ask is
     /// never rounded to nothing, however high the gain.
     @Test func aStepIsZeroWhenArrivedAndNeverZeroWhenNot() {
-        #expect(Pointer.step(from: Self.origin, to: ScreenPoint(x: 0.4, y: -0.5)!, gain: Pointer.Gain(perCount: 1, upTo: .infinity)) == .none)
-        #expect(Pointer.step(from: Self.origin, to: ScreenPoint(x: 1, y: -0.6)!, gain: Pointer.Gain(perCount: 10, upTo: .infinity)) == Move(x: Count(clamping: 1), y: Count(clamping: -1)))
+        #expect(Pointer.step(from: Self.origin, to: try! ScreenPoint(x: 0.4, y: -0.5), gain: Pointer.Gain(perCount: 1, upTo: .infinity)) == .none)
+        #expect(Pointer.step(from: Self.origin, to: try! ScreenPoint(x: 1, y: -0.6), gain: Pointer.Gain(perCount: 10, upTo: .infinity)) == Move(x: Count(clamping: 1), y: Count(clamping: -1)))
     }
 
     /// The gain is what moved over what was asked; a report that moved nothing halves the
@@ -30,7 +32,7 @@ import Testing
     @Test func theGainIsObservedMotionOverAskedMotion() {
         let asked = Move(x: Count(clamping: 127), y: Count(clamping: 127))
         let length = hypot(127.0, 127.0)
-        #expect(Pointer.gain(after: asked, from: Self.origin, to: ScreenPoint(x: 381, y: 381)!, previous: .assumed) == Pointer.Gain(perCount: 3, upTo: length))
+        #expect(Pointer.gain(after: asked, from: Self.origin, to: try! ScreenPoint(x: 381, y: 381), previous: .assumed) == Pointer.Gain(perCount: 3, upTo: length))
         #expect(Pointer.gain(after: asked, from: Self.origin, to: Self.origin, previous: .assumed) == Pointer.Gain(perCount: 0.5, upTo: .infinity))
     }
 
@@ -40,19 +42,19 @@ import Testing
     /// the cursor three points past; the ask stays at the two counts the gain was read from.
     @Test func aStepIsNoFasterThanTheReportItsGainCameFrom() {
         let slow = Pointer.Gain(perCount: 0.25, upTo: 2)
-        #expect(Pointer.step(from: Self.origin, to: ScreenPoint(x: 1.2, y: 0)!, gain: slow) == Move(x: Count(clamping: 2), y: .zero))
+        #expect(Pointer.step(from: Self.origin, to: try! ScreenPoint(x: 1.2, y: 0), gain: slow) == Move(x: Count(clamping: 2), y: .zero))
         // Both axes shrink together, so the report keeps its direction.
-        #expect(Pointer.step(from: Self.origin, to: ScreenPoint(x: 30, y: 40)!, gain: Pointer.Gain(perCount: 1, upTo: 5)) == Move(x: Count(clamping: 3), y: Count(clamping: 4)))
+        #expect(Pointer.step(from: Self.origin, to: try! ScreenPoint(x: 30, y: 40), gain: Pointer.Gain(perCount: 1, upTo: 5)) == Move(x: Count(clamping: 3), y: Count(clamping: 4)))
     }
 
     /// A move across the screen: the first full report is thrown by the curve, the loop
     /// reads the gain off it and lands short with the second, a one-count nudge finishes,
     /// and the arrival round still asks the check.
     @Test func aMoveLearnsTheGainAndConvergesFromBelow() async throws {
-        let mouse = FakeMouse(at: ScreenPoint(x: 100, y: 100)!)
-        let reports = try await mouse.pointer.home(on: ScreenPoint(x: 641.5, y: 475)!)
+        let mouse = FakeMouse(at: try! ScreenPoint(x: 100, y: 100))
+        let reports = try await mouse.pointer.home(on: Displays.vast.at(try! ScreenPoint(x: 641.5, y: 475)))
         #expect(reports == 3)
-        #expect(mouse.position == ScreenPoint(x: 641, y: 475)!)
+        #expect(mouse.position == (try! ScreenPoint(x: 641, y: 475)))
         #expect(mouse.log == ["move 127 127", "move 53 -2", "move 1 0"])
     }
 
@@ -61,7 +63,7 @@ import Testing
     @Test func aCursorThatWillNotMoveIsGivenUpAfterThreeStalls() async throws {
         let mouse = FakeMouse(at: Self.origin)
         mouse.stuck = true
-        let refused = try await #require(throws: WouldNotReach.self) { try await mouse.pointer.home(on: ScreenPoint(x: 50, y: 0)!) }
+        let refused = try await #require(throws: WouldNotReach.self) { try await mouse.pointer.home(on: Displays.vast.at(try! ScreenPoint(x: 50, y: 0))) }
         #expect(refused.reports == 3)
         #expect(refused.cursor == Self.origin)
         #expect(mouse.log == ["move 50 0", "move 100 0", "move 127 0"])
@@ -73,9 +75,9 @@ import Testing
         let mouse = FakeMouse(at: Self.origin)
         let click = try await mouse.pointer.click(at: .point(Self.origin), button: .middle, times: Clicks(rawValue: 3)!)
         let drawn = TrajectoryTests.trajectory(seed: 1, from: Self.origin, to: Self.origin)
-        #expect(click == Pointer.Click(at: Self.origin, moved: Pointer.Moved(from: Self.origin, aimed: Self.origin, toward: .point(Self.origin), planned: .zero, structure: drawn.structure,
+        #expect(click == Pointer.Click(at: Self.origin, moved: Pointer.Moved(from: Self.origin, aimed: Self.origin, toward: .point(Displays.vast.at(Self.origin)), planned: .zero, structure: drawn.structure,
                                                                              bow: drawn.bow, halfway: drawn.halfway,
-                                                                             displays: .vast, kept: Trajectory.Kept(ends: 1, bow: 1), steered: 0, closing: 0, lost: 0, landed: Self.origin)))
+                                                                             kept: Trajectory.Kept(ends: 1, bow: 1), steered: 0, closing: 0, lost: 0, landed: Self.origin)))
         #expect(mouse.log == ["down 3", "up", "down 3", "up", "down 3", "up"])
     }
 
@@ -131,9 +133,9 @@ import Testing
     @Test(arguments: [2.0, 3.0, 5.0, 7.5])
     func aMoveEndsBesideTheTargetRatherThanOscillatingPastIt(gain: Double) async throws {
         for offset in [1.4, 1.6, 2.5, 3.0, 4.9, 20.0] {
-            let mouse = SteadyGainMouse(at: ScreenPoint(x: 0, y: 0)!, gain: gain)
-            let target = ScreenPoint(x: offset, y: 0)!
-            let reports = try await mouse.pointer.home(on: target)
+            let mouse = SteadyGainMouse(at: try! ScreenPoint(x: 0, y: 0), gain: gain)
+            let target = try! ScreenPoint(x: offset, y: 0)
+            let reports = try await mouse.pointer.home(on: Displays.vast.at(target))
             let short = abs(mouse.position.x - target.x)
             #expect(short < gain, "gain \(gain), offset \(offset): stopped \(short) points short in \(reports) reports")
             #expect(reports < Pointer.rounds, "gain \(gain), offset \(offset): took every round it had")
@@ -143,9 +145,9 @@ import Testing
     /// A cursor that will not move is still a named failure and not a loop without end:
     /// the floor may never be the reason a move gives up, and a pinned cursor always is.
     @Test func aPinnedCursorIsStillWouldNotReach() async throws {
-        let mouse = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
+        let mouse = FakeMouse(at: try! ScreenPoint(x: 0, y: 0))
         mouse.stuck = true
-        await #expect(throws: WouldNotReach.self) { try await mouse.pointer.home(on: ScreenPoint(x: 400, y: 0)!) }
+        await #expect(throws: WouldNotReach.self) { try await mouse.pointer.home(on: Displays.vast.at(try! ScreenPoint(x: 400, y: 0))) }
     }
 }
 
@@ -159,35 +161,19 @@ import Testing
     /// move is floor-sized reports: if the floor alone decided this, it would report an
     /// arrival the cursor never made.
     @Test func aPinnedCursorIsWouldNotReachEvenWhenTheTargetIsOneCountAway() async throws {
-        let mouse = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
+        let mouse = FakeMouse(at: try! ScreenPoint(x: 0, y: 0))
         mouse.stuck = true
-        await #expect(throws: WouldNotReach.self) { try await mouse.pointer.home(on: ScreenPoint(x: 1.4, y: 0)!) }
+        await #expect(throws: WouldNotReach.self) { try await mouse.pointer.home(on: Displays.vast.at(try! ScreenPoint(x: 1.4, y: 0))) }
     }
 
     /// The click reports where the button went down, not where it was asked to go down.
     /// On a Mac whose smallest report carries the cursor three points, those are different
     /// places, and only one of them is a fact.
     @Test func aClickSaysWhereItLandedAndNotWhereItWasAimed() async throws {
-        let mouse = SteadyGainMouse(at: ScreenPoint(x: 0, y: 0)!, gain: 3)
-        let aim = ScreenPoint(x: 1.4, y: 0)!
+        let mouse = SteadyGainMouse(at: try! ScreenPoint(x: 0, y: 0), gain: 3)
+        let aim = try! ScreenPoint(x: 1.4, y: 0)
         let click = try await mouse.pointer.click(at: .point(aim), button: .left, times: .single)
         #expect(click.at == mouse.position)
         #expect(click.at != aim)
-    }
-
-    /// [LAW:parse-dont-validate] A pair that is not a place is refused where it is made.
-    /// The NaN is the one that matters: every comparison against it is false, so it passes
-    /// the pointer's arrival test on both axes and the click lands wherever the cursor was.
-    @Test(arguments: [(Double.nan, 0.0), (0.0, Double.nan), (.infinity, 0.0), (0.0, -.infinity), (.nan, .nan)])
-    func aCoordinateThatIsNotANumberIsNotAPlace(x: Double, y: Double) {
-        #expect(ScreenPoint(x: x, y: y) == nil)
-    }
-
-    /// And refused again on the way in from a script or a request, so nothing decodes into
-    /// a point the constructor would not have made. [LAW:single-enforcer]
-    @Test func aDecodedCoordinateCrossesTheSameRefusal() throws {
-        #expect(throws: (any Error).self) { try JSONDecoder().decode(ScreenPoint.self, from: Data(#"{"x":1e400,"y":1}"#.utf8)) }
-        let fine = try JSONDecoder().decode(ScreenPoint.self, from: Data(#"{"x":800,"y":500.5}"#.utf8))
-        #expect(fine == ScreenPoint(x: 800, y: 500.5)!)
     }
 }

@@ -1,5 +1,6 @@
 import Foundation
 import Pointing
+import ScreenSpace
 
 /// Where a person's aimed pointer movement is, moment by moment, from one point to another:
 /// a main movement that lands on the target, stops short, or overshoots, then as many
@@ -11,8 +12,9 @@ public struct Trajectory: Sendable, Equatable {
     public let start: ScreenPoint
     /// The point drawn inside the target it was aimed at, where it ends.
     public let target: ScreenPoint
-    /// The point or box it was aimed at, whose width its time was read off by Fitts' law.
-    public let toward: Target
+    /// The point or box it was aimed at, as placed, whose width its time was read off by
+    /// Fitts' law and whose displays it is kept on.
+    public let toward: PlacedTarget
     /// How long the whole movement takes, by Fitts' law and a drawn pace.
     public let duration: Duration
     /// How much of each drawn deviation from the straight line the path kept to stay on the
@@ -143,7 +145,8 @@ public struct Trajectory: Sendable, Equatable {
     /// and always whole: at most 1.6 points, under the few the steering follows the path to,
     /// it swings toward every edge it runs beside, and checking it would cut every other
     /// deviation with it.
-    public init(from start: ScreenPoint, toward aimed: Target, within displays: Displays, drawing generator: inout some RandomNumberGenerator) {
+    public init(from start: ScreenPoint, toward aimed: PlacedTarget, drawing generator: inout some RandomNumberGenerator) {
+        let displays = aimed.displays
         let target = aimed.aim(from: start, drawing: &generator)
         let pace = Self.pace.draw(using: &generator)
         let structure = Structure.draw(using: &generator)

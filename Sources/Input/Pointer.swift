@@ -1,5 +1,6 @@
 import Foundation
 import Pointing
+import ScreenSpace
 
 /// How many times a click clicks. At least one, because a click that does not click is a
 /// move and there is already a move. [LAW:parse-dont-validate]
@@ -55,8 +56,8 @@ public struct Pointer: Sendable {
     public let mouse: any Mouse
     /// Where the cursor is now, in the same coordinates as the targets.
     public let cursor: @Sendable () async throws -> ScreenPoint
-    /// Where the displays are, read at the start of every move, so a path is kept on the
-    /// layout as it is then.
+    /// Where the online displays are, read once by each act, which places its targets on
+    /// them and keeps every path to them there. [LAW:no-ambient-temporal-coupling]
     public let displays: @Sendable () async throws -> Displays
 
     /// The most motion reports one move may take. Each halves the remaining distance or
@@ -130,13 +131,12 @@ public struct Pointer: Sendable {
     public struct Moved: Equatable, Sendable {
         public let from: ScreenPoint
         public let aimed: ScreenPoint
-        public let toward: Target
+        public let toward: PlacedTarget
         public let planned: Duration
         public let structure: Trajectory.Structure
         /// Its drawn bow and speed profile: `Trajectory.bow` and `Trajectory.halfway`.
         public let bow: Double
         public let halfway: Double
-        public let displays: Displays
         public let kept: Trajectory.Kept
         public let steered: Int
         public let closing: Int
@@ -147,6 +147,8 @@ public struct Pointer: Sendable {
         public var reports: Int { steered + closing }
         /// The width its time was read off by Fitts' law.
         public var width: Double { toward.width }
+        /// The displays it was kept on: the ones its target was placed on.
+        public var displays: Displays { toward.displays }
     }
 
     /// How far the OS carries the cursor per count, and for how fast a report that holds.
@@ -232,16 +234,20 @@ public struct Pointer: Sendable {
     /// reports it got to.
     @discardableResult
     public func move(to target: Target) async throws -> Moved {
+        try await move(to: target.placed(on: displays()))
+    }
+
+    /// The move itself, to a target already placed. [LAW:parse-dont-validate]
+    func move(to target: PlacedTarget) async throws -> Moved {
         let start = try await cursor()
-        let displays = try await displays()
-        let trajectory = randomness.draw { Trajectory(from: start, toward: target, within: displays, drawing: &$0) }
+        let trajectory = randomness.draw { Trajectory(from: start, toward: target, drawing: &$0) }
         let began = timeline.now()
         var tracking = Tracking(at: trajectory.start)
         let ticks = Int((trajectory.duration / Self.tick).rounded(.up))
         var steered = 0, closing = 0
         var landed: ScreenPoint?
         var moved: Moved {
-            Moved(from: trajectory.start, aimed: trajectory.target, toward: trajectory.toward, planned: trajectory.duration, structure: trajectory.structure, bow: trajectory.bow, halfway: trajectory.halfway, displays: displays, kept: trajectory.kept,
+            Moved(from: trajectory.start, aimed: trajectory.target, toward: trajectory.toward, planned: trajectory.duration, structure: trajectory.structure, bow: trajectory.bow, halfway: trajectory.halfway, kept: trajectory.kept,
                   steered: steered, closing: closing, lost: tracking.lost, landed: landed)
         }
         defer { traced(.moved(moved)) }
@@ -271,7 +277,7 @@ public struct Pointer: Sendable {
         } catch let stop as WouldNotReach {
             // The move's reports, not the closing loop's alone: what the error says the move
             // sent is what the record counts. [LAW:one-source-of-truth]
-            throw WouldNotReach(target: target, aimed: stop.aimed, cursor: stop.cursor, reports: steered + stop.reports)
+            throw WouldNotReach(target: target.asked, aimed: stop.aimed, cursor: stop.cursor, reports: steered + stop.reports)
         }
         return moved
     }
@@ -280,8 +286,8 @@ public struct Pointer: Sendable {
     /// cursor shows them, and answers with how many reports it took. `vhid play` homes this
     /// way before a click; the verbs reach it through `move`.
     @discardableResult
-    public func home(on target: ScreenPoint) async throws -> Int {
-        try await home(on: target) {}.reports
+    public func home(on target: Placed<ScreenPoint>) async throws -> Int {
+        try await home(on: target.value) {}.reports
     }
 
     /// The closed loop, waiting on `pace` before each report: how many reports it sent, and
@@ -368,6 +374,7 @@ public struct Pointer: Sendable {
     /// apart. `docs/design/human.md`, "Clicks": some web menus open an item only once the
     /// pointer has rested on it.
     public func click(at target: Target, button: Button, times: Clicks) async throws -> Click {
+        let target = try target.placed(on: try await displays())
         do {
             let moved = try await move(to: target)
             try await pause(.rest)
@@ -416,6 +423,7 @@ public struct Pointer: Sendable {
     /// longer than its caller wanted is stopped by cancelling it, which this loop asks
     /// about once per notch.
     public func scroll(at target: Target, vertical: Int, horizontal: Int) async throws {
+        let target = try target.placed(on: try await displays())
         do {
             try await move(to: target)
             try await pause(.rest)
@@ -453,6 +461,9 @@ public struct Pointer: Sendable {
     /// nothing of its own. The release is `releaseAll` rather than the one button, for the
     /// reason `PointingDevice` has no `up`. [LAW:composability]
     public func drag(from start: Target, to end: Target, button: Button) async throws -> Drag {
+        // Both ends on one reading of the layout, before anything moves.
+        let displays = try await displays()
+        let (start, end) = (try start.placed(on: displays), try end.placed(on: displays))
         do {
             let approach = try await move(to: start)
             try await pause(.rest)
@@ -504,20 +515,13 @@ public struct WouldNotReach: Error, CustomStringConvertible {
     }
 }
 
+/// A cursor position the window server answered that is no place on the screen.
 public struct CursorUnreadable: Error, CustomStringConvertible {
-    public init() {}
+    public let cause: NotAPlace
 
-    public var description: String { "the window server would not say where the cursor is" }
-}
+    public init(cause: NotAPlace) { self.cause = cause }
 
-/// The window server listed no display a cursor could be on: none at all, or one with no
-/// area.
-public struct DisplaysUnreadable: Error, CustomStringConvertible {
-    public let frames: [CGRect]
-
-    public init(frames: [CGRect]) { self.frames = frames }
-
-    public var description: String { "the window server listed no displays a path could be kept on: \(frames)" }
+    public var description: String { "the window server answered the cursor at no place: \(cause)" }
 }
 
 /// A pointing run that stopped: vhidd went quiet, the caller cancelled it, or the

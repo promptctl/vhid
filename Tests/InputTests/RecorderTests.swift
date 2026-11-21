@@ -3,12 +3,14 @@ import Keystrokes
 import Pointing
 import Testing
 @testable import Input
+import ScreenSpace
+import ScreenSpaceTesting
 
 /// Recordings made from tap events a test wrote, read back by the parser `vhid play`
 /// uses: what the recorder writes is judged by what a replay would do with it.
 /// [LAW:behavior-not-structure]
 @Suite struct RecorderTests {
-    static let start = ScreenPoint(x: 100, y: 100)!
+    static let start = try! ScreenPoint(x: 100, y: 100)
     static let vhid: UInt64 = 4_297_410_007
     static let stopKeys: Set<Usage> = [.leftControl, .rightControl, Usage(rawValue: 0x06)]
 
@@ -16,7 +18,7 @@ import Testing
         TapEvent(at: .milliseconds(ms), sender: sender, location: location, kind: kind)
     }
 
-    private func point(_ x: Double, _ y: Double) -> ScreenPoint { ScreenPoint(x: x, y: y)! }
+    private func point(_ x: Double, _ y: Double) -> ScreenPoint { try! ScreenPoint(x: x, y: y) }
 
     private func keys(_ usages: UInt16...) -> Play.Report { .keys(try! HeldKeys(Set(usages.map(Usage.init(rawValue:))))) }
 
@@ -35,7 +37,7 @@ import Testing
     /// Shift held through h, an autorepeat that is dropped, then i; a drag. Every held set
     /// is its own line, the drag is points, and the script ends with nothing held.
     @Test func typingAndADragRoundTrip() throws {
-        var recorder = Recorder(start: Self.start, flags: 0, vhid: [Self.vhid]) { _ in false }
+        var recorder = try Recorder(start: Self.start, flags: 0, vhid: [Self.vhid], displays: .vast)
         for event in [
             event(10, .flagsChanged(keyCode: 56, flags: 0x20002)),
             event(20, .keyDown(keyCode: 4, autorepeat: false)),
@@ -59,7 +61,7 @@ import Testing
     /// The Control-C that stopped the recording is not in it; Control-X, which was not the
     /// stop, is. The script still ends with nothing held, at the stop.
     @Test func theStopChordIsTrimmedAndNothingElse() throws {
-        var stopped = Recorder(start: Self.start, flags: 0, vhid: []) { _ in false }
+        var stopped = try Recorder(start: Self.start, flags: 0, vhid: [], displays: .vast)
         stopped.take(event(10, .keyDown(keyCode: 0, autorepeat: false)))
         stopped.take(event(20, .keyUp(keyCode: 0)))
         stopped.take(event(100, .flagsChanged(keyCode: 59, flags: 0x40001)))
@@ -75,7 +77,7 @@ import Testing
             (0, keys()), (10, keys(0x04)), (20, keys()), (100, keys()), (101, keys()), (110, keys()), (112, keys()), (150, keys()), (150, .buttons([])),
         ])
 
-        var cut = Recorder(start: Self.start, flags: 0, vhid: []) { _ in false }
+        var cut = try Recorder(start: Self.start, flags: 0, vhid: [], displays: .vast)
         cut.take(event(100, .flagsChanged(keyCode: 59, flags: 0x40001)))
         cut.take(event(101, .keyDown(keyCode: 7, autorepeat: false)))
         expect(try replayed(cut, stoppedAt: 90), [
@@ -86,7 +88,7 @@ import Testing
     /// vhid's own motion moves the cursor under the person, and is taken back out of their
     /// points; its modifiers are in the session's flags, and are taken out of their keys.
     @Test func vhidsOwnEventsAreNotThePersons() throws {
-        var recorder = Recorder(start: Self.start, flags: 0, vhid: [Self.vhid]) { $0.x >= 150 }
+        var recorder = try Recorder(start: Self.start, flags: 0, vhid: [Self.vhid], displays: DisplayLayout.at(try! ScreenRect(x: 0, y: 0, width: 151, height: 1000)).online)
         recorder.take(event(10, .motion, at: point(150, 100), from: Self.vhid))
         recorder.take(event(20, .motion, at: point(160, 102)))
         recorder.take(event(30, .flagsChanged(keyCode: 56, flags: 0x20002), at: point(160, 102), from: Self.vhid))
@@ -103,7 +105,7 @@ import Testing
     /// An earlier Control-C, and a Control-A whose A came up inside the stop chord, are the
     /// person's: only the stop's own presses come out.
     @Test func onlyTheStopsOwnPressesComeOut() throws {
-        var earlier = Recorder(start: Self.start, flags: 0, vhid: []) { _ in false }
+        var earlier = try Recorder(start: Self.start, flags: 0, vhid: [], displays: .vast)
         earlier.take(event(10, .flagsChanged(keyCode: 59, flags: 0x40001)))
         earlier.take(event(11, .keyDown(keyCode: 8, autorepeat: false)))
         earlier.take(event(12, .keyUp(keyCode: 8)))
@@ -116,7 +118,7 @@ import Testing
             (20, .at(point(101, 100))), (30, keys()), (31, keys()), (40, keys()), (40, .buttons([])),
         ])
 
-        var controlA = Recorder(start: Self.start, flags: 0, vhid: []) { _ in false }
+        var controlA = try Recorder(start: Self.start, flags: 0, vhid: [], displays: .vast)
         controlA.take(event(5, .flagsChanged(keyCode: 59, flags: 0x40001)))
         controlA.take(event(10, .keyDown(keyCode: 0, autorepeat: false)))
         controlA.take(event(20, .keyUp(keyCode: 0)))
@@ -130,7 +132,7 @@ import Testing
     /// comes up, their next press of it is recorded. Times that arrive out of order are
     /// held to the line before.
     @Test func aSharedModifierIsThePersonsOnceVhidLetsGo() throws {
-        var recorder = Recorder(start: Self.start, flags: 0, vhid: [Self.vhid]) { _ in false }
+        var recorder = try Recorder(start: Self.start, flags: 0, vhid: [Self.vhid], displays: .vast)
         recorder.take(event(10, .flagsChanged(keyCode: 56, flags: 0x20002), from: Self.vhid))
         recorder.take(event(20, .flagsChanged(keyCode: 56, flags: 0x20002)))
         recorder.take(event(30, .flagsChanged(keyCode: 56, flags: 0x20002), from: Self.vhid))
@@ -146,7 +148,7 @@ import Testing
     /// usage is left out and counted. A modifier down when recording started is the first
     /// line, and comes up when it does.
     @Test func capsLockFnAndAModifierAlreadyDown() throws {
-        var recorder = Recorder(start: Self.start, flags: 0x100008, vhid: []) { _ in false }
+        var recorder = try Recorder(start: Self.start, flags: 0x100008, vhid: [], displays: .vast)
         recorder.take(event(10, .flagsChanged(keyCode: 55, flags: 0)))
         recorder.take(event(20, .flagsChanged(keyCode: 0x39, flags: 0x10000)))
         recorder.take(event(30, .flagsChanged(keyCode: 63, flags: 0x800100)))
@@ -157,13 +159,35 @@ import Testing
         #expect(recorder.unmapped == 1)
     }
 
+    /// A start no display holds is no recording: the script's first line would be one
+    /// `vhid play` refuses.
+    @Test func aStartOnNoDisplayIsRefused() {
+        let one = DisplayLayout.at(try! ScreenRect(x: 0, y: 0, width: 1920, height: 1080)).online
+        #expect(throws: Unplaced.point(point(2000, 10))) { try Recorder(start: point(2000, 10), flags: 0, vhid: [], displays: one) }
+    }
+
+    /// Motion is written as play reads it, to a thousandth, and placed as written: a move
+    /// the rounding takes off the display's far edge is left out and counted, so every line
+    /// written is one play accepts on the layout it was recorded on.
+    @Test func aMoveNoDisplayHoldsOnceWrittenIsLeftOutAndCounted() throws {
+        let one = DisplayLayout.at(try! ScreenRect(x: 0, y: 0, width: 200, height: 200)).online
+        var recorder = try Recorder(start: Self.start, flags: 0, vhid: [], displays: one)
+        recorder.take(event(10, .motion, at: point(150.25, 100)))
+        recorder.take(event(20, .motion, at: point(199.9996, 100)))
+        recorder.take(event(30, .motion, at: point(-3, 100)))
+        expect(try replayed(recorder, stoppedAt: 40), [(0, keys()), (10, .at(point(150.25, 100))), (40, keys()), (40, .buttons([]))])
+        #expect(recorder.offDisplays == 2)
+        let script = try Schedule<ScreenPoint>(Play.parse(recorder.script(stoppedAt: .milliseconds(40), stopKeys: Self.stopKeys)))
+        #expect(throws: Never.self) { try script.placed(on: one) }
+    }
+
     /// A recording is a script `vhid play` schedules whole: at lines and all.
     @Test func aRecordingSchedules() throws {
-        var recorder = Recorder(start: Self.start, flags: 0, vhid: []) { _ in false }
+        var recorder = try Recorder(start: Self.start, flags: 0, vhid: [], displays: .vast)
         recorder.take(event(8, .motion, at: point(104, 100)))
         recorder.take(event(16, .buttonDown(.left), at: point(104, 100)))
         recorder.take(event(24, .buttonUp(.left), at: point(104, 100)))
-        let schedule = try Schedule(Play.parse(recorder.script(stoppedAt: .milliseconds(30), stopKeys: Self.stopKeys)))
+        let schedule = try Schedule<ScreenPoint>(Play.parse(recorder.script(stoppedAt: .milliseconds(30), stopKeys: Self.stopKeys)))
         #expect(schedule.calibration != nil)
         #expect(schedule.reports == 3)
     }

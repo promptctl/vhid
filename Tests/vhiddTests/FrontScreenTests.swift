@@ -2,6 +2,8 @@ import Foundation
 import OwnThread
 import Testing
 @testable import vhidd
+import ScreenSpace
+import ScreenSpaceTesting
 
 /// The screen is read by a child in the session in front, and a session that comes to the
 /// front gets a child of its own. [LAW:behavior-not-structure]
@@ -17,9 +19,9 @@ import Testing
             if fails { throw FrontScreen.NobodyInFront() }
             return (Double(session.audit), 1)
         }
-        func displays() throws -> [CGRect] {
+        func displays() throws -> DisplayLayout {
             log.add("displays in \(session.audit)")
-            return [CGRect(x: 0, y: 0, width: Double(session.audit), height: 1)]
+            return .at(try ScreenRect(x: 0, y: 0, width: Double(session.audit), height: 1))
         }
         func stop() { log.add("stop \(session.audit)") }
     }
@@ -31,6 +33,12 @@ import Testing
         var all: [String] { lock.lock(); defer { lock.unlock() }; return lines }
     }
 
+    /// The main display, and one above and right of it asleep.
+    static let twoDisplays = try! DisplayLayout([
+        OnlineDisplay(id: 1, bounds: try! ScreenRect(x: 0, y: 0, width: 1920, height: 1080), active: true),
+        OnlineDisplay(id: 2, bounds: try! ScreenRect(x: 1920, y: -200, width: 1280, height: 800), active: false),
+    ])
+
     private let bmf = FrontScreen.Session(audit: 100003, user: "bmf")
     private let loginWindow = FrontScreen.Session(audit: 100120, user: "root")
 
@@ -39,7 +47,7 @@ import Testing
         let log = Log()
         let screen = FrontScreen(front: { bmf }, start: { log.add("start \($0.audit)"); return Reader($0, log) }, failed: log.add)
         #expect(try screen.cursor() == (100003, 1))
-        #expect(try screen.displays() == [CGRect(x: 0, y: 0, width: 100003, height: 1)])
+        #expect(try screen.displays() == .at(try ScreenRect(x: 0, y: 0, width: 100003, height: 1)))
         #expect(log.all == ["start 100003", "read in 100003", "displays in 100003"])
     }
 
@@ -119,18 +127,19 @@ import Testing
         #expect(try reader.cursor() == (12.5, 40))
     }
 
-    /// Each question goes as its own line, and the answer to `displays` is every display's
-    /// rectangle; an answer that is not one is the reader failing, saying what it heard.
+    /// Each question goes as its own line, and the answer to `displays` is every online
+    /// display's record, a sleeping one included; an answer that is not a layout is the
+    /// reader failing, saying what it heard.
     @Test func aChildAnswersEachQuestionByName() throws {
         let reader = try child("""
-        echo joined c0de; while read q; do case $q in cursor) echo '12.5 40';; displays) echo '0 0 1920 1080;1920 -200 1280 800';; *) echo nonsense;; esac; done
+        echo joined c0de; while read q; do case $q in cursor) echo '12.5 40';; displays) echo '1 0 0 1920 1080 1 2 1920 -200 1280 800 0';; *) echo nonsense;; esac; done
         """)
         defer { reader.stop() }
-        #expect(try reader.displays() == [CGRect(x: 0, y: 0, width: 1920, height: 1080), CGRect(x: 1920, y: -200, width: 1280, height: 800)])
+        #expect(try reader.displays() == Self.twoDisplays)
         #expect(try reader.cursor() == (12.5, 40))
         let garbled = try child("echo joined c0de; while read _; do echo '0 0 1920'; done")
         defer { garbled.stop() }
-        #expect { try garbled.displays() } throws: { "\($0)".contains("answered '0 0 1920'") }
+        #expect { try garbled.displays() } throws: { "\($0)".contains("answered '0 0 1920', which is no layout") }
     }
 
     /// `refused` is the window server declining, whichever question it answers.
@@ -222,14 +231,14 @@ import Testing
         #expect(holder.pid(on: 1) == nil)
     }
 
-    /// The displays are answered the same way, four numbers each.
+    /// The displays are answered the same way, the record of each display in turn.
     @Test func aSeatReadsTheDisplaysWithoutTheDevices() {
         let holder = Holder()
         let seat = Seat(ObjectIdentifier(NSObject()), pid: 41, holder: holder, readiness: Readiness(driver: { .running }),
-                        screen: FixedScreen(frames: [CGRect(x: 0, y: 0, width: 1920, height: 1080), CGRect(x: -1280, y: 0, width: 1280, height: 800)]))
+                        screen: FixedScreen(layout: Self.twoDisplays))
         var answer: ([NSNumber], Error?)?
         seat.displays { answer = ($0, $1) }
-        #expect(answer?.0.map(\.doubleValue) == [0, 0, 1920, 1080, -1280, 0, 1280, 800] && answer?.1 == nil)
+        #expect(answer?.0.map(\.doubleValue) == [1, 0, 0, 1920, 1080, 1, 2, 1920, -200, 1280, 800, 0] && answer?.1 == nil)
         #expect(holder.pid(on: 1) == nil)
     }
 }

@@ -4,6 +4,8 @@ import Synchronization
 import TestClock
 import Testing
 @testable import Input
+import ScreenSpace
+import ScreenSpaceTesting
 
 /// A script parsed whole or refused whole, with the line that refused it named.
 @Suite struct PlayTests {
@@ -16,7 +18,7 @@ import Testing
             {"t_ms":8.333,"wheel":{"v":-1,"h":2}}
             {"t_ms":1000,"buttons":[]}
             """)
-        #expect(play.start == ScreenPoint(x: 800, y: 500.5)!)
+        #expect(play.start == (try! ScreenPoint(x: 800, y: 500.5)))
         #expect(play.events == [
             Play.Timed(at: .zero, report: .buttons([.left]), line: 2),
             Play.Timed(at: .nanoseconds(8_333_000), report: .move(Move(x: Count(clamping: 4), y: Count(clamping: -127))), line: 4),
@@ -40,7 +42,7 @@ import Testing
         #expect(play.events == [
             Play.Timed(at: .zero, report: .keys(try HeldKeys([.leftShift, Usage(rawValue: 4)])), line: 2),
             Play.Timed(at: .milliseconds(5), report: .buttons([.left, Button(rawValue: 8)!]), line: 3),
-            Play.Timed(at: .milliseconds(6), report: .at(ScreenPoint(x: 12.5, y: 20)!), line: 4),
+            Play.Timed(at: .milliseconds(6), report: .at(try! ScreenPoint(x: 12.5, y: 20)), line: 4),
             Play.Timed(at: .milliseconds(7), report: .keys(try HeldKeys([Usage(rawValue: 0x28)])), line: 5),
             Play.Timed(at: .milliseconds(8), report: .keys(.none), line: 6),
             Play.Timed(at: .milliseconds(9), report: .buttons([]), line: 7),
@@ -123,7 +125,7 @@ import Testing
     /// later than that, still goes out on time.
     @Test func eachReportGoesOutAtItsOwnDeadlineAndALateOneIsSentLate() async throws {
         let clock = ManualClock()
-        let fake = FakeMouse(at: ScreenPoint(x: 10, y: 10)!)
+        let fake = FakeMouse(at: try! ScreenPoint(x: 10, y: 10))
         let mouse = CostlyMouse(mouse: fake, clock: clock, cost: .milliseconds(3))
         let play = try Play.parse("""
             {"to":{"x":10,"y":10}}
@@ -138,7 +140,7 @@ import Testing
             Played.Report(line: 3, scheduled: Self.epoch + 1000, sent: Self.epoch + 3000, acked: Self.epoch + 6000),
             Played.Report(line: 4, scheduled: Self.epoch + 10000, sent: Self.epoch + 10000, acked: Self.epoch + 13000),
         ])
-        #expect(played.lateness.ranks == [0, 2000, 2000, 2000])
+        #expect(played.lateness?.ranks == [0, 2000, 2000, 2000])
         #expect(fake.log == ["hold [1]", "move 5 0", "hold []"])
         // Only the last report was still ahead of the clock: the first was due at the
         // start and the second overdue, and neither paid for a sleep.
@@ -156,7 +158,7 @@ import Testing
     @MainActor
     @Test func aLongWaitIsCancelledWithinASlice() async throws {
         let clock = ManualClock()
-        let fake = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
+        let fake = FakeMouse(at: try! ScreenPoint(x: 0, y: 0))
         let play = try Play.parse("""
             {"to":{"x":0,"y":0}}
             {"t_ms":0,"buttons":["left"]}
@@ -183,7 +185,7 @@ import Testing
     @Test(.timeLimit(.minutes(1)))
     func aLeadIsWatchedOutOnAClockThatOnlyMovesWhenSleptOn() async throws {
         let clock = ManualClock()
-        let fake = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
+        let fake = FakeMouse(at: try! ScreenPoint(x: 0, y: 0))
         let play = try Play.parse("""
             {"to":{"x":0,"y":0}}
             {"t_ms":0,"buttons":["left"]}
@@ -192,7 +194,7 @@ import Testing
         let played = try await Player(pointer: fake.pointer(on: clock), keyboard: fake.keyboard, wall: { Self.epoch }, lead: .milliseconds(2)).play(Schedule(play))
         #expect(played.reports.map(\.scheduled) == [Self.epoch, Self.epoch + 10_000])
         // The watch put the clock exactly on the deadline, so nothing went out late.
-        #expect(played.lateness.max == 0)
+        #expect(played.lateness?.max == 0)
         #expect(fake.log == ["hold [1]", "hold []"])
     }
 
@@ -201,7 +203,7 @@ import Testing
     /// posted whole.
     @Test func aMixedScriptGoesOutInOrderOnOneClock() async throws {
         let clock = ManualClock()
-        let fake = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
+        let fake = FakeMouse(at: try! ScreenPoint(x: 0, y: 0))
         let play = try Play.parse("""
             {"to":{"x":0,"y":0}}
             {"t_ms":0,"keys":["leftShift"]}
@@ -226,7 +228,7 @@ import Testing
     /// A play stopped before its first keys line never pressed a key, so the keyboard is
     /// not asked to let go of one, and nothing says a key may be held.
     @Test func aStopBeforeAnyKeyLeavesTheKeyboardAlone() async throws {
-        let fake = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
+        let fake = FakeMouse(at: try! ScreenPoint(x: 0, y: 0))
         fake.refused = 0 ..< 1
         let play = try Play.parse("""
             {"to":{"x":0,"y":0}}
@@ -246,7 +248,7 @@ import Testing
     /// cursor between them, and the closed loop puts the press and the release exactly on
     /// their points, whatever the table got wrong. [LAW:verifiable-goals]
     @Test func aRecordedDragPressesAndReleasesOnItsPoints() async throws {
-        let fake = FakeMouse(at: ScreenPoint(x: 100, y: 100)!)
+        let fake = FakeMouse(at: try! ScreenPoint(x: 100, y: 100))
         let watched = WatchedMouse(fake)
         var lines = [#"{"to":{"x":100,"y":100}}"#, #"{"t_ms":0,"at":{"x":130,"y":110}}"#, #"{"t_ms":8,"buttons":["left"]}"#]
         for step in 1...40 {
@@ -257,7 +259,7 @@ import Testing
         let played = try await Player(pointer: Pointer(mouse: watched, cursor: fake.cursor, displays: { .vast }, clock: ManualClock(), randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in }), keyboard: fake.keyboard, wall: { Self.epoch }, lead: .zero).play(Schedule(play))
         // Within half a point, which is where the pointer's loop stops: this mouse moves
         // whole points, and 410.5 is between two.
-        let recorded = [ScreenPoint(x: 130, y: 110)!, ScreenPoint(x: 410.5, y: 230)!]
+        let recorded = [try! ScreenPoint(x: 130, y: 110), try! ScreenPoint(x: 410.5, y: 230)]
         #expect(watched.pressedAt.count == recorded.count)
         for (landed, point) in zip(watched.pressedAt, recorded) {
             #expect(landed.map { abs($0.x - point.x) <= 0.5 && abs($0.y - point.y) <= 0.5 } == true, "\(String(describing: landed)) for \(point)")
@@ -269,14 +271,14 @@ import Testing
     /// 20 points away, a burst of three 8-count reports would carry the cursor past it,
     /// where a screen edge may have stopped it, so the table stops at 4 counts.
     @Test func calibrationStaysWhereTheRecordingWent() async throws {
-        let fake = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
-        let script = try Schedule(Play.parse("""
+        let fake = FakeMouse(at: try! ScreenPoint(x: 0, y: 0))
+        let script = try Schedule<ScreenPoint>(Play.parse("""
             {"to":{"x":0,"y":0}}
             {"t_ms":0,"at":{"x":20,"y":0}}
             {"t_ms":8,"at":{"x":0,"y":0}}
             """))
         let calibration = try #require(script.calibration)
-        let steering = try await fake.pointer.calibrate(calibration, from: script.start)
+        let steering = try await fake.pointer.calibrate(calibration, from: Displays.vast.at(script.start))
         #expect(steering.samples.map(\.counts) == [1, 2, 4])
         #expect(steering.samples.map(\.perCount) == [1, 1, 1])
     }
@@ -284,7 +286,7 @@ import Testing
     /// A cursor that will not move gives calibration nothing to steer by, and the play
     /// stops before its first act, saying so.
     @Test func aCursorThatWillNotMoveStopsCalibration() async throws {
-        let fake = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
+        let fake = FakeMouse(at: try! ScreenPoint(x: 0, y: 0))
         fake.stuck = true
         let play = try Play.parse("""
             {"to":{"x":0,"y":0}}
@@ -299,16 +301,40 @@ import Testing
         #expect(stopped.causes.contains { $0 is Steering.Unmoved })
     }
 
+    /// A script line at a point no display holds is refused by its line number before
+    /// anything is sent: a replay on a layout that lost a display goes nowhere, rather than
+    /// pressing at the edge of the one left. [LAW:no-silent-failure]
+    @Test func aPointOnNoDisplayRefusesTheScriptByLineBeforeAnythingIsSent() async throws {
+        let fake = FakeMouse(at: try! ScreenPoint(x: 0, y: 0))
+        let play = try Play.parse("""
+            {"to":{"x":0,"y":0}}
+            {"t_ms":0,"buttons":["left"]}
+            {"t_ms":1,"at":{"x":5000,"y":10}}
+            {"t_ms":2,"buttons":[]}
+            """)
+        let one = DisplayLayout.at(try! ScreenRect(x: 0, y: 0, width: 1920, height: 1080)).online
+        let pointer = Pointer(mouse: fake, cursor: fake.cursor, displays: { one }, clock: ManualClock(), randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in })
+        let refused = try await #require(throws: Play.ScriptInvalid.self) {
+            try await Player(pointer: pointer, keyboard: fake.keyboard, wall: { Self.epoch }, lead: .zero).play(Schedule(play))
+        }
+        #expect(refused.line == 3)
+        #expect(refused.reason == "5000,10 is on no display")
+        #expect(fake.log.isEmpty)
+    }
+
     @Test func latenessIsReadByNearestRank() {
-        #expect(Lateness(of: (1...100).map(Int64.init).shuffled()).ranks == [50, 90, 99, 100])
-        #expect(Lateness(of: [7]).ranks == [7, 7, 7, 7])
+        #expect(Lateness(of: (1...100).map(Int64.init).shuffled())?.ranks == [50, 90, 99, 100])
+        #expect(Lateness(of: [7])?.ranks == [7, 7, 7, 7])
+        // A script that sent nothing was late by nothing at all, which is no ranks rather
+        // than ranks of zero.
+        #expect(Lateness(of: []) == nil)
     }
 
     /// A refused report stops the play with what went out before it, releases every key
     /// and button, and says when a release was refused too.
     @Test func aStopSaysHowFarThePlayGotAndReleases() async throws {
         let clock = ManualClock()
-        let fake = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
+        let fake = FakeMouse(at: try! ScreenPoint(x: 0, y: 0))
         fake.refused = 1 ..< .max
         let play = try Play.parse("""
             {"to":{"x":0,"y":0}}
@@ -373,7 +399,7 @@ struct CostlyMouse: Mouse {
 @Suite struct ScheduleTests {
     static let start = #"{"to":{"x":1,"y":1}}"#
 
-    private func schedule(_ lines: String) throws -> Schedule {
+    private func schedule(_ lines: String) throws -> Schedule<ScreenPoint> {
         try Schedule(Play.parse(Self.start + "\n" + lines))
     }
 
@@ -438,7 +464,7 @@ struct CostlyMouse: Mouse {
             {"t_ms":20,"at":{"x":31,"y":1}}
             {"t_ms":30,"buttons":[]}
             """)
-        let (one, eleven, fortyOne, thirtyOne) = (ScreenPoint(x: 1, y: 1)!, ScreenPoint(x: 11, y: 1)!, ScreenPoint(x: 41, y: 1)!, ScreenPoint(x: 31, y: 1)!)
+        let (one, eleven, fortyOne, thirtyOne) = (try! ScreenPoint(x: 1, y: 1), try! ScreenPoint(x: 11, y: 1), try! ScreenPoint(x: 41, y: 1), try! ScreenPoint(x: 31, y: 1))
         #expect(script.acts == [
             Schedule.Act(at: .zero, report: .steer(one), line: 2),
             Schedule.Act(at: .zero, report: .buttons([.left]), line: 2),

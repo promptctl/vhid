@@ -1,4 +1,6 @@
 import ArgumentParser
+import DisplayReading
+import ScreenSpace
 import Seeing
 import Telemetry
 
@@ -130,6 +132,7 @@ public struct Screen: Sendable {
 
     public static let live = Screen()
 
-    /// The reader of each kind, in the process.
-    static let reader: @Sendable (SourceKind, Query) async throws -> Judged = { @MainActor in try await $0.reader.judged($1) }
+    /// The reader of each kind, in the process, on the layout read for this look: one read
+    /// each look, so a wait sees a display that went to sleep. [LAW:no-ambient-temporal-coupling]
+    static let reader: @Sendable (SourceKind, Query) async throws -> Judged = { @MainActor in try await $0.reader.judged($1, on: DisplayReading.layout()) }
 }

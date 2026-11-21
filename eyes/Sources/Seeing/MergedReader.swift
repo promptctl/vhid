@@ -1,3 +1,5 @@
+import ScreenSpace
+
 /// Two readers asked the same query, what they saw reconciled into one answer.
 ///
 /// It holds each as `any Reader` and nothing more, so neither the readers nor this type
@@ -26,10 +28,10 @@ public struct MergedReader: Reader {
     /// neither could look; or when the task was cancelled. One reader that could not look -
     /// a window gone between the merge's look and its own included - is part of the
     /// answer, carried in the scope, and never proof of absence.
-    public func look(_ query: Query) async throws -> Candidates {
-        _ = try locate(query.region)
-        async let a = Self.attempt(first, query)
-        async let b = Self.attempt(second, query)
+    public func look(_ query: Query, on layout: DisplayLayout) async throws -> Candidates {
+        _ = try locate(query.region, layout)
+        async let a = Self.attempt(first, query, layout)
+        async let b = Self.attempt(second, query, layout)
         return try Candidates.merging(try await a, try await b)
     }
 
@@ -39,9 +41,9 @@ public struct MergedReader: Reader {
         try await second.pressing(try await first.pressing(reading, until: deadline), until: deadline)
     }
 
-    private static func attempt(_ reader: any Reader, _ query: Query) async throws -> Attempt {
+    private static func attempt(_ reader: any Reader, _ query: Query, _ layout: DisplayLayout) async throws -> Attempt {
         do {
-            return .looked(reader.source, try await reader.look(query))
+            return .looked(reader.source, try await reader.look(query, on: layout))
         } catch is CancellationError {
             throw CancellationError()
         } catch {
@@ -89,7 +91,8 @@ public extension Candidates {
     /// differently - Vision reads a menu bar as one run where the tree has an element per
     /// menu - and what is left of the run after its seen-twice stretches stays, in pieces.
     /// "Says the same" forgives a recogniser's slip, one edit in five characters; two
-    /// finds of one reader are never merged with each other.
+    /// finds of one reader are never merged with each other. A piece no display shows is
+    /// counted `unshown`.
     ///
     /// The region is where both looked. The reach is whole only when both readers read
     /// it whole; otherwise it names each reader's reach, and a reader that threw is
@@ -104,6 +107,13 @@ public extension Candidates {
         var merged = Set<Int>()
         var extra: [Found] = []
         var duplicates = 0
+        var unshown = 0
+        // The words as a row on the run's displays, or counted. [LAW:no-silent-failure]
+        func row(_ words: [Word], _ run: Found) {
+            guard let head = words.first else { return }
+            guard let found = Found(first: head, rest: Array(words.dropFirst()), source: run.source, on: run.displays) else { unshown += 1; return }
+            extra.append(found)
+        }
         for run in b.seen?.found ?? [] {
             var loose: [Word] = []
             let words = run.words
@@ -112,8 +122,9 @@ public extension Candidates {
                 // The closest-saying stretch from here, the longer on a tie: the longest
                 // one within the slip allowance would carry a neighbour along - "Downloads 3"
                 // is one edit from "Downloads", and the badge only the pixels saw is lost.
-                let hit = (i..<words.count).flatMap { j in
-                    let stretch = Found(first: words[i], rest: Array(words[(i + 1)..<(j + 1)]), source: run.source)
+                let hit = (i..<words.count).flatMap { j -> [(index: Int, end: Int, edits: Int)] in
+                    // A stretch no display shows is no place the first reader saw anything.
+                    guard let stretch = Found(first: words[i], rest: Array(words[(i + 1)..<(j + 1)]), source: run.source, on: run.displays) else { return [] }
                     return (0..<firsts).compactMap { k in kept[k].edits(to: stretch).map { (index: k, end: j, edits: $0) } }
                 }.min { ($0.edits, -$0.end) < ($1.edits, -$1.end) }
                 guard let (index, end, _) = hit else {
@@ -122,23 +133,24 @@ public extension Candidates {
                     continue
                 }
                 if merged.insert(index).inserted {
-                    kept[index] = Found(first: kept[index].first, rest: kept[index].rest, source: .merged(kept[index].source, run.source))
+                    kept[index] = kept[index].seen(also: run.source)
                 }
                 duplicates += 1
-                extra += Found(loose, source: run.source)
+                row(loose, run)
                 loose = []
                 i = end + 1
             }
-            extra += Found(loose, source: run.source)
+            row(loose, run)
         }
-        let regions = seen.map(\.region.cgRect)
-        let both = regions.dropFirst().reduce(regions[0]) { $0.intersection($1) }
+        let regions = seen.map(\.region)
+        let both = regions.dropFirst().reduce(Optional(regions[0])) { $0?.intersection($1) }
+        let excluded = seen.flatMap(\.excluded) + [Exclusion(reason: .duplicate, count: duplicates), Exclusion(reason: .unshown, count: unshown)]
         return Candidates(
             found: (kept + extra).inReadingOrder,
-            region: both.isNull ? seen[0].region : ScreenRect(both),
+            region: both ?? seen[0].region,
             examined: seen.map(\.examined).reduce(0, +),
-            excluded: (seen.flatMap(\.excluded) + [Exclusion(reason: .duplicate, count: duplicates)]).summed,
-            reach: a.part.isWhole && b.part.isWhole ? .whole : .stopped(.merged(a.part, b.part)),
+            excluded: excluded.summed,
+            reach: a.part.isWhole && b.part.isWhole ? Reach(excluded) : .stopped(.merged(a.part, b.part)),
             // A reader that could not look took in nobody's windows.
             owners: seen.map(\.owners).reduce(.only([])) { $0.union($1) }
         )
@@ -156,15 +168,4 @@ private extension Found {
     }
 }
 
-private extension Array where Element == Found {
-    static func += (list: inout [Found], found: Found?) {
-        if let found { list.append(found) }
-    }
-}
 
-private extension Found {
-    init?(_ words: [Word], source: Source) {
-        guard let head = words.first else { return nil }
-        self.init(first: head, rest: Array(words.dropFirst()), source: source)
-    }
-}

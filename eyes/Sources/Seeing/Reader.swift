@@ -1,3 +1,5 @@
+import ScreenSpace
+
 /// Something that can say what text is on screen and where.
 ///
 /// Two readers answer this: one walks the accessibility tree, one recognises pixels. They
@@ -23,7 +25,7 @@ public protocol Reader: Sendable {
     /// capture that wrote nothing - because those are facts about the tool and not about
     /// the screen, and a caller told "nothing matched" would take them for an absence.
     /// [LAW:no-silent-failure]
-    func look(_ query: Query) async throws -> Candidates
+    func look(_ query: Query, on layout: DisplayLayout) async throws -> Candidates
 
     /// The judged rows with each box this reader can check cut to where a click presses
     /// what the row names, and every other row as it was.
@@ -42,10 +44,10 @@ public protocol Reader: Sendable {
 public let hitTesting = Duration.seconds(2)
 
 public extension Reader {
-    /// The query's rows: what the reader saw, judged by the one rule every reader shares,
-    /// held with this reader to check their boxes.
-    func judged(_ query: Query) async throws -> Judged {
-        Judged(Reading.judging(try await look(query), query: query)) { try await self.pressing($0, until: $1) }
+    /// The query's rows: what the reader saw on `layout`, judged by the one rule every reader
+    /// shares, held with this reader to check their boxes.
+    func judged(_ query: Query, on layout: DisplayLayout) async throws -> Judged {
+        Judged(Reading.judging(try await look(query, on: layout), query: query)) { try await self.pressing($0, until: $1) }
     }
 }
 
@@ -75,8 +77,9 @@ public enum Pressed: Sendable, Hashable {
     /// The box stands: a click anywhere in it presses the element, as far as was checked,
     /// or the row is another reader's to check.
     case kept
-    /// Part of the box presses something else; this is the part that presses the element.
-    case narrowed(ScreenRect)
+    /// Part of the box presses something else; this is the row cut to the part that presses
+    /// the element, placed again.
+    case narrowed(Found)
     /// The box could not be checked, and stands as the reader placed it.
     case unchecked(Unchecked)
 }
@@ -85,7 +88,8 @@ public enum Pressed: Sendable, Hashable {
 public enum Unchecked: String, Sendable, Hashable, CaseIterable {
     /// The hit test, or a read of what it hit, did not answer.
     case unanswered
-    /// A click at the row's own point lands on something other than the element it names.
+    /// A click at the row's own point lands on something other than the element it names, or
+    /// the part that presses it is under a point a side.
     case elsewhere
     /// The time for checking the reading's boxes ran out first.
     case overTime = "over_time"

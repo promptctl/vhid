@@ -1,6 +1,7 @@
 import ApplicationServices
-import Seeing
 import Grants
+import ScreenSpace
+import Seeing
 
 /// Reads the screen through the accessibility tree: every on-screen window in the region,
 /// walked element by element, each element that says something reported at its own
@@ -36,11 +37,11 @@ public struct TreeReader: Reader {
 
     public init(granted: @escaping Gate) { self.granted = granted }
 
-    public func look(_ query: Query) async throws -> Candidates {
+    public func look(_ query: Query, on layout: DisplayLayout) async throws -> Candidates {
         // [LAW:no-silent-failure] Asked first: without the grant, every read fails, and a
         // walk that counted them as unanswered would report a looked-at, empty screen.
         guard try await granted(Self.grant) else { throw TreeError.noGrant }
-        let region = try query.region.bounds()
+        let region = try query.region.bounds(on: layout)
         let listing = try Geometry.onScreen()
         // Started before the owners are settled and the windows matched: both are reads too.
         let clock = ContinuousClock()
@@ -52,6 +53,7 @@ public struct TreeReader: Reader {
         let walked = try walk(
             from: roots,
             unwalked: unwalked,
+            on: layout.active,
             within: Self.bounds,
             elapsed: { clock.now - start },
             read: Self.node
@@ -291,12 +293,12 @@ public struct TreeReader: Reader {
         return AXValueGetValue(value as! AXValue, .axError, &error) ? error : nil
     }
 
-    /// Nil as well for a frame that is no place - NaN or infinite - which an app can claim.
-    /// [LAW:parse-dont-validate]
+    /// Nil as well for a frame that is no box - NaN, infinite, or a side under zero - which an
+    /// app can claim, and which the walk then counts `unplaced`. [LAW:parse-dont-validate]
     static func frame(_ position: CFTypeRef?, _ size: CFTypeRef?) -> ScreenRect? {
         unboxed(position, as: .cgPoint, CGPoint.zero).flatMap { origin in
-            unboxed(size, as: .cgSize, CGSize.zero).map { ScreenRect(CGRect(origin: origin, size: $0)) }
-        }.flatMap { [$0.x, $0.y, $0.width, $0.height].allSatisfy(\.isFinite) ? $0 : nil }
+            unboxed(size, as: .cgSize, CGSize.zero).flatMap { try? ScreenRect(CGRect(origin: origin, size: $0)) }
+        }
     }
 
     private static func bounded(_ element: AXUIElement) -> AXUIElement {

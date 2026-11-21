@@ -1,25 +1,27 @@
 import CoreGraphics
+import DisplayReading
+import ScreenSpace
 
 public extension Region {
-    /// The rectangle this region names, in the one screen space, or a refusal naming what
-    /// is not there - a display that is not attached reads as blindness, never as a blank
-    /// screen. [LAW:no-silent-failure]
+    /// The rectangle this region names, in the one screen space, on `layout` - the one the
+    /// look read - or a refusal naming what is not there: a display that is not active
+    /// reads as blindness, never as a blank screen. [LAW:no-silent-failure]
     ///
     /// [LAW:single-enforcer] Every reader resolves a region here, so a display id or a
     /// window id means one rectangle whichever reader was asked. What a reader then does
     /// with it - a capture clipping it to one display - is that reader's own business.
     @MainActor
-    func bounds() throws -> ScreenRect {
+    func bounds(on layout: DisplayLayout) throws -> ScreenRect {
         switch self {
         case .rect(let rect):
-            // A rectangle on no display has nothing in it to read, and a reader that walked
-            // it would report a blank screen. [LAW:no-silent-failure]
-            guard try Geometry.displays().contains(where: { $0.frame.intersects(rect) }) else { throw NoSuchPlace.offScreen(rect) }
+            // A rectangle no active display shows has nothing in it to read, and a reader
+            // that walked it would report a blank screen. [LAW:no-silent-failure]
+            guard layout.active.frames.contains(where: { $0.intersects(rect) }) else { throw NoSuchPlace.offScreen(rect) }
             return rect
         case .display(let id):
-            // The listing `eyes displays` prints, so an id it did not list is refused here.
-            guard let display = try Geometry.displays().first(where: { $0.id == id }) else { throw NoSuchPlace.display(id) }
-            return display.frame
+            // The displays `eyes displays` lists, so an id it did not list is refused here.
+            guard let display = layout.displays.first(where: { $0.id == id && $0.active }) else { throw NoSuchPlace.display(id) }
+            return display.bounds
         case .window(let id):
             guard let window = try Geometry.onScreen().windows.first(where: { $0.id == id }) else {
                 throw NoSuchPlace.window(id)
@@ -28,20 +30,21 @@ public extension Region {
         case .front(let front):
             // Its display, as `.display` is refused when detached; the windows read on it are
             // the front's owners, which each reader takes from its own window list.
-            return try Region.display(front.display).bounds()
+            return try Region.display(front.display).bounds(on: layout)
         case .page(let id, let frame):
             // The page goes with its window: a window closed since leaves no page to read.
             guard try Geometry.onScreen().windows.contains(where: { $0.id == id }) else { throw NoSuchPlace.window(id) }
             // On a display, as any rectangle must be: a wait reads it as one from then on.
-            return try Region.rect(frame).bounds()
+            return try Region.rect(frame).bounds(on: layout)
         }
     }
 }
 
-/// The rectangle a region names, or a refusal: `Region.bounds` wherever the screen is real.
-public typealias Locate = @MainActor @Sendable (Region) throws -> ScreenRect
+/// The rectangle a region names on a layout, or a refusal: `Region.bounds` wherever the
+/// screen is real.
+public typealias Locate = @MainActor @Sendable (Region, DisplayLayout) throws -> ScreenRect
 
-/// One attached display, as a caller needs it to aim: the id `Region.display` names, and
+/// One active display, as a caller needs it to aim: the id `Region.display` names, and
 /// where it sits in the one screen space.
 public struct Display: Sendable, Hashable {
     public let id: CGDirectDisplayID
@@ -62,29 +65,17 @@ public struct Display: Sendable, Hashable {
 }
 
 public extension Geometry {
-    /// The shape of `CGGetActiveDisplayList`: room for so many ids, where to put them, and how
-    /// many there are.
-    typealias DisplayList = (UInt32, UnsafeMutablePointer<CGDirectDisplayID>?, UnsafeMutablePointer<UInt32>?) -> CGError
-
-    /// Every active display, main first - sorted so, because under mirroring the display
-    /// list puts the largest drawable display first, not the main one. One reading for every caller, so the displays `eyes displays` lists are the
-    /// ones a region is checked against. [LAW:one-source-of-truth] A list the window server
-    /// would not give is said, never taken for no display active. [LAW:no-silent-failure]
-    ///
-    /// `list` is the window server's `CGGetActiveDisplayList`, or a test's.
-    static func displays(list: DisplayList = CGGetActiveDisplayList) throws(CannotReadDisplays) -> [Display] {
-        var count: UInt32 = 0
-        var error = list(0, nil, &count)
-        guard error == .success else { throw CannotReadDisplays(error: error) }
-        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
-        error = list(count, &ids, &count)
-        guard error == .success else { throw CannotReadDisplays(error: error) }
-        return ids.prefix(Int(count)).map { id in
+    /// The layout's active displays - the ones a capture shows - main first: sorted so,
+    /// because under mirroring the display list puts the largest drawable display first, not
+    /// the main one. [LAW:one-source-of-truth] The displays `eyes displays` lists are the
+    /// ones a region is checked against, from the one layout a look read.
+    static func displays(of layout: DisplayLayout) -> [Display] {
+        layout.displays.filter(\.active).map { display in
             // Both widths from the mode, which is unrotated; the bounds are rotated, and a
             // portrait display divided by them reads 1.78x instead of 1x.
-            let mode = CGDisplayCopyDisplayMode(id)
+            let mode = CGDisplayCopyDisplayMode(display.id)
             return Display(
-                id: id, frame: ScreenRect(CGDisplayBounds(id)), isMain: CGDisplayIsMain(id) != 0,
+                id: display.id, frame: display.bounds, isMain: CGDisplayIsMain(display.id) != 0,
                 scale: mode.flatMap { $0.width > 0 ? Double($0.pixelWidth) / Double($0.width) : nil })
         }.sorted { $0.isMain && !$1.isMain }
     }
@@ -99,7 +90,7 @@ public enum NoSuchPlace: Error, CustomStringConvertible {
 
     public var description: String {
         switch self {
-        case .offScreen(let r): "\(r) is on no display, so there is nothing there to read"
+        case .offScreen(let r): "\(r) is on no active display, so there is nothing there to read"
         case .pointOffScreen(let p): "\(p) is on no display, so a click there hits nothing"
         case .display(let id): "no display with id \(id) is attached"
         case .window(let id): "no on-screen window has id \(id); `look` with no arguments, or `eyes windows`, lists the ones that do"
@@ -110,13 +101,13 @@ public enum NoSuchPlace: Error, CustomStringConvertible {
 public extension Array where Element == Found {
     /// Top to bottom, then left to right. Neither reader's own order is reading order:
     /// Vision put a menu's third item after the window title below it, and the tree walks
-    /// containers before what they contain. A run belongs to the line above it while its
-    /// centre falls inside that line's first run; a fixed grid split one menu bar in two,
-    /// because its items do not share a baseline to the point.
+    /// containers before what they contain. A run belongs to the line above it while the
+    /// point it is pressed at falls inside that line's first run; a fixed grid split one
+    /// menu bar in two, because its items do not share a baseline to the point.
     var inReadingOrder: [Found] {
         var lines: [[Found]] = []
-        for run in sorted(by: { $0.frame.centre.y < $1.frame.centre.y }) {
-            if let first = lines.last?.first, run.frame.centre.y < first.frame.y + first.frame.height {
+        for run in sorted(by: { $0.press.y < $1.press.y }) {
+            if let first = lines.last?.first, run.press.y - first.frame.y < first.frame.height {
                 lines[lines.count - 1].append(run)
             } else {
                 lines.append([run])

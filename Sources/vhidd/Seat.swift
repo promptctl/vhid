@@ -113,11 +113,11 @@ final class Seat: NSObject, HelperService, @unchecked Sendable {
         }
     }
 
-    /// Where the displays are in the session in front, four numbers each. Claims nothing,
-    /// like `cursor`.
+    /// The display layout in the session in front, as its wire record. Claims nothing, like
+    /// `cursor`.
     func displays(reply: @escaping ([NSNumber], Error?) -> Void) {
         do {
-            reply(try screen.displays().flatMap { [$0.minX, $0.minY, $0.width, $0.height].map { NSNumber(value: Double($0)) } }, nil)
+            reply(try screen.displays().fields.map { NSNumber(value: $0) }, nil)
         } catch {
             reply([], refusal(error))
         }

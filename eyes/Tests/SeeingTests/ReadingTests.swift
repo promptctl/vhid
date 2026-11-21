@@ -1,6 +1,8 @@
 import CoreGraphics
 import Testing
 @testable import Seeing
+import ScreenSpace
+import ScreenSpaceTesting
 
 /// What a reading can honestly claim, asked with no reader behind it.
 ///
@@ -8,7 +10,7 @@ import Testing
 /// "nothing matched" acts on it; a caller told that by a reader which saw nothing acts on
 /// a lie. [LAW:no-silent-failure]
 @Suite struct ReadingTests {
-    static let region = ScreenRect(x: 0, y: 0, width: 1512, height: 982)
+    static let region = try! ScreenRect(x: 0, y: 0, width: 1512, height: 982)
 
     private func reading(outcome: Outcome, examined: Int, reach: Reach) -> Reading {
         Reading(outcome: outcome, scope: Scope(region: Self.region, examined: examined, reach: reach))
@@ -17,9 +19,9 @@ import Testing
     private func found(_ text: String) -> Found {
         Found(
             text: Text(text)!,
-            frame: ScreenRect(x: 10, y: 20, width: 30, height: 40),
+            frame: try! ScreenRect(x: 10, y: 20, width: 30, height: 40),
             source: .pixels(confidence: Confidence(0.9)!)
-        )
+        , on: .vast)!
     }
 
     /// The whole point: a reader that got through the region and examined something, and
@@ -185,9 +187,9 @@ import Testing
     /// whose check found nothing to cut keeps the very value it had, and each row's hit
     /// tests and reason it went unchecked are summed.
     @Test func pressingChecksEveryPrintedRowAndCountsWhatItFound() {
-        let cut = ScreenRect(x: 12, y: 22, width: 20, height: 30)
+        let cut = try! ScreenRect(x: 12, y: 22, width: 20, height: 30)
         let press: (Found) -> Checked = {
-            switch $0.text.value { case "Allow": Checked(.narrowed(cut), calls: 9); case "Deny": Checked(.unchecked(.overTime), calls: 0)
+            switch $0.text.value { case "Allow": Checked(.narrowed(Found(text: $0.text, frame: cut, source: $0.source, on: .vast)!), calls: 9); case "Deny": Checked(.unchecked(.overTime), calls: 0)
             default: Checked(.kept, calls: 5) }
         }
         let near = reading(outcome: .nearest([Near(found: found("Allow"), distance: 1), Near(found: found("Deny"), distance: 2),
@@ -199,7 +201,7 @@ import Testing
         #expect(near.scope.boxes == Boxes(narrowed: 1, unchecked: [.overTime: 1], calls: 14))
         #expect(near.scope.boxes.unchecked == [.unanswered: 0, .elsewhere: 0, .overTime: 1])
         let matched = reading(outcome: .matched(Matches([found("Allow")])!), examined: 1, reach: .whole).pressing(press)
-        #expect(matched.outcome == .matched(Matches([Found(text: Text("Allow")!, frame: cut, source: found("Allow").source)])!))
+        #expect(matched.outcome == .matched(Matches([Found(text: Text("Allow")!, frame: cut, source: found("Allow").source, on: .vast)!])!))
         #expect(matched.scope.boxes == Boxes(narrowed: 1, calls: 9))
     }
 

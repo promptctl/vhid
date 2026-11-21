@@ -1,3 +1,5 @@
+import ScreenSpace
+
 /// Turning what a reader saw into a `Reading`: which candidates match, which are nearest
 /// when none do, and what the limit cut.
 ///
@@ -63,13 +65,20 @@ public extension Reading {
         let fitting = fits.filter { query.match.tolerates($0.fit.distance) }
         let cast = Dictionary(grouping: fitting) { query.role.cast($0.found) }
         let admitted = distinct(cast[.admitted] ?? [], by: \.found)
-        let matching = admitted.kept.flatMap { query.match.narrowing($0.found, by: $0.fit) }
+        // Narrowed stretches no display shows are counted, not answered. [LAW:no-silent-failure]
+        var unshown = 0
+        func narrowing(_ match: Match?, _ found: Found, by fit: Fit) -> [Found] {
+            let cut = match.narrowing(found, by: fit)
+            unshown += cut.unshown
+            return cut.rows
+        }
+        let matching = admitted.kept.flatMap { narrowing(query.match, $0.found, by: $0.fit) }
         // Absent `near` is one anchor everywhere at once: every match beside it, reading
         // order kept by the stable sort. Anchors are any text on screen, whatever its role.
         // [LAW:dataflow-not-control-flow]
         let nearFits = query.near.map { near in (near: near, fits: candidates.map { (found: $0, fit: near.fit($0)) }) }
         let anchors = nearFits.map { near, fits in
-            distinct(fits.filter { near.tolerates($0.fit.distance) }, by: \.found).kept.flatMap { near.narrowing($0.found, by: $0.fit) }
+            distinct(fits.filter { near.tolerates($0.fit.distance) }, by: \.found).kept.flatMap { narrowing(near, $0.found, by: $0.fit) }
         }
         // The rows a miss shows: the asked-for text's of the asked-for role, the anchor's of any.
         func misses(among pool: [(found: Found, fit: Fit)]) -> [Near] {
@@ -92,6 +101,7 @@ public extension Reading {
             : Matches(kept).map(Outcome.matched) ?? .nearest(misses(among: fits.filter { query.role.cast($0.found) == .admitted }))
         // Rows set aside for their role are things on screen too, each counted once.
         let set: [Exclusion] = [Exclusion(reason: .duplicate, count: admitted.dropped),
+                                Exclusion(reason: .unshown, count: unshown),
                                 Exclusion(reason: .otherRole, count: distinct(cast[.other] ?? [], by: \.found).kept.count),
                                 Exclusion(reason: .roleUnknown, count: distinct(cast[.unknown] ?? [], by: \.found).kept.count),
                                 Exclusion(reason: .ranked, count: cut)]
@@ -115,7 +125,13 @@ extension Optional where Wrapped == Match {
     /// [LAW:dataflow-not-control-flow]
     public func fit(_ found: Found) -> Fit { map { $0.fit(found) } ?? .drawn(0) }
     func tolerates(_ distance: Int) -> Bool { map { $0.tolerates(distance) } ?? true }
-    func narrowing(_ found: Found, by fit: Fit) -> [Found] { map { $0.narrowing(found, by: fit) } ?? [found] }
+    func narrowing(_ found: Found, by fit: Fit) -> Narrowed { map { $0.narrowing(found, by: fit) } ?? Narrowed(rows: [found], unshown: 0) }
+}
+
+/// A row narrowed to the stretches that match: the ones a display shows, and how many it does not.
+struct Narrowed {
+    let rows: [Found]
+    let unshown: Int
 }
 
 /// Which of a row's texts a match fits best, and how many edits off: its own text, or one of
@@ -191,15 +207,16 @@ extension Match {
     /// two share a word. `exact` matched the whole run and reports it whole, as does a
     /// match that only fits across the words' own spacing.
     /// A row matched by another of its element's texts answers whole: those words have no
-    /// place of their own to narrow to.
-    func narrowing(_ found: Found, by fit: Fit) -> [Found] {
+    /// place of their own to narrow to. A stretch is placed again on the row's displays, and
+    /// one no display shows is counted rather than answered.
+    func narrowing(_ found: Found, by fit: Fit) -> Narrowed {
         switch (self, fit) {
-        case (.exact, _), (_, .also): [found]
+        case (.exact, _), (_, .also): Narrowed(rows: [found], unshown: 0)
         case (.contains, .drawn), (.within, .drawn): narrowed(found)
         }
     }
 
-    private func narrowed(_ found: Found) -> [Found] {
+    private func narrowed(_ found: Found) -> Narrowed {
         let words = found.words
         let spans = words.indices.flatMap { start in words.indices[start...].map { start...$0 } }
             .filter { tolerates(distance(to: Text(joining: words[$0].map(\.text)).value)) }
@@ -209,9 +226,10 @@ extension Match {
             chosen.append(span)
         }
         let narrowed = chosen.sorted { $0.lowerBound < $1.lowerBound }.map { span in
-            Found(first: words[span.lowerBound], rest: Array(words[span].dropFirst()), source: found.source)
+            Found(first: words[span.lowerBound], rest: Array(words[span].dropFirst()), source: found.source, on: found.displays)
         }
-        return narrowed.isEmpty ? [found] : narrowed
+        let shown = narrowed.compactMap { $0 }
+        return chosen.isEmpty ? Narrowed(rows: [found], unshown: 0) : Narrowed(rows: shown, unshown: narrowed.count - shown.count)
     }
 
     func tolerates(_ distance: Int) -> Bool {

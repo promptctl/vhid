@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import Helper
 import Input
+import ScreenSpace
 import Installations
 import Keystrokes
 import Pointing
@@ -126,19 +127,14 @@ struct Devices {
     static func cursor(_ helper: HelperConnection, on queue: DeviceQueue) -> @Sendable () async throws -> ScreenPoint {
         {
             let at = try await queue.run { try helper.cursor() }
-            guard let point = ScreenPoint(x: at.x, y: at.y) else { throw CursorUnreadable() }
-            return point
+            do throws(NotAPlace) { return try ScreenPoint(x: at.x, y: at.y) } catch { throw CursorUnreadable(cause: error) }
         }
     }
 
-    /// The displays as the daemon reads them, in the session in front, for the reason the
-    /// cursor is read there. [LAW:single-enforcer] Every move reads them here.
+    /// The online displays as the daemon reads them, in the session in front, for the reason
+    /// the cursor is read there. [LAW:single-enforcer] Every act reads them here, once.
     static func displays(_ helper: HelperConnection, on queue: DeviceQueue) -> @Sendable () async throws -> Displays {
-        {
-            let frames = try await queue.run { try helper.displays() }
-            guard let displays = Displays(frames: frames) else { throw DisplaysUnreadable(frames: frames) }
-            return displays
-        }
+        { try await queue.run { try helper.displays() }.online }
     }
 }
 

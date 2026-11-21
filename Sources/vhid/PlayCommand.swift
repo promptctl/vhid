@@ -1,6 +1,7 @@
 import ArgumentParser
 import Foundation
 import Input
+import ScreenSpace
 
 /// Replays a script of keyboard and mouse acts at fixed times, and says when each report
 /// went out.
@@ -33,12 +34,12 @@ struct PlayCommand: AsyncParsableCommand {
     }
 
     /// A script's text as what the player sends, refused whole or not at all.
-    static func schedule(_ text: String) throws -> Schedule {
+    static func schedule(_ text: String) throws -> Schedule<ScreenPoint> {
         try Schedule(Play.parse(text))
     }
 
     /// The verb itself, over devices from anywhere. [LAW:decomposition]
-    static func play(_ schedule: Schedule, with devices: Devices) async throws -> Played {
+    static func play(_ schedule: Schedule<ScreenPoint>, with devices: Devices) async throws -> Played {
         try await Player(pointer: devices.pointer, keyboard: devices.keyboard, wall: epochMicroseconds, lead: lead).play(schedule)
     }
 
@@ -51,15 +52,8 @@ struct PlayCommand: AsyncParsableCommand {
     /// stoppage to provoke. Here it is a property of the value: a stopped play carries no
     /// `Played`, so there is no done line to be made and no path that makes one.
     ///
-    /// **`finished` holds a play that sent something, and the type system is what says
-    /// so.** `Played`'s initialiser is internal to `Input`, so the only one this target
-    /// can hold is one `Player.play` returned, and a `Schedule` carries at least one report by
-    /// construction - which is the precondition `Lateness` documents and relies on. There
-    /// is therefore no guard here against an empty finished play: it cannot be spelled
-    /// from outside `Input`, and a guard would have to invent a meaning for a done line
-    /// with no lateness in it. [LAW:no-defensive-null-guards] [LAW:comments-carry-meaning]
-    /// A test reaching through `@testable import Input` can of course build one, and that
-    /// is the test stepping outside the guarantee rather than the guarantee being weak.
+    /// A finished play may have sent no report: a script whose at lines all sat within a
+    /// count of the cursor sends none. Its done line then has no `late_us`.
     enum Ending {
         case finished(Played)
         case stopped([Played.Report])
@@ -163,7 +157,8 @@ struct PlayCommand: AsyncParsableCommand {
         struct Done: Encodable {
             let reports: Int
             let startReports: Int
-            let lateUs: Lateness
+            /// Absent for a play that sent no report.
+            let lateUs: Lateness?
         }
     }
 }

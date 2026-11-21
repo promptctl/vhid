@@ -165,10 +165,11 @@ enum Help {
     /// What a box does to a pointer verb, said once for all four. [LAW:one-source-of-truth]
     static let aim = """
         Given a point, it presses that point. Given a box - the one eyes prints beside each \
-        point - it presses a point drawn inside it, spread about the centre as a person's clicks \
-        spread on a target and never within \(Int(Target.margin)) points of its edge, or at its centre \
-        when a side is too narrow for that, and the move \
-        takes as long as a hand's would to a target that size.
+        point - it presses a point drawn inside the largest part of it one display shows, spread \
+        about that part's centre as a person's clicks spread on a target and never within \
+        \(Int(PlacedTarget.margin)) points of its edge, or at its centre when a side is too narrow \
+        for that, and the move takes as long as a hand's would to a target that size. A point or \
+        box no display shows is refused, saying it is on no display.
         """
 
     static let script = "the script, as JSON Lines: the start line, then one act a line"

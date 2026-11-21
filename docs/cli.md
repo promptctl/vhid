@@ -80,10 +80,14 @@ left of or above it has negative ones, which follow `--` after every option:
 
 `click`, `move`, `scroll` and `drag` take each place as a point, two numbers `x y`, or as a
 box, one word `x,y,width,height`: the box `look` prints beside each point. A point is
-pressed where it is. In a box, the pointer lands on a point drawn inside it, spread about
-the centre as a person's clicks spread on a button and never within 2 points of its edge
-(a side too narrow for that is aimed at its centre, and one under a point is refused),
-and the move there takes as long as Fitts' law says a hand's would to a target that size.
+pressed where it is. In a box, the pointer lands on a point drawn inside the largest part
+of it one display shows, spread about that part's centre as a person's clicks spread on a
+button and never within 2 points of its edge (a side too narrow for that is aimed at its
+centre), and the move there takes as long as Fitts' law says a hand's would to a target
+that size. A point no display holds, or a box no display shows a part of a point or more a
+side, is refused, saying it is on no display, by `click`, `move`, `scroll`, `drag` and
+`play` alike: nothing is moved to an edge without a word. A display asleep still holds the
+cursor, so it counts.
 The MCP tools take `box` in place of `x` and `y`, and `drag`'s `from` and `to` take the
 box as a string. [design/human.md](design/human.md#where-a-click-lands) has the model.
 
@@ -125,9 +129,9 @@ A verb that opens the devices records `attributes.seed`, the hex seed every poin
 it makes and every key it times is drawn from, and `attributes.paths` has one entry for each such move, in order,
 the move a failed verb stopped in included: `from` is where the cursor was when it began,
 `aimed` the point it aimed at, `x` and `y`, drawn inside the box from there when it was
-given one, `box` that box as `x,y,width,height` (absent
-for a point), `fitts_width` the target width its time was
-read from (the box's smaller side, or 20 for a point), `landed` where the cursor was read
+given one, `box` that box as `x,y,width,height` and `shown` the part of it the aim was drawn inside
+(both absent for a point), `fitts_width` the target width its time was
+read from (the shown part's smaller side, or 20 for a point), `landed` where the cursor was read
 when it landed, absent for a move that stopped first, `planned_ms` is how long its trajectory was
 drawn to take, `structure` how it was built (`direct`, `undershoot`, `overshoot` or
 `two_corrections`), `bow` its drawn curve as a fraction of the distance, away from the

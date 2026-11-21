@@ -1,6 +1,8 @@
 import Seeing
 import Testing
 @testable import EyesVerbs
+import ScreenSpace
+import ScreenSpaceTesting
 
 /// The sentence the binary prints before its rows, asked with no screen behind it.
 ///
@@ -10,7 +12,7 @@ import Testing
 /// one, so what the sentence claims is a contract and is tested like one.
 @Suite struct WindowsCommandTests {
     private func window(id: UInt32 = 1, owner: String = "Safari", layer: Int = 0) -> Window {
-        Window(id: id, owner: owner, pid: 400, frame: ScreenRect(x: 0, y: 33, width: 1512, height: 949), layer: layer)
+        Window(id: id, owner: owner, pid: 400, frame: try! ScreenRect(x: 0, y: 33, width: 1512, height: 949), layer: layer)
     }
 
     /// Nothing filtered and nothing excluded says so by saying nothing extra: the counted
@@ -29,11 +31,11 @@ import Testing
     /// and the Dock at 20 sit above its window, and a row of it is marked wherever it falls.
     @Test func theFrontmostApplicationsRowsAreMarkedByPidNotPosition() {
         let rows = [
-            Window(id: 9, owner: "Safari", pid: 400, frame: ScreenRect(x: 10, y: 0, width: 200, height: 300), layer: 101),
-            Window(id: 8, owner: "Dock", pid: 90, frame: ScreenRect(x: 0, y: 900, width: 1512, height: 82), layer: 20),
-            Window(id: 7, owner: "Window Server", pid: 91, frame: ScreenRect(x: 0, y: 0, width: 1512, height: 33), layer: 24),
-            Window(id: 2, owner: "Finder", pid: 401, frame: ScreenRect(x: 0, y: 33, width: 800, height: 600), layer: 0),
-            Window(id: 1, owner: "Safari", pid: 400, frame: ScreenRect(x: 0, y: 33, width: 1512, height: 949), layer: 0),
+            Window(id: 9, owner: "Safari", pid: 400, frame: try! ScreenRect(x: 10, y: 0, width: 200, height: 300), layer: 101),
+            Window(id: 8, owner: "Dock", pid: 90, frame: try! ScreenRect(x: 0, y: 900, width: 1512, height: 82), layer: 20),
+            Window(id: 7, owner: "Window Server", pid: 91, frame: try! ScreenRect(x: 0, y: 0, width: 1512, height: 33), layer: 24),
+            Window(id: 2, owner: "Finder", pid: 401, frame: try! ScreenRect(x: 0, y: 33, width: 800, height: 600), layer: 0),
+            Window(id: 1, owner: "Safari", pid: 400, frame: try! ScreenRect(x: 0, y: 33, width: 1512, height: 949), layer: 0),
         ]
         let lines = Windows.report(WindowListing(windows: rows, excluded: []), owner: nil,
                                    frontmost: Front.App(pid: 400, name: "Safari")).split(separator: "\n")
@@ -118,7 +120,7 @@ import Testing
     /// The layer is on every row, because it is the one fact that tells an open menu from
     /// an ordinary window and the tool no longer decides which of those a caller meant.
     @Test func theRowCarriesTheLayerAndTheCoordinatesVhidClicks() throws {
-        let frame = ScreenRect(x: 160, y: 33, width: 723, height: 949)
+        let frame = try! ScreenRect(x: 160, y: 33, width: 723, height: 949)
         let row = Windows.row(Window(id: 104, owner: "System Settings", pid: 400, frame: frame, layer: 101))
         #expect(row == "104\tSystem Settings\tL101\t160,33,723,949")
         #expect(try printedRects(row) == [frame])
@@ -132,7 +134,7 @@ import Testing
             id: 7,
             owner: nil,
             pid: 400,
-            frame: ScreenRect(x: 0, y: 0, width: 100, height: 50),
+            frame: try! ScreenRect(x: 0, y: 0, width: 100, height: 50),
             layer: 0
         ))
         #expect(row == "7\t(unnamed)\tL0\t0,0,100,50")

@@ -15,12 +15,14 @@ import TelemetryTesting
 import TestClock
 import Testing
 @testable import vhid
+import ScreenSpace
+import ScreenSpaceTesting
 
 /// Every invocation leaves one record, however it ends, and the record carries what the
 /// verb decided. Driven through `Devices.using` over a real XPC connection to a far end of
 /// the test's own, because that is where the reports are counted. [LAW:behavior-not-structure]
 @Suite(.eventsKept) struct InvocationTests {
-    static let at = ScreenPoint(x: 40, y: 30)!
+    static let at = try! ScreenPoint(x: 40, y: 30)
 
     /// `body` against a far end that acknowledges every act until `after` of them.
     private static func against<T: Sendable>(acknowledging after: Int = .max, _ body: (Devices) async throws -> T) async throws -> T {
@@ -99,7 +101,7 @@ import Testing
         #expect(paths[0].filter { !["bow", "halfway"].contains($0.key) }.compactMapValues { $0 as? Double } == ["fitts_width": 20, "planned_ms": 0, "ends_kept": 1, "bow_kept": 1, "steered_reports": 0, "closing_reports": 0, "lost_reports": 0])
         // The bow and speed profile it drew: the pointer's randomness is seed 1, and the move is its first draw.
         var generator = SeededGenerator(seed: 1)
-        let drawn = Trajectory(from: Self.at, toward: .point(Self.at), within: .vast, drawing: &generator)
+        let drawn = Trajectory(from: Self.at, toward: try! Target.point(Self.at).placed(on: .vast), drawing: &generator)
         #expect(paths[0]["bow"] as? Double == drawn.bow)
         #expect(paths[0]["halfway"] as? Double == drawn.halfway)
         // A point is aimed at exactly, from where the cursor was, and read back there when it landed.
@@ -159,15 +161,16 @@ import Testing
     }
 
     /// A move the cursor never follows throws, and its record still carries the move: the box
-    /// it was given and the point drawn inside it, every steered report given up on, and the
-    /// closing loop's reports up to the stall that stopped it, and no landing. The error
-    /// names the box too. Through the pointer `Devices` opens, which is where moves are recorded.
+    /// it was given, hanging off the top of the display, the part the display shows and the
+    /// point drawn inside that part, every steered report given up on, and the closing loop's
+    /// reports up to the stall that stopped it, and no landing. The error names the box too.
+    /// Through the pointer `Devices` opens, which is where moves are recorded.
     @Test func aMoveThatWouldNotReachIsRecordedWithItsPath() async throws {
         let collected = Collected()
         let thrown = await #expect(throws: (any Error).self) {
             try await Self.mcp("move", into: collected) {
                 // The far end's cursor is always at (0, 0).
-                try await Self.against { try await MoveCommand.move(to: .box(ScreenRect(x: 30, y: -5, width: 20, height: 10)!), with: $0.pointer) }
+                try await Self.against { try await MoveCommand.move(to: .box(try! ScreenRect(x: 30, y: -5, width: 20, height: 10)), with: $0.pointer) }
             }
         }
         #expect(thrown.map { "\($0)".contains("drawn inside the box 30,-5,20,10") } == true, "\(String(describing: thrown))")
@@ -184,12 +187,13 @@ import Testing
         #expect(paths[0]["steered_reports"].map { $0 > 0 } == true)
         #expect(paths[0]["lost_reports"] == paths[0]["steered_reports"])
         #expect(paths[0]["closing_reports"] == Double(Pointer.stalls))
-        #expect(paths[0]["fitts_width"] == 10)
+        #expect(paths[0]["fitts_width"] == 5)
         #expect(recorded[0]["box"] as? [Double] == [30, -5, 20, 10])
+        #expect(recorded[0]["shown"] as? [Double] == [30, 0, 20, 5])
         #expect(recorded[0]["from"] as? [Double] == [0, 0])
         #expect(Set(["direct", "undershoot", "overshoot", "two_corrections"]).contains(recorded[0]["structure"] as? String ?? ""))
         let aimed = try #require(recorded[0]["aimed"] as? [Double])
-        #expect((32 ... 48).contains(aimed[0]) && (-3 ... 3).contains(aimed[1]), "\(aimed)")
+        #expect((32 ... 48).contains(aimed[0]) && (0 ... 5).contains(aimed[1]), "\(aimed)")
         #expect(recorded[0]["landed"] == nil)
     }
 

@@ -4,6 +4,8 @@ import Foundation
 import MCP
 import Testing
 @testable import vhid
+import ScreenSpace
+import ScreenSpaceTesting
 
 /// The command line and the MCP tool list, read as a user of each sees them and put side
 /// by side: a verb on both has one name, one set of arguments, and one description.

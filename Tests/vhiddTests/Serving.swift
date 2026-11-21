@@ -1,5 +1,7 @@
 import Foundation
 @testable import vhidd
+import ScreenSpace
+import ScreenSpaceTesting
 
 extension Readiness {
     /// Readiness whose one attempt brought `devices` up, as a seat finds it once vhidd serves.
@@ -33,7 +35,7 @@ final class RecordingDevices: NSObject, ServedDevices, @unchecked Sendable {
 /// never read it.
 struct FixedScreen: ScreenSource {
     var at = (x: 12.5, y: 40.0)
-    var frames = [CGRect(x: 0, y: 0, width: 1920, height: 1080)]
+    var layout = DisplayLayout.at(try! ScreenRect(x: 0, y: 0, width: 1920, height: 1080))
     func cursor() throws -> (x: Double, y: Double) { at }
-    func displays() throws -> [CGRect] { frames }
+    func displays() throws -> DisplayLayout { layout }
 }

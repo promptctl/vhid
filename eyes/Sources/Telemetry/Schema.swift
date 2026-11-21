@@ -138,5 +138,9 @@ extension Telemetry {
         /// reason there is named, zeros included.
         case excluded
         case boxesUnchecked = "boxes_unchecked"
+        /// How a recording ended, and what it left out of the script, by what: every kind
+        /// named, zeros included.
+        case ending
+        case leftOut = "left_out"
     }
 }

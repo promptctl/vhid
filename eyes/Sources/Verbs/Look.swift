@@ -1,6 +1,8 @@
 import AppKit
 import ArgumentParser
 import CoreGraphics
+import DisplayReading
+import ScreenSpace
 import Seeing
 import Grants
 import Pixels
@@ -65,7 +67,7 @@ extension SourceKind: ExpressibleByArgument {
         switch self {
         case .tree: TreeReader(granted: Self.granted)
         case .pixels: PixelReader(granted: Self.granted, hit: TreeReader.hit)
-        case .merged: MergedReader(TreeReader(granted: Self.granted), PixelReader(granted: Self.granted, hit: TreeReader.hit), locate: { try $0.bounds() })
+        case .merged: MergedReader(TreeReader(granted: Self.granted), PixelReader(granted: Self.granted, hit: TreeReader.hit), locate: { try $0.bounds(on: $1) })
         }
     }
 
@@ -201,8 +203,11 @@ public struct Where: ParsableArguments {
         return limit
     }
 
+    /// A box with area: one with none has nothing in it to read.
     private static func parsedRect(_ spelled: String, as s: Spelling) throws -> ScreenRect {
-        guard let rect = ScreenRect(spelled: spelled) else { throw ValidationError("\(s("rect")) wants \(ScreenRect.spelling) - got \(spelled)") }
+        guard let rect = ScreenRect(spelled: spelled), !rect.isEmpty else {
+            throw ValidationError("\(s("rect")) wants a box with area, \(ScreenRect.spelling) - got \(spelled)")
+        }
         return rect
     }
 }
@@ -240,7 +245,7 @@ enum Report {
             reach(s.reach),
             reading.outcome.misses.isEmpty ? nil : "nearest follow",
         ]
-        return clauses.compactMap { $0 }.joined(separator: "; ") + ". Each row's point is its centre and its box holds it, x,y,width,height, in vhid click coordinates."
+        return clauses.compactMap { $0 }.joined(separator: "; ") + ". Each row's point is where a click presses it, inside its box, the part of it a display shows, x,y,width,height, in vhid click coordinates."
     }
 
     /// What checking the boxes did, when it did anything: a box cut is a row whose frame the
@@ -262,7 +267,7 @@ enum Report {
         }
     }
 
-    /// One run per row: the centre a click lands on, the box around the run, the text,
+    /// One run per row: the point a click presses it at, the part of it a display shows, the text,
     /// and what it is - the role the tree gave it, or `pixels` for text only the pixels
     /// reader saw, which has none - then what else its element says in words, each after the
     /// attribute that says it: a "+" button's `description Add`. The nearest rows add, before those,
@@ -277,9 +282,7 @@ enum Report {
     /// The columns every row has in the same place - `then`, a near miss's distance, among
     /// them - before the element's other words, however many it says.
     private static func row(_ found: Found, then: [String] = []) -> String {
-        let at = clickPoint(found.frame.centre)
-        // The point as every point is spelled, which a frame too large or not finite cannot trap.
-        return (["\(ScreenPoint(x: at.x, y: at.y))", "\(box(found.frame, holding: at))", spelled(found.text.value), found.source.role?.rawValue ?? "pixels"]
+        (["\(found.press)", "\(found.frame)", spelled(found.text.value), found.source.role?.rawValue ?? "pixels"]
             + then + found.source.also.map { "\($0.attribute.rawValue) \(spelled($0.text.value))" }).joined(separator: "\t")
     }
 
@@ -301,16 +304,6 @@ enum Report {
             length += 1
         }
         return line
-    }
-
-    /// The whole point a click is sent to: the frame's centre, rounded.
-    private static func clickPoint(_ p: ScreenPoint) -> CGPoint { CGPoint(x: p.x.rounded(), y: p.y.rounded()) }
-
-    /// The frame grown to cover the cell of the point printed beside it. The rounded point
-    /// can fall past the frame's right or bottom edge, which half-open containment counts as
-    /// outside, so the point is covered by construction rather than by luck of the rounding.
-    private static func box(_ frame: ScreenRect, holding at: CGPoint) -> ScreenRect {
-        ScreenRect(frame.cgRect.union(CGRect(origin: at, size: CGSize(width: 1, height: 1))))
     }
 
     private static func wanted(_ match: Match) -> String {
@@ -567,6 +560,6 @@ extension Desk {
             Desk.Running(app: Front.App(pid: $0.processIdentifier, name: $0.localizedName), regular: $0.activationPolicy == .regular)
         }
         return Desk(frontmost: frontmost, own: Front.Passed(holder: holder, among: apps), running: running,
-                    listing: try Geometry.onScreen(), displays: try Geometry.displays())
+                    listing: try Geometry.onScreen(), displays: Geometry.displays(of: try DisplayReading.layout()))
     }
 }

@@ -2,6 +2,7 @@ import struct EyesVerbs.ArgumentRefused
 import Input
 import MCP
 import Pointing
+import ScreenSpace
 import enum Seeing.SourceKind
 import enum Seeing.Until
 
@@ -166,7 +167,7 @@ extension Parameter where Taken == Target {
             if let box = $0.stringValue { return ScreenRect(spelled: box).map(Target.box) }
             guard let object = $0.objectValue, Set(object.keys) == ["x", "y"],
                   let x = object["x"]?.number, let y = object["y"]?.number else { return nil }
-            return ScreenPoint(x: x, y: y).map(Target.point)
+            return (try? ScreenPoint(x: x, y: y)).map(Target.point)
         }
     }
 }

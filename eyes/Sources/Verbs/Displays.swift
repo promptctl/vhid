@@ -1,4 +1,5 @@
 import ArgumentParser
+import DisplayReading
 import Seeing
 import Foundation
 
@@ -14,7 +15,7 @@ public struct Displays: AsyncParsableCommand {
     )
 
     public func run() async throws {
-        print(Self.report(try Geometry.displays()))
+        print(Self.report(Geometry.displays(of: try DisplayReading.layout())))
     }
 
     /// The scope line and a row per display: what the verb prints and what the MCP tool

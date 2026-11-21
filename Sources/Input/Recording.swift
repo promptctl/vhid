@@ -2,6 +2,7 @@ import Foundation
 import KeyboardLayouts
 import Keystrokes
 import Pointing
+import ScreenSpace
 
 /// One event as the session tap delivered it, reduced to what a recording reads: when,
 /// from which device, where the cursor was, and what happened.
@@ -48,8 +49,11 @@ public struct Recorder {
     /// them is vhid's, not the person's.
     public var vhid: Set<UInt64>
     public let start: ScreenPoint
-    /// Whether a point is on a screen's edge, where motion can be stopped short.
-    private let atEdge: @Sendable (ScreenPoint) -> Bool
+    /// The online displays, as the window server last said they were: replaced, never read
+    /// here, when it says the layout changed. Every point the recorder writes is placed on
+    /// them as it is written, by the rule `vhid play` places it by, so a recording holds no
+    /// line its play refuses on the layout it was recorded on. [LAW:single-enforcer]
+    public var displays: Displays
 
     private var lines: [Line]
     /// Keys the person holds, modifiers apart.
@@ -68,6 +72,9 @@ public struct Recorder {
 
     /// Key presses with no usage, fn above all, left out of the recording.
     public private(set) var unmapped = 0
+    /// Motion of the person's that, written, no display held - the cursor where vhid's own
+    /// motion was taken out of it - left out of the recording.
+    public private(set) var offDisplays = 0
     /// Motion of vhid's that ended on a screen edge, after which the offset may be wrong.
     public private(set) var vhidAtEdge = 0
 
@@ -85,14 +92,29 @@ public struct Recorder {
 
     /// A recording from `start`, with the session's modifier `flags` as they were then:
     /// the first keys line, at 0, is the modifiers already down. vhid holds nothing then,
-    /// because recording refuses to start while it holds the devices.
-    public init(start: ScreenPoint, flags: UInt64, vhid: Set<UInt64>, atEdge: @escaping @Sendable (ScreenPoint) -> Bool) {
-        self.start = start
+    /// because recording refuses to start while it holds the devices. A start that, written,
+    /// no display holds is refused: a play of it would be.
+    public init(start: ScreenPoint, flags: UInt64, vhid: Set<UInt64>, displays: Displays) throws(Unplaced) {
+        self.start = try displays.place(Self.written(start)).value
         self.vhid = vhid
-        self.atEdge = atEdge
+        self.displays = displays
         session = Self.modifiers(in: flags)
         last = start
         lines = [.keys(.zero, session)]
+    }
+
+    /// A point as a script line writes it: each coordinate to a thousandth, as `number` spells it.
+    static func written(_ point: ScreenPoint) -> ScreenPoint {
+        // A thousandth of a finite coordinate is finite.
+        try! ScreenPoint(x: (point.x * 1000).rounded() / 1000, y: (point.y * 1000).rounded() / 1000)
+    }
+
+    /// Whether `point` is on a display and less than a point from one of its edges, where
+    /// motion can be stopped short.
+    private func atEdge(_ point: ScreenPoint) -> Bool {
+        displays.frames.contains { frame in
+            frame.contains(point) && min(point.x - frame.x, point.y - frame.y, frame.x + frame.width - point.x, frame.y + frame.height - point.y) <= 1
+        }
     }
 
     /// Takes one event, writing a line when it changed what the person holds or where
@@ -167,7 +189,14 @@ public struct Recorder {
         case .flagsChanged(_, let flags):
             session = Self.modifiers(in: flags)
         case .motion:
-            lines.append(.at(event.at, ScreenPoint(x: event.location.x - offset.x, y: event.location.y - offset.y) ?? event.location))
+            // Placed as it is written, so a line is one a play takes. [LAW:no-silent-failure]
+            // One no display holds is left out and counted.
+            do {
+                let point = try displays.place(Self.written(try ScreenPoint(x: event.location.x - offset.x, y: event.location.y - offset.y)))
+                lines.append(.at(event.at, point.value))
+            } catch {
+                offDisplays += 1
+            }
         case .buttonDown(let button):
             buttons.insert(button)
             lines.append(.buttons(event.at, buttons))

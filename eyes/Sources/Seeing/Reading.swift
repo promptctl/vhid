@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import ScreenSpace
 
 /// The most findings one reading may return, which is always at least one.
 ///
@@ -292,9 +293,13 @@ public struct Exclusion: Sendable, Hashable {
     public enum Reason: String, Sendable, Hashable, CaseIterable {
         /// No text on it at all.
         case wordless
-        /// Zero-sized, offscreen, outside the region asked for, or outside what holds it - a
-        /// row scrolled out of its list.
+        /// Zero-sized, outside the region asked for, or outside what holds it - a row scrolled
+        /// out of its list.
         case unplaced
+        /// Text read where no active display shows a part of it a point or more a side - on a
+        /// display asleep, or off every display - so nothing a look prints presses it, and the
+        /// region was not read whole.
+        case unshown
         /// An area holding other elements - a window, a group, a list - whose text names the
         /// area. Its centre is on whatever sits there, not on the words.
         case area
@@ -334,7 +339,7 @@ public struct Exclusion: Sendable, Hashable {
         /// [LAW:single-enforcer] Every reader's reach is decided here.
         public var leavesUnread: Bool {
             switch self {
-            case .unanswered, .unwalked, .overlaid, .roleUnknown: true
+            case .unanswered, .unwalked, .overlaid, .roleUnknown, .unshown: true
             case .wordless, .unplaced, .area, .covered, .duplicate, .ranked, .outside, .otherRole: false
             }
         }
@@ -421,7 +426,7 @@ public extension Reading {
             calls += checked.calls
             switch checked.pressed {
             case .kept: return found
-            case .narrowed(let frame): narrowed += 1; return Found(text: found.text, frame: frame, source: found.source)
+            case .narrowed(let cut): narrowed += 1; return cut
             case .unchecked(let why): unchecked[why, default: 0] += 1; return found
             }
         }

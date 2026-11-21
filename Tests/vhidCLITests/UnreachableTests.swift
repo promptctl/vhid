@@ -7,6 +7,8 @@ import TestClock
 import Testing
 @testable import Helper
 @testable import vhid
+import ScreenSpace
+import ScreenSpaceTesting
 
 /// What a verb says when the daemon could not be reached or would not serve it: the service
 /// it dialled, which link failed, and a held key or button only when one could be.
@@ -53,7 +55,7 @@ import Testing
         func status(reply: @escaping (NSNumber?, Error?) -> Void) { respond { reply(nil, $0) } }
         func lastFailure(reply: @escaping (String?, Date?) -> Void) { reply(nil, nil) }
         func cursor(reply: @escaping (Double, Double, Error?) -> Void) { respond { reply(0, 0, $0) } }
-        func displays(reply: @escaping ([NSNumber], Error?) -> Void) { reply([0, 0, 1920, 1080].map { NSNumber(value: $0) }, nil) }
+        func displays(reply: @escaping ([NSNumber], Error?) -> Void) { reply([1, 0, 0, 1920, 1080, 1].map { NSNumber(value: $0) }, nil) }
 
         func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
             guard case .refusing = answer else { return false }
@@ -70,7 +72,7 @@ import Testing
     /// What `vhid type ab` against `far` says, and what `vhid click` at the cursor says,
     /// each against a far end of its own so neither counts the other's acts.
     private static func said(_ far: FarEnd) async -> (typed: String, clicked: String) {
-        let at = ScreenPoint(x: 5, y: 5)!
+        let at = try! ScreenPoint(x: 5, y: 5)
         let typed = await failure(against: far) { try await TypeCommand.type("ab", on: VerbTests.us, into: .anywhere, with: $0.typist, front: $0.front) }
         let clicked = await failure(against: far) {
             try await ClickCommand.click(at: .point(at), button: .left, times: .single, holding: .none, with: Pointer(mouse: $0.mouse, cursor: { at }, displays: { .vast }, clock: ManualClock(), randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in }), $0.keyboard)
@@ -107,7 +109,7 @@ import Testing
     @Test func aServiceNobodyHoldsIsNamedAndNoKeyIsClaimedHeld() async {
         let unreachable = "no launchd job answers \(Self.far) (NSCocoaErrorDomain 4099): vhidd is not installed or not loaded"
         func helper() -> HelperConnection { HelperConnection(connection: Unanswered(), service: Self.far, replyTimeout: .seconds(20)) }
-        let at = ScreenPoint(x: 5, y: 5)!
+        let at = try! ScreenPoint(x: 5, y: 5)
         let typed = await Self.failure { try await Devices.using(helper()) { try await TypeCommand.type("ab", on: VerbTests.us, into: .anywhere, with: $0.typist, front: $0.front) } }
         let clicked = await Self.failure {
             try await Devices.using(helper()) { try await ClickCommand.click(at: .point(at), button: .left, times: .single, holding: .none, with: Pointer(mouse: $0.mouse, cursor: { at }, displays: { .vast }, clock: ManualClock(), randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in }), $0.keyboard) }

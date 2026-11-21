@@ -1,4 +1,4 @@
-import CoreGraphics
+import ScreenSpace
 
 /// A string with something in it other than blank space.
 ///
@@ -38,40 +38,72 @@ public struct Word: Sendable, Hashable {
     }
 }
 
-/// One piece of text on screen and where it is, as the words it is made of.
+/// One piece of text on screen, as the words it is made of, placed on the displays a look
+/// read: where a display shows it, and the point a click presses it at.
 ///
 /// Words and not one rectangle, because a reader's run is not always one thing: measured,
-/// Vision reads a menu bar's "Shell Edit View Session" as a single run, and the centre of
+/// Vision reads a menu bar's "Shell Edit View Session" as a single run, and the middle of
 /// that run is on no menu at all. Carrying where each word sits is what lets a match be
 /// narrowed to the stretch that matched, so a found point lands on what was asked for.
 /// Never empty, for the reason `Matches` is not. [LAW:types-are-the-program]
+///
+/// [LAW:parse-dont-validate] Made only placed, by `Displays.place`, so every row a reading
+/// holds is one a display shows, at the point the devices press for its box. Words that make
+/// no such row are no `Found`, and whoever read them counts them `unshown`.
 public struct Found: Sendable, Hashable {
     public let first: Word
     public let rest: [Word]
     public let source: Source
+    /// The box of the words as placed. Computed once, in the init - the words cannot change
+    /// after it, so it cannot disagree with them. [LAW:one-source-of-truth]
+    public let placed: Placed<Shown>
 
-    /// One run the reader places as a whole - what the accessibility tree reports.
-    public init(text: Text, frame: ScreenRect, source: Source) {
-        self.init(first: Word(text: text, frame: frame), rest: [], source: source)
+    /// One run already placed, at the box it was placed by.
+    public init(text: Text, placed: Placed<Shown>, source: Source) {
+        self.init(first: Word(text: text, frame: placed.value.box), rest: [], source: source, placed: placed)
     }
 
-    public init(first: Word, rest: [Word], source: Source) {
+    /// One run the reader places as a whole - what the accessibility tree reports.
+    public init?(text: Text, frame: ScreenRect, source: Source, on displays: Displays) {
+        self.init(first: Word(text: text, frame: frame), rest: [], source: source, on: displays)
+    }
+
+    /// Nil when no display shows a part of the words' box a point or more a side, or the
+    /// words lie further apart than a box holds.
+    public init?(first: Word, rest: [Word], source: Source, on displays: Displays) {
+        guard let box = try? rest.reduce(first.frame, { try $0.union($1.frame) }), let placed = try? displays.place(box) else { return nil }
         self.first = first
         self.rest = rest
         self.source = source
-        self.frame = ScreenRect(rest.reduce(first.frame.cgRect) { $0.union($1.frame.cgRect) })
+        self.placed = placed
     }
+
+    private init(first: Word, rest: [Word], source: Source, placed: Placed<Shown>) {
+        self.first = first
+        self.rest = rest
+        self.source = source
+        self.placed = placed
+    }
+
+    /// The same row where a second reader saw it too: its words and place kept, its source
+    /// both readers'.
+    func seen(also other: Source) -> Found { Found(first: first, rest: rest, source: .merged(source, other), placed: placed) }
 
     public var words: [Word] { [first] + rest }
 
     /// The words read as one line, derived so it cannot disagree with them.
     public var text: Text { Text(joining: words.map(\.text)) }
 
-    /// Global screen coordinates, top-left origin, points. Its centre is a click target
-    /// with no conversion. Computed from the words once, in the init - the words cannot
-    /// change after it, so it cannot disagree with them, and merging and sorting read it
-    /// many times. [LAW:one-source-of-truth]
-    public let frame: ScreenRect
+    /// The part of the words' box a display shows: the box a row is printed at, and the one
+    /// rows are ordered, merged and told apart by.
+    public var frame: ScreenRect { placed.value.part }
+
+    /// Where a click presses this row, inside `frame`: the point a look prints and the
+    /// readers hit-test, so what is checked is what is pressed. [LAW:single-enforcer]
+    public var press: ScreenPoint { placed.value.press }
+
+    /// The displays it was placed on, which a row cut from it is placed on again.
+    public var displays: Displays { placed.displays }
 }
 
 /// Which reader found it, carrying what only that reader can know.

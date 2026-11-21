@@ -1,6 +1,7 @@
 import Foundation
 import Keystrokes
 import Pointing
+import ScreenSpace
 
 /// A script of keyboard and mouse acts at fixed times on one clock: one absolute starting
 /// point, then acts at offsets from a clock started once the cursor is there.
@@ -18,6 +19,8 @@ import Pointing
 /// carries, and nothing held at the end. Nothing downstream asks any of that again.
 public struct Play: Hashable, Sendable {
     public let start: ScreenPoint
+    /// The line the start is written on, which a refusal of it names.
+    public let startLine: Int
     public let events: [Timed]
 
     /// The latest a report may be due, in milliseconds: an hour, far past any measurement
@@ -86,7 +89,7 @@ public struct Play: Hashable, Sendable {
         guard buttons.isEmpty else {
             throw ScriptInvalid(line: last.number, reason: "the script ends with button \(buttons.sorted().map { "\($0.rawValue)" }.joined(separator: ", ")) held: end it with {\"t_ms\":…,\"buttons\":[]}")
         }
-        return Play(start: start, events: events)
+        return Play(start: start, startLine: first.number, events: events)
     }
 
     private static func decode<T: Decodable>(_ type: T.Type, _ line: (number: Int, text: String)) throws -> T {
@@ -152,10 +155,11 @@ private func point(_ line: KeyedDecodingContainer<AnyKey>, _ key: AnyKey) throws
     let place = try container(line.superDecoder(forKey: key), taking: ["x", "y"])
     let x = try place.decode(Double.self, forKey: AnyKey("x"))
     let y = try place.decode(Double.self, forKey: AnyKey("y"))
-    guard let point = ScreenPoint(x: x, y: y) else {
-        throw Refusal(reason: "\(key.stringValue) is (\(x.clean), \(y.clean)), which is not a place on the screen")
+    do {
+        return try ScreenPoint(x: x, y: y)
+    } catch {
+        throw Refusal(reason: "\(key.stringValue) is \(error)")
     }
-    return point
 }
 
 private extension Double {

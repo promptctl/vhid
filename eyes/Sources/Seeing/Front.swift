@@ -1,4 +1,5 @@
 import CoreGraphics
+import ScreenSpace
 
 /// The app a look reads: the one it was told, or with no app named, the one a person sees
 /// in front.
@@ -95,10 +96,7 @@ public struct Front: Sendable, Hashable {
     private init(_ app: App, passedOver: PassedOver?, on desk: Desk) throws(AppUnread) {
         guard !desk.displays.isEmpty else { throw .noDisplay }
         guard let window = desk.listing.front(of: app.pid).map({ desk.listing.windows[$0] }) else { throw .noWindow(app) }
-        let shown = { (display: Display) -> CGFloat in
-            let shared = display.frame.cgRect.intersection(window.frame.cgRect)
-            return shared.isNull ? 0 : shared.width * shared.height
-        }
+        let shown = { (display: Display) in display.frame.intersection(window.frame)?.area ?? 0 }
         guard let display = desk.displays.max(by: { shown($0) < shown($1) }), shown(display) > 0 else { throw .offDisplays(app) }
         self.init(app: app, display: display.id, own: desk.own, passedOver: passedOver)
     }
@@ -111,14 +109,14 @@ public struct Front: Sendable, Hashable {
     /// could be drawn. Notification Center holds one over the whole screen that draws nothing
     /// there, and the menu bar is listed above every window and shows the frontmost app's
     /// menus. So the hit test settles each, at the centre of what it covers of the front
-    /// window, as `Covers` settles a rect; one that does not answer takes nothing in.
-    /// [LAW:single-enforcer]
+    /// window, as `Covers` settles a rect; one that does not answer, or whose centre is past
+    /// what a Double holds, takes nothing in. [LAW:single-enforcer]
     public func owners(in listing: WindowListing, hit: (ScreenPoint) -> Heard<Int32>) -> Set<Int32> {
         let front = listing.front(of: app.pid)
         let over = front.map { i in
             listing.windows[..<i].filter { window in
-                let shared = window.frame.cgRect.intersection(listing.windows[i].frame.cgRect)
-                return !shared.isNull && !shared.isEmpty && hit(ScreenRect(shared).centre) == .answered(window.pid)
+                guard let centre = try? window.frame.intersection(listing.windows[i].frame)?.centre else { return false }
+                return hit(centre) == .answered(window.pid)
             }
         } ?? []
         return Set(over.map(\.pid)).union([app.pid]).subtracting(own.pids)

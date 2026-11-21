@@ -19,10 +19,76 @@ public enum FromApp: Codable, Equatable, Sendable {
     case refused(String)
     /// The tap is running.
     case recording
-    /// Something the person should hear about the recording, on stderr.
-    case note(String)
-    /// The recording, whole, as `vhid play` reads it. The last message.
-    case script(String)
+    /// The recording, whole, and how it ended. The last message.
+    case recorded(Recorded)
+}
+
+/// A finished recording: the script `vhid play` reads, how the recording ended, and what it
+/// left out. [LAW:nothing-unseen] One message, so the command's record and its stderr say
+/// the same of it.
+public struct Recorded: Codable, Equatable, Sendable {
+    public let script: String
+    public let ending: Ending
+    /// Key presses with no HID usage, fn among them.
+    public let unmapped: Int
+    /// Moves of the person's no display held, once vhid's own motion was taken out.
+    public let offDisplays: Int
+    /// Motion of vhid's that reached a screen edge, after which the points may be off.
+    public let vhidAtEdge: Int
+
+    public init(script: String, ending: Ending, unmapped: Int, offDisplays: Int, vhidAtEdge: Int) {
+        self.script = script
+        self.ending = ending
+        self.unmapped = unmapped
+        self.offDisplays = offDisplays
+        self.vhidAtEdge = vhidAtEdge
+    }
+
+    public enum Ending: Codable, Equatable, Sendable {
+        /// Control-C, whose keys came out.
+        case stopped
+        /// Any other signal, which dropped nothing.
+        case ended
+        /// macOS turned the tap off, too slow or by user input, so events after it are missing.
+        case tapOff(String)
+        /// An hour, the longest a script plays.
+        case hour
+        /// vhid's devices came back under new ids that could not be read.
+        case devicesUnreadable(String)
+        /// The displays changed, and the new layout could not be read.
+        case layoutUnreadable(String)
+        /// The tap handed over an event whose location was no point.
+        case eventUnreadable(String)
+
+        /// The word a record keeps it under.
+        public var said: String {
+            switch self {
+            case .stopped: "stopped"
+            case .ended: "ended"
+            case .tapOff: "tap_off"
+            case .hour: "hour"
+            case .devicesUnreadable: "devices_unreadable"
+            case .layoutUnreadable: "layout_unreadable"
+            case .eventUnreadable: "event_unreadable"
+            }
+        }
+    }
+
+    /// What a person hears of it, a sentence each, for all but an ordinary stop.
+    public var notes: [String] {
+        let ending: [String] = switch ending {
+        case .stopped, .ended: []
+        case .tapOff(let why): ["macOS turned the tap off (\(why)), so the recording ends there"]
+        case .hour: ["the recording reached an hour, the longest a script plays, and stopped"]
+        case .devicesUnreadable(let why): ["vhid's devices came back and could not be told apart again (\(why)), so the recording ends there"]
+        case .layoutUnreadable(let why): ["the displays changed and could not be read again (\(why)), so the recording ends there"]
+        case .eventUnreadable(let why): ["the tap handed over an event at no place (\(why)), so the recording ends there"]
+        }
+        return ending
+            + (unmapped > 0 ? ["\(unmapped) key presses with no HID usage, fn among them, are not in the recording"] : [])
+            + (offDisplays > 0 ? ["\(offDisplays) moves on no display, once vhid's own motion was taken out, are not in the recording"] : [])
+            + (vhidAtEdge > 0 ? ["vhid's motion reached a screen edge \(vhidAtEdge) times while recording, so the pointer points after it may be off"] : [])
+    }
 }
 
 /// One end of the socket, as lines of messages.

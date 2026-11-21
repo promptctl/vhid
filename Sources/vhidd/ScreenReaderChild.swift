@@ -1,4 +1,5 @@
 import CoreGraphics
+import DisplayReading
 import Foundation
 
 /// The `--read-screen-in <audit session>` in argv, or nil when this is the daemon.
@@ -11,12 +12,13 @@ func screenReaderArgument(_ arguments: [String]) -> au_asid_t? {
 enum ScreenQuestion: String {
     /// Answered `x y`.
     case cursor
-    /// Answered `x y width height` for each online display, separated by `;`.
+    /// Answered with the online display layout's wire record, its numbers separated by spaces.
     case displays
 }
 
-/// The answer to either question when the window server would not give one: said apart
-/// from a garbled answer so the daemon's log names the window server.
+/// The answer to either question when the window server would not give one, followed by
+/// why when the reader knows: said apart from a garbled answer so the daemon's log names
+/// the window server.
 let refusedAnswer = "refused"
 
 /// The child `FrontScreen` starts: joins `session` and says so, and which build it is,
@@ -42,24 +44,19 @@ func readScreen(in session: au_asid_t) -> Never {
     while let line = readLine() {
         switch ScreenQuestion(rawValue: line) {
         case .cursor: print(CGEvent(source: nil).map { "\($0.location.x) \($0.location.y)" } ?? refusedAnswer)
-        case .displays: print(onlineDisplays())
+        case .displays: print(displayLayout())
         case nil: print("asked '\(line)', which is no question")
         }
     }
     exit(0)
 }
 
-/// The online displays' bounds, in the global space the cursor is read in, as `displays` is
-/// answered; `refusedAnswer` when the window server would not list them.
-///
-/// **Online, not active.** A display that has gone to sleep is not active, and the cursor
-/// still moves on it and its Dock still rises: on studious, its one display asleep, the
-/// active list was empty and the online list held it at (0, 0, 1600, 900). The members of a
-/// mirror set are all online with one frame, which only says that frame twice.
-private func onlineDisplays() -> String {
-    var count: UInt32 = 0
-    guard CGGetOnlineDisplayList(0, nil, &count) == .success else { return refusedAnswer }
-    var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
-    guard CGGetOnlineDisplayList(count, &ids, &count) == .success else { return refusedAnswer }
-    return ids.prefix(Int(count)).map(CGDisplayBounds).map { "\($0.minX) \($0.minY) \($0.width) \($0.height)" }.joined(separator: ";")
+/// The online display layout, read by the one read both halves make, as its wire record;
+/// `refusedAnswer` and why when the window server would not give it. [LAW:single-enforcer]
+private func displayLayout() -> String {
+    do {
+        return try DisplayReading.layout().fields.map { "\($0)" }.joined(separator: " ")
+    } catch {
+        return "\(refusedAnswer) \(error)"
+    }
 }

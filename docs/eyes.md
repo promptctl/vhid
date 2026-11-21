@@ -49,9 +49,12 @@ Each row is a point, the box around the run, the text, and what it is: the role 
 accessibility tree gives the element (`AXButton`, `AXLink`, `AXTextField`, ...), or
 `pixels` for text only the pixels reader saw, such as words drawn on a canvas. The role
 is what tells a page's Settings button from a browser bookmark of the same name, or a
-field from its label. The box is `x,y,width,height` in the same points, the form `--rect`
-takes, rounded outward to whole points so it covers the run and holds the point printed
-beside it. Every rectangle eyes prints is in that form, a window's or display's bounds and
+field from its label. The point is where a click presses the run, by the rule `vhid click`
+uses for a box, so `click` at the point and `click` given the box press the same place.
+The box is the part of the run a display shows, `x,y,width,height` in the same points, the
+form `--rect` takes, rounded outward to whole points so it covers that part and holds the
+point printed beside it. Text in the region of which no active display shows a part a
+point or more a side is counted `unshown`, and leaves the region not read whole. Every rectangle eyes prints is in that form, a window's or display's bounds and
 a scope line's region too, so any of them can be passed back as `--rect`.
 
 A row the tree found is its element's first text in words, of its value, title and

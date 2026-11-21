@@ -2,11 +2,13 @@ import Pointing
 import TestClock
 import Testing
 @testable import Input
+import ScreenSpace
+import ScreenSpaceTesting
 
 /// Modifiers held around a pointer act: the reports the keyboard and mouse make together,
 /// and what a stop anywhere among them leaves held.
 @Suite @MainActor struct HoldingTests {
-    static let target = ScreenPoint(x: 5, y: 0)!
+    static let target = try! ScreenPoint(x: 5, y: 0)
     static let shiftCommand = try! HeldModifiers([.leftCommand, .leftShift])
 
     /// Every key and button the log leaves down after its last report: a key down is held
@@ -34,7 +36,7 @@ import Testing
     /// Modifiers down in a fixed order, then the click with them held, then the mouse and
     /// then the keyboard let go.
     @Test func aModifiedClickIsModifiersDownThenTheClickThenEverythingUp() async throws {
-        let mouse = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
+        let mouse = FakeMouse(at: try! ScreenPoint(x: 0, y: 0))
         let click = try await mouse.pointer.holding(Self.shiftCommand, on: mouse.keyboard) {
             try await $0.click(at: .point(Self.target), button: .left, times: .single)
         }
@@ -44,7 +46,7 @@ import Testing
 
     /// No modifiers touches no key: the act's reports are the whole run.
     @Test func noModifiersIsTheSameRunWithNothingHeld() async throws {
-        let mouse = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
+        let mouse = FakeMouse(at: try! ScreenPoint(x: 0, y: 0))
         try await mouse.pointer.holding(.none, on: mouse.keyboard) {
             try await $0.scroll(at: .point(Self.target), vertical: 3, horizontal: 0)
         }
@@ -53,10 +55,10 @@ import Testing
 
     /// A drag carries the modifiers from the press to the release.
     @Test func aModifiedDragHoldsTheModifiersAcrossTheCarry() async throws {
-        let mouse = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
+        let mouse = FakeMouse(at: try! ScreenPoint(x: 0, y: 0))
         let option = try HeldModifiers([.leftOption])
         _ = try await mouse.pointer.holding(option, on: mouse.keyboard) {
-            try await $0.drag(from: .point(Self.target), to: .point(ScreenPoint(x: 8, y: 0)!), button: .left)
+            try await $0.drag(from: .point(Self.target), to: .point(try! ScreenPoint(x: 8, y: 0)), button: .left)
         }
         #expect(Self.collapsed(mouse.log) == ["key down e2", "moves", "down 1", "moves", "up", "keys up"])
     }
@@ -64,12 +66,12 @@ import Testing
     /// Refuse any one report of the run and it stops as `HoldingStopped`, with the refusal
     /// as its cause, releases that answered, and nothing left held.
     @Test func aFailureAtEachStepLeavesNothingHeld() async throws {
-        let whole = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
+        let whole = FakeMouse(at: try! ScreenPoint(x: 0, y: 0))
         _ = try await whole.pointer.holding(Self.shiftCommand, on: whole.keyboard) {
             try await $0.click(at: .point(Self.target), button: .left, times: .single)
         }
         for step in whole.log.indices {
-            let mouse = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
+            let mouse = FakeMouse(at: try! ScreenPoint(x: 0, y: 0))
             mouse.refused = step ..< step + 1
             let stop = await #expect(throws: HoldingStopped.self) {
                 try await mouse.pointer.holding(Self.shiftCommand, on: mouse.keyboard) {
@@ -87,7 +89,7 @@ import Testing
     /// A release that fails too is reported beside the stop, and the report says what may
     /// still be down.
     @Test func aReleaseThatFailsIsReportedBesideTheStop() async throws {
-        let mouse = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
+        let mouse = FakeMouse(at: try! ScreenPoint(x: 0, y: 0))
         mouse.refused = 1 ..< .max
         let stop = await #expect(throws: HoldingStopped.self) {
             try await mouse.pointer.holding(Self.shiftCommand, on: mouse.keyboard) {
@@ -101,7 +103,7 @@ import Testing
     /// A run cancelled between two modifiers stops before the pointer moves, with the key
     /// that went down let go again.
     @Test func aCancelledRunReleasesTheKeysItHeld() async throws {
-        let mouse = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
+        let mouse = FakeMouse(at: try! ScreenPoint(x: 0, y: 0))
         let keyboard = CancellingKeyboard(afterReports: 1)
         let run = Task { @MainActor in
             _ = try await mouse.pointer.holding(Self.shiftCommand, on: keyboard) {

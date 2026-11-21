@@ -1,9 +1,11 @@
 import Testing
 @testable import Seeing
+import ScreenSpace
+import ScreenSpaceTesting
 
 /// A merged reader over two readers a test wrote, neither of which is the tree or pixels.
 @MainActor @Suite struct MergedReaderTests {
-    static let region = ScreenRect(x: 0, y: 0, width: 1000, height: 800)
+    static let region = try! ScreenRect(x: 0, y: 0, width: 1000, height: 800)
 
     struct Fake: Reader {
         let source: SourceKind
@@ -17,7 +19,7 @@ import Testing
 
         struct Blind: Error, CustomStringConvertible { var description: String { "no grant" } }
 
-        func look(_ query: Query) async throws -> Candidates {
+        func look(_ query: Query, on layout: DisplayLayout) async throws -> Candidates {
             if fails { throw Blind() }
             return Candidates(found: found, region: region, examined: found.count, excluded: [], reach: reach, owners: .every)
         }
@@ -29,14 +31,14 @@ import Testing
     static let seen = Source.pixels(confidence: Confidence(0.8)!)
 
     private func at(_ text: String, _ x: Double, _ y: Double, _ source: Source, width: Double = 60) -> Found {
-        Found(text: Text(text)!, frame: ScreenRect(x: x, y: y, width: width, height: 20), source: source)
+        Found(text: Text(text)!, frame: try! ScreenRect(x: x, y: y, width: width, height: 20), source: source, on: .vast)!
     }
 
     /// The region resolved without asking the host which displays it has. [LAW:effects-at-boundaries]
-    static let here: Locate = { _ in region }
+    static let here: Locate = { _, _ in region }
 
     private func read(_ a: any Reader, _ b: any Reader, _ match: Match? = nil) async throws -> Reading {
-        try await MergedReader(a, b, locate: Self.here).judged(Query(match: match, region: .rect(Self.region))).pressed()
+        try await MergedReader(a, b, locate: Self.here).judged(Query(match: match, region: .rect(Self.region)), on: .vast).pressed()
     }
 
     private func all(_ reading: Reading) -> [Found] {
@@ -62,7 +64,7 @@ import Testing
         )
         let found = all(r)
         #expect(found.count == 1)
-        #expect(found.first?.frame == ScreenRect(x: 100, y: 100, width: 60, height: 20))
+        #expect(found.first?.frame == (try! ScreenRect(x: 100, y: 100, width: 60, height: 20)))
         #expect(found.first?.source == .merged(Self.role, Self.seen))
         #expect(found.first?.source.kind == .merged)
         #expect(r.scope.excluded == [Exclusion(reason: .duplicate, count: 1)])
@@ -134,7 +136,7 @@ import Testing
             Fake(source: .tree, found: [at("a", 10, 10, Self.role)]),
             Fake(source: .pixels, found: [at("b", 10, 200, Self.seen)]),
             locate: Self.here
-        ).judged(Query(match: nil, region: .rect(Self.region), limit: Limit(1)!)).pressed()
+        ).judged(Query(match: nil, region: .rect(Self.region), limit: Limit(1)!), on: .vast).pressed()
         #expect(all(r).map(\.text.value) == ["a"])
         #expect(r.scope.reach == .stopped(.resultLimit(Limit(1)!)))
         #expect(r.scope.excluded == [Exclusion(reason: .ranked, count: 1)])
@@ -143,9 +145,9 @@ import Testing
     /// A run as Vision places it: each word at its own spot along one line, from `x`.
     private func run(_ text: String, _ x: Double, _ y: Double) -> Found {
         let words = text.split(separator: " ").enumerated().map { i, w in
-            Word(text: Text(String(w))!, frame: ScreenRect(x: x + Double(i) * 50, y: y, width: 45, height: 20))
+            Word(text: Text(String(w))!, frame: try! ScreenRect(x: x + Double(i) * 50, y: y, width: 45, height: 20))
         }
-        return Found(first: words[0], rest: Array(words.dropFirst()), source: Self.seen)
+        return Found(first: words[0], rest: Array(words.dropFirst()), source: Self.seen, on: .vast)!
     }
 
     @Test func aContainsQueryFindsOneButtonOnceWhateverEachReaderDividedItInto() async throws {
@@ -188,9 +190,9 @@ import Testing
 
     @Test func theRegionIsWhereBothLooked() async throws {
         var clipped = Fake(source: .pixels, found: [])
-        clipped.region = ScreenRect(x: 0, y: 0, width: 500, height: 800)
+        clipped.region = try! ScreenRect(x: 0, y: 0, width: 500, height: 800)
         let r = try await read(Fake(source: .tree, found: []), clipped)
-        #expect(r.scope.region == ScreenRect(x: 0, y: 0, width: 500, height: 800))
+        #expect(r.scope.region == (try! ScreenRect(x: 0, y: 0, width: 500, height: 800)))
     }
 
     @Test func aWordOnlyTheSecondReaderSawIsNotCarriedAwayAsASlip() async throws {
@@ -206,12 +208,12 @@ import Testing
 
     struct Refusing: Reader {
         let source = SourceKind.tree
-        func look(_ query: Query) async throws -> Candidates { throw NoGrant() }
+        func look(_ query: Query, on layout: DisplayLayout) async throws -> Candidates { throw NoGrant() }
         func pressing(_ reading: Reading, until deadline: ContinuousClock.Instant) async throws -> Reading { reading }
     }
 
     @Test func aBlindReadersMissingGrantIsCarriedInItsPart() async throws {
-        let r = try await MergedReader(Refusing(), Fake(source: .pixels, found: []), locate: Self.here).judged(Query(match: nil, region: .rect(Self.region))).pressed()
+        let r = try await MergedReader(Refusing(), Fake(source: .pixels, found: []), locate: Self.here).judged(Query(match: nil, region: .rect(Self.region)), on: .vast).pressed()
         guard case .stopped(.merged(.blind(.tree, _, let grant), _)) = r.scope.reach else { Issue.record("\(r)"); return }
         #expect(grant)
     }
@@ -220,7 +222,7 @@ import Testing
     /// the two looks.
     struct Gone: Reader {
         let source = SourceKind.pixels
-        func look(_ query: Query) async throws -> Candidates { throw NoSuchPlace.window(7) }
+        func look(_ query: Query, on layout: DisplayLayout) async throws -> Candidates { throw NoSuchPlace.window(7) }
         func pressing(_ reading: Reading, until deadline: ContinuousClock.Instant) async throws -> Reading { reading }
     }
 
@@ -232,7 +234,7 @@ import Testing
 
     struct Unasked: Reader {
         let source: SourceKind
-        func look(_ query: Query) async throws -> Candidates {
+        func look(_ query: Query, on layout: DisplayLayout) async throws -> Candidates {
             Issue.record("the \(source) reader was asked about a region that names nowhere")
             return Candidates(found: [], region: MergedReaderTests.region, examined: 0, excluded: [], reach: .whole, owners: .every)
         }
@@ -245,7 +247,7 @@ import Testing
         let nowhere = NoSuchPlace.display(4_000_000_000)
         for (a, b) in [(Unasked(source: .tree), Unasked(source: .pixels)) as (any Reader, any Reader), (Refusing(), Refusing())] {
             await #expect {
-                _ = try await MergedReader(a, b, locate: { _ in throw nowhere }).judged(Query(match: nil, region: .display(4_000_000_000))).pressed()
+                _ = try await MergedReader(a, b, locate: { _, _ in throw nowhere }).judged(Query(match: nil, region: .display(4_000_000_000)), on: .vast).pressed()
             } throws: { "\($0)" == nowhere.description }
         }
     }
@@ -253,13 +255,13 @@ import Testing
     /// Each reader checks the rows it placed: the tree's cut stands, and the pixels reader,
     /// asked after it, sees the cut row and leaves it.
     @Test func eachReaderChecksTheBoxesOfTheRowsItPlaced() async throws {
-        let cut = ScreenRect(x: 17, y: 15, width: 40, height: 12)
+        let cut = try! ScreenRect(x: 17, y: 15, width: 40, height: 12)
         let tree = Fake(source: .tree, found: [at("Allow", 10, 10, Self.role), at("Deny", 100, 10, Self.role)],
-                        press: { $0.text.value == "Allow" ? .narrowed(cut) : .unchecked(.elsewhere) }, calls: 4)
+                        press: { $0.text.value == "Allow" ? .narrowed(Found(text: $0.text, frame: cut, source: $0.source, on: .vast)!) : .unchecked(.elsewhere) }, calls: 4)
         let pixels = Fake(source: .pixels, found: [at("Allow", 12, 11, Self.seen)],
                           press: { $0.source.role == nil ? .unchecked(.unanswered) : .kept })
         let r = try await read(tree, pixels)
-        #expect(all(r).map(\.frame) == [cut, ScreenRect(x: 100, y: 10, width: 60, height: 20)])
+        #expect(all(r).map(\.frame) == [cut, try! ScreenRect(x: 100, y: 10, width: 60, height: 20)])
         #expect(r.scope.boxes == Boxes(narrowed: 1, unchecked: [.elsewhere: 1], calls: 8))
     }
 }

@@ -1,3 +1,4 @@
+import ScreenSpace
 import ApplicationServices
 import Grants
 import Seeing
@@ -95,9 +96,8 @@ enum Candidate: Equatable {
 /// One rule for an element's children and for a window the tree cannot walk, so "could
 /// anything there be seen" means one thing. [LAW:single-enforcer]
 func visible(_ frame: ScreenRect, in clip: ScreenRect, under covers: Covers) -> ScreenRect? {
-    let shared = frame.cgRect.intersection(clip.cgRect)
-    guard !shared.isNull, !shared.isEmpty, !covers.hide(ScreenRect(shared)) else { return nil }
-    return ScreenRect(shared)
+    guard let shared = frame.intersection(clip), !covers.hide(shared) else { return nil }
+    return shared
 }
 
 /// Roles whose frame is an area holding other elements. What such an element says names
@@ -114,11 +114,12 @@ let areas: Set<Role> = Set([
 ].map { Role(rawValue: $0) } + [webArea])
 
 extension Node {
-    /// The element as a finding: its first text in words, at its own frame, with the rest of
-    /// its words as `also` - a figure or an address says an element's state or where it goes,
-    /// never what it is, so neither is a row's text or a name to find it by. If it
-    /// is not an area, and the centre of that frame - the point a click lands on - is
-    /// inside `clip` and under none of the windows in front of this one.
+    /// The element as a finding: its first text in words, at its own frame placed on
+    /// `displays`, with the rest of its words as `also` - a figure or an address says an
+    /// element's state or where it goes, never what it is, so neither is a row's text or a
+    /// name to find it by. If it is not an area, and the point it is pressed at is inside
+    /// `clip` and under none of the windows in front of this one. One in `clip` that no
+    /// display shows is `unshown`: its text was read where nothing presses it.
     ///
     /// An area is known by its role and children together: a list with nothing under it is
     /// the thing its label names, and its centre is where it is pressed. It is decided first, from reads that arrive with the role, so an area
@@ -133,26 +134,31 @@ extension Node {
     /// wordless element could never be a finding. [LAW:no-silent-failure]
     /// [LAW:effects-at-boundaries] Decided from facts and a hit test handed in, so every
     /// rule an element is kept or dropped by is tested with both written by a test.
-    func candidate(in clip: ScreenRect, under covers: Covers) -> Candidate {
+    func candidate(in clip: ScreenRect, under covers: Covers, on displays: Displays) -> Candidate {
         let leaf = if case .answered(let children) = children { children.isEmpty } else { false }
         guard leaf || !areas.contains(facts.role) else { return .excluded(.area) }
-        if case .answered(let placed) = facts.frame {
-            guard let placed, !placed.isThin, clip.contains(placed.centre) else { return .excluded(.unplaced) }
+        // Nil while the frame would not say, or no display shows it.
+        var shown: Placed<Shown>?
+        if case .answered(let frame) = facts.frame {
+            guard let frame, !frame.isThin, clip.intersects(frame) else { return .excluded(.unplaced) }
+            shown = try? displays.place(frame)
+            if let shown, !clip.contains(shown.value.press) { return .excluded(.unplaced) }
         }
         let words = facts.texts.compactMap { $0.answer??.words }
         let text = words.first?.text
         guard text != nil || facts.texts.contains(.unanswered) else { return .excluded(.wordless) }
-        if case .answered(let placed?) = facts.frame {
-            switch covers.hide(placed.centre) {
+        if case .answered(.some) = facts.frame, shown == nil { return .excluded(.unshown) }
+        if let shown {
+            switch covers.hide(shown.value.press) {
             case .answered(false): break
             case .answered(true): return .excluded(.covered)
             case .unanswered: return .excluded(.overlaid)
             }
         }
-        guard let text, case .answered(let placed?) = facts.frame else { return .excluded(.unanswered) }
+        guard let text, let shown else { return .excluded(.unanswered) }
         var said: Set = [text]
         let also = words.dropFirst().filter { said.insert($0.text).inserted }
-        return .found(Found(text: text, frame: placed, source: .tree(role: facts.role, also: also)))
+        return .found(Found(text: text, placed: shown, source: .tree(role: facts.role, also: also)))
     }
 }
 
@@ -298,11 +304,12 @@ extension Facts {
     /// more. The walk's own bounds cap it, and say so in the reach.
     ///
     /// Where what this element holds can be drawn: `bound`, cut to its own frame when it
-    /// clips - the one rule the reading walk and the page search narrow by.
-    /// [LAW:single-enforcer]
+    /// clips - the one rule the reading walk and the page search narrow by - and a box
+    /// holding no point at `bound`'s corner when the two do not meet. [LAW:single-enforcer]
     func bound(within bound: ScreenRect) -> ScreenRect {
         guard clips.contains(role), case .answered(let placed?) = frame, !placed.isEmpty else { return bound }
-        return ScreenRect(bound.cgRect.intersection(placed.cgRect))
+        // A corner of a box is finite, and a side of zero is a box.
+        return bound.intersection(placed) ?? (try! ScreenRect(x: bound.x, y: bound.y, width: 0, height: 0))
     }
 
     /// The one place the descend, probe and prune decision is made. [LAW:single-enforcer]
@@ -363,6 +370,7 @@ struct Bounds {
 func walk<Element>(
     from roots: [Root<Element>],
     unwalked: Int,
+    on displays: Displays,
     within bounds: Bounds,
     elapsed: () -> Duration,
     read: (Element) throws -> Node<Element>
@@ -379,7 +387,7 @@ func walk<Element>(
             guard elapsed() < bounds.time else { stop = .timeBudget(bounds.time); break roots }
             let node = try read(root.element)
             examined += 1
-            let candidate = node.candidate(in: root.clip, under: root.covers)
+            let candidate = node.candidate(in: root.clip, under: root.covers, on: displays)
             // A probe not seen - off the clip, or with a frame that says nothing - was never
             // placed in the region: nothing to count, unless a read it needed failed, which
             // leaves unknown whether it was.

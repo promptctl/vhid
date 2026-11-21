@@ -2,6 +2,7 @@ import ChildProcess
 import CoreGraphics
 import Foundation
 import IOKit
+import ScreenSpace
 
 /// Where the cursor is and where the displays are, read in the session in front, whoever's
 /// it is.
@@ -37,7 +38,7 @@ final class FrontScreen: ScreenSource, @unchecked Sendable {
     /// Something that reads the screen in one session, until it is stopped.
     protocol Reader: AnyObject {
         func cursor() throws -> (x: Double, y: Double)
-        func displays() throws -> [CGRect]
+        func displays() throws -> DisplayLayout
         func stop()
     }
 
@@ -65,7 +66,7 @@ final class FrontScreen: ScreenSource, @unchecked Sendable {
 
     func cursor() throws -> (x: Double, y: Double) { try read { try $0.cursor() } }
 
-    func displays() throws -> [CGRect] { try read { try $0.displays() } }
+    func displays() throws -> DisplayLayout { try read { try $0.displays() } }
 
     /// `question` asked of the front session's reader.
     private func read<Answer>(_ question: (any Reader) throws -> Answer) throws -> Answer {
@@ -136,13 +137,15 @@ final class FrontScreen: ScreenSource, @unchecked Sendable {
 struct WindowServerRefused: Error, CustomStringConvertible {
     let session: FrontScreen.Session
     let question: ScreenQuestion
-    var description: String { "the window server in \(session) would not answer '\(question.rawValue)'" }
+    /// Why, when the reader said: empty when it did not.
+    let why: String
+    var description: String { "the window server in \(session) would not answer '\(question.rawValue)'" + (why.isEmpty ? "" : ": \(why)") }
 }
 
 /// Where the cursor is and where the displays are, as the daemon answers them.
 protocol ScreenSource: Sendable {
     func cursor() throws -> (x: Double, y: Double)
-    func displays() throws -> [CGRect]
+    func displays() throws -> DisplayLayout
 }
 
 /// This executable, run as `--read-screen-in <audit session>`: a child in the session in
@@ -229,11 +232,13 @@ final class ChildReader: FrontScreen.Reader {
         return (fields[0], fields[1])
     }
 
-    func displays() throws -> [CGRect] {
+    func displays() throws -> DisplayLayout {
         let line = try ask(.displays)
-        return try line.split(separator: ";").map { frame in
-            guard let fields = Self.numbers(frame), fields.count == 4 else { throw Failed(session: session, what: "answered '\(line)'") }
-            return CGRect(x: fields[0], y: fields[1], width: fields[2], height: fields[3])
+        guard let fields = Self.numbers(line) else { throw Failed(session: session, what: "answered '\(line)'") }
+        do {
+            return try DisplayLayout(fields: fields)
+        } catch {
+            throw Failed(session: session, what: "answered '\(line)', which is no layout: \(error)")
         }
     }
 
@@ -243,7 +248,8 @@ final class ChildReader: FrontScreen.Reader {
         let line = question.rawValue + "\n"
         guard Darwin.write(requests, line, line.utf8.count) == line.utf8.count else { throw Failed(session: session, what: "could not be asked: errno \(errno)") }
         let answer = try answerLine(within: patience, to: "answer")
-        guard answer != refusedAnswer else { throw WindowServerRefused(session: session, question: question) }
+        let refused = answer == refusedAnswer ? "" : answer.hasPrefix(refusedAnswer + " ") ? String(answer.dropFirst(refusedAnswer.count + 1)) : nil
+        if let refused { throw WindowServerRefused(session: session, question: question, why: refused) }
         return answer
     }
 

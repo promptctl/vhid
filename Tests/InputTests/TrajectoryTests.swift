@@ -5,24 +5,26 @@ import Synchronization
 import TestClock
 import Testing
 @testable import Input
+import ScreenSpace
+import ScreenSpaceTesting
 
 /// The trajectory model of `docs/design/human.md`, on fixed seeds: how long a move takes,
 /// the shape of its path, and the draws behind both. Seconds of work over a thousand seeds,
 /// which would hold `make test`'s one-thread pool, hence its own thread.
 @Suite(.ownThread) struct TrajectoryTests {
-    static let start = ScreenPoint(x: 100, y: 300)!
-    static let across = ScreenPoint(x: 840, y: 300)!
+    static let start = try! ScreenPoint(x: 100, y: 300)
+    static let across = try! ScreenPoint(x: 840, y: 300)
 
     static func trajectory(seed: UInt64, from start: ScreenPoint = start, to target: ScreenPoint = across) -> Trajectory {
         var generator = SeededGenerator(seed: seed)
-        return Trajectory(from: start, toward: .point(target), within: .vast, drawing: &generator)
+        return Trajectory(from: start, toward: Target.point(target).on(.vast), drawing: &generator)
     }
 
     /// MT = 50 ms + 150 ms × log2(D/20 + 1), times the pace drawn after the aim: about
     /// 0.84 s across 740 points before the pace.
     @Test func aMoveTakesFittsTimeTimesItsDrawnPace() {
         var generator = SeededGenerator(seed: 7)
-        _ = Target.point(Self.across).aim(from: Self.start, drawing: &generator)
+        _ = Target.point(Self.across).on(.vast).aim(from: Self.start, drawing: &generator)
         let pace = Trajectory.pace.draw(using: &generator)
         let fitts = Duration.milliseconds(50) + .milliseconds(150) * log2(740.0 / 20 + 1)
         #expect(Self.trajectory(seed: 7).duration == fitts * pace)
@@ -39,7 +41,7 @@ import Testing
 
     /// A move under a point long takes no time: it is all the closing loop's.
     @Test func aMoveUnderAPointTakesNoTime() {
-        let near = Self.trajectory(seed: 1, to: ScreenPoint(x: 100.8, y: 300.4)!)
+        let near = Self.trajectory(seed: 1, to: try! ScreenPoint(x: 100.8, y: 300.4))
         #expect(near.duration == .zero)
         #expect(near.point(after: .zero) == (100.8, 300.4))
         #expect(Self.trajectory(seed: 1, to: Self.start).duration == .zero)
@@ -107,11 +109,11 @@ import Testing
     /// move right or left bulges up, or for the few drawn below zero slightly toward it. One
     /// along the forearm hardly bows at all. Corrections are straight.
     @Test func theBowFollowsTheForearm() {
-        let centre = ScreenPoint(x: 2000, y: 2000)!
+        let centre = try! ScreenPoint(x: 2000, y: 2000)
         let forearm = Trajectory.forearm
         for degrees in stride(from: 0.0, to: 360, by: 15) {
             let angle = degrees * .pi / 180
-            let end = ScreenPoint(x: centre.x + 740 * cos(angle), y: centre.y + 740 * sin(angle))!
+            let end = try! ScreenPoint(x: centre.x + 740 * cos(angle), y: centre.y + 740 * sin(angle))
             for seed in UInt64(0) ..< 40 {
                 let path = Self.trajectory(seed: seed, from: centre, to: end)
                 let main = path.strokes[0]
@@ -127,7 +129,7 @@ import Testing
                 if degrees == 0 || degrees == 180 { #expect(bulge.1 * path.bow <= 0, "\(degrees)° seed \(seed): \(bulge)") }
             }
         }
-        let along = Self.trajectory(seed: 1, from: centre, to: ScreenPoint(x: centre.x + 740 * forearm.x, y: centre.y + 740 * forearm.y)!)
+        let along = Self.trajectory(seed: 1, from: centre, to: try! ScreenPoint(x: centre.x + 740 * forearm.x, y: centre.y + 740 * forearm.y))
         #expect(abs(along.strokes[0].bow) < 0.01 * 740 * 0.05)
     }
 
@@ -190,11 +192,11 @@ import Testing
     /// toward the elbow, and the whole move's speed peaks at a spread of shares of its time.
     @Test func aHundredMovesAreNotBuiltFromTheSameParts() {
         var generator = SeededGenerator(seed: 1)
-        let box = Target.box(ScreenRect(x: 820, y: 596, width: 83, height: 26)!)
-        let start = ScreenPoint(x: 120, y: 250)!
+        let box = Target.box(try! ScreenRect(x: 820, y: 596, width: 83, height: 26))
+        let start = try! ScreenPoint(x: 120, y: 250)
         var bows: [Double] = [], peaks: [Double] = []
         for _ in 0 ..< 100 {
-            let path = Trajectory(from: start, toward: box, within: .vast, drawing: &generator)
+            let path = Trajectory(from: start, toward: box.on(.vast), drawing: &generator)
             // The bow is signed away from the elbow, which for this move down and right is up and right of its line.
             bows.append(-path.strokes[0].bow)
             let ms = Int(path.duration / .milliseconds(1))
@@ -232,13 +234,13 @@ import Testing
 /// everything. Over 200 seeds each, seconds of work that would hold `make test`'s one-thread
 /// pool, hence its own thread.
 @Suite(.ownThread) struct TrajectoryOnTheDisplaysTests {
-    static let screen = Displays(frames: [CGRect(x: 0, y: 0, width: 1920, height: 1080)])!
+    static let screen = DisplayLayout.at(try! ScreenRect(x: 0, y: 0, width: 1920, height: 1080)).online
     /// Ten points above the bottom edge, where an auto-hidden Dock waits, and across it.
-    static let alongTheEdge = (ScreenPoint(x: 100, y: 1070)!, ScreenPoint(x: 1800, y: 1070)!)
+    static let alongTheEdge = (try! ScreenPoint(x: 100, y: 1070), try! ScreenPoint(x: 1800, y: 1070))
 
     static func trajectory(seed: UInt64, from start: ScreenPoint, to target: ScreenPoint, within displays: Displays = screen) -> Trajectory {
         var generator = SeededGenerator(seed: seed)
-        return Trajectory(from: start, toward: .point(target), within: displays, drawing: &generator)
+        return Trajectory(from: start, toward: Target.point(target).on(displays), drawing: &generator)
     }
 
     /// Every millisecond of every path along the bottom edge: its strokes no lower than the
@@ -271,7 +273,7 @@ import Testing
     @Test func aPathAlongTheMenuBarCutsItsBowAlone() {
         var kept: [Trajectory.Kept] = []
         for seed in UInt64(0) ..< 200 {
-            let path = Self.trajectory(seed: seed, from: ScreenPoint(x: 100, y: 12)!, to: ScreenPoint(x: 900, y: 12)!)
+            let path = Self.trajectory(seed: seed, from: try! ScreenPoint(x: 100, y: 12), to: try! ScreenPoint(x: 900, y: 12))
             for ms in 0 ... Int(path.duration / .milliseconds(1)) {
                 #expect(path.unshaken(after: .milliseconds(ms)).y >= 11.95, "seed \(seed) at \(ms) ms")
             }
@@ -290,7 +292,7 @@ import Testing
     @Test func aPathUpToTheMenuBarCutsItsOvershootNotItsBow() {
         var overshoots = 0, short = 0, bowed = 0
         for seed in UInt64(0) ..< 200 {
-            let path = Self.trajectory(seed: seed, from: ScreenPoint(x: 400, y: 600)!, to: ScreenPoint(x: 900, y: 12)!)
+            let path = Self.trajectory(seed: seed, from: try! ScreenPoint(x: 400, y: 600), to: try! ScreenPoint(x: 900, y: 12))
             for ms in 0 ... Int(path.duration / .milliseconds(1)) {
                 #expect(path.unshaken(after: .milliseconds(ms)).y >= 11.95, "seed \(seed) at \(ms) ms")
             }
@@ -308,7 +310,7 @@ import Testing
     @Test func aPathIntoACornerStaysOffIt() {
         var kept: [Trajectory.Kept] = []
         for seed in UInt64(0) ..< 200 {
-            let path = Self.trajectory(seed: seed, from: ScreenPoint(x: 900, y: 500)!, to: ScreenPoint(x: 1910, y: 1070)!)
+            let path = Self.trajectory(seed: seed, from: try! ScreenPoint(x: 900, y: 500), to: try! ScreenPoint(x: 1910, y: 1070))
             for ms in 0 ... Int(path.duration / .milliseconds(1)) {
                 let unshaken = path.unshaken(after: .milliseconds(ms))
                 #expect(unshaken.x <= 1910.05 && unshaken.y <= 1070.05, "seed \(seed) at \(ms) ms: \(unshaken)")
@@ -322,12 +324,13 @@ import Testing
     /// Far from every edge, and across the seam between two displays side by side, the whole
     /// drawn path is kept: the same path as on a screen with no edges near.
     @Test func aPathFarFromTheEdgesKeepsItsWholeBow() {
-        let pair = Displays(frames: [CGRect(x: 0, y: 0, width: 1920, height: 1080), CGRect(x: 1920, y: 0, width: 1920, height: 1080)])!
+        let pair = DisplayLayout.at(try! ScreenRect(x: 0, y: 0, width: 1920, height: 1080), try! ScreenRect(x: 1920, y: 0, width: 1920, height: 1080)).online
         for seed in UInt64(0) ..< 200 {
             let across = Self.trajectory(seed: seed, from: TrajectoryTests.start, to: TrajectoryTests.across)
-            #expect(across == TrajectoryTests.trajectory(seed: seed), "seed \(seed)")
+            let plain = TrajectoryTests.trajectory(seed: seed)
+            #expect(across.strokes == plain.strokes && across.tremor == plain.tremor && across.duration == plain.duration, "seed \(seed)")
             #expect(across.kept == Trajectory.Kept(ends: 1, bow: 1))
-            let seam = Self.trajectory(seed: seed, from: ScreenPoint(x: 1000, y: 540)!, to: ScreenPoint(x: 2800, y: 540)!, within: pair)
+            let seam = Self.trajectory(seed: seed, from: try! ScreenPoint(x: 1000, y: 540), to: try! ScreenPoint(x: 2800, y: 540), within: pair)
             #expect(seam.kept == Trajectory.Kept(ends: 1, bow: 1), "seed \(seed)")
         }
     }
@@ -360,10 +363,10 @@ import Testing
         }
     }
 
-    static let start = ScreenPoint(x: 100, y: 300)!
-    static let target = ScreenPoint(x: 840.4, y: 300)!
+    static let start = try! ScreenPoint(x: 100, y: 300)
+    static let target = try! ScreenPoint(x: 840.4, y: 300)
     /// Moves to steer: across the screen, back, up a diagonal, and a short hop.
-    static let moves = [(start, target), (target, start), (ScreenPoint(x: 900, y: 700)!, ScreenPoint(x: 300.5, y: 120)!), (start, ScreenPoint(x: 160, y: 330)!)]
+    static let moves = [(start, target), (target, start), (try! ScreenPoint(x: 900, y: 700), try! ScreenPoint(x: 300.5, y: 120)), (start, try! ScreenPoint(x: 160, y: 330))]
 
     /// One move of `moves` on `seed`, over a curved mouse whose cursor shows every report
     /// in time: what the move answered, the trajectory it was drawn, the cursor as each
@@ -476,12 +479,12 @@ import Testing
         tracking.sent(Move(x: Count(clamping: 6), y: .zero), on: 2)
         // At gain one the two were expected to carry 4 and 10 together; the cursor moved 5,
         // nearer the first alone.
-        tracking.saw(ScreenPoint(x: 105, y: 300)!, on: 2)
+        tracking.saw(try! ScreenPoint(x: 105, y: 300), on: 2)
         #expect(tracking.unseen.map(\.counts) == [Move(x: Count(clamping: 6), y: .zero)])
         #expect(tracking.curve == [Steering.Sample(counts: 4, perCount: 1.25)])
         #expect(tracking.expected == (112.5, 300))
         // A report that has shown nothing for longer than the closed loop waits moved nothing.
-        tracking.saw(ScreenPoint(x: 105, y: 300)!, on: 2 + Tracking.patience + 1)
+        tracking.saw(try! ScreenPoint(x: 105, y: 300), on: 2 + Tracking.patience + 1)
         #expect(tracking.unseen.isEmpty)
         #expect(tracking.lost == 1)
         // And so does one still unshown when the move gives up waiting.
@@ -498,7 +501,7 @@ import Testing
         tracking.sent(Move(x: Count(clamping: 4), y: .zero), on: 1)
         tracking.sent(Move(x: .zero, y: Count(clamping: 3)), on: 2)
         // 0.8 of (4, 3): nearer both together than the first alone.
-        tracking.saw(ScreenPoint(x: 103.2, y: 302.4)!, on: 2)
+        tracking.saw(try! ScreenPoint(x: 103.2, y: 302.4), on: 2)
         #expect(tracking.unseen.isEmpty)
         let sample = try #require(tracking.curve.first)
         #expect(tracking.curve.count == 1)
@@ -528,7 +531,7 @@ final class CurvedMouse: Mouse {
     }
 
     /// Where the cursor really is, late reports included.
-    var position: ScreenPoint { state.withLock { ScreenPoint(x: $0.shown.x + $0.pending.x, y: $0.shown.y + $0.pending.y)! } }
+    var position: ScreenPoint { state.withLock { try! ScreenPoint(x: $0.shown.x + $0.pending.x, y: $0.shown.y + $0.pending.y) } }
     /// The furthest right it has really been.
     var farthest: Double { state.withLock { $0.farthest } }
 
@@ -536,7 +539,7 @@ final class CurvedMouse: Mouse {
     func cursor() -> ScreenPoint {
         state.withLock {
             let shown = $0.shown
-            $0.shown = ScreenPoint(x: shown.x + $0.pending.x, y: shown.y + $0.pending.y)!
+            $0.shown = try! ScreenPoint(x: shown.x + $0.pending.x, y: shown.y + $0.pending.y)
             $0.pending = (0, 0)
             return shown
         }
@@ -555,7 +558,7 @@ final class CurvedMouse: Mouse {
             if lateEvery > 0, $0.reports % lateEvery == 0 {
                 $0.pending = ($0.pending.x + motion.x, $0.pending.y + motion.y)
             } else {
-                $0.shown = ScreenPoint(x: $0.shown.x + motion.x, y: $0.shown.y + motion.y)!
+                $0.shown = try! ScreenPoint(x: $0.shown.x + motion.x, y: $0.shown.y + motion.y)
             }
             $0.farthest = max($0.farthest, $0.shown.x + $0.pending.x)
         }

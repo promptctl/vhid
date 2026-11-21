@@ -1,3 +1,4 @@
+import ScreenSpace
 import Seeing
 
 /// What one element says of itself for a row to be found by it, or for a climb to list it.
@@ -63,12 +64,14 @@ struct Probe<Element> {
     /// A frame is the app's claim, and the hit test is where the click goes: Safari gives a
     /// native-looking `<button>` a frame several points wider than the element its page
     /// hit-tests. [LAW:one-source-of-truth] So the element is found from the row's own
-    /// point - the hit there, or the nearest ancestor of it with the row's role and frame -
-    /// and the box is tested from that point outward: each edge along the line through it
-    /// to the edge, moved in to the last point a click presses the element at, found by
-    /// halving; then each corner of that box along the diagonal to it, since a rounded
-    /// button's corner presses the page though both its edges stand, the box's sides drawn
-    /// in until every corner is a point the diagonal reached.
+    /// point - the point it is pressed at: the hit there, or the nearest ancestor of it with
+    /// the row's role and frame - and the part a display shows is tested from that point
+    /// outward: each edge along the line through it to the edge, moved in to the last point
+    /// a click presses the element at, found by halving; then each corner of that box along
+    /// the diagonal to it, since a rounded button's corner presses the page though both its
+    /// edges stand, the box's sides drawn in until every corner is a point the diagonal
+    /// reached. A cut no display shows a point or more a side of presses nowhere a row can
+    /// be pressed, and is `elsewhere`.
     ///
     /// A row the tree did not place is not this reader's to check, and stands. Every read
     /// that does not answer, a row whose own point lands on something else, and a row the
@@ -78,7 +81,7 @@ struct Probe<Element> {
         guard let role = found.source.role else { return Checked(.kept, calls: 0) }
         let check = Check(probe: self)
         do {
-            return Checked(try check.box(found.frame, role: role), calls: check.calls)
+            return Checked(try check.box(found, role: role), calls: check.calls)
         } catch let stop as Check<Element>.Stop {
             return Checked(.unchecked(stop.why), calls: check.calls)
         }
@@ -141,9 +144,9 @@ private final class Check<Element> {
     func texts(_ element: Element) throws -> [Heard<Said?>] { try ask { .answered(try probe.texts(element)) } }
     private func parent(_ element: Element) throws -> Element? { try ask { try probe.parent(element) } }
 
-    func box(_ frame: ScreenRect, role: Role) throws -> Pressed {
-        let centre = frame.centre
-        guard let at = try hit(centre), let element = try named(from: at, role: role, frame: frame) else {
+    func box(_ found: Found, role: Role) throws -> Pressed {
+        let (press, shown) = (found.press, found.frame)
+        guard let at = try hit(press), let element = try named(from: at, role: role, frame: found.placed.value.box) else {
             throw Stop(why: .elsewhere)
         }
         // Read the first time a click lands beside the element: a native control's every
@@ -164,8 +167,10 @@ private final class Check<Element> {
             throw Stop(why: .unanswered)
         }
         let resolution = Probe<Element>.resolution
-        // How far from the centre along a line of length `span` a click still presses the
-        // element: all of it, or the last point found by halving.
+        // Every point probed is inside the shown part, which a display holds, so is finite.
+        func point(_ x: Double, _ y: Double) -> ScreenPoint { try! ScreenPoint(x: x, y: y) }
+        // How far from the press point along a line of length `span` a click still presses
+        // the element: all of it, or the last point found by halving.
         func reach(_ span: Double, _ along: (Double) -> ScreenPoint) throws -> Double {
             guard span > resolution, !(try presses(along(span - resolution))) else { return span }
             var (inside, outside) = (0.0, span - resolution)
@@ -175,22 +180,27 @@ private final class Check<Element> {
             }
             return inside
         }
-        let (halfWidth, halfHeight) = (frame.width / 2, frame.height / 2)
-        let left = try reach(halfWidth) { ScreenPoint(x: centre.x - $0, y: centre.y) }
-        let right = try reach(halfWidth) { ScreenPoint(x: centre.x + $0, y: centre.y) }
-        let up = try reach(halfHeight) { ScreenPoint(x: centre.x, y: centre.y - $0) }
-        let down = try reach(halfHeight) { ScreenPoint(x: centre.x, y: centre.y + $0) }
+        // To each edge of the shown part from the press point, which the part holds.
+        let spans = (left: press.x - shown.x, right: shown.width - (press.x - shown.x),
+                     up: press.y - shown.y, down: shown.height - (press.y - shown.y))
+        let left = try reach(spans.left) { point(press.x - $0, press.y) }
+        let right = try reach(spans.right) { point(press.x + $0, press.y) }
+        let up = try reach(spans.up) { point(press.x, press.y - $0) }
+        let down = try reach(spans.down) { point(press.x, press.y + $0) }
         // The share of the diagonal to a corner of that box a click presses the element along.
         func corner(_ dx: Double, _ dy: Double) throws -> Double {
             let length = (dx * dx + dy * dy).squareRoot()
-            return length == 0 ? 1 : try reach(length) { ScreenPoint(x: centre.x + dx * $0 / length, y: centre.y + dy * $0 / length) } / length
+            return length == 0 ? 1 : try reach(length) { point(press.x + dx * $0 / length, press.y + dy * $0 / length) } / length
         }
         let (upLeft, upRight) = (try corner(-left, -up), try corner(right, -up))
         let (downLeft, downRight) = (try corner(-left, down), try corner(right, down))
         let (l, r) = (left * min(upLeft, downLeft), right * min(upRight, downRight))
         let (u, d) = (up * min(upLeft, upRight), down * min(downLeft, downRight))
-        guard (l, r, u, d) == (halfWidth, halfWidth, halfHeight, halfHeight) else {
-            return .narrowed(ScreenRect(x: centre.x - l, y: centre.y - u, width: l + r, height: u + d))
+        guard (l, r, u, d) == (spans.left, spans.right, spans.up, spans.down) else {
+            // Inside the shown part, so finite, with no side under zero.
+            let cut = try! ScreenRect(x: press.x - l, y: press.y - u, width: l + r, height: u + d)
+            guard let narrowed = Found(text: found.text, frame: cut, source: found.source, on: found.displays) else { throw Stop(why: .elsewhere) }
+            return .narrowed(narrowed)
         }
         return .kept
     }

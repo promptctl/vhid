@@ -1,7 +1,9 @@
 import Foundation
+import ScreenSpace
 
-/// What a pointer verb is aimed at: a point, pressed exactly, or a box, pressed at a point
-/// drawn inside it. `docs/design/human.md`, "Where a click lands".
+/// What a pointer verb is asked to go to: a point, pressed exactly, or a box, pressed at a
+/// point drawn inside the part of it a display shows. `docs/design/human.md`, "Where a click
+/// lands". As asked, before any display is read; `placed(on:)` puts it on them.
 ///
 /// [LAW:types-are-the-program] The two differ in what is known of the target's size, which
 /// is what Fitts' law and the spread of a person's clicks are both read from, so each is a
@@ -14,17 +16,56 @@ public enum Target: Hashable, Sendable, CustomStringConvertible {
     /// vhid is not told the size of, and the room a path keeps from an edge.
     static let button = 20.0
 
-    /// Fitts' W, the target's width along the move: for a box, the smaller of its sides, as
-    /// MacKenzie and Buxton's "smaller-of" model takes it for a two-dimensional target; for
-    /// a point, whose size vhid is not told, `button`.
-    var width: Double {
+    /// This target on `displays`, by the one rule both halves press by, or the refusal that
+    /// says it is on none. [LAW:single-enforcer]
+    public func placed(on displays: Displays) throws(Unplaced) -> PlacedTarget {
         switch self {
-        case .point: Self.button
-        case .box(let box): min(box.width, box.height)
+        case .point(let point): .point(try displays.place(point))
+        case .box(let box): .box(try displays.place(box))
         }
     }
 
-    /// How far inside a box's edge every drawn point stays, in points. eyes rounds a box out
+    public var description: String {
+        switch self {
+        case .point(let point): "\(point)"
+        case .box(let box): "the box \(box)"
+        }
+    }
+}
+
+/// A target a display shows, with the displays it was placed on: the only kind aiming,
+/// steering and pressing take. [LAW:parse-dont-validate]
+public enum PlacedTarget: Hashable, Sendable {
+    case point(Placed<ScreenPoint>)
+    case box(Placed<Shown>)
+
+    /// The target as it was asked for, which a report names.
+    public var asked: Target {
+        switch self {
+        case .point(let point): .point(point.value)
+        case .box(let box): .box(box.value.box)
+        }
+    }
+
+    /// The displays a path to it is kept on.
+    public var displays: Displays {
+        switch self {
+        case .point(let point): point.displays
+        case .box(let box): box.displays
+        }
+    }
+
+    /// Fitts' W, the target's width along the move: for a box, the smaller of the sides of
+    /// the part a display shows, as MacKenzie and Buxton's "smaller-of" model takes it for a
+    /// two-dimensional target; for a point, whose size vhid is not told, `Target.button`.
+    var width: Double {
+        switch self {
+        case .point: Target.button
+        case .box(let box): min(box.value.part.width, box.value.part.height)
+        }
+    }
+
+    /// How far inside a shown part's edge every drawn point stays, in points. A look rounds a box out
     /// to whole points, up to a point bigger on each side than what it found, and the cursor
     /// lands within half a point of where it is sent wherever one count moves it less than
     /// that; two points is clear of both. A Mac whose tracking speed carries the cursor
@@ -63,16 +104,20 @@ public enum Target: Hashable, Sendable, CustomStringConvertible {
         let over = abs(start.x - centre.x) <= reach.x && abs(start.y - centre.y) <= reach.y
         let held = over ? scatter : scatter.held(to: (start.x, start.y), across: (-dy / distance, dx / distance), straying: Self.directionalError * distance)
         let (x, y) = held.draw(within: (centre.x - half.x ... centre.x + half.x, centre.y - half.y ... centre.y + half.y), using: &generator)
-        return ScreenPoint(x: x, y: y)!
+        // Inside the shown part, which lies on a display, so finite.
+        return try! ScreenPoint(x: x, y: y)
     }
 
     /// The centre, how far either side of it on each axis the target reaches, and how far a
-    /// click may land: a box less its margin, none at all for a box too small to have any,
-    /// and none for a point.
-    private var extent: (centre: ScreenPoint, reach: (x: Double, y: Double), aimable: (x: Double, y: Double)) {
+    /// click may land: the shown part less its margin, none at all for a part too small to
+    /// have any, and none for a point.
+    private var extent: (centre: (x: Double, y: Double), reach: (x: Double, y: Double), aimable: (x: Double, y: Double)) {
         switch self {
-        case .point(let point): (point, (0, 0), (0, 0))
-        case .box(let box): (box.centre, (box.width / 2, box.height / 2), (max(0, box.width / 2 - Self.margin), max(0, box.height / 2 - Self.margin)))
+        case .point(let point): return ((point.value.x, point.value.y), (0, 0), (0, 0))
+        case .box(let box):
+            let part = box.value.part
+            return ((part.x + part.width / 2, part.y + part.height / 2), (part.width / 2, part.height / 2),
+                    (max(0, part.width / 2 - Self.margin), max(0, part.height / 2 - Self.margin)))
         }
     }
 
@@ -104,13 +149,6 @@ public enum Target: Hashable, Sendable, CustomStringConvertible {
                 let drawn = (x: mean.x + l11 * z1, y: mean.y + l21 * z1 + l22 * z2)
                 if bounds.x.contains(drawn.x), bounds.y.contains(drawn.y) { return drawn }
             }
-        }
-    }
-
-    public var description: String {
-        switch self {
-        case .point(let point): "\(point)"
-        case .box(let box): "the box \(box)"
         }
     }
 }

@@ -5,6 +5,7 @@ import Foundation
 import Helper
 import Installations
 import RecordingTie
+import Telemetry
 
 /// Records the physical keyboard and mouse as a script `vhid play` replays.
 ///
@@ -54,8 +55,7 @@ struct RecordCommand: AsyncParsableCommand {
         try await withTaskCancellationHandler {
             while let message = try app.receive(FromApp.self) {
                 switch message {
-                case .note(let note): FileHandle.standardError.write(Data("vhid record: \(note)\n".utf8))
-                case .script(let script): print(script, terminator: ""); return
+                case .recorded(let recorded): Self.report(recorded); return
                 case .recording, .refused: throw TieFailure("the tap app said \(message) while recording")
                 }
             }
@@ -64,6 +64,16 @@ struct RecordCommand: AsyncParsableCommand {
             signals?.answer()
             try? app.send(signals?.taken == SIGINT ? ToApp.stop : ToApp.end)
         }
+    }
+
+    /// A finished recording, said the one way: its notes on stderr, how it ended and what it
+    /// left out on the record, and the script on stdout. [LAW:nothing-unseen]
+    static func report(_ recorded: Recorded) {
+        for note in recorded.notes { FileHandle.standardError.write(Data("vhid record: \(note)\n".utf8)) }
+        Telemetry.note(.ending, .string(recorded.ending.said))
+        Telemetry.note(.leftOut, .object(["unmapped": .int(recorded.unmapped), "off_displays": .int(recorded.offDisplays),
+                                          "vhid_at_edge": .int(recorded.vhidAtEdge)]))
+        print(recorded.script, terminator: "")
     }
 
     /// Why a recording cannot start, from what was read: who holds the devices, and the
