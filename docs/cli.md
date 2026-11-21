@@ -110,7 +110,9 @@ names the signal too.
 `event` is the verb as it is typed (`scroll`, `driver state`), and an MCP call's is its
 tool's name, which is the same word; `entry` says which it came through. `outcome` is
 `ok`, `failed` or `cancelled`, and `error` is what the caller was told, absent when a verb
-said its piece and exited nonzero, as `doctor` does. Refused arguments are recorded as
+said its piece and exited nonzero. A verdict is not a failure: `doctor` on a Mac that is not
+ready, and `read-grants` reading a grant not held, record `ok` and exit with the status their
+verdict is. Refused arguments are recorded as
 refused but not quoted, since they can hold text meant for a password field, and for the
 same reason a `type` run's error names its kinds (`TypingStopped: UntypeableCharacters`)
 rather than quoting its words. An argument that could not be parsed
