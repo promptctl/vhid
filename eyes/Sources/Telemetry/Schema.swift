@@ -1,5 +1,7 @@
-// The record schema: every key a record of either half is written under, here and nowhere
-// else, so a typo is a compile error and the set a reader can find is the set there is.
+// The record schema: every count and attribute a record of either half is written under,
+// here and nowhere else, so a typo is a compile error and the set a reader can find is the
+// set there is. What an attribute's value holds - a move's fields, a pause's - is its
+// writer's, as its meaning is.
 // [LAW:types-are-the-program] [LAW:one-source-of-truth] Names only - what each fact means is
 // decided by the code that writes it - so Telemetry links nothing to hold them.
 

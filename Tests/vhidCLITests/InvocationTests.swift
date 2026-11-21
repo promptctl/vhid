@@ -1,5 +1,6 @@
+import ChildProcess
 import struct EyesVerbs.ArgumentRefused
-import enum EyesVerbs.Entry
+import struct EyesVerbs.Entry
 import ArgumentParser
 import DriverExtension
 import Foundation
@@ -376,6 +377,24 @@ import Testing
         #expect(refused["error"] as? String == Telemetry.refusedArguments)
     }
 
+    /// Refused arguments go unquoted through either door however they were refused - by a
+    /// tool, or by ArgumentParser's validation - and every other error is said as that
+    /// door's caller is told it.
+    @Test func eitherDoorSaysRefusedArgumentsUnquotedAndTheRestAsItsCallerIsTold() {
+        let cli = Entry.cli(under: Vhid.self), mcp = Entry.mcp(under: Vhid.self)
+        for entry in [cli, mcp] {
+            for refusal: any Error in [ArgumentRefused("hunter2"), ValidationError("hunter2")] {
+                #expect(entry.said(refusal) == Telemetry.refusedArguments, "\(entry.door) \(refusal)")
+            }
+            #expect(entry.said(CancellationError()) == CancellationError().reported)
+        }
+        struct Broke: Error, CustomStringConvertible { var description: String { "the reading broke" } }
+        let failed = Broke()
+        #expect(mcp.said(failed) == failed.reported)
+        #expect(cli.said(failed) == Vhid.message(for: failed))
+        #expect(cli.said(CleanExit.helpRequest()).isEmpty)
+    }
+
     @Test func anArgumentThatCannotBeParsedIsRecordedUnderTheRoot() async throws {
         let collected = Collected()
         await Self.commandLine(["clik"], into: collected)
@@ -426,7 +445,7 @@ import Testing
     /// A stopped session ends only once the call it withdrew has finished stopping: a
     /// withdrawn verb hands the devices back and lets go of what it holds on its way out,
     /// and its record says what it sent by then.
-    @Test func aStoppedSessionWaitsForItsWithdrawnCallToFinishStopping() async throws {
+    @Test(.timeLimit(.minutes(1))) func aStoppedSessionWaitsForItsWithdrawnCallToFinishStopping() async throws {
         let (began, begin) = AsyncStream<Void>.makeStream()
         let (handedBack, handBack) = AsyncStream<Void>.makeStream()
         let holding = VerbTool(Help.click, []) { _, _ in

@@ -195,7 +195,8 @@ The devices' half, by layer. Lower rows depend on nothing above them.
 | `KeyboardLayouts` | a layout's characters mapped back to the keys that type them |
 | `Keystrokes`, `Pointing` | key usages, key codes, buttons: plain values |
 | `Installations` | an installation's names, built from one string |
-| `ChildProcess`, `Signals`, `Version` | spawning children, catching signals, the build's version |
+| `ChildProcess` | starting a child and running a command to its deadline or its stop, for both halves |
+| `Signals`, `Version` | catching signals, the build's version |
 
 The rest of the tree:
 

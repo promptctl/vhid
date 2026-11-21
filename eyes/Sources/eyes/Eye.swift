@@ -24,7 +24,7 @@ struct Eye: AsyncParsableCommand {
     static func main() async {
         let ending: Result<Entry.Ran, any Error>
         do {
-            ending = .success(try await Entry.cli.unit(_commandName, said: { Entry.said(for: $0, under: Self.self) }) {
+            ending = .success(try await Entry.cli(under: Self.self).unit(_commandName) {
                 try await Entry.commandLine(Self.self, nil)
             })
         } catch {

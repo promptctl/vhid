@@ -1,4 +1,3 @@
-import ChildProcess
 import Foundation
 import Synchronization
 
@@ -6,28 +5,43 @@ import Synchronization
 ///
 /// Small on purpose: a reading needs a status and two streams, and a general process
 /// wrapper would be a second thing to maintain for the sake of arguments nobody passes.
-/// It lives beside the driver probe because that is where the first reading was taken;
-/// `vhid doctor`'s launchd reading is taken the same way rather than growing a second
-/// runner.
-public struct Command {
+/// [LAW:single-enforcer] Every command either half runs to read this Mac is run here: the
+/// driver probe's, `vhid doctor`'s launchd reading, the grant reading and the screen
+/// capture, so each is heard to its end, bounded, and stopped the one way.
+public struct Command: Sendable {
     public let tool: URL
     public let arguments: [String]
+    /// The child's environment: this process's when nil.
+    public let environment: [String: String]?
 
     public init(_ tool: String, _ arguments: String...) {
+        self.init(tool, arguments)
+    }
+
+    public init(_ tool: String, _ arguments: [String], environment: [String: String]? = nil) {
         self.tool = URL(fileURLWithPath: tool)
         self.arguments = arguments
+        self.environment = environment
     }
 
     public struct Output: Sendable {
-        public let status: Int32
+        /// What it exited with, or the signal that ended it.
+        public let ending: Ending
         public let stdout: String
         public let stderr: String
 
-        public init(status: Int32, stdout: String, stderr: String) {
-            self.status = status
+        public init(ending: Ending, stdout: String, stderr: String) {
+            self.ending = ending
             self.stdout = stdout
             self.stderr = stderr
         }
+
+        public init(status: Int32, stdout: String, stderr: String) {
+            self.init(ending: .exited(status), stdout: stdout, stderr: stderr)
+        }
+
+        /// The exit status, or the signal's number for a child a signal ended.
+        public var status: Int32 { switch ending { case .exited(let code), .signalled(let code): code } }
         /// What a reader should be shown when the command failed: tools split their
         /// complaints across both streams and which one carried it is not the reader's
         /// problem.
@@ -185,12 +199,19 @@ public struct Command {
             throw error
         }
         defer { close(out.read); close(err.read) }
+        // Nothing to read: a reading takes no input, and under an MCP server this process's
+        // own stdin is the client's JSON-RPC stream, which a child must not take from.
+        let nothing = open("/dev/null", O_RDONLY)
+        guard nothing >= 0 else {
+            close(out.read); close(out.write); close(err.read); close(err.write)
+            throw unheard("could not be given an empty stdin")
+        }
         let pid: pid_t
         do {
             // The writing ends are the child's once it has them: one left open here is a
             // stream that never ends.
-            defer { close(out.write); close(err.write) }
-            pid = try spawn(tool.path, arguments, stdio: [1: out.write, 2: err.write])
+            defer { close(out.write); close(err.write); close(nothing) }
+            pid = try spawn(tool.path, arguments, stdio: [0: nothing, 1: out.write, 2: err.write], environment: environment)
         }
         let heard = Result { try hear(pid, [out.read, err.read], by: deadline) }
         // [LAW:single-enforcer] The one place the child is stopped and collected, however
@@ -219,10 +240,8 @@ public struct Command {
         case .stopped:
             throw CancellationError()
         }
-        // What it exited with, or the signal that ended it.
-        let status = switch ending { case .exited(let code), .signalled(let code): code }
         return Output(
-            status: status,
+            ending: ending,
             stdout: String(decoding: streams[out.read, default: []], as: UTF8.self),
             stderr: String(decoding: streams[err.read, default: []], as: UTF8.self)
         )

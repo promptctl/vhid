@@ -1,7 +1,7 @@
 import Foundation
 import OwnThread
 import Testing
-@testable import DriverExtension
+@testable import ChildProcess
 
 /// What `Command` promises about the two streams it reads: both come back whole, and
 /// neither the size of a stream nor the order the child writes them in changes what comes

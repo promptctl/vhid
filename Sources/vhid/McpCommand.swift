@@ -1,6 +1,6 @@
 import ArgumentParser
 import Darwin
-import enum EyesVerbs.Entry
+import struct EyesVerbs.Entry
 import Foundation
 import Input
 import Installations
@@ -110,7 +110,7 @@ struct McpCommand: AsyncParsableCommand {
     /// Runs `work` as one call's unit of work, of a trace of its own: the tool it named,
     /// through this dispatcher, and the signal that stopped the session, if one did.
     static func dispatched<T>(_ name: String, stoppedBy signals: FirstSignal?, _ work: () async throws -> T) async throws -> T {
-        try await Entry.mcp.unit(name, trace: .fresh, said: { $0.reported }) {
+        try await Entry.mcp(under: Vhid.self).unit(name, trace: .fresh) {
             defer { signals?.noted() }
             return try await work()
         }

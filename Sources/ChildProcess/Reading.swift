@@ -1,4 +1,3 @@
-import DriverExtension
 import Foundation
 import Telemetry
 
@@ -20,7 +19,7 @@ import Telemetry
 ///
 /// [LAW:nothing-unseen] A cancelled reading's record names the commands the cancel
 /// ended: what a person who pressed Control-C was waiting on.
-func reading<T: Sendable>(_ read: @escaping @Sendable (Command.Stop) -> T) async throws(CancellationError) -> T {
+public func reading<T: Sendable>(_ read: @escaping @Sendable (Command.Stop) -> T) async throws(CancellationError) -> T {
     let stop = Command.Stop()
     let taken = await withTaskCancellationHandler {
         await withCheckedContinuation { reading in

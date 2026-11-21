@@ -81,7 +81,7 @@ struct Vhid: AsyncParsableCommand {
         case (.failure(let error), let number):
             // Said, because it can be the one report of what the verb had done when the
             // signal landed, in the words its record has. [LAW:no-silent-failure]
-            let words = Entry.said(for: error, under: Self.self)
+            let words = Entry.cli(under: Self.self).said(error)
             if !words.isEmpty { FileHandle.standardError.write(Data("vhid: \(words)\n".utf8)) }
             guard let number else { exit(withError: exitCode(for: error)) }
             die(by: number)
@@ -91,7 +91,7 @@ struct Vhid: AsyncParsableCommand {
     /// Runs `work` as one command-line run's unit of work, named `event` until it names
     /// itself, with the signal that stopped it, if one did.
     static func dispatched<T>(_ event: String, _ work: () async throws -> T) async throws -> T {
-        try await Entry.cli.unit(event, said: { Entry.said(for: $0, under: Self.self) }) {
+        try await Entry.cli(under: Self.self).unit(event) {
             defer { signals?.noted() }
             return try await work()
         }

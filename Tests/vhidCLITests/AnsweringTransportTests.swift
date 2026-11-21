@@ -52,7 +52,7 @@ import Testing
 
     /// Stopped after stdin has ended, when the relay is already parked on what is owed, the
     /// session still ends, and says which answers it gave up on.
-    @Test func aSessionStoppedWhileParkedEndsAndSaysWhatWasOwed() async throws {
+    @Test(.timeLimit(.minutes(1))) func aSessionStoppedWhileParkedEndsAndSaysWhatWasOwed() async throws {
         let stdio = Stdio(), said = Said()
         let transport = AnsweringTransport(stdio, logger: Logger(label: "test") { _ in said })
         let (read, next) = AsyncStream<Void>.makeStream()
@@ -76,7 +76,7 @@ import Testing
 
     /// A withdrawn call whose handler pays the withdrawal no mind holds the end of stdin
     /// until its handler is over, and its answer is never written.
-    @Test func aWithdrawnCallHoldsTheSessionUntilItsHandlerIsOver() async throws {
+    @Test(.timeLimit(.minutes(1))) func aWithdrawnCallHoldsTheSessionUntilItsHandlerIsOver() async throws {
         let (finish, done) = AsyncStream<Void>.makeStream()
         let (began, begin) = AsyncStream<Void>.makeStream()
         let stubborn = VerbTool(Help.click, []) { _, _ in
@@ -106,7 +106,7 @@ import Testing
     }
 
     /// A call cancelled twice is withdrawn once: a later call that reuses its id is answered.
-    @Test func aCancelSentTwiceWithdrawsOnlyTheCallItNames() async throws {
+    @Test(.timeLimit(.minutes(1))) func aCancelSentTwiceWithdrawsOnlyTheCallItNames() async throws {
         let stdio = Stdio(), transport = AnsweringTransport(stdio)
         let (read, next) = AsyncStream<Void>.makeStream()
         let session = Task {

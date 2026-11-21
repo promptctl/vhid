@@ -53,9 +53,12 @@ import Testing
         await #expect(throws: GrantReadingFailure("/usr/bin/false exited 1")) {
             try await GrantReading.taken(by: URL(fileURLWithPath: "/usr/bin/false"), [])
         }
-        await #expect(throws: GrantReadingFailure("/bin/sleep 5 did not answer within 0.2 seconds")) {
+        // Given up on at its deadline as every command is, and said as `Command` says it.
+        let stuck = await #expect(throws: GrantReadingFailure.self) {
             try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/sleep"), ["5"], within: .milliseconds(200))
         }
+        #expect(stuck?.description.hasPrefix("`sleep 5` had not ended") == true)
+        #expect(stuck?.description.hasSuffix("at the limit of 0.2 seconds, and was given up on") == true)
         // A grandchild holding the pipe does not hold the call past its deadline.
         let start = ContinuousClock.now
         await #expect(throws: GrantReadingFailure.self) {

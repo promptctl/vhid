@@ -1,3 +1,4 @@
+import ChildProcess
 import CoreGraphics
 import Foundation
 import Grants
@@ -172,32 +173,17 @@ public struct PixelReader: Reader {
     /// written nothing when the path is unwritable. The file it wrote, decoded, is the only
     /// proof a capture happened.
     ///
-    /// A look withdrawn while it captures ends its capture with it, so a stopped session's
-    /// wait on its calls is not held by a child nobody is waiting for.
-    /// [LAW:no-ambient-temporal-coupling]
+    /// Run as every command is, to `Command.limit` or until the look is withdrawn, and over
+    /// either way only once the child is collected: the file is removed after nothing can
+    /// still be writing it. [LAW:single-enforcer] [LAW:no-ambient-temporal-coupling]
     nonisolated static func capture(_ region: ScreenRect) async throws -> CGImage {
         let path = FileManager.default.temporaryDirectory
             .appendingPathComponent("eyes-\(UUID().uuidString).png")
         defer { try? FileManager.default.removeItem(at: path) }
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
         let r = region.cgRect
-        process.arguments = ["-x", "-t", "png", "-R\(Int(r.minX)),\(Int(r.minY)),\(Int(r.width)),\(Int(r.height))", path.path]
-        let stderr = Pipe()
-        process.standardError = stderr
-        // Under an MCP server this process's stdin is the client's JSON-RPC stream.
-        process.standardInput = FileHandle.nullDevice
-        let (ended, end) = AsyncStream<Void>.makeStream()
-        process.terminationHandler = { _ in end.finish() }
-        try process.run()
-        let child = process.processIdentifier
-        await withTaskCancellationHandler {
-            for await _ in ended {}
-        } onCancel: {
-            kill(child, SIGTERM)
-        }
-        try Task.checkCancellation()
+        let command = Command("/usr/sbin/screencapture", ["-x", "-t", "png", "-R\(Int(r.minX)),\(Int(r.minY)),\(Int(r.width)),\(Int(r.height))", path.path])
+        let output = try await reading { stop in Result { try command.run(by: .within(Command.limit, or: stop)) } }.get()
 
         guard let source = CGImageSourceCreateWithURL(path as CFURL, nil),
               // Decoded now, not on first use: the image is lazy by default, and the file
@@ -207,8 +193,7 @@ public struct PixelReader: Reader {
                   source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary
               )
         else {
-            let said = String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            throw PixelsError.captureWroteNothing(region, said.trimmingCharacters(in: .whitespacesAndNewlines))
+            throw PixelsError.captureWroteNothing(region, output.merged)
         }
         // The backstop for the clipping above: an image not the shape of the rectangle
         // would map every box to the wrong place, so it is refused rather than read.

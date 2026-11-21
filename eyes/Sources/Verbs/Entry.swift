@@ -1,23 +1,44 @@
 import ArgumentParser
 import Telemetry
 
-/// Where a unit of work came into an executable: typed on a command line, or called as an
-/// MCP tool.
+/// Where a unit of work came into an executable - typed on a command line, or called as an
+/// MCP tool - and the command tree it is dispatched under.
 ///
 /// [LAW:single-enforcer] Both executables open every command and every call through here,
 /// so what a dispatched unit says of itself - where it came in, and which words of an error
 /// stay off its record - is decided once for `vhid`, `vhid mcp` and `eyes` alike.
-public enum Entry: String, Sendable {
-    case cli, mcp
+public struct Entry {
+    public enum Door: String, Sendable { case cli, mcp }
 
-    /// Runs `work` as one dispatched unit named `name`. `said` gives what the caller was told
-    /// of an error, which the record carries - except refused arguments' words, which can
-    /// quote text meant for a password field, and outlive the terminal and the conversation.
-    public func unit<T>(_ name: String, trace: Telemetry.Trace = .joined, said: (any Error) -> String?,
-                        _ work: () async throws -> T) async throws -> T {
-        try await Telemetry.unit(name, trace: trace, said: { $0 is ArgumentRefused ? Telemetry.refusedArguments : said($0) }) {
-            Telemetry.note(.entry, .string(rawValue))
+    public let door: Door
+    public let root: any ParsableCommand.Type
+
+    public static func cli(under root: any ParsableCommand.Type) -> Entry { Entry(door: .cli, root: root) }
+    public static func mcp(under root: any ParsableCommand.Type) -> Entry { Entry(door: .mcp, root: root) }
+
+    /// Runs `work` as one dispatched unit named `name`, its record carrying what the caller
+    /// was told of an error, as `said` words it.
+    public func unit<T>(_ name: String, trace: Telemetry.Trace = .joined, _ work: () async throws -> T) async throws -> T {
+        try await Telemetry.unit(name, trace: trace, said: said) {
+            Telemetry.note(.entry, .string(door.rawValue))
             return try await work()
+        }
+    }
+
+    /// What the caller was told of `error`, in the words a record and a command line's last
+    /// words carry. Refused arguments are said to be refused and never quoted, at either
+    /// door, however they were refused - by a tool, or by ArgumentParser's own validation -
+    /// since their words can be text meant for a password field, and outlive the terminal
+    /// and the conversation. Otherwise a cancellation as a caller is told it, since
+    /// ArgumentParser has no words for one; an MCP caller is told the error as it reports
+    /// itself; and a command line, nothing for `--help` and `--version`, which end well,
+    /// and ArgumentParser's words for the rest.
+    public func said(_ error: any Error) -> String {
+        if error is ArgumentRefused || root.exitCode(for: error) == .validationFailure { return Telemetry.refusedArguments }
+        if error.isCancellation { return error.reported }
+        switch door {
+        case .mcp: return error.reported
+        case .cli: return root.exitCode(for: error) == .success ? "" : root.message(for: error)
         }
     }
 
@@ -37,20 +58,6 @@ public enum Entry: String, Sendable {
             case .judged(let status): root.exit(withError: ExitCode(status))
             case .answered(let answer): root.exit(withError: answer)
             }
-        }
-    }
-
-    /// What a command line's record and its last words say of a verb that ended in
-    /// `error`: nothing for `--help` and `--version`, which end well; that the arguments
-    /// were refused, never their words, which can quote text meant for a password field;
-    /// a cancellation as a caller is told it, since ArgumentParser has no words for one;
-    /// and otherwise ArgumentParser's. [LAW:single-enforcer] One rule for both executables.
-    public static func said(for error: any Error, under root: any ParsableCommand.Type) -> String {
-        if error.isCancellation { return error.reported }
-        switch root.exitCode(for: error) {
-        case .success: return ""
-        case .validationFailure: return Telemetry.refusedArguments
-        default: return root.message(for: error)
         }
     }
 

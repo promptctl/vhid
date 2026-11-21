@@ -1,8 +1,8 @@
 import Darwin
 
 /// Starts `executable` as this process's child, with the hygiene every child of vhidd
-/// needs. [LAW:single-enforcer] Every child vhidd starts is started here, the commands it
-/// runs to read the driver with them.
+/// needs. [LAW:single-enforcer] Every child vhidd starts is started here, and every command
+/// either half runs to read this Mac, through `Command`.
 ///
 /// - Every signal at its default, and none blocked: vhidd ignores SIGTERM to answer it on
 ///   a queue, the threads dispatch runs its queues on block it, and `vhid record` ignores
@@ -12,8 +12,10 @@ import Darwin
 ///   reader's stdin would keep that reader alive past vhidd itself. `stdio` maps a child's
 ///   0, 1 or 2 onto a descriptor of vhidd's; any of the three it leaves out is vhidd's own.
 ///
+/// `environment` is the child's, or this process's own when nil.
+///
 /// The pid is the caller's to reap, and until it does, no other process can have it.
-public func spawn(_ executable: String, _ arguments: [String], stdio: [Int32: Int32]) throws -> pid_t {
+public func spawn(_ executable: String, _ arguments: [String], stdio: [Int32: Int32], environment: [String: String]? = nil) throws -> pid_t {
     var attributes: posix_spawnattr_t?
     posix_spawnattr_init(&attributes)
     defer { posix_spawnattr_destroy(&attributes) }
@@ -36,8 +38,11 @@ public func spawn(_ executable: String, _ arguments: [String], stdio: [Int32: In
     }
     let argv: [UnsafeMutablePointer<CChar>?] = ([executable] + arguments).map { strdup($0) } + [nil]
     defer { argv.forEach { free($0) } }
+    let envp: [UnsafeMutablePointer<CChar>?]? = environment.map { $0.map { strdup("\($0.key)=\($0.value)") } + [nil] }
+    defer { envp?.forEach { free($0) } }
     var pid: pid_t = 0
-    let spawned = posix_spawn(&pid, executable, &actions, &attributes, argv, environ)
+    let spawned = envp.map { envp in envp.withUnsafeBufferPointer { posix_spawn(&pid, executable, &actions, &attributes, argv, $0.baseAddress) } }
+        ?? posix_spawn(&pid, executable, &actions, &attributes, argv, environ)
     guard spawned == 0 else { throw CouldNotStart(executable: executable, code: spawned) }
     return pid
 }

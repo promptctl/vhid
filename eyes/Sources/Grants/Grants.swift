@@ -1,4 +1,5 @@
 import ApplicationServices
+import ChildProcess
 import CoreGraphics
 import Darwin
 import Seeing
@@ -195,51 +196,17 @@ public struct GrantReading: Sendable, Equatable {
     }
 
     private static func child(_ reader: URL, _ arguments: [String], within deadline: Duration) async throws -> GrantReading {
-        let command = ([reader.path] + arguments).joined(separator: " ")
-        let process = Process()
-        process.executableURL = reader
-        process.arguments = arguments
         // The child's records, if it makes any, belong under this reading's span.
-        process.environment = Telemetry.childEnvironment()
-        let output = Pipe(), complaint = Pipe()
-        // Under an MCP server this process's stdin is the client's JSON-RPC stream.
-        process.standardInput = FileHandle.nullDevice
-        process.standardOutput = output
-        process.standardError = complaint
-        let (ended, end) = AsyncStream<Void>.makeStream()
-        process.terminationHandler = { _ in end.finish() }
-        do { try process.run() } catch { throw GrantReadingFailure("\(command) did not start: \(error)") }
-        // Drained while the child runs, so a child that says a lot cannot fill a pipe and stall;
-        // unstructured, so a deadline returns without waiting on whatever still holds a pipe.
-        let said = Task { await drained(output) }, why = Task { await drained(complaint) }
-        let finished = await withTaskGroup(of: Bool.self) { group in
-            group.addTask { for await _ in ended {}; return !Task.isCancelled }
-            group.addTask { try? await Task.sleep(for: deadline); return false }
-            defer { group.cancelAll() }
-            return await group.next()!
+        let command = Command(reader.path, arguments, environment: Telemetry.childEnvironment())
+        let ran = try await reading { stop in Result { try command.run(by: .within(deadline, or: stop)) } }
+        let output: Command.Output
+        do { output = try ran.get() } catch { throw GrantReadingFailure("\(error)") }
+        guard case .exited(let status) = output.ending, [0, GrantReading.lacking].contains(status) else {
+            let how = switch output.ending { case .exited(let code): "exited \(code)"; case .signalled(let code): "crashed with signal \(code)" }
+            let complaint = output.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw GrantReadingFailure("\(reader.path) \(how)\(complaint.isEmpty ? "" : ": \(complaint)")")
         }
-        guard finished else {
-            kill(process.processIdentifier, SIGKILL)
-            if Task.isCancelled { throw CancellationError() }
-            throw GrantReadingFailure("\(command) did not answer within \(deadline)")
-        }
-        guard process.terminationReason == .exit, [0, GrantReading.lacking].contains(process.terminationStatus) else {
-            let complaint = await why.value
-            let how = process.terminationReason == .uncaughtSignal ? "crashed with signal" : "exited"
-            throw GrantReadingFailure("\(command) \(how) \(process.terminationStatus)\(complaint.isEmpty ? "" : ": \(complaint)")")
-        }
-        return try GrantReading(line: await said.value)
-    }
-
-    /// Everything a pipe carries until its writer closes it, read off the cooperative pool,
-    /// which a blocking read must not hold.
-    private static func drained(_ pipe: Pipe) async -> String {
-        await withCheckedContinuation { done in
-            DispatchQueue.global().async {
-                done.resume(returning: String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-                    .trimmingCharacters(in: .whitespacesAndNewlines))
-            }
-        }
+        return try GrantReading(line: output.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 }
 
