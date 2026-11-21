@@ -75,9 +75,10 @@ struct VerbTool: Sendable {
         case .screen(let read):
             return try await read(arguments)
         case .daemon(let act):
-            return try await turns.take {
+            return try await turns.take(waited: {
                 Telemetry.count(.queuedMilliseconds, Int((ContinuousClock.now - arrived) / .milliseconds(1)))
-                return try await act(arguments, installation)
+            }) {
+                try await act(arguments, installation)
             }
         }
     }

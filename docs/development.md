@@ -28,8 +28,9 @@ The package holds two halves that share no code: the devices, and eyes.
 No target of either half links a target of the other. What links both is the `vhid`
 executable: its `look` reads with eyes and its acts press with the devices, so one MCP
 server does both. The `eyes` executable links eyes alone. The targets they both stand on,
-`Telemetry`, `Turns` and `ChildProcess`, link neither half: every child either half starts
-is run by `ChildProcess`'s `Command`, to a deadline. The manifest's comments say which target is
+`Telemetry`, `Turns` and `ChildProcess`, link neither half, wherever their directory: a
+command either half runs to read this Mac is run by `ChildProcess`'s `Command`, to a
+deadline. The manifest's comments say which target is
 which, and a `dependencies:` line that joins the halves anywhere but in `vhid` is the line
 to refuse in review.
 

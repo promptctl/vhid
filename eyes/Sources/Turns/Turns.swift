@@ -20,9 +20,16 @@ public actor Turns {
     /// How many callers are waiting for a turn.
     var queued: Int { waiting.count }
 
-    /// Runs `work` once every caller queued before this one has had its turn.
-    public nonisolated func take<T>(_ work: () async throws -> T) async throws -> T {
-        try await acquire()
+    /// Runs `work` once every caller queued before this one has had its turn. `waited` is
+    /// called as the wait is over, however it ended - the turn come, or the caller withdrawn
+    /// while it waited - so a caller that counts its wait counts the one a withdrawal cut
+    /// short too. [LAW:nothing-unseen]
+    public nonisolated func take<T>(waited: () -> Void, _ work: () async throws -> T) async throws -> T {
+        do { try await acquire() } catch {
+            waited()
+            throw error
+        }
+        waited()
         do {
             // A caller cancelled before its turn came never starts its work: not when no turn
             // was ahead of it, and not when the turn reached it before its withdrawal from

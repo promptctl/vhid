@@ -10,7 +10,7 @@ import Testing
         try await withThrowingTaskGroup(of: Void.self) { group in
             for name in ["a", "b", "c"] {
                 group.addTask {
-                    try await turns.take {
+                    try await turns.take(waited: {}) {
                         await log.note("\(name) begins"); await Task.yield(); await log.note("\(name) ends")
                     }
                 }
@@ -30,18 +30,20 @@ import Testing
         let turns = Turns()
         let (gate, open) = AsyncStream<Void>.makeStream()
         let (began, begin) = AsyncStream<Void>.makeStream()
-        let running = Task { try await turns.take { begin.finish(); for await _ in gate { break } } }
+        let running = Task { try await turns.take(waited: {}) { begin.finish(); for await _ in gate { break } } }
         for await _ in began {}
-        let ran = Mutex(false)
-        let waiter = Task { try await turns.take { ran.withLock { $0 = true } } }
+        let ran = Mutex(false), waited = Mutex(false)
+        let waiter = Task { try await turns.take(waited: { waited.withLock { $0 = true } }) { ran.withLock { $0 = true } } }
         // Queued behind the running work before it is cancelled.
         while await turns.queued == 0 { await Task.yield() }
         waiter.cancel()
         await #expect(throws: CancellationError.self) { try await waiter.value }
         #expect(!ran.withLock { $0 })
+        // The wait a withdrawal cut short is a wait over, said to the caller who counts it.
+        #expect(waited.withLock { $0 })
         open.yield()
         try await running.value
-        #expect(try await turns.take { "after" } == "after")
+        #expect(try await turns.take(waited: {}) { "after" } == "after")
     }
 
     /// A caller cancelled as the turn ahead of it ends never runs its work, whichever comes
@@ -52,7 +54,7 @@ import Testing
         let (began, begin) = AsyncStream<Void>.makeStream()
         let waiter = Mutex<Task<Void, any Error>?>(nil)
         let running = Task {
-            try await turns.take {
+            try await turns.take(waited: {}) {
                 begin.finish()
                 for await _ in gate { break }
                 // Cancelled from inside the turn, which is handed on the moment this returns.
@@ -60,7 +62,7 @@ import Testing
             }
         }
         for await _ in began {}
-        let queued = Task { try await turns.take { ran.withLock { $0 = true } } }
+        let queued = Task { try await turns.take(waited: {}) { ran.withLock { $0 = true } } }
         waiter.withLock { $0 = queued }
         while await turns.queued == 0 { await Task.yield() }
         open.yield()
@@ -75,7 +77,7 @@ import Testing
         let turns = Turns(), started = Mutex(false)
         let cancelled = Task {
             withUnsafeCurrentTask { $0?.cancel() }
-            return try await turns.take { started.withLock { $0 = true }; return "ran" }
+            return try await turns.take(waited: {}) { started.withLock { $0 = true }; return "ran" }
         }
         await #expect(throws: CancellationError.self) { try await cancelled.value }
         #expect(!started.withLock { $0 }, "the work started though its caller was cancelled")
@@ -85,7 +87,7 @@ import Testing
     @Test func workThatThrowsHandsTheTurnOn() async throws {
         struct Refusal: Error {}
         let turns = Turns()
-        await #expect(throws: Refusal.self) { try await turns.take { throw Refusal() } }
-        #expect(try await turns.take { 1 } == 1)
+        await #expect(throws: Refusal.self) { try await turns.take(waited: {}) { throw Refusal() } }
+        #expect(try await turns.take(waited: {}) { 1 } == 1)
     }
 }

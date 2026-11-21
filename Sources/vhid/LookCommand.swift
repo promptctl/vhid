@@ -27,22 +27,8 @@ struct LookCommand: AsyncParsableCommand {
     @Option(help: .sentence(LookHelp.timeout))
     var timeout: Double?
 
-    @Option(help: .sentence(LookHelp.display))
-    var display: UInt32?
-
-    @Option(help: .sentence(LookHelp.window))
-    var window: UInt32?
-
-    @Option(help: .sentence(LookHelp.page))
-    var page: UInt32?
-
-    /// Takes the next argument whatever it starts with, as a coordinate below does: a box on
-    /// a display left of or above the main one starts with a minus.
-    @Option(parsing: .unconditional, help: .sentence(LookHelp.rect))
-    var rect: String?
-
-    @Option(help: .sentence(LookHelp.app))
-    var app: String?
+    /// The place, declared once for `vhid look` and `eyes find` and `read`.
+    @OptionGroup var place: Where
 
     @Option(help: .sentence(LookHelp.limit))
     var limit: Int?
@@ -66,7 +52,7 @@ struct LookCommand: AsyncParsableCommand {
 
     private func asked() throws -> Asked {
         try Asked.parsed(text: text, exact: exact, edits: edits, near: near, until: until, timeout: timeout,
-                         display: display, window: window, page: page, rect: rect, app: app,
+                         display: place.display, window: place.window, page: place.page, rect: place.rect, app: place.app,
                          limit: limit, source: source, role: role, x: x, y: y, as: .flag)
     }
 }

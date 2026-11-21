@@ -192,20 +192,21 @@ public struct Command: Sendable {
     public func run(by deadline: Deadline) throws -> Output {
         try deadline.stop.admit()
         let started = SuspendingClock.now
-        let out = try pipe()
-        let err: (read: Int32, write: Int32)
-        do { err = try pipe() } catch {
-            close(out.read); close(out.write)
-            throw error
-        }
-        defer { close(out.read); close(err.read) }
         // Nothing to read: a reading takes no input, and under an MCP server this process's
         // own stdin is the client's JSON-RPC stream, which a child must not take from.
         let nothing = open("/dev/null", O_RDONLY)
-        guard nothing >= 0 else {
-            close(out.read); close(out.write); close(err.read); close(err.write)
-            throw unheard("could not be given an empty stdin")
+        guard nothing >= 0 else { throw unheard("could not be given an empty stdin") }
+        let out: (read: Int32, write: Int32)
+        do { out = try pipe() } catch {
+            close(nothing)
+            throw error
         }
+        let err: (read: Int32, write: Int32)
+        do { err = try pipe() } catch {
+            close(nothing); close(out.read); close(out.write)
+            throw error
+        }
+        defer { close(out.read); close(err.read) }
         let pid: pid_t
         do {
             // The writing ends are the child's once it has them: one left open here is a

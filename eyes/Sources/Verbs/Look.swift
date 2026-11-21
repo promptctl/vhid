@@ -89,25 +89,27 @@ extension SourceKind: ExpressibleByArgument {
 }
 
 /// Where `find` and `read` look, shared so the two verbs cannot disagree about it.
-struct Where: ParsableArguments {
+public struct Where: ParsableArguments {
     @Option(help: .sentence(LookHelp.display))
-    var display: UInt32?
+    public var display: UInt32?
 
     @Option(help: .sentence(LookHelp.window))
-    var window: UInt32?
+    public var window: UInt32?
 
     /// Takes the next argument whatever it starts with: a box on a display left of or
     /// above the main one starts with a minus, which would otherwise read as a flag.
     @Option(parsing: .unconditional, help: .sentence(LookHelp.rect))
-    var rect: String?
+    public var rect: String?
 
     @Option(help: .sentence(LookHelp.page))
-    var page: UInt32?
+    public var page: UInt32?
 
     @Option(help: .sentence(LookHelp.app))
-    var app: String?
+    public var app: String?
 
-    func validate() throws {
+    public init() {}
+
+    public func validate() throws {
         _ = try Self.place(display: display, window: window, page: page, rect: rect, app: app, as: .flag)
     }
 

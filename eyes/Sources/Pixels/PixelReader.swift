@@ -220,9 +220,10 @@ public struct PixelReader: Reader {
     /// [LAW:single-enforcer]
     nonisolated static func recognise(_ image: CGImage, of region: ScreenRect, in tile: ScreenRect) async throws -> [Found?] {
         let asked = ContinuousClock.now
-        return try await vision.take {
+        return try await vision.take(waited: {
             Telemetry.tally(.visionQueuedMilliseconds, by: Int((ContinuousClock.now - asked) / .milliseconds(1)))
-            return try await recognised(image, of: region, in: tile)
+        }) {
+            try await recognised(image, of: region, in: tile)
         }
     }
 

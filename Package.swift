@@ -208,11 +208,12 @@ let package = Package(
         ),
 
         // eyes: the screen read, so input can be aimed - what is in front, where text is -
-        // in the points the devices press. Its targets live under eyes/ and link nothing of
-        // the devices': no device, no daemon, no input, and no device target links one of
-        // them. What links both halves is the vhid executable, whose `look` reads with these
-        // and whose acts press with those, and its tests. [LAW:one-way-deps] The root targets
-        // an eyes target names link nothing of the devices': ChildProcess and Version.
+        // in the points the devices press. Its targets link nothing of the devices': no
+        // device, no daemon, no input, and no device target links one of them. What links
+        // both halves is the vhid executable, whose `look` reads with these and whose acts
+        // press with those, and its tests. [LAW:one-way-deps] Both halves stand on Telemetry
+        // and Turns, here under eyes/, and ChildProcess and Version, under Sources/, which
+        // link neither half.
         //
         // The vocabulary both readers speak and the protocol both conform to. It links
         // nothing - not Vision, not ApplicationServices - so the tree and the pixels share one
