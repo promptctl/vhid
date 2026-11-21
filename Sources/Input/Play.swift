@@ -1,6 +1,7 @@
 import Foundation
 import Keystrokes
 import Pointing
+import ScreenSpace
 
 /// A script of keyboard and mouse acts at fixed times on one clock: one absolute starting
 /// point, then acts at offsets from a clock started once the cursor is there.

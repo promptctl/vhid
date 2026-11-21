@@ -1,6 +1,7 @@
 import Foundation
 import Keystrokes
 import Pointing
+import ScreenSpace
 
 /// A point a script puts the cursor that no display shows: refused before the script plays.
 public struct OffDisplays: Error, CustomStringConvertible {
@@ -16,7 +17,8 @@ public struct OffDisplays: Error, CustomStringConvertible {
 /// What `vhid play` sends and when: a `Play` as one act per device call, on one clock.
 ///
 /// [LAW:parse-dont-validate] Made from a `Play` before anything is connected, so a script
-/// this cannot play is refused at its line and moves nothing. A line that restates the set
+/// this cannot play is refused at its line and moves nothing; a point no display shows is
+/// refused once play has read the displays, still before anything moves. A line that restates the set
 /// already held sends nothing, so it is not an act.
 ///
 /// **Keys held through a quiet stretch are kept alive here, as acts.** vhidd lets go of
@@ -111,7 +113,7 @@ public struct Schedule: Hashable, Sendable {
             case .keys, .buttons, .move, .wheel, .keepAlive: nil
             }
         }
-        if let off = points.first(where: { !displays.covers((x: $0.0.x, y: $0.0.y), by: 0) }) {
+        if let off = points.first(where: { !displays.holds($0.0) }) {
             throw OffDisplays(point: off.0, line: off.1)
         }
     }

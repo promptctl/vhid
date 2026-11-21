@@ -1,5 +1,6 @@
 import Foundation
 import Pointing
+import ScreenSpace
 
 /// Where a person's aimed pointer movement is, moment by moment, from one point to another:
 /// a main movement that lands on the target, stops short, or overshoots, then as many
@@ -144,7 +145,12 @@ public struct Trajectory: Sendable, Equatable {
     /// it swings toward every edge it runs beside, and checking it would cut every other
     /// deviation with it.
     public init(from start: ScreenPoint, toward aimed: Target, within displays: Displays, drawing generator: inout some RandomNumberGenerator) {
-        let target = aimed.aim(from: start, drawing: &generator)
+        // Where the cursor can be: the window server keeps it inside the display space, so a
+        // start or an aim past it is where the cursor stops, and the path's arithmetic stays
+        // far inside what a Double holds. [LAW:types-are-the-program]
+        let start = ScreenRect.displaySpace.clamping(x: start.x, y: start.y)
+        let aim = aimed.aim(from: start, drawing: &generator)
+        let target = ScreenRect.displaySpace.clamping(x: aim.x, y: aim.y)
         let pace = Self.pace.draw(using: &generator)
         let structure = Structure.draw(using: &generator)
         let (short, over) = (Self.short.draw(using: &generator), Self.over.draw(using: &generator))

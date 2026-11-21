@@ -1,7 +1,5 @@
 import Foundation
-// Input's verbs are aimed in ScreenSpace's points and boxes, so whatever speaks Input speaks
-// those too. [LAW:one-source-of-truth]
-@_exported import ScreenSpace
+import ScreenSpace
 
 /// What a pointer verb is aimed at: a point, pressed exactly, or a box, pressed at a point
 /// drawn inside it. `docs/design/human.md`, "Where a click lands".
@@ -13,16 +11,18 @@ public enum Target: Hashable, Sendable, CustomStringConvertible {
     case point(ScreenPoint)
     case box(Box)
 
-    /// A box a press can land inside: a frame with every side at least a point, kept as it
-    /// was given. [LAW:parse-dont-validate] The one parse that turns a frame - one eyes found,
-    /// or one a caller spelled - into a press target. The closing loop lands within half a
-    /// point, so a narrower box is not one the cursor can be put inside, and Fitts' law read
-    /// off it would take a move without end.
+    /// A box a press can land inside: a frame with every side at least a point, inside the
+    /// space a display can be in, kept as it was given. [LAW:parse-dont-validate] The one
+    /// parse that turns a frame - one eyes found, or one a caller spelled - into a press
+    /// target. The closing loop lands within half a point, so a narrower box is not one the
+    /// cursor can be put inside, and Fitts' law read off it would take a move without end.
+    /// The cursor is never past `ScreenRect.displaySpace`, so neither is a box it presses,
+    /// which keeps the aim's arithmetic finite.
     public struct Box: Hashable, Sendable, CustomStringConvertible {
         public let frame: ScreenRect
 
         public init?(_ frame: ScreenRect) {
-            guard frame.width >= 1, frame.height >= 1 else { return nil }
+            guard frame.width >= 1, frame.height >= 1, ScreenRect.displaySpace.contains(frame) else { return nil }
             self.frame = frame
         }
 
@@ -34,7 +34,7 @@ public enum Target: Hashable, Sendable, CustomStringConvertible {
         }
 
         /// What a refusal names as the form a press box is read in.
-        public static let spelling = "\(ScreenRect.spelling), each side at least a point"
+        public static let spelling = "\(ScreenRect.spelling), each side at least a point, inside \(ScreenRect.displaySpace)"
 
         public var description: String { frame.description }
     }
@@ -92,18 +92,22 @@ public enum Target: Hashable, Sendable, CustomStringConvertible {
         let over = abs(start.x - centre.x) <= reach.x && abs(start.y - centre.y) <= reach.y
         let held = over ? scatter : scatter.held(to: (start.x, start.y), across: (-dy / distance, dx / distance), straying: Self.directionalError * distance)
         let (x, y) = held.draw(within: (centre.x - half.x ... centre.x + half.x, centre.y - half.y ... centre.y + half.y), using: &generator)
-        // Drawn inside the box, whose every point is finite.
-        return ScreenPoint(x: x, y: y)!
+        return frame.clamping(x: x, y: y)
+    }
+
+    /// Where the target is: a box, or a point as a box of no size at it.
+    private var frame: ScreenRect {
+        switch self {
+        case .point(let point): ScreenRect(at: point)
+        case .box(let box): box.frame
+        }
     }
 
     /// The centre, how far either side of it on each axis the target reaches, and how far a
-    /// click may land: a box less its margin, none at all for a box too small to have any,
-    /// and none for a point.
+    /// click may land: the frame less its margin, none at all for a box too small to have
+    /// any or a point. [LAW:dataflow-not-control-flow]
     private var extent: (centre: ScreenPoint, reach: (x: Double, y: Double), aimable: (x: Double, y: Double)) {
-        switch self {
-        case .point(let point): (point, (0, 0), (0, 0))
-        case .box(let box): (box.frame.centre, (box.frame.width / 2, box.frame.height / 2), (max(0, box.frame.width / 2 - Self.margin), max(0, box.frame.height / 2 - Self.margin)))
-        }
+        (frame.centre, (frame.width / 2, frame.height / 2), (max(0, frame.width / 2 - Self.margin), max(0, frame.height / 2 - Self.margin)))
     }
 
     /// A two-dimensional normal: where a person's clicks fall, before the box's edges cut it.

@@ -21,8 +21,47 @@ public enum FromApp: Codable, Equatable, Sendable {
     case recording
     /// Something the person should hear about the recording, on stderr.
     case note(String)
+    /// How the recording ended and what it left out, for the command's record of the run.
+    /// Sent before the script.
+    case summary(Summary)
     /// The recording, whole, as `vhid play` reads it. The last message.
     case script(String)
+}
+
+/// What a recording came to: why it ended, and how many of the person's events it could
+/// not keep or could not trust. [LAW:nothing-unseen]
+public struct Summary: Codable, Equatable, Sendable {
+    public enum Ending: String, Codable, Sendable {
+        /// The person's Control-C, whose keys came out of the recording.
+        case stopped
+        /// Any other ending the command asked for.
+        case ended
+        /// macOS turned the tap off.
+        case tapOff = "tap_off"
+        /// An hour went by, as long as a script plays.
+        case hour
+        /// macOS gave an event at no place on the screen.
+        case eventAtNoPlace = "event_at_no_place"
+        /// The displays would not read, so vhid's motion could not be told stopped at an edge.
+        case displaysUnreadable = "displays_unreadable"
+        /// vhid's devices came back under IDs that could not be read.
+        case sendersLost = "senders_lost"
+    }
+
+    public let ending: Ending
+    /// Key presses with no HID usage, fn among them, left out.
+    public let unmapped: Int
+    /// Times vhid's motion reached a screen edge, after which the points may be off.
+    public let vhidAtEdge: Int
+    /// The person's moves at no place once vhid's motion was taken out, left out.
+    public let unplaced: Int
+
+    public init(ending: Ending, unmapped: Int, vhidAtEdge: Int, unplaced: Int) {
+        self.ending = ending
+        self.unmapped = unmapped
+        self.vhidAtEdge = vhidAtEdge
+        self.unplaced = unplaced
+    }
 }
 
 /// One end of the socket, as lines of messages.

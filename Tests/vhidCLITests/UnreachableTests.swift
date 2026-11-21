@@ -7,6 +7,7 @@ import TestClock
 import Testing
 @testable import Helper
 @testable import vhid
+import ScreenSpace
 
 /// What a verb says when the daemon could not be reached or would not serve it: the service
 /// it dialled, which link failed, and a held key or button only when one could be.

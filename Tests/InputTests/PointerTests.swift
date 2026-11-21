@@ -3,6 +3,7 @@ import Pointing
 import TestClock
 import Testing
 @testable import Input
+import ScreenSpace
 
 /// The pointer against a fake screen with a fake acceleration curve: what the loop posts,
 /// where the cursor ends up, and what it does when the cursor will not go.

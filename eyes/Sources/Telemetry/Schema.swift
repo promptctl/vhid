@@ -48,6 +48,11 @@ extension Telemetry {
         case matched
         case matchedAlso = "matched_also"
         case nearest
+        /// What a recording left out or could not trust: key presses with no HID usage, the
+        /// times vhid's motion reached a screen edge, and the person's moves at no place.
+        case keysUnmapped = "keys_unmapped"
+        case vhidAtEdge = "vhid_at_edge"
+        case movesUnplaced = "moves_unplaced"
 
         /// Whether opening the devices writes this as zero, so a verb that opened them and
         /// sent nothing reads zero and one that never opened them carries none. A switch
@@ -57,7 +62,8 @@ extension Telemetry {
             switch self {
             case .keyboardReports, .mouseReports, .verticalNotches, .horizontalNotches, .keyRollovers, .keyHesitations: true
             case .queuedMilliseconds, .visionQueuedMilliseconds, .calls, .frontCalls, .rows, .ownPids, .examined, .pages, .reads,
-                 .boxMilliseconds, .boxesNarrowed, .boxCalls, .owners, .matched, .matchedAlso, .nearest: false
+                 .boxMilliseconds, .boxesNarrowed, .boxCalls, .owners, .matched, .matchedAlso, .nearest,
+                 .keysUnmapped, .vhidAtEdge, .movesUnplaced: false
             }
         }
     }
@@ -117,6 +123,8 @@ extension Telemetry {
         case frontPid = "front_pid"
         case display
         case passedOver = "passed_over"
+        /// How a recording ended: `stopped`, `ended`, or what ended it first.
+        case recordingEnded = "recording_ended"
         /// Where a hit test landed: the app, its pid and window, its standing, the app in front.
         case app
         case pid

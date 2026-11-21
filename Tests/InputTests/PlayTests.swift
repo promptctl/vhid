@@ -1,9 +1,11 @@
+import CoreGraphics
 import Keystrokes
 import Pointing
 import Synchronization
 import TestClock
 import Testing
 @testable import Input
+import ScreenSpace
 
 /// A script parsed whole or refused whole, with the line that refused it named.
 @Suite struct PlayTests {
@@ -106,6 +108,8 @@ import Testing
         (start + "\n" + #"{"t_ms":0,"at":{"x":1}}"#, 2, "y"),
         (start + "\n" + #"{"t_ms":0,"at":{"x":1,"y":2,"z":3}}"#, 2, "unknown key \"z\""),
         (start + "\n" + #"{"t_ms":0,"keys":"leftShift"}"#, 2, "keys"),
+        (start + "\n" + #"{"t_ms":0,"at":{"x":1e7,"y":2}}"#, 2, "10000000,2 is not a place on the screen"),
+        (#"{"to":{"x":0,"y":-1e300}}"# + "\n" + #"{"t_ms":0,"buttons":[]}"#, 1, "is not a place on the screen"),
     ])
     func aScriptThatCannotBePlayedWholeIsRefusedAtItsLine(script: String, line: Int, saying: String) throws {
         let refused = try #require(throws: Play.ScriptInvalid.self) { try Play.parse(script) }
@@ -284,7 +288,7 @@ import Testing
     /// A point on no display is one the cursor cannot be put at, so the play is refused at
     /// the line naming it - the start's or a later one's - before anything moves.
     @Test func aPointOnNoDisplayIsRefusedBeforeAnythingMoves() async throws {
-        let display = Displays(frames: [ScreenRect(x: 0, y: 0, width: 100, height: 100)!])!
+        let display = try! Displays(bounds: [CGRect(x: 0, y: 0, width: 100, height: 100)])
         for (script, line) in [(#"{"to":{"x":500,"y":50}}"# + "\n" + #"{"t_ms":0,"buttons":["left"]}"# + "\n" + #"{"t_ms":1,"buttons":[]}"#, nil as Int?),
                                (#"{"to":{"x":50,"y":50}}"# + "\n" + #"{"t_ms":0,"at":{"x":50,"y":-1}}"#, 2)] {
             let fake = FakeMouse(at: ScreenPoint(x: 50, y: 50)!)

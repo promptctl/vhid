@@ -1,6 +1,7 @@
 import Seeing
 import Testing
 @testable import EyesVerbs
+import ScreenSpace
 
 /// What `eyes displays` prints, over displays written here.
 @Suite struct DisplaysCommandTests {

@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import ScreenSpace
 
 /// A window on screen: who owns it, where it is, and how high it is composited.
 ///

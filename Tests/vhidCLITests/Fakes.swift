@@ -9,6 +9,7 @@ import TestClock
 import Testing
 import Turns
 @testable import vhid
+import ScreenSpace
 
 extension VerbTool {
     /// One call alone, as a session with nothing else underway makes it: its turn is free.
@@ -119,5 +120,5 @@ extension Installation {
 extension Displays {
     /// A screen whose edges are further than any test's path goes, for tests that are not
     /// about the edges.
-    static let vast = Displays(frames: [ScreenRect(x: -100_000, y: -100_000, width: 200_000, height: 200_000)!])!
+    static let vast = try! Displays(bounds: [CGRect(x: -100_000, y: -100_000, width: 200_000, height: 200_000)])
 }

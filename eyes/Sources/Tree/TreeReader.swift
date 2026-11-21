@@ -1,6 +1,7 @@
 import ApplicationServices
 import Seeing
 import Grants
+import ScreenSpace
 
 /// Reads the screen through the accessibility tree: every on-screen window in the region,
 /// walked element by element, each element that says something reported at its own

@@ -1,4 +1,5 @@
 import CoreGraphics
+import ScreenSpace
 
 public extension Region {
     /// The rectangle this region names, in the one screen space, or a refusal naming what
@@ -66,20 +67,17 @@ public extension Geometry {
     /// many there are.
     typealias DisplayList = (UInt32, UnsafeMutablePointer<CGDirectDisplayID>?, UnsafeMutablePointer<UInt32>?) -> CGError
 
-    /// The shape of `CGDisplayBounds`: where a display sits in the global space.
-    typealias DisplayBounds = (CGDirectDisplayID) -> CGRect
-
     /// Every active display, main first - sorted so, because under mirroring the display
     /// list puts the largest drawable display first, not the main one. One reading for every caller, so the displays `eyes displays` lists are the
     /// ones a region is checked against. [LAW:one-source-of-truth] A list the window server
     /// would not give is said, never taken for no display active. [LAW:no-silent-failure]
     ///
-    /// Bounds that are no box are said by the display they came from, never read as some
-    /// other box; empty bounds are a display showing nothing, and kept as one.
+    /// Each display's bounds are read by `ScreenRect(displayBounds:)`, the rule the devices
+    /// read them by too: bounds that are no place a display can be are said by the display
+    /// they came from, and empty bounds are a display showing nothing, kept as one.
     ///
-    /// `list` and `bounds` are the window server's `CGGetActiveDisplayList` and
-    /// `CGDisplayBounds`, or a test's.
-    static func displays(list: DisplayList = CGGetActiveDisplayList, bounds: DisplayBounds = CGDisplayBounds) throws(CannotReadDisplays) -> [Display] {
+    /// `list` is the window server's `CGGetActiveDisplayList`, or a test's.
+    static func displays(list: DisplayList = CGGetActiveDisplayList) throws(CannotReadDisplays) -> [Display] {
         var count: UInt32 = 0
         var error = list(0, nil, &count)
         guard error == .success else { throw .list(error) }
@@ -87,8 +85,8 @@ public extension Geometry {
         error = list(count, &ids, &count)
         guard error == .success else { throw .list(error) }
         return try ids.prefix(Int(count)).map { id throws(CannotReadDisplays) in
-            let read = bounds(id)
-            guard let frame = ScreenRect(read) else { throw .bounds(id, read) }
+            let read = CGDisplayBounds(id)
+            guard let frame = ScreenRect(displayBounds: read) else { throw .bounds(id, read) }
             // Both widths from the mode, which is unrotated; the bounds are rotated, and a
             // portrait display divided by them reads 1.78x instead of 1x.
             let mode = CGDisplayCopyDisplayMode(id)

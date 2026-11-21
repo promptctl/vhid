@@ -2,6 +2,7 @@ import Foundation
 import KeyboardLayouts
 import Keystrokes
 import Pointing
+import ScreenSpace
 
 /// One event as the session tap delivered it, reduced to what a recording reads: when,
 /// from which device, where the cursor was, and what happened.
@@ -49,7 +50,7 @@ public struct Recorder {
     public var vhid: Set<UInt64>
     public let start: ScreenPoint
     /// Whether a point is on a screen's edge, where motion can be stopped short.
-    private let atEdge: @Sendable (ScreenPoint) -> Bool
+    private let atEdge: @Sendable (ScreenPoint) throws(DisplaysUnreadable) -> Bool
 
     private var lines: [Line]
     /// Keys the person holds, modifiers apart.
@@ -89,7 +90,7 @@ public struct Recorder {
     /// A recording from `start`, with the session's modifier `flags` as they were then:
     /// the first keys line, at 0, is the modifiers already down. vhid holds nothing then,
     /// because recording refuses to start while it holds the devices.
-    public init(start: ScreenPoint, flags: UInt64, vhid: Set<UInt64>, atEdge: @escaping @Sendable (ScreenPoint) -> Bool) {
+    public init(start: ScreenPoint, flags: UInt64, vhid: Set<UInt64>, atEdge: @escaping @Sendable (ScreenPoint) throws(DisplaysUnreadable) -> Bool) {
         self.start = start
         self.vhid = vhid
         self.atEdge = atEdge
@@ -99,14 +100,15 @@ public struct Recorder {
     }
 
     /// Takes one event, writing a line when it changed what the person holds or where
-    /// they put the cursor.
-    public mutating func take(_ event: TapEvent) {
+    /// they put the cursor; or the displays that would not read, which leave no telling
+    /// whether vhid's motion was stopped short, so the recording cannot go on past it.
+    public mutating func take(_ event: TapEvent) throws(DisplaysUnreadable) {
         // Never before the line before it: the tap can hand two devices' events over a
         // hair out of order, and a script's times may not go backwards.
         let event = TapEvent(at: max(event.at, lines.last?.at ?? .zero), sender: event.sender, location: event.location, kind: event.kind)
         let held = self.held
         if vhid.contains(event.sender) {
-            takeVhid(event)
+            try takeVhid(event)
         } else {
             takePerson(event)
         }
@@ -134,11 +136,11 @@ public struct Recorder {
     /// What the person holds: their keys, and the session's modifiers less vhid's.
     private var held: Set<Usage> { keys.union(session.subtracting(vhidModifiers)) }
 
-    private mutating func takeVhid(_ event: TapEvent) {
+    private mutating func takeVhid(_ event: TapEvent) throws(DisplaysUnreadable) {
         switch event.kind {
         case .motion:
             offset = (offset.x + event.location.x - last.x, offset.y + event.location.y - last.y)
-            vhidAtEdge += atEdge(event.location) ? 1 : 0
+            vhidAtEdge += try atEdge(event.location) ? 1 : 0
         case .flagsChanged(let code, let flags):
             session = Self.modifiers(in: flags)
             if let modifier = Usage(virtualKeyCode: code), let bit = Self.deviceBits[modifier] {
@@ -170,7 +172,10 @@ public struct Recorder {
         case .flagsChanged(_, let flags):
             session = Self.modifiers(in: flags)
         case .motion:
-            if let place = ScreenPoint(x: event.location.x - offset.x, y: event.location.y - offset.y) {
+            // A place the person put the cursor, once vhid's offset is out: past the screen
+            // when vhid's motion was not all seen, which is that move's to leave out and
+            // count, not the recording's to end - every event around it is whole.
+            if let place = try? ScreenPoint.at(event.location.x - offset.x, event.location.y - offset.y) {
                 lines.append(.at(event.at, place))
             } else {
                 unplaced += 1

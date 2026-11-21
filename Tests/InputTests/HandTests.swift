@@ -4,6 +4,7 @@ import Synchronization
 import TestClock
 import Testing
 @testable import Input
+import ScreenSpace
 
 /// The pauses a pointer makes around its presses, on a fake clock: a rest before the
 /// button goes down, the button held, the clicks of a double click a gap apart, and the

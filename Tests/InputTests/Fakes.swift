@@ -4,6 +4,7 @@ import Keystrokes
 import Pointing
 import Synchronization
 import TestClock
+import ScreenSpace
 
 /// A keyboard that records what it was asked to do and refuses after a given number of
 /// calls, so a run can be stopped at any point inside a character.
@@ -265,5 +266,5 @@ final class SteadyGainMouse: Mouse {
 extension Displays {
     /// A screen whose edges are further than any test's path goes, for tests that are not
     /// about the edges.
-    static let vast = Displays(frames: [ScreenRect(x: -100_000, y: -100_000, width: 200_000, height: 200_000)!])!
+    static let vast = try! Displays(bounds: [CGRect(x: -100_000, y: -100_000, width: 200_000, height: 200_000)])
 }

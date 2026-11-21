@@ -156,6 +156,7 @@ import Testing
         let dragged = await Self.refusal(Tools.drag, ["from": "-10,20,30,40", "to": ["x": 3, "y": 4]])
         #expect(dragged?.hasPrefix("from") == false && dragged?.hasPrefix("to") == false, "\(dragged ?? "nil")")
         #expect(await Self.refusal(Tools.drag, ["from": "1,2,3", "to": ["x": 3, "y": 4]])?.hasPrefix("from is ") == true)
+        #expect(await Self.refusal(Tools.drag, ["from": "1,2,3,4", "to": ["x": 2e6, "y": 4]])?.hasPrefix("to is ") == true)
     }
 
     /// The SDK has already turned `data:,hi` into bytes it cannot give back as sent, when

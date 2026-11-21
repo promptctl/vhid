@@ -1,14 +1,15 @@
 import ArgumentParser
 import Input
 import Pointing
+import ScreenSpace
 
 /// Two coordinates from a command line as a place on the screen, or the refusal that says
 /// they are not one.
 ///
-/// [LAW:parse-dont-validate] `ScreenPoint` refuses what is not a place on the screen, and
+/// [LAW:parse-dont-validate] `ScreenPoint.at` refuses what is not a place on the screen, and
 /// `inf` and `nan` are both things a shell hands over as a Double without complaint.
-/// [LAW:single-enforcer] Every verb that takes a place reads it through here, from both
-/// its `validate` and its `run`, so the refusal is worded one way everywhere.
+/// [LAW:single-enforcer] Every command-line verb that takes a place reads it through here,
+/// from both its `validate` and its `run`, so the command line words the refusal one way.
 func place(_ x: Double, _ y: Double) throws -> ScreenPoint {
     do { return try ScreenPoint.at(x, y) } catch { throw ValidationError(error.description) }
 }

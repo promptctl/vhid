@@ -15,6 +15,7 @@ import TelemetryTesting
 import TestClock
 import Testing
 @testable import vhid
+import ScreenSpace
 
 /// Every invocation leaves one record, however it ends, and the record carries what the
 /// verb decided. Driven through `Devices.using` over a real XPC connection to a far end of

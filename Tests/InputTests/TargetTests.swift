@@ -2,6 +2,7 @@ import Foundation
 import TestClock
 import Testing
 @testable import Input
+import ScreenSpace
 
 /// Where a click lands, `docs/design/human.md`: a point exactly, and a box at a point drawn
 /// inside it and clear of its edge, spread about its centre and held to the line the hand
@@ -138,6 +139,15 @@ private extension Target {
         for refused in ["", "1,2,0,4", "1,2,3,0", "1,2.5,3,4", "1,2,inf,4"] {
             #expect(Target.Box(spelled: refused) == nil, "\(refused)")
         }
+    }
+
+    /// A press lands on a display, so a box reaching past where any display can be is no
+    /// press box, however a frame claimed it; the widest the space holds is aimed inside.
+    @Test func aPressBoxLiesWhereADisplayCanBe() {
+        #expect(Target.Box(ScreenRect(x: -400, y: 22, width: 1e20, height: 30)!) == nil)
+        #expect(Target.Box(spelled: "999990,0,20,20") == nil)
+        let widest = ScreenRect.displaySpace
+        #expect(Self.aims(at: .box(widest), seeds: 0 ..< 50).allSatisfy(widest.contains))
     }
 
     /// A click given a box lands on the point its move aimed at, inside the box, and says

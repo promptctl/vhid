@@ -3,6 +3,7 @@ import Input
 import Pointing
 import Testing
 @testable import vhid
+import ScreenSpace
 
 /// What argv becomes before a verb holds it. [LAW:parse-dont-validate]
 @Suite struct ArgumentsTests {

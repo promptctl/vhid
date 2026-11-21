@@ -1,6 +1,7 @@
 import CoreGraphics
 import Testing
 @testable import Seeing
+import ScreenSpace
 
 /// The rule that turns the window server's list into the windows a person can see, asked
 /// with no window server.
@@ -23,22 +24,6 @@ import Testing
             #expect(throws: CannotReadDisplays.list(.cannotComplete)) { try Geometry.displays(list: refused) }
         }
         #expect(try Geometry.displays { _, _, count in count?.pointee = 0; return .success }.isEmpty)
-    }
-
-    /// Bounds the window server gives that are no box are said by the display they came
-    /// from, never read as another box; empty bounds are a display showing nothing, kept.
-    @Test func displayBoundsThatAreNoBoxAreSaidAndEmptyOnesKept() throws {
-        let one: Geometry.DisplayList = { _, ids, count in
-            ids?.pointee = 7
-            count?.pointee = 1
-            return .success
-        }
-        let broken = CGRect(x: CGFloat.nan, y: 0, width: 10, height: 10)
-        let refused = try #require(throws: CannotReadDisplays.self) { try Geometry.displays(list: one, bounds: { _ in broken }) }
-        guard case .bounds(7, _) = refused else { Issue.record("\(refused)"); return }
-        #expect("\(refused)".contains("nan"))
-        let empty = try Geometry.displays(list: one, bounds: { _ in CGRect(x: 5, y: 5, width: 0, height: 0) })
-        #expect(empty.map(\.frame) == [ScreenRect(x: 5, y: 5, width: 0, height: 0)!])
     }
 
     private func entry(

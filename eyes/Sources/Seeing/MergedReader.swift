@@ -1,3 +1,4 @@
+import ScreenSpace
 /// Two readers asked the same query, what they saw reconciled into one answer.
 ///
 /// It holds each as `any Reader` and nothing more, so neither the readers nor this type
@@ -133,11 +134,12 @@ public extension Candidates {
                     kept[index] = kept[index].found(by: .merged(kept[index].source, run.source))
                 }
                 duplicates += 1
-                extra += run.stretch(loose..<i)
+                // The words before this match that no match took, if any.
+                if loose < i { extra.append(run.stretch(loose...(i - 1))) }
                 loose = end + 1
                 i = end + 1
             }
-            extra += run.stretch(loose..<words.count)
+            if loose < words.count { extra.append(run.stretch(loose...(words.count - 1))) }
         }
         let regions = seen.map(\.region)
         guard let both = regions.dropFirst().reduce(regions[0], { $0?.intersection($1) }) else { throw RegionsApart(regions: regions) }
@@ -164,15 +166,3 @@ private extension Found {
     }
 }
 
-private extension Array where Element == Found {
-    static func += (list: inout [Found], found: Found?) {
-        if let found { list.append(found) }
-    }
-}
-
-private extension Found {
-    /// The words `span` of this run, or none for a span with no words in it.
-    func stretch(_ span: Range<Int>) -> Found? {
-        span.isEmpty ? nil : stretch(span.lowerBound...(span.upperBound - 1))
-    }
-}

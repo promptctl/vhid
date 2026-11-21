@@ -27,7 +27,7 @@ struct VerbHelp: Sendable {
 /// phrase, which a tool's schema shows as it is and a refusal quotes after "and it is";
 /// the command line shows it as a sentence.
 enum Help {
-    static let place = "screen points from the top left of the main display, the space cursor reports in; negative on a display left of or above it"
+    static let place = "screen points from the top left of the main display, the space cursor reports in; negative on a display left of or above it, and never a million or more from it, past where any display can be"
 
     /// A point a look asks what a click would land on.
     static let lookX = "the x of a point to say what a click there would land on - the app, its window and the element pressed - in " + place + "; given with y and nothing else"

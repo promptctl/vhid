@@ -7,6 +7,7 @@ import KeyboardLayouts
 import Keystrokes
 import Pointing
 import RecordingTie
+import ScreenSpace
 
 // The tap app `vhid record` launches: `vhid-record <socket> <command pid>`.
 //
@@ -96,18 +97,16 @@ do {
 }
 
 /// Whether a point is on the edge of a display, where motion can be stopped short, by the
-/// rule a path is kept off the edges by. [LAW:single-enforcer] A layout that will not read
-/// as displays - a bounds that is no box, or none with area - cannot rule an edge out, so
-/// it counts as one, and the recording's note says points after it may be off.
-@Sendable func atEdge(_ point: ScreenPoint) -> Bool {
+/// rule a path is kept off the edges by, on the displays as `Displays` reads them.
+/// [LAW:single-enforcer] A layout that will not read is thrown, never taken for an edge.
+@Sendable func atEdge(_ point: ScreenPoint) throws(DisplaysUnreadable) -> Bool {
     var count: UInt32 = 0
-    CGGetActiveDisplayList(0, nil, &count)
+    var error = CGGetActiveDisplayList(0, nil, &count)
+    guard error == .success else { throw .list(error) }
     var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
-    CGGetActiveDisplayList(count, &ids, &count)
-    let bounds = ids.prefix(Int(count)).map(CGDisplayBounds)
-    let frames = bounds.compactMap(ScreenRect.init)
-    guard frames.count == bounds.count, let displays = Displays(frames: frames) else { return true }
-    return displays.edge(at: point)
+    error = CGGetActiveDisplayList(count, &ids, &count)
+    guard error == .success else { throw .list(error) }
+    return try Displays(bounds: ids.prefix(Int(count)).map(CGDisplayBounds)).edge(at: point)
 }
 
 // Read here, not through vhidd: a recording taps this session's events, so it only
@@ -138,7 +137,7 @@ func sinceStart() -> Duration { .nanoseconds(Int64(clock_gettime_nsec_np(CLOCK_U
 
     /// Sends the recording and exits: a stop waits up to half a second, or until nothing
     /// is held, for the stop chord's own releases, and takes out its keys.
-    func finish(_ ending: ToApp, notes: [String] = []) {
+    func finish(_ ending: ToApp, as why: Summary.Ending, notes: [String] = []) {
         guard !finishing else { return }
         finishing = true
         // Never past an hour, which is as far as a script's times go.
@@ -152,6 +151,7 @@ func sinceStart() -> Duration { .nanoseconds(Int64(clock_gettime_nsec_np(CLOCK_U
             if recorder.unplaced > 0 { said.append("\(recorder.unplaced) of the person's moves were at no place once vhid's motion was taken out, and are not in the recording") }
             do {
                 for note in said { try command.send(FromApp.note(note)) }
+                try command.send(FromApp.summary(Summary(ending: why, unmapped: recorder.unmapped, vhidAtEdge: recorder.vhidAtEdge, unplaced: recorder.unplaced)))
                 try command.send(FromApp.script(recorder.script(stoppedAt: stoppedAt, stopKeys: ending == .stop ? stopKeys : [])))
                 exit(0)
             } catch {
@@ -202,14 +202,19 @@ guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .tailAppendEve
         // A tap macOS turned off has missed events, so what it recorded is ended there
         // rather than carried on with a gap in it, and said so.
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-            session.finish(.end, notes: ["macOS turned the tap off (\(type == .tapDisabledByTimeout ? "too slow" : "by user input")), so the recording ends there"])
+            session.finish(.end, as: .tapOff, notes: ["macOS turned the tap off (\(type == .tapDisabledByTimeout ? "too slow" : "by user input")), so the recording ends there"])
         } else if session.taking {
+            // An event at no place is a stream with a hole in it, and a layout that will not
+            // read leaves vhid's motion unaccounted for: either ends the recording there,
+            // and says why, rather than carry on past it. [LAW:no-silent-failure]
             do {
                 if let taken = try tapEvent(type, event) {
-                    if taken.at > hour { session.finish(.end, notes: [hourNote]) } else { session.recorder.take(taken) }
+                    if taken.at > hour { session.finish(.end, as: .hour, notes: [hourNote]) } else { try session.recorder.take(taken) }
                 }
+            } catch let error as NotAPlace {
+                session.finish(.end, as: .eventAtNoPlace, notes: ["macOS gave an event at no place (\(error)), so the recording ends there"])
             } catch {
-                session.finish(.end, notes: ["macOS gave an event at no place (\(error)), so the recording ends there"])
+                session.finish(.end, as: .displaysUnreadable, notes: ["the displays could not be read (\(error)), so whether vhid's motion was stopped at an edge is not known, and the recording ends there"])
             }
         }
     }
@@ -233,7 +238,7 @@ let reread: IOServiceMatchingCallback = { _, iterator in
         do {
             session.recorder.vhid = try vhidSenders()
         } catch {
-            session.finish(.end, notes: ["vhid's devices came back and could not be told apart again (\(error)), so the recording ends there"])
+            session.finish(.end, as: .sendersLost, notes: ["vhid's devices came back and could not be told apart again (\(error)), so the recording ends there"])
         }
     }
 }
@@ -245,7 +250,7 @@ reread(nil, appeared)
 
 // An hour with no event ends the recording too.
 DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(Int(Play.longest))) {
-    MainActor.assumeIsolated { session.finish(.end, notes: [hourNote]) }
+    MainActor.assumeIsolated { session.finish(.end, as: .hour, notes: [hourNote]) }
 }
 
 try? command.send(FromApp.recording)
@@ -253,7 +258,7 @@ Thread.detachNewThread {
     // The command's messages, and its end: a socket closed without a word is the command
     // gone, and so is the app.
     while let message = try? command.receive(ToApp.self) {
-        DispatchQueue.main.async { MainActor.assumeIsolated { session.finish(message) } }
+        DispatchQueue.main.async { MainActor.assumeIsolated { session.finish(message, as: message == .stop ? .stopped : .ended) } }
     }
     DispatchQueue.main.async { exit(1) }
 }

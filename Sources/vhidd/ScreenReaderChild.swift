@@ -61,5 +61,5 @@ private func onlineDisplays() -> String {
     guard CGGetOnlineDisplayList(0, nil, &count) == .success else { return refusedAnswer }
     var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
     guard CGGetOnlineDisplayList(count, &ids, &count) == .success else { return refusedAnswer }
-    return ids.prefix(Int(count)).map(CGDisplayBounds).map { "\($0.minX) \($0.minY) \($0.width) \($0.height)" }.joined(separator: ";")
+    return ids.prefix(Int(count)).map(CGDisplayBounds).map { "\($0.origin.x) \($0.origin.y) \($0.size.width) \($0.size.height)" }.joined(separator: ";")
 }

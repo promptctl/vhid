@@ -1,5 +1,6 @@
 import Testing
 @testable import Seeing
+import ScreenSpace
 
 /// A merged reader over two readers a test wrote, neither of which is the tree or pixels.
 @MainActor @Suite struct MergedReaderTests {
@@ -145,7 +146,7 @@ import Testing
         let words = text.split(separator: " ").enumerated().map { i, w in
             Word(text: Text(String(w))!, frame: ScreenRect(x: x + Double(i) * 50, y: y, width: 45, height: 20)!)
         }
-        return Found(first: words[0], rest: Array(words.dropFirst()), source: Self.seen)!
+        return Found(first: words[0], rest: Array(words.dropFirst()), source: Self.seen)
     }
 
     @Test func aContainsQueryFindsOneButtonOnceWhateverEachReaderDividedItInto() async throws {

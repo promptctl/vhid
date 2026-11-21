@@ -1,5 +1,6 @@
 import Testing
 @testable import Seeing
+import ScreenSpace
 
 /// What a reader's candidates become, asked with a list a test wrote.
 @Suite struct JudgeTests {
@@ -10,7 +11,7 @@ import Testing
         let words = text.split(separator: " ").enumerated().map { i, w in
             Word(text: Text(String(w))!, frame: ScreenRect(x: 10 + Double(i) * 40, y: y, width: 30, height: 12)!)
         }
-        return Found(first: words[0], rest: Array(words.dropFirst()), source: .pixels(confidence: Confidence(0.9)!))!
+        return Found(first: words[0], rest: Array(words.dropFirst()), source: .pixels(confidence: Confidence(0.9)!))
     }
 
     private func judge(_ texts: [String], _ match: Match?, limit: Limit = .default) -> Reading {
@@ -153,7 +154,7 @@ import Testing
         let words = ["Shell", "Edit", "View"].enumerated().map { i, w in
             Word(text: Text(w)!, frame: ScreenRect(x: Double(i) * 50, y: 0, width: 40, height: 20)!)
         }
-        let run = Found(first: words[0], rest: Array(words.dropFirst()), source: .pixels(confidence: Confidence(1)!))!
+        let run = Found(first: words[0], rest: Array(words.dropFirst()), source: .pixels(confidence: Confidence(1)!))
         let read = Reading.judging([run], query: Query(match: .contains("edit"), region: .rect(Self.region)),
                                    region: Self.region, examined: 1, excluded: [], reach: .whole, owners: .every)
         guard case .matched(let m) = read.outcome else { Issue.record("nothing"); return }
@@ -166,7 +167,7 @@ import Testing
         let words = ["Save", "As…", "Cancel"].enumerated().map { i, w in
             Word(text: Text(w)!, frame: ScreenRect(x: Double(i) * 50, y: 0, width: 40, height: 20)!)
         }
-        let run = Found(first: words[0], rest: Array(words.dropFirst()), source: .pixels(confidence: Confidence(1)!))!
+        let run = Found(first: words[0], rest: Array(words.dropFirst()), source: .pixels(confidence: Confidence(1)!))
         #expect(Match.contains("save as").narrowing(run, by: .drawn(0)).map(\.text.value) == ["Save As…"])
         #expect(Match.exact("Save As… Cancel").narrowing(run, by: .drawn(0)) == [run])
     }
@@ -232,7 +233,7 @@ import Testing
     @Test func theRowsOwnTextWinsATie() {
         let save = Found(first: Word(text: Text("Save")!, frame: ScreenRect(x: 0, y: 0, width: 30, height: 12)!),
                          rest: [Word(text: Text("As")!, frame: ScreenRect(x: 40, y: 0, width: 20, height: 12)!)],
-                         source: .tree(role: Self.button, also: [Words(.title, Text("Save it")!)]))!
+                         source: .tree(role: Self.button, also: [Words(.title, Text("Save it")!)]))
         #expect(Match?.some(.contains("save")).fit(save) == .drawn(0))
         guard case .matched(let m) = judged([save], .contains("save")).outcome else { Issue.record("not found"); return }
         #expect(m.all.map(\.text.value) == ["Save"])

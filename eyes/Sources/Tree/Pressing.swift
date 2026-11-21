@@ -1,4 +1,6 @@
+import Foundation
 import Seeing
+import ScreenSpace
 
 /// What one element says of itself for a row to be found by it, or for a climb to list it.
 struct Lineage<Element> {
@@ -176,25 +178,26 @@ private final class Check<Element> {
             return inside
         }
         let (halfWidth, halfHeight) = (frame.width / 2, frame.height / 2)
-        // Every probe lies between the centre and an edge of the frame, and every number
-        // between two finite edges is finite, so each is a place. [LAW:types-are-the-program]
-        let inside = { (x: Double, y: Double) in ScreenPoint(x: x, y: y)! }
+        // Every probe is a point of the frame. [LAW:types-are-the-program]
+        let inside = { (x: Double, y: Double) in frame.clamping(x: x, y: y) }
         let left = try reach(halfWidth) { inside(centre.x - $0, centre.y) }
         let right = try reach(halfWidth) { inside(centre.x + $0, centre.y) }
         let up = try reach(halfHeight) { inside(centre.x, centre.y - $0) }
         let down = try reach(halfHeight) { inside(centre.x, centre.y + $0) }
-        // The share of the diagonal to a corner of that box a click presses the element along.
+        // The share of the diagonal to a corner of that box a click presses the element
+        // along, stepped along it as a unit direction, so no step is past the corner.
         func corner(_ dx: Double, _ dy: Double) throws -> Double {
-            let length = (dx * dx + dy * dy).squareRoot()
-            return length == 0 ? 1 : try reach(length) { inside(centre.x + dx * $0 / length, centre.y + dy * $0 / length) } / length
+            let length = hypot(dx, dy)
+            guard length > 0 else { return 1 }
+            let (ux, uy) = (dx / length, dy / length)
+            return try reach(length) { inside(centre.x + ux * $0, centre.y + uy * $0) } / length
         }
         let (upLeft, upRight) = (try corner(-left, -up), try corner(right, -up))
         let (downLeft, downRight) = (try corner(-left, down), try corner(right, down))
         let (l, r) = (left * min(upLeft, downLeft), right * min(upRight, downRight))
         let (u, d) = (up * min(upLeft, upRight), down * min(downLeft, downRight))
         guard (l, r, u, d) == (halfWidth, halfWidth, halfHeight, halfHeight) else {
-            // Inside the frame for the probes' reason, each side no longer than the frame's.
-            return .narrowed(ScreenRect(x: centre.x - l, y: centre.y - u, width: l + r, height: u + d)!)
+            return .narrowed(frame.part(from: (centre.x - l, centre.y - u), to: (centre.x + r, centre.y + d)))
         }
         return .kept
     }

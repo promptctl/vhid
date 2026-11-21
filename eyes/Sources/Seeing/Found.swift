@@ -1,4 +1,5 @@
 import CoreGraphics
+import ScreenSpace
 
 /// A string with something in it other than blank space.
 ///
@@ -48,38 +49,40 @@ public struct Word: Sendable, Hashable {
 public struct Found: Sendable, Hashable {
     public let first: Word
     public let rest: [Word]
-    public let source: Source
+    public private(set) var source: Source
 
-    /// One run the reader places as a whole - what the accessibility tree reports.
+    /// One run the reader places as a whole - what the accessibility tree reports - at its
+    /// frame as given, however far out an app claims it.
     public init(text: Text, frame: ScreenRect, source: Source) {
-        self.init(first: Word(text: text, frame: frame), rest: [], source: source, frame: frame)
-    }
-
-    /// Words a reader placed as one run, or none when the box holding them all is past what
-    /// a Double holds: words no box holds are not one run.
-    public init?(first: Word, rest: [Word], source: Source) {
-        guard let frame = rest.reduce(first.frame, { $0?.union($1.frame) }) else { return nil }
-        self.init(first: first, rest: rest, source: source, frame: frame)
-    }
-
-    private init(first: Word, rest: [Word], source: Source, frame: ScreenRect) {
-        self.first = first
-        self.rest = rest
+        first = Word(text: text, frame: frame)
+        rest = []
         self.source = source
         self.frame = frame
     }
 
-    /// The words `span` of this run, as a run of its own. Total: the box holding some of the
-    /// words lies within the one holding all of them, so a span that held all of them holds
-    /// these.
+    /// Words a reader read off the screen as one run, placed at the part of the display
+    /// space holding them all: words read off a display lie inside it, so that is the box
+    /// holding them, and it is always a box.
+    public init(first: Word, rest: [Word], source: Source) {
+        self.first = first
+        self.rest = rest
+        self.source = source
+        let edges = rest.map(\.frame).reduce((first.frame.x, first.frame.y, first.frame.maxX, first.frame.maxY)) {
+            (min($0.0, $1.x), min($0.1, $1.y), max($0.2, $1.maxX), max($0.3, $1.maxY))
+        }
+        frame = ScreenRect.displaySpace.part(from: (edges.0, edges.1), to: (edges.2, edges.3))
+    }
+
+    /// The words `span` of this run, as a run of its own.
     public func stretch(_ span: ClosedRange<Int>) -> Found {
-        let words = words[span]
-        return Found(first: words.first!, rest: Array(words.dropFirst()), source: source)!
+        Found(first: words[span.lowerBound], rest: Array(words[(span.lowerBound + 1) ..< (span.upperBound + 1)]), source: source)
     }
 
     /// This run as `source` found it.
     public func found(by source: Source) -> Found {
-        Found(first: first, rest: rest, source: source, frame: frame)
+        var found = self
+        found.source = source
+        return found
     }
 
     public var words: [Word] { [first] + rest }

@@ -118,7 +118,8 @@ let package = Package(
         .testTarget(name: "HelperTests", dependencies: ["Helper", "Installations", "Keystrokes", "Pointing", "OwnThread"]),
         // What a caller asks the devices for, said in a caller's terms: text lowered to
         // keystrokes, a chord, a place on the screen to click. It links the two
-        // vocabularies and the layout, and deliberately not Helper or VirtualHID: which
+        // vocabularies, the layout and ScreenSpace, the space its places are in, and
+        // deliberately not Helper or VirtualHID: which
         // device answers is the caller's to pick, so this holds the protocols and the
         // caller supplies a conformance. [LAW:one-way-deps] [LAW:effects-at-boundaries]
         // Telemetry for the cause chain its stops are read by, so a record and a caller tell
@@ -127,7 +128,7 @@ let package = Package(
         // The pointer's loop against a fake screen with an acceleration curve of its own,
         // and the typist against a keyboard that can be made to fail at the third keystroke
         // of four: no device, no window server, no grant.
-        .testTarget(name: "InputTests", dependencies: ["Input", "KeyboardLayouts", "Keystrokes", "OwnThread", "Pointing", "TestClock", "Telemetry"]),
+        .testTarget(name: "InputTests", dependencies: ["Input", "KeyboardLayouts", "Keystrokes", "OwnThread", "Pointing", "ScreenSpace", "TestClock", "Telemetry"]),
         // What must hold before a verb can reach the devices, as a table from readings of
         // this Mac to a step for a person. The table reads nothing: every requirement is a
         // pure function of readings, so every combination is exercised in its tests,
@@ -158,7 +159,7 @@ let package = Package(
         // Monitoring can be granted to it once. It reads the tap and the I/O Registry and
         // hands the events to Input's `Recorder`; it never reaches the devices.
         // [LAW:effects-at-boundaries]
-        .executableTarget(name: "vhid-record", dependencies: ["Input", "Keystrokes", "KeyboardLayouts", "Pointing", "RecordingTie"]),
+        .executableTarget(name: "vhid-record", dependencies: ["Input", "Keystrokes", "KeyboardLayouts", "Pointing", "RecordingTie", "ScreenSpace"]),
         // The root daemon that owns the devices. It links DriverExtension for the identity
         // the keyboard files its Keyboard Setup Assistant answer under, and deliberately
         // not KeyboardLayouts: text never reaches this process. [LAW:one-way-deps]
@@ -180,7 +181,7 @@ let package = Package(
             name: "vhid",
             dependencies: [
                 "Input", "Helper", "Installations", "KeyboardLayouts", "Keystrokes", "Pointing", "DriverExtension", "ChildProcess", "Doctor",
-                "Version", "RecordingTie", "Signals", "Telemetry", "Turns", "Seeing", "EyesVerbs", "Grants",
+                "Version", "RecordingTie", "Signals", "Telemetry", "Turns", "Seeing", "EyesVerbs", "Grants", "ScreenSpace",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "MCP", package: "swift-sdk"),
                 .product(name: "Logging", package: "swift-log"),
@@ -193,7 +194,7 @@ let package = Package(
             name: "vhidCLITests",
             dependencies: [
                 "vhid", "Input", "Helper", "Installations", "Keystrokes", "Pointing", "Doctor", "DriverExtension", "Version", "OwnThread", "TestClock", "Signals",
-                "Telemetry", "TelemetryTesting", "Turns", "Seeing", "EyesVerbs",
+                "Telemetry", "TelemetryTesting", "Turns", "Seeing", "EyesVerbs", "ScreenSpace",
                 .product(name: "MCP", package: "swift-sdk"),
             ]
         ),
@@ -229,17 +230,17 @@ let package = Package(
         // Every type there is a value, so the vocabulary is exercised with no display, no
         // capture and no grant. [LAW:effects-at-boundaries] The waits are kept on
         // a test's clock.
-        .testTarget(name: "SeeingTests", dependencies: ["Seeing", "TestClock"], path: "eyes/Tests/SeeingTests"),
+        .testTarget(name: "SeeingTests", dependencies: ["Seeing", "ScreenSpace", "TestClock"], path: "eyes/Tests/SeeingTests"),
         // The pixel reader: the grant, the capture and Vision. Its own target, so the
         // vocabulary stays linking nothing and the tree reader sits beside it unlinked.
-        .target(name: "Pixels", dependencies: ["Seeing", "Grants", "ChildProcess", "Telemetry", "Turns"], path: "eyes/Sources/Pixels"),
+        .target(name: "Pixels", dependencies: ["Seeing", "Grants", "ChildProcess", "ScreenSpace", "Telemetry", "Turns"], path: "eyes/Sources/Pixels"),
         // How a capture is cut into pieces and put back together, with no capture at all.
-        .testTarget(name: "PixelsTests", dependencies: ["Pixels", "Seeing", "Grants", "ChildProcess", "Turns"], path: "eyes/Tests/PixelsTests"),
+        .testTarget(name: "PixelsTests", dependencies: ["Pixels", "Seeing", "Grants", "ChildProcess", "ScreenSpace", "Turns"], path: "eyes/Tests/PixelsTests"),
         // The tree reader: the accessibility grant and the element reads, apart from Pixels
         // for the same reason.
-        .target(name: "Tree", dependencies: ["Seeing", "Grants"], path: "eyes/Sources/Tree"),
+        .target(name: "Tree", dependencies: ["Seeing", "Grants", "ScreenSpace"], path: "eyes/Sources/Tree"),
         // The element rules, the walk and the climb, over trees a test wrote.
-        .testTarget(name: "TreeTests", dependencies: ["Tree", "Seeing", "Grants"], path: "eyes/Tests/TreeTests"),
+        .testTarget(name: "TreeTests", dependencies: ["Tree", "Seeing", "Grants", "ScreenSpace"], path: "eyes/Tests/TreeTests"),
         // Whether the readers' grants are held and which app holds them: about the process,
         // not any reading, so apart from both readers, each of which asks it before looking.
         .target(name: "Grants", dependencies: ["Seeing", "ChildProcess", "Telemetry", "Responsibility"], path: "eyes/Sources/Grants"),
@@ -264,7 +265,7 @@ let package = Package(
         .target(
             name: "EyesVerbs",
             dependencies: [
-                "Seeing", "Pixels", "Tree", "Grants", "Telemetry",
+                "Seeing", "Pixels", "Tree", "Grants", "ScreenSpace", "Telemetry",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ],
             path: "eyes/Sources/Verbs"
@@ -273,7 +274,7 @@ let package = Package(
         // is checked here rather than read off a terminal. [LAW:verifiable-goals]
         .testTarget(
             name: "EyesVerbsTests",
-            dependencies: ["EyesVerbs", "Seeing", "Pixels", "Tree", "Grants", "Telemetry", "TelemetryTesting"],
+            dependencies: ["EyesVerbs", "Seeing", "Pixels", "Tree", "Grants", "ScreenSpace", "Telemetry", "TelemetryTesting"],
             path: "eyes/Tests/EyesVerbsTests"
         ),
         // The eyes command line: the verbs, and the version every binary here is stamped with.

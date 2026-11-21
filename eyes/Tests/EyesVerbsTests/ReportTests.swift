@@ -6,6 +6,7 @@ import TelemetryTesting
 @testable import Tree
 import Testing
 @testable import EyesVerbs
+import ScreenSpace
 
 /// What `find` and `read` print, asked with a reading a test wrote.
 @Suite(.eventsKept) struct ReportTests {

@@ -3,6 +3,7 @@ import ArgumentParser
 import Seeing
 import Telemetry
 import Tree
+import ScreenSpace
 
 /// What a click at a point would hit, asked right before acting on it: which app and window
 /// it goes to, and which element it presses. A question, never a guard - nothing is refused on

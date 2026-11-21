@@ -1,6 +1,7 @@
 import CoreGraphics
 import Testing
 @testable import Seeing
+import ScreenSpace
 
 /// The conversion from what a recogniser reports to what a caller clicks, asked without a
 /// display, a capture or a grant.

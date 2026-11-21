@@ -5,6 +5,7 @@ import Synchronization
 import TestClock
 import Testing
 @testable import Input
+import ScreenSpace
 
 /// The trajectory model of `docs/design/human.md`, on fixed seeds: how long a move takes,
 /// the shape of its path, and the draws behind both. Seconds of work over a thousand seeds,
@@ -232,7 +233,46 @@ import Testing
 /// everything. Over 200 seeds each, seconds of work that would hold `make test`'s one-thread
 /// pool, hence its own thread.
 @Suite(.ownThread) struct TrajectoryOnTheDisplaysTests {
-    static let screen = Displays(frames: [ScreenRect(x: 0, y: 0, width: 1920, height: 1080)!])!
+    static let screen = try! Displays(bounds: [CGRect(x: 0, y: 0, width: 1920, height: 1080)])
+
+    /// The window server's bounds are read by one rule: a display past where any can be is
+    /// refused by its place in the list, a display with no area is kept and holds no point,
+    /// and a layout with no area at all is no screen.
+    @Test func displaysAreReadByOneRule() throws {
+        let refused = #expect(throws: DisplaysUnreadable.self) {
+            try Displays(bounds: [CGRect(x: 0, y: 0, width: 1920, height: 1080), CGRect(x: 2e6, y: 0, width: 10, height: 10)])
+        }
+        #expect(refused == .bounds(display: 2, of: 2, CGRect(x: 2e6, y: 0, width: 10, height: 10)))
+        #expect(refused.map { "\($0)" } == "the window server gave display 2 of 2 the bounds 2000000,0,10,10, which are no place a display can be")
+        let mirrored = try Displays(bounds: [CGRect(x: 0, y: 0, width: 1920, height: 1080), CGRect(x: 0, y: 0, width: 0, height: 0)])
+        #expect(mirrored.frames.count == 2)
+        #expect(mirrored.holds(ScreenPoint(x: 0, y: 0)!))
+        #expect(!mirrored.holds(ScreenPoint(x: 1920, y: 0)!))
+        #expect(throws: DisplaysUnreadable.noArea([CGRect(x: 5, y: 5, width: 0, height: 0)])) {
+            try Displays(bounds: [CGRect(x: 5, y: 5, width: 0, height: 0)])
+        }
+        #expect(throws: DisplaysUnreadable.noArea([])) { try Displays(bounds: []) }
+    }
+
+    /// An edge is where the displays end, within a point: the seam between two displays
+    /// side by side is none, and the far side of either is one.
+    @Test func theSeamBetweenTwoDisplaysIsNoEdge() throws {
+        let pair = try Displays(bounds: [CGRect(x: 0, y: 0, width: 1920, height: 1080), CGRect(x: 1920, y: 0, width: 1920, height: 1080)])
+        #expect(!pair.edge(at: ScreenPoint(x: 1919.5, y: 500)!))
+        #expect(!pair.edge(at: ScreenPoint(x: 1920, y: 500)!))
+        #expect(pair.edge(at: ScreenPoint(x: 3839.5, y: 500)!))
+        #expect(pair.edge(at: ScreenPoint(x: 0, y: 500)!))
+        #expect(!pair.edge(at: ScreenPoint(x: 4000, y: 500)!))
+    }
+
+    /// A start or an aim no display can be at is where the cursor stops, so the path is
+    /// reckoned in finite numbers whatever point it was handed.
+    @Test func aPathFromPastTheDisplaySpaceIsReckonedInsideIt() {
+        var generator = SeededGenerator(seed: 1)
+        let path = Trajectory(from: ScreenPoint(x: -1.7e308, y: 1.7e308)!, toward: .point(ScreenPoint(x: 1.7e308, y: 0)!),
+                              within: Self.screen, drawing: &generator)
+        #expect(path.duration.components.seconds < 60)
+    }
     /// Ten points above the bottom edge, where an auto-hidden Dock waits, and across it.
     static let alongTheEdge = (ScreenPoint(x: 100, y: 1070)!, ScreenPoint(x: 1800, y: 1070)!)
 
@@ -322,7 +362,7 @@ import Testing
     /// Far from every edge, and across the seam between two displays side by side, the whole
     /// drawn path is kept: the same path as on a screen with no edges near.
     @Test func aPathFarFromTheEdgesKeepsItsWholeBow() {
-        let pair = Displays(frames: [ScreenRect(x: 0, y: 0, width: 1920, height: 1080)!, ScreenRect(x: 1920, y: 0, width: 1920, height: 1080)!])!
+        let pair = try! Displays(bounds: [CGRect(x: 0, y: 0, width: 1920, height: 1080), CGRect(x: 1920, y: 0, width: 1920, height: 1080)])
         for seed in UInt64(0) ..< 200 {
             let across = Self.trajectory(seed: seed, from: TrajectoryTests.start, to: TrajectoryTests.across)
             #expect(across == TrajectoryTests.trajectory(seed: seed), "seed \(seed)")

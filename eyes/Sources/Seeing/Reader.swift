@@ -1,3 +1,4 @@
+import ScreenSpace
 /// Something that can say what text is on screen and where.
 ///
 /// Two readers answer this: one walks the accessibility tree, one recognises pixels. They

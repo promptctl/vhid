@@ -4,6 +4,7 @@ import TelemetryTesting
 import Testing
 @testable import EyesVerbs
 @testable import Tree
+import ScreenSpace
 
 /// What `eyes hit` says of a click at a point, asked with landings a test wrote.
 @Suite(.eventsKept) struct HitCommandTests {

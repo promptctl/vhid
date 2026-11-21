@@ -7,6 +7,7 @@ import Seeing
 import Telemetry
 import Turns
 import Vision
+import ScreenSpace
 
 /// Reads the screen as pixels: captures the region, recognises its text on-device with
 /// Vision, and hands the runs to the one judge every reader shares.
@@ -46,25 +47,23 @@ public struct PixelReader: Reader {
         let listing = try Geometry.onScreen()
         let owners = query.region.owners(in: listing, hit: hit)
         let image = try await Self.capture(region)
-        // A run with no words in it is nil: examined, and counted as wordless.
         // One piece after another, never at once: measured, recognising the pieces in a
         // task group segfaulted inside TextRecognition in 4 runs of 15.
-        var runs: [Found?] = []
+        var runs: [Recognised] = []
         var readable: [Piece] = []
         for (index, tile) in Self.tiles(of: region).enumerated() {
             let recognised = try await Self.recognise(image, of: region, in: tile)
             runs += recognised
-            readable += recognised.compactMap { $0.map { Piece(tile: index, run: $0) } }
+            readable += recognised.compactMap { if case .run(let run) = $0 { Piece(tile: index, run: run) } else { nil } }
         }
 
-        let distinct = try Self.distinct(readable)
+        let distinct = Self.distinct(readable)
         // A capture is what is on top, every app's; the owners' part of it is what is read.
         let seen = distinct.map { (found: $0, seen: owners.see($0.frame.centre, windows: listing.windows, hit: hit)) }
         let setAside = seen.compactMap { if case .setAside(let why) = $0.seen { why } else { nil } }
-        let excluded = ([
-            Exclusion(reason: .wordless, count: runs.count - readable.count),
-            Exclusion(reason: .duplicate, count: readable.count - distinct.count),
-        ] + Exclusion.Reason.allCases.map { why in Exclusion(reason: why, count: setAside.filter { $0 == why }.count) })
+        let unread = runs.compactMap { if case .excluded(let why) = $0 { why } else { nil } }
+        let excluded = ([Exclusion(reason: .duplicate, count: readable.count - distinct.count)]
+            + Exclusion.Reason.allCases.map { why in Exclusion(reason: why, count: (unread + setAside).filter { $0 == why }.count) })
             .filter { $0.count > 0 }
         return Candidates(
             found: seen.filter { $0.seen == .read }.map(\.found).inReadingOrder,
@@ -96,9 +95,8 @@ public struct PixelReader: Reader {
             return (0...steps).map { origin + min(Double($0) * tileSide / 2, length - side) }
         }
         let (w, h) = (min(tileSide, region.width), min(tileSide, region.height))
-        // Each piece lies within the region, whose every edge is finite.
         return starts(region.y, region.height).flatMap { y in
-            starts(region.x, region.width).map { x in ScreenRect(x: x, y: y, width: w, height: h)! }
+            starts(region.x, region.width).map { x in region.part(from: (x, y), to: (x + w, y + h)) }
         }
     }
 
@@ -111,22 +109,21 @@ public struct PixelReader: Reader {
     /// spans overlap; within a joined run, a word mostly inside a wider word at the same
     /// place is the same word read again or cut by a seam, and only the widest is kept.
     /// Labels side by side do not overlap, so they stay apart. [LAW:no-silent-failure]
-    nonisolated static func distinct(_ pieces: [Piece]) throws(PixelsError) -> [Found] {
+    nonisolated static func distinct(_ pieces: [Piece]) -> [Found] {
         var groups: [[Piece]] = []
         for piece in pieces {
             let joined = groups.indices.filter { i in groups[i].contains { piece.continues($0) } }
             let merged = joined.flatMap { groups[$0] } + [piece]
             groups = groups.indices.filter { !joined.contains($0) }.map { groups[$0] } + [merged]
         }
-        return try groups.map { pieces throws(PixelsError) in try joining(pieces) }
+        return groups.map(joining)
     }
 
     /// Joined pieces as one run. A word is dropped only when a larger word read by a
     /// *different* tile covers half of it - the same spot read twice, or cut by a seam - so
     /// the words of one Vision run are never weighed against each other. Larger by area, so
     /// a half-height misread from a tile whose edge cut the line gives way to the whole one.
-    /// Words no box holds are no run, and are said by name.
-    nonisolated static func joining(_ pieces: [Piece]) throws(PixelsError) -> Found {
+    nonisolated static func joining(_ pieces: [Piece]) -> Found {
         let words = pieces.flatMap { piece in piece.run.words.map { (tile: piece.tile, word: $0) } }
         var kept: [(tile: Int, word: Word)] = []
         for candidate in words.sorted(by: { $0.word.frame.area > $1.word.frame.area }) {
@@ -138,10 +135,7 @@ public struct PixelReader: Reader {
         let ordered = kept.map(\.word).sorted { $0.frame.x < $1.frame.x }
         // A joined run is no surer than its least sure piece.
         let confidence = pieces.compactMap { if case .pixels(let c) = $0.run.source { c } else { nil } }.min()!
-        guard let run = Found(first: ordered[0], rest: Array(ordered.dropFirst()), source: .pixels(confidence: confidence)) else {
-            throw .unplaceable(ordered.map(\.text.value).joined(separator: " "))
-        }
-        return run
+        return Found(first: ordered[0], rest: Array(ordered.dropFirst()), source: .pixels(confidence: confidence))
     }
 
     /// The query's region as a rectangle a capture can take: the one `Region.bounds` names,
@@ -222,7 +216,7 @@ public struct PixelReader: Reader {
     /// The gate is here, at the one call into Vision, so nothing that recognises can go
     /// round it; the time a recognition waited is counted on the unit underway.
     /// [LAW:single-enforcer]
-    nonisolated static func recognise(_ image: CGImage, of region: ScreenRect, in tile: ScreenRect) async throws -> [Found?] {
+    nonisolated static func recognise(_ image: CGImage, of region: ScreenRect, in tile: ScreenRect) async throws -> [Recognised] {
         let asked = ContinuousClock.now
         return try await vision.take(waited: {
             Telemetry.tally(.visionQueuedMilliseconds, by: Int((ContinuousClock.now - asked) / .milliseconds(1)))
@@ -236,36 +230,40 @@ public struct PixelReader: Reader {
     /// two recognitions run together, which crashes the process.
     nonisolated static let vision = Turns()
 
-    private nonisolated static func recognised(_ image: CGImage, of region: ScreenRect, in tile: ScreenRect) async throws -> [Found?] {
+    private nonisolated static func recognised(_ image: CGImage, of region: ScreenRect, in tile: ScreenRect) async throws -> [Recognised] {
         var request = RecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.regionOfInterest = NormalizedRect(normalizedRect: tile.normalized(in: region))
         return try await request.perform(on: image).map { observation in
-            guard let best = observation.topCandidates(1).first else { return nil }
+            guard let best = observation.topCandidates(1).first else { return .excluded(.wordless) }
             guard let confidence = Confidence(Double(best.confidence)) else {
                 throw PixelsError.unreadableConfidence(best.string)
-            }
-            let place = { (box: NormalizedRect) throws(PixelsError) in
-                guard let placed = ScreenRect.fromImageSpace(normalized: box.cgRect, on: tile) else { throw .unplaceable(best.string) }
-                return placed
             }
             let source = Source.pixels(confidence: confidence)
             let words = best.string.split(whereSeparator: \.isWhitespace).map { word in
                 (text: Text(String(word))!, box: best.boundingBox(for: word.startIndex..<word.endIndex)?.boundingBox)
             }
+            // A run of only blank space has no word to place: examined, and counted as wordless.
+            guard !words.isEmpty, let text = Text(best.string) else { return .excluded(.wordless) }
             // A run with a word Vision cannot place stays one word at the run's own box,
             // rather than placing that word as if it covered the whole line.
-            guard words.allSatisfy({ $0.box != nil }) else {
-                let frame = try place(observation.boundingBox)
-                return Text(best.string).map { Found(text: $0, frame: frame, source: source) }
-            }
-            let placed = try words.map { word throws(PixelsError) in Word(text: word.text, frame: try place(word.box!)) }
-            // A run of only blank space has no word to place: examined, and counted as wordless.
-            guard let first = placed.first else { return nil }
-            guard let run = Found(first: first, rest: Array(placed.dropFirst()), source: source) else { throw PixelsError.unplaceable(best.string) }
-            return run
+            let boxed = words.compactMap { word in word.box.map { (text: word.text, box: $0) } }
+            let boxes = boxed.count == words.count ? boxed : [(text: text, box: observation.boundingBox)]
+            let placed = boxes.compactMap { word in ScreenRect.fromImageSpace(normalized: word.box.cgRect, on: tile).map { Word(text: word.text, frame: $0) } }
+            // A box that is no place, or a run with no area, is somewhere no click lands.
+            guard placed.count == boxes.count else { return .excluded(.unplaced) }
+            let run = Found(first: placed[0], rest: Array(placed.dropFirst()), source: source)
+            return run.frame.isEmpty ? .excluded(.unplaced) : .run(run)
         }
     }
+}
+
+/// What Vision's one observation came to: a run, or why it is none - no word to place, or
+/// a box that is no place or has no area. [LAW:no-silent-failure] Each counted under its
+/// reason, and the rest of the read kept.
+enum Recognised {
+    case run(Found)
+    case excluded(Exclusion.Reason)
 }
 
 /// A run and the tile that read it, which is what tells the same text read twice by
@@ -292,9 +290,6 @@ public enum PixelsError: ReaderError, CustomStringConvertible {
     case captureWrongShape(ScreenRect, width: Int, height: Int)
     case captureWroteNothing(ScreenRect, String)
     case unreadableConfidence(String)
-    /// Vision placed a run's text at no place on the screen: a box that is no box, or words
-    /// no box holds.
-    case unplaceable(String)
 
     public var missingGrant: Bool { if case .noGrant = self { true } else { false } }
 
@@ -315,8 +310,6 @@ public enum PixelsError: ReaderError, CustomStringConvertible {
                 + (said.isEmpty ? "" : ": \(said)")
         case .unreadableConfidence(let text):
             "Vision reported a confidence that is not a number for \"\(text)\""
-        case .unplaceable(let text):
-            "Vision placed \"\(text)\" at no place on the screen"
         }
     }
 }

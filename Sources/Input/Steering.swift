@@ -1,5 +1,6 @@
 import Foundation
 import Pointing
+import ScreenSpace
 
 /// Points per count by report length, at one report interval: what macOS's acceleration
 /// made of reports that size, measured, and the reports that carry the cursor a given
@@ -64,7 +65,12 @@ public struct Steering: Hashable, Sendable {
     /// leave it. One report when the distance fits in one, and otherwise as many as it
     /// takes, each as long as a report carries. What no whole count covers is left over
     /// in the expected point, so the next line's reports make it up rather than lose it.
+    ///
+    /// Reckoned in the display space, where the cursor is held: both ends, and so every
+    /// step between them, stay far inside what a Double holds. [LAW:types-are-the-program]
     public func reports(from: ScreenPoint, to: ScreenPoint) -> (reports: [Move], lands: ScreenPoint) {
+        let space = ScreenRect.displaySpace
+        let (from, to) = (space.clamping(x: from.x, y: from.y), space.clamping(x: to.x, y: to.y))
         var at = (x: from.x, y: from.y)
         var reports: [Move] = []
         while true {
@@ -75,8 +81,7 @@ public struct Steering: Hashable, Sendable {
             // The longest report there is, in any direction, and still short: another.
             guard counts == Int(Count.limit) else { break }
         }
-        // `from` and a few finite steps, each a report's counts times a measured gain.
-        return (reports, ScreenPoint(x: at.x, y: at.y)!)
+        return (reports, space.clamping(x: at.x, y: at.y))
     }
 
     /// The one report whose expected motion comes nearest `dx, dy`, its length in counts,

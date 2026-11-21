@@ -5,6 +5,7 @@ import Foundation
 import Helper
 import Installations
 import RecordingTie
+import Telemetry
 
 /// Records the physical keyboard and mouse as a script `vhid play` replays.
 ///
@@ -55,6 +56,11 @@ struct RecordCommand: AsyncParsableCommand {
             while let message = try app.receive(FromApp.self) {
                 switch message {
                 case .note(let note): FileHandle.standardError.write(Data("vhid record: \(note)\n".utf8))
+                case .summary(let summary):
+                    Telemetry.note(.recordingEnded, .string(summary.ending.rawValue))
+                    Telemetry.count(.keysUnmapped, summary.unmapped)
+                    Telemetry.count(.vhidAtEdge, summary.vhidAtEdge)
+                    Telemetry.count(.movesUnplaced, summary.unplaced)
                 case .script(let script): print(script, terminator: ""); return
                 case .recording, .refused: throw TieFailure("the tap app said \(message) while recording")
                 }

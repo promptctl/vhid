@@ -5,6 +5,7 @@ import Pointing
 import TestClock
 import Testing
 @testable import vhid
+import ScreenSpace
 
 /// What each verb does with the devices, and what it says afterwards. No daemon, no
 /// driver, no root: the devices record instead of acting. [LAW:behavior-not-structure]

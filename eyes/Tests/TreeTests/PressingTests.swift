@@ -3,6 +3,7 @@ import Testing
 import Seeing
 import Grants
 @testable import Tree
+import ScreenSpace
 
 /// How a row's box is checked against where a click lands, asked of trees a test wrote:
 /// each element an Int, the hit test a function of the point.
@@ -53,6 +54,23 @@ import Grants
         #expect(cut.y >= Self.element.y && cut.y - Self.element.y <= res)
         #expect(cut.x + cut.width < Self.element.x + Self.element.width && Self.element.x + Self.element.width - (cut.x + cut.width) <= 2 * res)
         #expect(cut.y + cut.height < Self.element.y + Self.element.height && Self.element.y + Self.element.height - (cut.y + cut.height) <= 2 * res)
+    }
+
+    /// A frame an app claims far wider than any screen is probed in finite numbers, every
+    /// probe a point of it, and cut to the element a click there presses.
+    @Test func aFrameFarWiderThanAnyScreenIsProbedInsideIt() throws {
+        let claimed = ScreenRect(x: -5e199, y: 620, width: 1e200, height: 34)!
+        let element = ScreenRect(x: -50, y: 625, width: 100, height: 26)!
+        let lineages = [0: Self.lineages[0]!, 1: Lineage(role: Self.button, frame: claimed, parent: 0)]
+        var outside = 0
+        let checked = try probe(hit: { p in
+            outside += claimed.contains(x: p.x, y: p.y) ? 0 : 1
+            return .answered(element.contains(p) ? 1 : 0)
+        }, lineages: lineages).press(row(claimed))
+        guard case .narrowed(let cut) = checked.pressed else { Issue.record("not narrowed: \(checked.pressed)"); return }
+        #expect(outside == 0)
+        #expect(claimed.contains(cut))
+        #expect(cut.width < 200 && element.contains(cut.centre))
     }
 
     /// A row merged from both readers carries the tree's role and frame, and is checked.

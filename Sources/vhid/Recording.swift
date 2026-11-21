@@ -3,6 +3,7 @@ import Input
 import Signals
 import Synchronization
 import Telemetry
+import ScreenSpace
 
 extension Telemetry.Attribute {
     static func name(ofSignal number: Int32) -> String {

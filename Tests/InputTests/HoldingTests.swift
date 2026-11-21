@@ -2,6 +2,7 @@ import Pointing
 import TestClock
 import Testing
 @testable import Input
+import ScreenSpace
 
 /// Modifiers held around a pointer act: the reports the keyboard and mouse make together,
 /// and what a stop anywhere among them leaves held.

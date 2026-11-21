@@ -1,5 +1,6 @@
 import Foundation
 import Pointing
+import ScreenSpace
 
 /// How many times a click clicks. At least one, because a click that does not click is a
 /// move and there is already a move. [LAW:parse-dont-validate]
@@ -504,20 +505,13 @@ public struct WouldNotReach: Error, CustomStringConvertible {
     }
 }
 
+/// Where the window server said the cursor is, which is not a place on the screen.
 public struct CursorUnreadable: Error, CustomStringConvertible {
-    public init() {}
+    public let read: NotAPlace
 
-    public var description: String { "the window server would not say where the cursor is" }
-}
+    public init(read: NotAPlace) { self.read = read }
 
-/// The window server listed no display a cursor could be on: none at all, or one with no
-/// area.
-public struct DisplaysUnreadable: Error, CustomStringConvertible {
-    public let frames: [CGRect]
-
-    public init(frames: [CGRect]) { self.frames = frames }
-
-    public var description: String { "the window server listed no displays a path could be kept on: \(frames)" }
+    public var description: String { "the window server put the cursor at \(read.x.positional),\(read.y.positional), which is not a place on the screen" }
 }
 
 /// A pointing run that stopped: vhidd went quiet, the caller cancelled it, or the

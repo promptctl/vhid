@@ -1,6 +1,7 @@
 import Seeing
 import Testing
 @testable import EyesVerbs
+import ScreenSpace
 
 /// The sentence the binary prints before its rows, asked with no screen behind it.
 ///

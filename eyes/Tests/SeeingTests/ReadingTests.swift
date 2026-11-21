@@ -1,6 +1,7 @@
 import CoreGraphics
 import Testing
 @testable import Seeing
+import ScreenSpace
 
 /// What a reading can honestly claim, asked with no reader behind it.
 ///

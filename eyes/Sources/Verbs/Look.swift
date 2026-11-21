@@ -6,6 +6,7 @@ import Grants
 import Pixels
 import Telemetry
 import Tree
+import ScreenSpace
 
 /// How a caller spells an argument's name in a refusal: `--limit` on the command line,
 /// `limit` to an MCP client.
@@ -201,18 +202,13 @@ public struct Where: ParsableArguments {
         return limit
     }
 
-    /// The farthest from the origin a region's edge or size may be, in points: a capture is
-    /// cut in whole points, and no display is near this far out.
-    static let regionLimit = 1_000_000.0
-
     /// What a refusal of a region names as the form wanted.
-    static let regionSpelling = "\(ScreenRect.spelling), with area, nothing past \(regionLimit.positional)"
+    static let regionSpelling = "\(ScreenRect.spelling), with area, inside \(ScreenRect.displaySpace)"
 
-    /// A region a look reads, which a capture cuts and a walk clips to: a box with area, and
-    /// no edge or size past `regionLimit`. [LAW:parse-dont-validate]
+    /// A region a caller names, which a capture cuts and a walk clips to: a box with area,
+    /// inside the space a display can be in, as a box vhid presses is.
     private static func parsedRect(_ spelled: String, as s: Spelling) throws -> ScreenRect {
-        guard let rect = ScreenRect(spelled: spelled), !rect.isEmpty,
-              [rect.x, rect.y, rect.width, rect.height].allSatisfy({ abs($0) <= regionLimit })
+        guard let rect = ScreenRect(spelled: spelled), !rect.isEmpty, ScreenRect.displaySpace.contains(rect)
         else { throw ValidationError("\(s("rect")) wants \(regionSpelling) - got \(spelled)") }
         return rect
     }
@@ -312,13 +308,12 @@ enum Report {
         return line
     }
 
-    /// The whole point a click is sent to: the whole point inside the box the row prints -
-    /// the frame rounded out - nearest the frame's centre, so the printed box holds the
-    /// printed point by construction. A box holding no whole point, one with no area, has
-    /// only its centre to give, rounded, on its edge.
+    /// The whole point a click is sent to: the one whose square holds the frame's centre.
+    /// The frame rounded out is the box the row prints, and it starts at or before the
+    /// centre's floor, so the printed box holds the printed point by construction - inside
+    /// it for a frame with area, at its corner for a frame a reader narrowed to none.
     private static func clickPoint(_ frame: ScreenRect) -> ScreenPoint {
-        let centre = frame.centre.rounded()
-        return frame.integral.nearest(to: centre)?.rounded(.down) ?? centre
+        frame.centre.rounded(.down)
     }
 
     private static func wanted(_ match: Match) -> String {

@@ -7,6 +7,7 @@ import Keystrokes
 import Pointing
 import struct Seeing.Front
 import Telemetry
+import ScreenSpace
 
 /// The two devices an installation's daemon owns, as a client reaches them.
 ///
@@ -126,8 +127,7 @@ struct Devices {
     static func cursor(_ helper: HelperConnection, on queue: DeviceQueue) -> @Sendable () async throws -> ScreenPoint {
         {
             let at = try await queue.run { try helper.cursor() }
-            guard let point = ScreenPoint(x: at.x, y: at.y) else { throw CursorUnreadable() }
-            return point
+            do throws(NotAPlace) { return try ScreenPoint.at(at.x, at.y) } catch { throw CursorUnreadable(read: error) }
         }
     }
 
@@ -136,10 +136,7 @@ struct Devices {
     static func displays(_ helper: HelperConnection, on queue: DeviceQueue) -> @Sendable () async throws -> Displays {
         {
             let read = try await queue.run { try helper.displays() }
-            // Every display's bounds a box, and at least one of them with area.
-            let frames = read.compactMap(ScreenRect.init)
-            guard frames.count == read.count, let displays = Displays(frames: frames) else { throw DisplaysUnreadable(frames: read) }
-            return displays
+            return try Displays(bounds: read)
         }
     }
 }

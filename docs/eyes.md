@@ -53,7 +53,7 @@ field from its label. The box is `x,y,width,height` in the same points, the form
 takes, rounded outward to whole points so it covers the run and holds the point printed
 beside it. Every rectangle eyes prints is in that form, a window's or display's bounds and
 a scope line's region too, so any of them can be passed back as `--rect`, which takes a
-box with area and no number past 1000000.
+box with area inside `-1000000,-1000000,2000000,2000000`, where any display can be.
 
 A row the tree found is its element's first text in words, of its value, title and
 description. Whatever else the element says in words follows the role, each after the

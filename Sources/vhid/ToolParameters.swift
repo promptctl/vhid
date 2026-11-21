@@ -4,6 +4,7 @@ import MCP
 import Pointing
 import enum Seeing.SourceKind
 import enum Seeing.Until
+import ScreenSpace
 
 /// One argument a tool takes: its name, what it is in words, and how its JSON becomes the
 /// value a verb takes.
@@ -166,7 +167,9 @@ extension Parameter where Taken == Target {
             if let box = $0.stringValue { return Target.Box(spelled: box).map(Target.box) }
             guard let object = $0.objectValue, Set(object.keys) == ["x", "y"],
                   let x = object["x"]?.number, let y = object["y"]?.number else { return nil }
-            return .point(try ScreenPoint.at(x, y))
+            // Refused as a box is, with the parameter's one refusal: what a place is, and
+            // what was given. [LAW:single-enforcer]
+            return (try? ScreenPoint.at(x, y)).map(Target.point)
         }
     }
 }

@@ -35,6 +35,27 @@ public struct ScreenRect: Hashable, Sendable, CustomStringConvertible {
         self.init(x: rect.origin.x, y: rect.origin.y, width: rect.size.width, height: rect.size.height)
     }
 
+    /// The box of no size at `point`.
+    public init(at point: ScreenPoint) {
+        self.init(Span(finite: point.x, 0), Span(finite: point.y, 0))
+    }
+
+    /// A display's bounds as the window server reports them: a box inside `displaySpace`,
+    /// or none. One with no area is a display showing nothing, and still a display.
+    /// [LAW:single-enforcer] The one rule both halves read a display by.
+    public init?(displayBounds: CGRect) {
+        guard let bounds = ScreenRect(displayBounds), Self.displaySpace.contains(bounds) else { return nil }
+        self = bounds
+    }
+
+    /// Where any display can be: a million points from the origin each way. The window
+    /// server lays displays out edge to edge from the main one, and the most displays a Mac
+    /// drives, each the widest made, reach under a tenth of that. The cursor is never
+    /// outside it, so a place to put the cursor, a box to press, or a region to capture
+    /// lies inside it, and arithmetic on such places stays far inside what a Double holds.
+    /// [LAW:types-are-the-program]
+    public static let displaySpace = ScreenRect(Span(finite: -1_000_000, 2_000_000), Span(finite: -1_000_000, 2_000_000))
+
     init(_ across: Span, _ down: Span) {
         (x, width, y, height) = (across.origin, across.length, down.origin, down.length)
     }
@@ -59,6 +80,12 @@ public struct ScreenRect: Hashable, Sendable, CustomStringConvertible {
     /// box, the right and bottom edges are in the next one.
     public func contains(_ point: ScreenPoint) -> Bool {
         across.holds(point.x) && down.holds(point.y)
+    }
+
+    /// `contains` on two numbers, for arithmetic that holds positions as numbers: one that
+    /// is no number lies between no two edges, so no box holds it.
+    public func contains(x: Double, y: Double) -> Bool {
+        across.holds(x) && down.holds(y)
     }
 
     /// Whether `other` lies wholly inside this box, edges included.
@@ -87,17 +114,22 @@ public struct ScreenRect: Hashable, Sendable, CustomStringConvertible {
         return ScreenRect(across, down)
     }
 
-    /// The smallest box of whole points holding this one: each origin rounded down, each
-    /// size rounded up past it. Total: a whole origin keeps its size rounded up, and the far
-    /// edge moves out by under two points, which no finite edge rounds past the largest
-    /// Double by.
+    /// The smallest box of whole points holding this one: each origin rounded down, each far
+    /// edge rounded up. Total: no finite edge rounds past the largest Double.
     public var integral: ScreenRect { ScreenRect(across.integral, down.integral) }
 
-    /// The point of this box nearest `place`, by `contains`' half-open rule: none for a box
-    /// that holds no point, one with no area or too far out for a Double to step inside it.
-    public func nearest(to place: ScreenPoint) -> ScreenPoint? {
-        guard let x = across.nearest(to: place.x), let y = down.nearest(to: place.y) else { return nil }
-        return ScreenPoint(finite: x, y)
+    /// The point of this box nearest `x, y`, by `contains`' half-open rule: total for any
+    /// two numbers - a NaN goes to the near edge - and for a box with no area, which holds
+    /// no point, its origin.
+    public func clamping(x: Double, y: Double) -> ScreenPoint {
+        ScreenPoint(finite: across.nearest(x), down.nearest(y))
+    }
+
+    /// The part of this box between two places, each held between its edges, the far ones
+    /// included: the box whose corners they are, in either order. Total, and built from
+    /// this box's own numbers, as `intersection` is.
+    public func part(from a: (x: Double, y: Double), to b: (x: Double, y: Double)) -> ScreenRect {
+        ScreenRect(across.part(a.x, b.x), down.part(a.y, b.y))
     }
 
     /// What a refusal names as the form a box is read in.
@@ -166,14 +198,30 @@ struct Span: Hashable {
         return first == last ? first : Span(first.origin, last.end - first.origin)
     }
 
+    /// Reckoned two ways, each whole where the other rounds, and the larger kept: from the
+    /// far edge rounded up, which near the origin holds what the fraction above the floor
+    /// lost; and from the size as given plus that fraction, rounded up, which far out keeps
+    /// a size the edges are too coarse to say.
     var integral: Span {
         let start = origin.rounded(.down)
-        // Exact: a double less its own floor loses no digits.
-        return Span(finite: start, (length + (origin - start)).rounded(.up))
+        return Span(finite: start, max(end.rounded(.up) - start, (length + (origin - start)).rounded(.up)))
     }
 
-    func nearest(to value: Double) -> Double? {
-        let last = end.nextDown
-        return last >= origin ? min(max(value, origin), last) : nil
+    /// `value` held between two edges: a NaN, which is neither above nor below, goes to
+    /// the near one.
+    private func held(_ value: Double, upTo last: Double) -> Double {
+        Double.minimum(Double.maximum(value, origin), last)
+    }
+
+    /// The value of this span nearest `value`, the far edge being the next span's: the
+    /// origin, for a span of no length.
+    func nearest(_ value: Double) -> Double { held(value, upTo: Swift.max(origin, end.nextDown)) }
+
+    /// The stretch between two values, each held inside this span: no longer than what is
+    /// left of it past the nearer, so its own far edge is this one's at most.
+    func part(_ a: Double, _ b: Double) -> Span {
+        let (a, b) = (held(a, upTo: end), held(b, upTo: end))
+        let low = min(a, b)
+        return Span(finite: low, min(max(a, b) - low, end - low))
     }
 }

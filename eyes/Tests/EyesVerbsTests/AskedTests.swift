@@ -3,6 +3,7 @@ import ArgumentParser
 import Synchronization
 import Testing
 @testable import EyesVerbs
+import ScreenSpace
 
 /// What `look` answers, asked of a screen a test wrote: the arguments read into one question,
 /// and the overview that shows the desk whatever the place came to.
@@ -95,15 +96,15 @@ import Testing
         #expect(refusal { try Self.asked(limit: 0) } == "limit must be at least 1")
     }
 
-    /// A rect is a region a look can cut and clip: a box with area, no number past the
-    /// limit, and a refusal that names the form it wanted.
+    /// A rect is a region a look can cut and clip: a box with area inside the space a
+    /// display can be in - its far edge too - and a refusal that names the form it wanted.
     @Test func aRectIsABoxWithAreaWithinTheLimit() throws {
         guard case .region(.rect(let rect)) = try Where.place(display: nil, window: nil, page: nil, rect: "-1000000,0,1000000,5", app: nil, as: .argument)
         else { Issue.record("not a rect"); return }
         #expect(rect == ScreenRect(x: -1_000_000, y: 0, width: 1_000_000, height: 5)!)
-        for refused in ["0,0,0,5", "1000001,0,5,5", "0,0,5,1e9", "0,0,5,5.5"] {
+        for refused in ["0,0,0,5", "1000001,0,5,5", "999999,0,5,5", "0,0,5,1e9", "0,0,5,5.5"] {
             #expect { try Where.place(display: nil, window: nil, page: nil, rect: refused, app: nil, as: .argument) } throws: {
-                ($0 as? ValidationError)?.message == "rect wants x,y,width,height in whole points, with area, nothing past 1000000 - got \(refused)"
+                ($0 as? ValidationError)?.message == "rect wants x,y,width,height in whole points, with area, inside -1000000,-1000000,2000000,2000000 - got \(refused)"
             }
         }
     }

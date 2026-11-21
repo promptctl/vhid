@@ -3,6 +3,7 @@ import Seeing
 import Testing
 @testable import Pixels
 @testable import Turns
+import ScreenSpace
 
 /// Two recognitions in flight crash the process inside Vision, so each one waits for the
 /// process's one Vision turn.

@@ -23,10 +23,12 @@ public struct ScreenPoint: Hashable, Sendable, CustomStringConvertible {
         self.init(finite: x, y)
     }
 
-    /// Two numbers a caller gave as a point, or the refusal every door says it with.
+    /// Two numbers given as a place on the screen - by a caller, or by the window server
+    /// as where the cursor or an event is - or the refusal every door says it with: a place
+    /// is a point some display could show, inside `ScreenRect.displaySpace`.
     /// [LAW:single-enforcer]
     public static func at(_ x: Double, _ y: Double) throws(NotAPlace) -> ScreenPoint {
-        guard let point = ScreenPoint(x: x, y: y) else { throw NotAPlace(x: x, y: y) }
+        guard let point = ScreenPoint(x: x, y: y), ScreenRect.displaySpace.contains(point) else { throw NotAPlace(x: x, y: y) }
         return point
     }
 
@@ -46,7 +48,8 @@ public struct ScreenPoint: Hashable, Sendable, CustomStringConvertible {
     public var description: String { "\(x.positional),\(y.positional)" }
 }
 
-/// Two numbers given as a point that are not one: either is NaN or infinite.
+/// Two numbers given as a place that are not one: either is NaN or infinite, or the point
+/// is past where any display can be.
 public struct NotAPlace: Error, CustomStringConvertible {
     public let x: Double
     public let y: Double

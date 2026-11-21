@@ -1,5 +1,6 @@
 import Testing
 @testable import Seeing
+import ScreenSpace
 
 /// What a look reads: the app it names, or with none named the app a person sees in front,
 /// from desks a test writes.

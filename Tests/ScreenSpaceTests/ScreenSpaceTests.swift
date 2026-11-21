@@ -43,6 +43,27 @@ import Testing
         }
     }
 
+    /// A place a caller or the window server gives is one a display could show: a point
+    /// past where any display can be is refused as the non-finite one is, and one at the
+    /// near edge of that space is a place.
+    @Test func aPlaceIsInsideTheSpaceADisplayCanBeIn() throws {
+        #expect(try ScreenPoint.at(-1_000_000, 999_999.5) == ScreenPoint(x: -1_000_000, y: 999_999.5))
+        for (x, y) in [(1_000_000.0, 0.0), (0, -1_000_000.5), (1e20, 1e20)] {
+            #expect(throws: NotAPlace.self, "\(x),\(y)") { try ScreenPoint.at(x, y) }
+        }
+    }
+
+    /// A display's bounds are a box a display can be at: a box past that space, or one that
+    /// is no box, is no display; one with no area is a display showing nothing, kept.
+    @Test func aDisplaysBoundsAreABoxInsideTheDisplaySpace() {
+        #expect(ScreenRect(displayBounds: CGRect(x: -1920, y: -98, width: 1920, height: 1080)) == ScreenRect(x: -1920, y: -98, width: 1920, height: 1080))
+        #expect(ScreenRect(displayBounds: CGRect(x: 5, y: 5, width: 0, height: 0))?.isEmpty == true)
+        for refused in [CGRect(x: CGFloat.nan, y: 0, width: 10, height: 10), CGRect(x: 999_000, y: 0, width: 1920, height: 1080),
+                        CGRect(x: 0, y: 0, width: -10, height: 10)] {
+            #expect(ScreenRect(displayBounds: refused) == nil, "\(refused)")
+        }
+    }
+
     /// The strongest theorem true of every frame a reader is handed: finite numbers, finite
     /// far edges, no side under zero. A frame with no area is one, and one 1e20 wide is one.
     @Test func aBoxIsAnyFrameTheScreenReportsAndNothingElse() {
@@ -72,9 +93,30 @@ import Testing
         #expect(box.contains(ScreenPoint(x: 19.99, y: 19.99)!))
         #expect(!box.contains(ScreenPoint(x: 20, y: 15)!))
         #expect(box.contains(box.centre))
-        #expect(box.nearest(to: ScreenPoint(x: 100, y: -100)!) == ScreenPoint(x: 20.0.nextDown, y: 10))
-        #expect(box.contains(box.nearest(to: ScreenPoint(x: 100, y: 100)!)!))
-        #expect(ScreenRect(x: 5, y: 5, width: 0, height: 3)!.nearest(to: ScreenPoint(x: 5, y: 5)!) == nil)
+    }
+
+    /// The point of a box nearest any two numbers is a point of it, by the half-open rule
+    /// every point of a box is held to, whatever the numbers - a NaN goes to the near edge
+    /// - and however large the box; a box with no area, holding none, gives its origin.
+    @Test func everyNumberHeldToABoxIsAPointOfIt() {
+        let box = ScreenRect(x: 10, y: 10, width: 10, height: 10)!
+        #expect(box.clamping(x: 100, y: -100) == ScreenPoint(x: 20.0.nextDown, y: 10))
+        #expect(box.clamping(x: 15, y: 12) == ScreenPoint(x: 15, y: 12))
+        #expect(box.clamping(x: .nan, y: .infinity) == ScreenPoint(x: 10, y: 20.0.nextDown))
+        let vast = ScreenRect(x: -5e307, y: -5e307, width: 1e308, height: 1e308)!
+        #expect(vast.contains(vast.clamping(x: -.infinity, y: 1e308)))
+        #expect(ScreenRect(x: 5, y: 5, width: 0, height: 3)!.clamping(x: 9, y: 9) == ScreenPoint(x: 5, y: 8.0.nextDown))
+    }
+
+    /// The part of a box between two places is a box inside it, in either order, however
+    /// far past it the places are, and never rebuilt larger than what is left of it.
+    @Test func thePartOfABoxBetweenTwoPlacesLiesInsideIt() {
+        let box = ScreenRect(x: 0, y: 0, width: 100, height: 50)!
+        #expect(box.part(from: (90, 40), to: (10, 5)) == ScreenRect(x: 10, y: 5, width: 80, height: 35))
+        #expect(box.part(from: (-1e300, .nan), to: (1e300, 1e300)) == ScreenRect(x: 0, y: 0, width: 100, height: 50))
+        #expect(box.part(from: (20, 20), to: (20, 20)) == ScreenRect(x: 20, y: 20, width: 0, height: 0))
+        let vast = ScreenRect(x: -8e307, y: 0, width: 1.6e308, height: 1)!
+        #expect(vast.contains(vast.part(from: (-.infinity, 0), to: (.infinity, 1))))
     }
 
     /// Boxes that touch at an edge share no area, which is how one thing seen twice is told
@@ -126,6 +168,13 @@ import Testing
         #expect(ScreenRect(x: -0.6, y: 10.5, width: 99.6, height: 20)!.description == "-1,10,100,21")
         #expect(ScreenRect(x: 10.5, y: 3, width: 1, height: 1)!.description == "10,3,2,1")
         #expect(ScreenRect(x: 1e20, y: 0, width: 5, height: 1e-5)!.description == "100000000000000000000,0,5,1")
+        // Just left of zero: the fraction above the floor rounds to a whole point, and the
+        // printed box still reaches past every point of the one found.
+        let slip = ScreenRect(x: -1e-17, y: 0, width: 5e-17, height: 1)!
+        #expect(slip.integral == ScreenRect(x: -1, y: 0, width: 2, height: 1))
+        // Whole far out, with a fraction near the origin: still holding it all.
+        let wide = ScreenRect(x: 0.5, y: 0, width: 1e20, height: 1)!
+        #expect(wide.integral.contains(wide))
     }
 
     /// Every printed box reads back as the box printed, and the reading takes that form and

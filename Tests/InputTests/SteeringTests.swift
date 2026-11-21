@@ -1,6 +1,7 @@
 import Pointing
 import Testing
 @testable import Input
+import ScreenSpace
 
 /// The table between clicks: what it predicts, and the reports it asks for.
 @Suite struct SteeringTests {
