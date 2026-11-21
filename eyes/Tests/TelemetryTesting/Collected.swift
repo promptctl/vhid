@@ -17,7 +17,7 @@ public struct EventsKept: SuiteTrait, TestTrait, TestScoping {
     public var isRecursive: Bool { true }
 
     public func provideScope(
-        for test: Test, testCase: Test.Case?, performing function: @Sendable () async throws -> Void
+        for test: Test, testCase: Test.Case?, performing function: @concurrent @Sendable () async throws -> Void
     ) async throws {
         try await Telemetry.$export.withValue(Collected().export) { try await function() }
     }

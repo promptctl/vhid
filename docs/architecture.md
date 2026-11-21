@@ -136,11 +136,11 @@ installation it is; it asks the value for the name it needs.
   keyboard first, so the question is never asked
   ([`vhidd/KeyboardTypeAnswer.swift`](../Sources/vhidd/KeyboardTypeAnswer.swift)).
 
-## eyes, the separate package
+## eyes, the reading half
 
-`eyes/` is its own SwiftPM package, and the root manifest doesn't mention it. Nothing in
-code joins reading the screen to pressing keys, only the workflow, and a package boundary
-keeps it that way ([development.md](development.md#two-packages)).
+`eyes/` holds the targets that read the screen. They link nothing of the devices', and
+the devices' targets link nothing of theirs; the `vhid` executable alone links both, for
+its MCP server ([development.md](development.md#two-halves)).
 
 Inside, two readers answer the same query. The tree reader walks the accessibility tree
 ([`eyes/Sources/Tree/`](../eyes/Sources/Tree)). The pixels reader runs Vision's text
@@ -187,7 +187,7 @@ The rest of the tree:
 
 | Path | What it is |
 |---|---|
-| `eyes/` | the screen-reading package, built and tested on its own |
+| `eyes/` | the screen-reading targets and their tests, built and tested with the rest |
 | `Tests/` | test targets, each named for what it tests (`Signals`, `Version` and the two apps have none); `OwnThread` and `TestClock` are helpers for tests |
 | `claude-plugin/`, `.claude-plugin/` | the Claude Code plugin: skills, the session-start check, the marketplace entry, and `VERSION`, the one place the version is written, which `scripts/version` reads for every build |
 | `pkg/`, `scripts/make-pkg`, `scripts/notarize` | building, signing and notarizing the package |

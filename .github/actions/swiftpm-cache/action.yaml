@@ -9,7 +9,7 @@
 # was written by a run on master. SwiftPM checks out each pin by its commit hash, so a
 # cached clone cannot hand it other source.
 name: SwiftPM cache
-description: SwiftPM's dependency clones and manifests, keyed on the toolchain, Package.resolved and eyes/Package.resolved
+description: SwiftPM's dependency clones and manifests, keyed on the toolchain and Package.resolved
 runs:
   using: composite
   steps:
@@ -18,5 +18,5 @@ runs:
         path: |
           ~/Library/Caches/org.swift.swiftpm/repositories
           ~/Library/Caches/org.swift.swiftpm/manifests
-        key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ env.DEVELOPER_DIR }}-${{ hashFiles('Package.resolved', 'eyes/Package.resolved') }}
+        key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ env.DEVELOPER_DIR }}-${{ hashFiles('Package.resolved') }}
         restore-keys: swiftpm-${{ runner.os }}-${{ runner.arch }}-

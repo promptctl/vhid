@@ -1,4 +1,4 @@
-import Eyes
+import Seeing
 
 /// What one element says of itself for a row to be found by it, or for a climb to list it.
 struct Lineage<Element> {

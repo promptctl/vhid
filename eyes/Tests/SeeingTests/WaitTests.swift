@@ -1,5 +1,5 @@
 import Testing
-@testable import Eyes
+@testable import Seeing
 
 /// The wait, over a fake read whose answer changes on its third read. The dangerous case
 /// is a false "gone", so most of what is here is absence: when it may be believed, and

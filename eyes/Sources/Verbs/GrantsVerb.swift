@@ -5,8 +5,10 @@ import Telemetry
 
 /// Whether the readers' grants are held, and by which app, asked before a reading needs
 /// them rather than learned from a refusal halfway through a task.
-struct GrantsVerb: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
+public struct GrantsVerb: AsyncParsableCommand {
+    public init() {}
+
+    public static let configuration = CommandConfiguration(
         commandName: "grants",
         abstract: "Say whether Screen Recording and Accessibility are granted, and which app macOS charges them to.",
         discussion: """
@@ -24,7 +26,7 @@ struct GrantsVerb: AsyncParsableCommand {
     @Flag(help: .private)
     var readHere = false
 
-    func run() async throws {
+    public func run() async throws {
         if readHere {
             print(GrantReading.here().line)
             return

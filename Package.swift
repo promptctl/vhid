@@ -19,6 +19,7 @@ let package = Package(
         .executable(name: "vhid", targets: ["vhid"]),
         .executable(name: "vhid-menubar", targets: ["vhid-menubar"]),
         .executable(name: "vhid-record", targets: ["vhid-record"]),
+        .executable(name: "eyes", targets: ["eyes"]),
     ],
     // The dependencies stop at the leaf. Every library target below still links
     // nothing outside this package; what takes these is the CLI, which is the end of the
@@ -195,6 +196,78 @@ let package = Package(
         .testTarget(
             name: "vhiddTests",
             dependencies: ["vhidd", "Helper", "VirtualHID", "DriverExtension", "Keystrokes", "Pointing", "Signals", "Installations", "OwnThread"]
+        ),
+
+        // eyes: reading the screen, so that input can be aimed - where the windows are, and
+        // where text is, in the points the devices press. Its targets live under eyes/ and
+        // link nothing above: no device, no daemon, no input. What links both halves is
+        // the vhid binary alone, whose MCP server reads with these and presses with those.
+        // [LAW:one-way-deps]
+        //
+        // The vocabulary both readers speak and the protocol both conform to. It links
+        // nothing - not Vision, not ApplicationServices - so the tree and the pixels
+        // share one language without either having to link the other.
+        .target(name: "Seeing", path: "eyes/Sources/Seeing"),
+        // Every type here is a value, so the whole vocabulary is exercised with no
+        // display, no capture and no accessibility grant. [LAW:effects-at-boundaries]
+        .testTarget(name: "SeeingTests", dependencies: ["Seeing"], path: "eyes/Tests/SeeingTests"),
+        // The pixel reader: the grant, the capture and Vision. Its own target so the
+        // vocabulary above stays linking nothing, and the accessibility reader can sit
+        // beside it without either linking the other.
+        .target(name: "Pixels", dependencies: ["Seeing", "Grants"], path: "eyes/Sources/Pixels"),
+        // How a capture is cut into pieces and put back together, with no capture at all.
+        .testTarget(name: "PixelsTests", dependencies: ["Pixels", "Seeing", "Grants"], path: "eyes/Tests/PixelsTests"),
+        // The tree reader: the accessibility grant and the element reads. Its own target
+        // for the reason Pixels is one - neither reader links the other.
+        .target(name: "Tree", dependencies: ["Seeing", "Grants"], path: "eyes/Sources/Tree"),
+        // The error mapping, the element rules and the walk, with trees a test wrote.
+        .testTarget(name: "TreeTests", dependencies: ["Tree", "Seeing", "Grants"], path: "eyes/Tests/TreeTests"),
+        // Whether the readers' grants are held and which app holds them. Apart from both
+        // readers, because the answer is about the process, not about any reading; each
+        // reader asks it before looking.
+        .target(name: "Grants", dependencies: ["Seeing", "Telemetry", "Responsibility"], path: "eyes/Sources/Grants"),
+        // The calls tccd's attribution rests on, which libSystem exports and the SDK has no
+        // header for. A header of its own, so they are linked and type-checked, not looked up.
+        .target(name: "Responsibility", path: "eyes/Sources/Responsibility"),
+        // One event per unit of work and the one edge it leaves by. Links nothing of
+        // eyes', so every target can report through it. [LAW:nothing-unseen]
+        .target(name: "Telemetry", path: "eyes/Sources/Telemetry"),
+        // What every test target that runs units of work shares: a collector for their
+        // events, and the trait that keeps them off the real edge.
+        .target(name: "TelemetryTesting", dependencies: ["Telemetry"], path: "eyes/Tests/TelemetryTesting"),
+        .testTarget(name: "TelemetryTests", dependencies: ["Telemetry", "TelemetryTesting"], path: "eyes/Tests/TelemetryTests"),
+        .testTarget(name: "GrantsTests", dependencies: ["Grants", "Seeing", "Telemetry", "TelemetryTesting"], path: "eyes/Tests/GrantsTests"),
+        // What each verb does and says, for the eyes command line and for vhid's MCP server
+        // alike, so the two cannot come to answer differently. [LAW:one-source-of-truth]
+        // Every line a verb prints describes the screen and the scope that was looked at,
+        // which is what lets the reading below it be narrow and still be trusted.
+        // [LAW:no-silent-failure] It links the readers and nothing of the devices'.
+        .target(
+            name: "EyesVerbs",
+            dependencies: [
+                "Seeing", "Pixels", "Tree", "Grants", "Telemetry",
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+            ],
+            path: "eyes/Sources/Verbs"
+        ),
+        // The scope line is the sentence that licenses every narrow answer under it, so it
+        // is checked here rather than read off a terminal by eye. [LAW:verifiable-goals]
+        .testTarget(
+            name: "EyesVerbsTests",
+            dependencies: ["EyesVerbs", "Seeing", "Pixels", "Tree", "Grants", "Telemetry", "TelemetryTesting"],
+            path: "eyes/Tests/EyesVerbsTests"
+        ),
+        // The binary: the verbs under one root, and nothing of its own. No other target is
+        // named `eyes` in any case: a case-insensitive disk, which macOS gives you by
+        // default, takes two such names for one, and swiftbuild then finds a cycle between
+        // them.
+        .executableTarget(
+            name: "eyes",
+            dependencies: [
+                "EyesVerbs", "Telemetry", "Version",
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+            ],
+            path: "eyes/Sources/eyes"
         ),
     ]
 )

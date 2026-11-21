@@ -1,5 +1,5 @@
 import CoreGraphics
-import Eyes
+import Seeing
 import Foundation
 import Grants
 import ImageIO

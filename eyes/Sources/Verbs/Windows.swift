@@ -1,6 +1,6 @@
 import AppKit
 import ArgumentParser
-import Eyes
+import Seeing
 import Foundation
 
 /// Where the windows are, which a caller can ask before capturing anything.
@@ -10,8 +10,10 @@ import Foundation
 /// tokens and it tells a caller which application holds which part of the display.
 /// Nothing here captures, recognises, or reads an accessibility tree, and it needs no
 /// grant.
-struct Windows: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
+public struct Windows: AsyncParsableCommand {
+    public init() {}
+
+    public static let configuration = CommandConfiguration(
         commandName: "windows",
         abstract: "List the on-screen windows, front to back, with their layer and bounds, and the frontmost application."
     )
@@ -24,7 +26,7 @@ struct Windows: AsyncParsableCommand {
     /// never means produces the one answer they cannot argue with: zero windows, on a
     /// screen full of them. It arrives from `--owner "$APP"` with `APP` unset, which is a
     /// mistake worth a sentence rather than a confident empty list.
-    func validate() throws {
+    public func validate() throws {
         try Self.refuseEmpty(owner, named: "--owner", " (A shell variable that did not expand?)")
     }
 
@@ -40,7 +42,7 @@ struct Windows: AsyncParsableCommand {
     }
 
     @MainActor
-    func run() async throws {
+    public func run() async throws {
         // Frontmost first: an activation lands before the listing that reflects it.
         let frontmost = Front.App.now()
         print(Self.report(try Geometry.onScreen(), owner: owner, frontmost: frontmost))

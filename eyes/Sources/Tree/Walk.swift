@@ -1,5 +1,5 @@
 import ApplicationServices
-import Eyes
+import Seeing
 
 /// What one accessibility read came back as, before anything is made of it.
 ///

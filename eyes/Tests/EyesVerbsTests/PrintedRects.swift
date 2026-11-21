@@ -1,6 +1,6 @@
-import Eyes
+import Seeing
 import Testing
-@testable import EyesCommand
+@testable import EyesVerbs
 
 /// Every rectangle in a printed line, each read back as `--rect` reads it, in order. A
 /// field of four comma-separated numbers is a rectangle; one that `--rect` refuses fails the

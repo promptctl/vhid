@@ -1,4 +1,4 @@
-import Eyes
+import Seeing
 import Grants
 import Testing
 @testable import Pixels

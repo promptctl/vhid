@@ -1,8 +1,8 @@
-import Eyes
+import Seeing
 import Telemetry
 import TelemetryTesting
 import Testing
-@testable import EyesCommand
+@testable import EyesVerbs
 @testable import Tree
 
 /// What `eyes hit` says of a click at a point, asked with landings a test wrote.

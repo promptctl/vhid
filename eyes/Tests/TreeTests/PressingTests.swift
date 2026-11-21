@@ -1,6 +1,6 @@
 import CoreGraphics
 import Testing
-import Eyes
+import Seeing
 import Grants
 @testable import Tree
 

@@ -2,7 +2,7 @@ import Grants
 import Telemetry
 import TelemetryTesting
 import Testing
-@testable import EyesCommand
+@testable import EyesVerbs
 
 struct GrantsReportTests {
     private let holder = Holder(executable: "/Applications/iTerm.app/Contents/MacOS/iTerm2")

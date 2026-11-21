@@ -1,6 +1,6 @@
 import CoreGraphics
 import Testing
-@testable import Eyes
+@testable import Seeing
 
 /// What a reading can honestly claim, asked with no reader behind it.
 ///

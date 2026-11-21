@@ -1,6 +1,6 @@
 import CoreGraphics
 import Testing
-@testable import Eyes
+@testable import Seeing
 
 /// The conversion from what a recogniser reports to what a caller clicks, asked without a
 /// display, a capture or a grant.
