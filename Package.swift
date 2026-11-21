@@ -58,6 +58,12 @@ let package = Package(
         // vocabulary without sharing a dependency. [LAW:one-way-deps]
         .target(name: "Pointing"),
         .testTarget(name: "PointingTests", dependencies: ["Pointing"]),
+        // The one screen space both halves speak: a point, a box, how each is written, and
+        // the geometry of boxes. It links nothing, so the devices and the readers hold one
+        // ScreenPoint and one ScreenRect without either half linking the other.
+        // [LAW:one-source-of-truth] [LAW:one-way-deps]
+        .target(name: "ScreenSpace"),
+        .testTarget(name: "ScreenSpaceTests", dependencies: ["ScreenSpace"]),
         // Answering a signal rather than obeying it, for the daemon that has an ending of
         // its own to unwind through: a SIGTERM that killed it where it stood would leave a
         // key down on a device nothing is left to release. It links nothing.
@@ -117,7 +123,7 @@ let package = Package(
         // caller supplies a conformance. [LAW:one-way-deps] [LAW:effects-at-boundaries]
         // Telemetry for the cause chain its stops are read by, so a record and a caller tell
         // a withdrawn run from a failed one by one rule. [LAW:single-enforcer]
-        .target(name: "Input", dependencies: ["KeyboardLayouts", "Keystrokes", "Pointing", "Telemetry"]),
+        .target(name: "Input", dependencies: ["KeyboardLayouts", "Keystrokes", "Pointing", "ScreenSpace", "Telemetry"]),
         // The pointer's loop against a fake screen with an acceleration curve of its own,
         // and the typist against a keyboard that can be made to fail at the third keystroke
         // of four: no device, no window server, no grant.
@@ -212,13 +218,14 @@ let package = Package(
         // device, no daemon, no input, and no device target links one of them. What links
         // both halves is the vhid executable, whose `look` reads with these and whose acts
         // press with those, and its tests. [LAW:one-way-deps] Both halves stand on Telemetry
-        // and Turns, here under eyes/, and ChildProcess and Version, under Sources/, which
-        // link neither half.
+        // and Turns, here under eyes/, and ChildProcess, ScreenSpace and Version, under
+        // Sources/, which link neither half.
         //
         // The vocabulary both readers speak and the protocol both conform to. It links
-        // nothing - not Vision, not ApplicationServices - so the tree and the pixels share one
-        // language without either linking the other.
-        .target(name: "Seeing", path: "eyes/Sources/Seeing"),
+        // ScreenSpace for the points and boxes it is said in, and nothing else - not Vision,
+        // not ApplicationServices - so the tree and the pixels share one language without
+        // either linking the other.
+        .target(name: "Seeing", dependencies: ["ScreenSpace"], path: "eyes/Sources/Seeing"),
         // Every type there is a value, so the vocabulary is exercised with no display, no
         // capture and no grant. [LAW:effects-at-boundaries] The waits are kept on
         // a test's clock.

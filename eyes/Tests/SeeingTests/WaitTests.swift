@@ -6,10 +6,10 @@ import Testing
 /// is a false "gone", so most of what is here is absence: when it may be believed, and
 /// when a read that could not see must end the wait instead. [LAW:no-silent-failure]
 @Suite struct WaitTests {
-    static let region = ScreenRect(x: 0, y: 0, width: 800, height: 600)
+    static let region = ScreenRect(x: 0, y: 0, width: 800, height: 600)!
 
     static let present = Reading(
-        outcome: .matched(Matches([Found(text: Text("Save")!, frame: ScreenRect(x: 10, y: 10, width: 40, height: 20),
+        outcome: .matched(Matches([Found(text: Text("Save")!, frame: ScreenRect(x: 10, y: 10, width: 40, height: 20)!,
                                          source: .pixels(confidence: Confidence(1)!))])!),
         scope: Scope(region: region, examined: 1, reach: .whole))
     static let absent = Reading(outcome: .nearest([]), scope: Scope(region: region, examined: 0, reach: .whole))

@@ -5,15 +5,14 @@ import Foundation
 /// rises, a hot corner fires - so a path that means to touch nothing has to know where
 /// they are.
 public struct Displays: Sendable, Equatable {
-    public let frames: [CGRect]
+    public let frames: [ScreenRect]
 
-    /// [LAW:parse-dont-validate] At least one display, each a finite rectangle with area:
-    /// a layout with none is no screen to keep a path on, and an empty or infinite frame is
-    /// a read that went wrong, not a display.
-    public init?(frames: [CGRect]) {
-        guard !frames.isEmpty,
-              frames.allSatisfy({ [$0.minX, $0.minY, $0.width, $0.height].allSatisfy(\.isFinite) && $0.width > 0 && $0.height > 0 })
-        else { return nil }
+    /// [LAW:parse-dont-validate] At least one display, each with area: a layout with none is
+    /// no screen to keep a path on, and a display showing no area is none a cursor can be
+    /// on. Each frame is already a box, so a bound that is not finite was refused where it
+    /// was read.
+    public init?(frames: [ScreenRect]) {
+        guard !frames.isEmpty, frames.allSatisfy({ !$0.isEmpty }) else { return nil }
         self.frames = frames
     }
 
@@ -26,8 +25,16 @@ public struct Displays: Sendable, Equatable {
     /// test against one display at a time would see an edge at every seam.
     func covers(_ point: Submovement.Point, by reach: Double) -> Bool {
         [(-reach, -reach), (-reach, reach), (reach, -reach), (reach, reach)].allSatisfy { corner in
-            frames.contains { $0.contains(CGPoint(x: point.x + corner.0, y: point.y + corner.1)) }
+            ScreenPoint(x: point.x + corner.0, y: point.y + corner.1).map { corner in frames.contains { $0.contains(corner) } } ?? false
         }
+    }
+
+    /// Whether `point` is on a display and within a point of where the displays end: where
+    /// the window server stops motion short. A seam between two displays side by side is
+    /// no edge, by `covers`' rule.
+    public func edge(at point: ScreenPoint) -> Bool {
+        let at = (x: point.x, y: point.y)
+        return covers(at, by: 0) && !covers(at, by: 1)
     }
 
     /// How far inside the displays `point` is, up to `limit`: the half-side of the largest

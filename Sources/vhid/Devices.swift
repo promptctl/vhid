@@ -135,8 +135,10 @@ struct Devices {
     /// cursor is read there. [LAW:single-enforcer] Every move reads them here.
     static func displays(_ helper: HelperConnection, on queue: DeviceQueue) -> @Sendable () async throws -> Displays {
         {
-            let frames = try await queue.run { try helper.displays() }
-            guard let displays = Displays(frames: frames) else { throw DisplaysUnreadable(frames: frames) }
+            let read = try await queue.run { try helper.displays() }
+            // Every display's bounds a box, and at least one of them with area.
+            let frames = read.compactMap(ScreenRect.init)
+            guard frames.count == read.count, let displays = Displays(frames: frames) else { throw DisplaysUnreadable(frames: read) }
             return displays
         }
     }

@@ -208,9 +208,7 @@ extension Match {
         for span in spans where !chosen.contains(where: { $0.overlaps(span) }) {
             chosen.append(span)
         }
-        let narrowed = chosen.sorted { $0.lowerBound < $1.lowerBound }.map { span in
-            Found(first: words[span.lowerBound], rest: Array(words[span].dropFirst()), source: found.source)
-        }
+        let narrowed = chosen.sorted { $0.lowerBound < $1.lowerBound }.map(found.stretch)
         return narrowed.isEmpty ? [found] : narrowed
     }
 

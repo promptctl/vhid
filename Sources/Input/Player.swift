@@ -2,6 +2,17 @@ import Foundation
 import Keystrokes
 import Pointing
 
+/// A point a script puts the cursor that no display shows: refused before the script plays.
+public struct OffDisplays: Error, CustomStringConvertible {
+    public let point: ScreenPoint
+    /// The script line that names it; none for the start, which every script begins with.
+    public let line: Int?
+
+    public var description: String {
+        "\(line.map { "line \($0) of the script" } ?? "the script's start"): \(point) is on no display, so the cursor cannot be put there"
+    }
+}
+
 /// What `vhid play` sends and when: a `Play` as one act per device call, on one clock.
 ///
 /// [LAW:parse-dont-validate] Made from a `Play` before anything is connected, so a script
@@ -92,6 +103,19 @@ public struct Schedule: Hashable, Sendable {
     /// goes out late still lands well inside it.
     public static let keepAlive: Duration = HeldKeys.silenceLimit / 2
 
+    /// Every point the script puts the cursor, each on a display, or the first that is not.
+    func shown(on displays: Displays) throws(OffDisplays) {
+        let points: [(ScreenPoint, Int?)] = [(start, nil)] + acts.compactMap { act -> (ScreenPoint, Int?)? in
+            switch act.report {
+            case .at(let point), .steer(let point): (point, act.line)
+            case .keys, .buttons, .move, .wheel, .keepAlive: nil
+            }
+        }
+        if let off = points.first(where: { !displays.covers((x: $0.0.x, y: $0.0.y), by: 0) }) {
+            throw OffDisplays(point: off.0, line: off.1)
+        }
+    }
+
     /// How many of the acts are reports, which is what a play that stops is counted against.
     public var reports: Int { acts.filter(\.report.isReport).count }
 
@@ -181,6 +205,10 @@ public struct Player {
     }
 
     public func play(_ play: Schedule, isolation: isolated (any Actor)? = #isolation) async throws -> Played {
+        // Refused before anything moves: steering reckons toward each point from reports, and
+        // a point no display shows is one the cursor stops short of, so the table would be
+        // reckoning past the screen.
+        try play.shown(on: try await pointer.displays())
         let timeline = pointer.timeline
         var went: [Played.Report] = []
         var reached = 0

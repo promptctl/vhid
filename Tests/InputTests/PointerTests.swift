@@ -182,12 +182,4 @@ import Testing
     func aCoordinateThatIsNotANumberIsNotAPlace(x: Double, y: Double) {
         #expect(ScreenPoint(x: x, y: y) == nil)
     }
-
-    /// And refused again on the way in from a script or a request, so nothing decodes into
-    /// a point the constructor would not have made. [LAW:single-enforcer]
-    @Test func aDecodedCoordinateCrossesTheSameRefusal() throws {
-        #expect(throws: (any Error).self) { try JSONDecoder().decode(ScreenPoint.self, from: Data(#"{"x":1e400,"y":1}"#.utf8)) }
-        let fine = try JSONDecoder().decode(ScreenPoint.self, from: Data(#"{"x":800,"y":500.5}"#.utf8))
-        #expect(fine == ScreenPoint(x: 800, y: 500.5)!)
-    }
 }

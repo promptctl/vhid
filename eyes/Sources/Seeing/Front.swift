@@ -95,10 +95,7 @@ public struct Front: Sendable, Hashable {
     private init(_ app: App, passedOver: PassedOver?, on desk: Desk) throws(AppUnread) {
         guard !desk.displays.isEmpty else { throw .noDisplay }
         guard let window = desk.listing.front(of: app.pid).map({ desk.listing.windows[$0] }) else { throw .noWindow(app) }
-        let shown = { (display: Display) -> CGFloat in
-            let shared = display.frame.cgRect.intersection(window.frame.cgRect)
-            return shared.isNull ? 0 : shared.width * shared.height
-        }
+        let shown = { (display: Display) in display.frame.overlap(window.frame) }
         guard let display = desk.displays.max(by: { shown($0) < shown($1) }), shown(display) > 0 else { throw .offDisplays(app) }
         self.init(app: app, display: display.id, own: desk.own, passedOver: passedOver)
     }
@@ -117,8 +114,8 @@ public struct Front: Sendable, Hashable {
         let front = listing.front(of: app.pid)
         let over = front.map { i in
             listing.windows[..<i].filter { window in
-                let shared = window.frame.cgRect.intersection(listing.windows[i].frame.cgRect)
-                return !shared.isNull && !shared.isEmpty && hit(ScreenRect(shared).centre) == .answered(window.pid)
+                guard let shared = window.frame.intersection(listing.windows[i].frame) else { return false }
+                return hit(shared.centre) == .answered(window.pid)
             }
         } ?? []
         return Set(over.map(\.pid)).union([app.pid]).subtracting(own.pids)

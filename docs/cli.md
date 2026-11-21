@@ -79,7 +79,8 @@ left of or above it has negative ones, which follow `--` after every option:
 `vhid click --button left -- -100 -40`.
 
 `click`, `move`, `scroll` and `drag` take each place as a point, two numbers `x y`, or as a
-box, one word `x,y,width,height`: the box `look` prints beside each point. A point is
+box, one word `x,y,width,height` in whole points with no spaces: the box `look` prints
+beside each point. A point is
 pressed where it is. In a box, the pointer lands on a point drawn inside it, spread about
 the centre as a person's clicks spread on a button and never within 2 points of its edge
 (a side too narrow for that is aimed at its centre, and one under a point is refused),

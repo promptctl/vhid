@@ -167,7 +167,7 @@ import Testing
         let thrown = await #expect(throws: (any Error).self) {
             try await Self.mcp("move", into: collected) {
                 // The far end's cursor is always at (0, 0).
-                try await Self.against { try await MoveCommand.move(to: .box(ScreenRect(x: 30, y: -5, width: 20, height: 10)!), with: $0.pointer) }
+                try await Self.against { try await MoveCommand.move(to: .box(Target.Box(ScreenRect(x: 30, y: -5, width: 20, height: 10)!)!), with: $0.pointer) }
             }
         }
         #expect(thrown.map { "\($0)".contains("drawn inside the box 30,-5,20,10") } == true, "\(String(describing: thrown))")

@@ -12,7 +12,7 @@ func printedRects(_ line: String, sourceLocation: SourceLocation = #_sourceLocat
     return try fields.filter { $0.wholeMatch(of: /-?[\d.]+(,-?[\d.]+){3}/) != nil }.map { field in
         guard case .region(.rect(let rect)) = try Where.place(display: nil, window: nil, page: nil, rect: field, app: nil, as: .flag) else {
             Issue.record("\(field) did not read as a rect", sourceLocation: sourceLocation)
-            return ScreenRect(x: 0, y: 0, width: 0, height: 0)
+            return ScreenRect(x: 0, y: 0, width: 0, height: 0)!
         }
         return rect
     }

@@ -6,6 +6,11 @@ import Testing
 /// Where a click lands, `docs/design/human.md`: a point exactly, and a box at a point drawn
 /// inside it and clear of its edge, spread about its centre and held to the line the hand
 /// sets out on, the move timed by its size.
+/// A frame as a press target, for the boxes these tests press: each a point a side.
+private extension Target {
+    static func box(_ frame: ScreenRect) -> Target { .box(Target.Box(frame)!) }
+}
+
 @Suite struct TargetTests {
     static let start = ScreenPoint(x: 100, y: 300)!
     static let button = ScreenRect(x: 800, y: 290, width: 80, height: 24)!
@@ -121,15 +126,17 @@ import Testing
             < Trajectory(from: Self.start, toward: .box(small), within: .vast, drawing: &b).duration)
     }
 
-    /// A box is what eyes prints, and nothing that is not one is read as one.
-    @Test func aBoxIsSpelledAsEyesPrintsIt() {
-        #expect(ScreenRect(spelled: "800,290,80,24") == Self.button)
-        #expect(ScreenRect(spelled: " -5 ,2.5,1,1") == ScreenRect(x: -5, y: 2.5, width: 1, height: 1))
-        #expect(Self.button.description == "800,290,80,24")
-        let typed = ScreenRect(x: 1234.567, y: -0.125, width: 30, height: 40)!
-        #expect(ScreenRect(spelled: typed.description) == typed, "\(typed)")
-        for refused in ["", "1,2,3", "1,2,3,4,5", "1,2,0,4", "1,2,3,-4", "1,2,0.5,4", "0,0,1e-320,10", "1,,3,4", "a,2,3,4", "1,2,inf,4", "1e308,0,1e308,1"] {
-            #expect(ScreenRect(spelled: refused) == nil, "\(refused)")
+    /// A press box is a frame a point a side, kept as it was given: a one-point frame at a
+    /// fractional origin, as eyes finds one, stays pressable and is aimed inside, and a frame
+    /// under a point a side is refused, whether found or spelled.
+    @Test func aPressBoxIsAFrameAPointASideKeptAsGiven() {
+        let found = ScreenRect(x: 10.5, y: 3.25, width: 1, height: 1)!
+        #expect(Target.Box(found)?.frame == found)
+        #expect(Self.aims(at: .box(found)).allSatisfy(found.contains))
+        #expect(Target.Box(ScreenRect(x: 0, y: 0, width: 0.99, height: 10)!) == nil)
+        #expect(Target.Box(spelled: "800,290,80,24")?.frame == Self.button)
+        for refused in ["", "1,2,0,4", "1,2,3,0", "1,2.5,3,4", "1,2,inf,4"] {
+            #expect(Target.Box(spelled: refused) == nil, "\(refused)")
         }
     }
 

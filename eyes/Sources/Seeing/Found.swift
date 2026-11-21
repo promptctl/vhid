@@ -52,14 +52,34 @@ public struct Found: Sendable, Hashable {
 
     /// One run the reader places as a whole - what the accessibility tree reports.
     public init(text: Text, frame: ScreenRect, source: Source) {
-        self.init(first: Word(text: text, frame: frame), rest: [], source: source)
+        self.init(first: Word(text: text, frame: frame), rest: [], source: source, frame: frame)
     }
 
-    public init(first: Word, rest: [Word], source: Source) {
+    /// Words a reader placed as one run, or none when the box holding them all is past what
+    /// a Double holds: words no box holds are not one run.
+    public init?(first: Word, rest: [Word], source: Source) {
+        guard let frame = rest.reduce(first.frame, { $0?.union($1.frame) }) else { return nil }
+        self.init(first: first, rest: rest, source: source, frame: frame)
+    }
+
+    private init(first: Word, rest: [Word], source: Source, frame: ScreenRect) {
         self.first = first
         self.rest = rest
         self.source = source
-        self.frame = ScreenRect(rest.reduce(first.frame.cgRect) { $0.union($1.frame.cgRect) })
+        self.frame = frame
+    }
+
+    /// The words `span` of this run, as a run of its own. Total: the box holding some of the
+    /// words lies within the one holding all of them, so a span that held all of them holds
+    /// these.
+    public func stretch(_ span: ClosedRange<Int>) -> Found {
+        let words = words[span]
+        return Found(first: words.first!, rest: Array(words.dropFirst()), source: source)!
+    }
+
+    /// This run as `source` found it.
+    public func found(by source: Source) -> Found {
+        Found(first: first, rest: rest, source: source, frame: frame)
     }
 
     public var words: [Word] { [first] + rest }

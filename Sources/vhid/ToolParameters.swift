@@ -146,11 +146,11 @@ extension Parameter where Taken == Gesture {
     }
 }
 
-extension Parameter where Taken == ScreenRect {
-    /// A box as eyes prints it, read by `ScreenRect(spelled:)`, as the command line reads
-    /// one. [LAW:single-enforcer]
+extension Parameter where Taken == Target.Box {
+    /// A box as eyes prints it, read by `Target.Box.init(spelled:)`, as the command line
+    /// reads one. [LAW:single-enforcer]
     static func box(_ name: String, _ expected: String) -> Self {
-        Self(name: name, expected: expected, schema: ["type": "string"], absent: nil) { $0.stringValue.flatMap(ScreenRect.init(spelled:)) }
+        Self(name: name, expected: expected, schema: ["type": "string"], absent: nil) { $0.stringValue.flatMap(Target.Box.init(spelled:)) }
     }
 }
 
@@ -163,10 +163,10 @@ extension Parameter where Taken == Target {
                                  "required": ["x", "y"], "additionalProperties": false],
                                 ["type": "string"]]],
              absent: nil) {
-            if let box = $0.stringValue { return ScreenRect(spelled: box).map(Target.box) }
+            if let box = $0.stringValue { return Target.Box(spelled: box).map(Target.box) }
             guard let object = $0.objectValue, Set(object.keys) == ["x", "y"],
                   let x = object["x"]?.number, let y = object["y"]?.number else { return nil }
-            return ScreenPoint(x: x, y: y).map(Target.point)
+            return .point(try ScreenPoint.at(x, y))
         }
     }
 }

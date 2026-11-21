@@ -39,7 +39,7 @@ enum Help {
     static let targetForm = "a point as two numbers, x y, or a box as one word, x,y,width,height - the box eyes prints beside each point - in " + place
     static let target = "where: " + targetForm
     /// A box as a tool takes one.
-    static let box = "a box to press a point inside, as x,y,width,height in " + place + ": the box eyes prints beside each point. Given instead of x and y"
+    static let box = "a box to press a point inside, as " + Target.Box.spelling + ", " + place + ": the box eyes prints beside each point. Given instead of x and y"
     static let text = "the text to type: anything the keyboard layout has keys for, dead-key sequences and line breaks included"
     static let chords = "the chords, pressed in order"
     static let layout = "the keyboard layout to read keys off, by input source id, e.g. com.apple.keylayout.Dvorak; left out, the calling user's own layout, or US English when the system reports none. Name it when the Mac is at the login window or another user is in front, whose layout the caller cannot see"

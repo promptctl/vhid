@@ -201,8 +201,19 @@ public struct Where: ParsableArguments {
         return limit
     }
 
+    /// The farthest from the origin a region's edge or size may be, in points: a capture is
+    /// cut in whole points, and no display is near this far out.
+    static let regionLimit = 1_000_000.0
+
+    /// What a refusal of a region names as the form wanted.
+    static let regionSpelling = "\(ScreenRect.spelling), with area, nothing past \(regionLimit.positional)"
+
+    /// A region a look reads, which a capture cuts and a walk clips to: a box with area, and
+    /// no edge or size past `regionLimit`. [LAW:parse-dont-validate]
     private static func parsedRect(_ spelled: String, as s: Spelling) throws -> ScreenRect {
-        guard let rect = ScreenRect(spelled: spelled) else { throw ValidationError("\(s("rect")) wants \(ScreenRect.spelling) - got \(spelled)") }
+        guard let rect = ScreenRect(spelled: spelled), !rect.isEmpty,
+              [rect.x, rect.y, rect.width, rect.height].allSatisfy({ abs($0) <= regionLimit })
+        else { throw ValidationError("\(s("rect")) wants \(regionSpelling) - got \(spelled)") }
         return rect
     }
 }
@@ -277,9 +288,7 @@ enum Report {
     /// The columns every row has in the same place - `then`, a near miss's distance, among
     /// them - before the element's other words, however many it says.
     private static func row(_ found: Found, then: [String] = []) -> String {
-        let at = clickPoint(found.frame.centre)
-        // The point as every point is spelled, which a frame too large or not finite cannot trap.
-        return (["\(ScreenPoint(x: at.x, y: at.y))", "\(box(found.frame, holding: at))", spelled(found.text.value), found.source.role?.rawValue ?? "pixels"]
+        return (["\(clickPoint(found.frame))", "\(found.frame)", spelled(found.text.value), found.source.role?.rawValue ?? "pixels"]
             + then + found.source.also.map { "\($0.attribute.rawValue) \(spelled($0.text.value))" }).joined(separator: "\t")
     }
 
@@ -303,14 +312,13 @@ enum Report {
         return line
     }
 
-    /// The whole point a click is sent to: the frame's centre, rounded.
-    private static func clickPoint(_ p: ScreenPoint) -> CGPoint { CGPoint(x: p.x.rounded(), y: p.y.rounded()) }
-
-    /// The frame grown to cover the cell of the point printed beside it. The rounded point
-    /// can fall past the frame's right or bottom edge, which half-open containment counts as
-    /// outside, so the point is covered by construction rather than by luck of the rounding.
-    private static func box(_ frame: ScreenRect, holding at: CGPoint) -> ScreenRect {
-        ScreenRect(frame.cgRect.union(CGRect(origin: at, size: CGSize(width: 1, height: 1))))
+    /// The whole point a click is sent to: the whole point inside the box the row prints -
+    /// the frame rounded out - nearest the frame's centre, so the printed box holds the
+    /// printed point by construction. A box holding no whole point, one with no area, has
+    /// only its centre to give, rounded, on its edge.
+    private static func clickPoint(_ frame: ScreenRect) -> ScreenPoint {
+        let centre = frame.centre.rounded()
+        return frame.integral.nearest(to: centre)?.rounded(.down) ?? centre
     }
 
     private static func wanted(_ match: Match) -> String {

@@ -79,6 +79,14 @@ public struct BothBlind: Error, CustomStringConvertible {
     public var description: String { "neither reader could look: \(first); \(second)" }
 }
 
+/// The two readers of a merged read looked at places that share nothing, so there is no
+/// region the merge saw: an answer over either would claim the other looked there too.
+public struct RegionsApart: Error, CustomStringConvertible {
+    public let regions: [ScreenRect]
+
+    public var description: String { "the readers looked at \(regions.map(String.init(describing:)).joined(separator: " and ")), which share nothing" }
+}
+
 public extension Candidates {
     /// What two readers saw, as what one merged reader saw.
     ///
@@ -105,7 +113,8 @@ public extension Candidates {
         var extra: [Found] = []
         var duplicates = 0
         for run in b.seen?.found ?? [] {
-            var loose: [Word] = []
+            // Where the words no stretch matched begin: they stay, as one run, up to the next match.
+            var loose = 0
             let words = run.words
             var i = 0
             while i < words.count {
@@ -113,29 +122,28 @@ public extension Candidates {
                 // one within the slip allowance would carry a neighbour along - "Downloads 3"
                 // is one edit from "Downloads", and the badge only the pixels saw is lost.
                 let hit = (i..<words.count).flatMap { j in
-                    let stretch = Found(first: words[i], rest: Array(words[(i + 1)..<(j + 1)]), source: run.source)
+                    let stretch = run.stretch(i...j)
                     return (0..<firsts).compactMap { k in kept[k].edits(to: stretch).map { (index: k, end: j, edits: $0) } }
                 }.min { ($0.edits, -$0.end) < ($1.edits, -$1.end) }
                 guard let (index, end, _) = hit else {
-                    loose.append(words[i])
                     i += 1
                     continue
                 }
                 if merged.insert(index).inserted {
-                    kept[index] = Found(first: kept[index].first, rest: kept[index].rest, source: .merged(kept[index].source, run.source))
+                    kept[index] = kept[index].found(by: .merged(kept[index].source, run.source))
                 }
                 duplicates += 1
-                extra += Found(loose, source: run.source)
-                loose = []
+                extra += run.stretch(loose..<i)
+                loose = end + 1
                 i = end + 1
             }
-            extra += Found(loose, source: run.source)
+            extra += run.stretch(loose..<words.count)
         }
-        let regions = seen.map(\.region.cgRect)
-        let both = regions.dropFirst().reduce(regions[0]) { $0.intersection($1) }
+        let regions = seen.map(\.region)
+        guard let both = regions.dropFirst().reduce(regions[0], { $0?.intersection($1) }) else { throw RegionsApart(regions: regions) }
         return Candidates(
             found: (kept + extra).inReadingOrder,
-            region: both.isNull ? seen[0].region : ScreenRect(both),
+            region: both,
             examined: seen.map(\.examined).reduce(0, +),
             excluded: (seen.flatMap(\.excluded) + [Exclusion(reason: .duplicate, count: duplicates)]).summed,
             reach: a.part.isWhole && b.part.isWhole ? .whole : .stopped(.merged(a.part, b.part)),
@@ -163,8 +171,8 @@ private extension Array where Element == Found {
 }
 
 private extension Found {
-    init?(_ words: [Word], source: Source) {
-        guard let head = words.first else { return nil }
-        self.init(first: head, rest: Array(words.dropFirst()), source: source)
+    /// The words `span` of this run, or none for a span with no words in it.
+    func stretch(_ span: Range<Int>) -> Found? {
+        span.isEmpty ? nil : stretch(span.lowerBound...(span.upperBound - 1))
     }
 }

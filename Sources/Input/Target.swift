@@ -1,4 +1,7 @@
 import Foundation
+// Input's verbs are aimed in ScreenSpace's points and boxes, so whatever speaks Input speaks
+// those too. [LAW:one-source-of-truth]
+@_exported import ScreenSpace
 
 /// What a pointer verb is aimed at: a point, pressed exactly, or a box, pressed at a point
 /// drawn inside it. `docs/design/human.md`, "Where a click lands".
@@ -8,7 +11,33 @@ import Foundation
 /// case rather than a box with a flag saying whether its size means anything.
 public enum Target: Hashable, Sendable, CustomStringConvertible {
     case point(ScreenPoint)
-    case box(ScreenRect)
+    case box(Box)
+
+    /// A box a press can land inside: a frame with every side at least a point, kept as it
+    /// was given. [LAW:parse-dont-validate] The one parse that turns a frame - one eyes found,
+    /// or one a caller spelled - into a press target. The closing loop lands within half a
+    /// point, so a narrower box is not one the cursor can be put inside, and Fitts' law read
+    /// off it would take a move without end.
+    public struct Box: Hashable, Sendable, CustomStringConvertible {
+        public let frame: ScreenRect
+
+        public init?(_ frame: ScreenRect) {
+            guard frame.width >= 1, frame.height >= 1 else { return nil }
+            self.frame = frame
+        }
+
+        /// A box as `ScreenRect` spells one, a point a side: the one reading of a press box
+        /// a caller wrote, for the command line and the MCP server alike. [LAW:single-enforcer]
+        public init?(spelled: String) {
+            guard let frame = ScreenRect(spelled: spelled) else { return nil }
+            self.init(frame)
+        }
+
+        /// What a refusal names as the form a press box is read in.
+        public static let spelling = "\(ScreenRect.spelling), each side at least a point"
+
+        public var description: String { frame.description }
+    }
 
     /// About a button's height or a line of text's, in points: the size taken for a target
     /// vhid is not told the size of, and the room a path keeps from an edge.
@@ -20,7 +49,7 @@ public enum Target: Hashable, Sendable, CustomStringConvertible {
     var width: Double {
         switch self {
         case .point: Self.button
-        case .box(let box): min(box.width, box.height)
+        case .box(let box): min(box.frame.width, box.frame.height)
         }
     }
 
@@ -63,6 +92,7 @@ public enum Target: Hashable, Sendable, CustomStringConvertible {
         let over = abs(start.x - centre.x) <= reach.x && abs(start.y - centre.y) <= reach.y
         let held = over ? scatter : scatter.held(to: (start.x, start.y), across: (-dy / distance, dx / distance), straying: Self.directionalError * distance)
         let (x, y) = held.draw(within: (centre.x - half.x ... centre.x + half.x, centre.y - half.y ... centre.y + half.y), using: &generator)
+        // Drawn inside the box, whose every point is finite.
         return ScreenPoint(x: x, y: y)!
     }
 
@@ -72,7 +102,7 @@ public enum Target: Hashable, Sendable, CustomStringConvertible {
     private var extent: (centre: ScreenPoint, reach: (x: Double, y: Double), aimable: (x: Double, y: Double)) {
         switch self {
         case .point(let point): (point, (0, 0), (0, 0))
-        case .box(let box): (box.centre, (box.width / 2, box.height / 2), (max(0, box.width / 2 - Self.margin), max(0, box.height / 2 - Self.margin)))
+        case .box(let box): (box.frame.centre, (box.frame.width / 2, box.frame.height / 2), (max(0, box.frame.width / 2 - Self.margin), max(0, box.frame.height / 2 - Self.margin)))
         }
     }
 

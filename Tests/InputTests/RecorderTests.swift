@@ -100,6 +100,17 @@ import Testing
         #expect(recorder.vhidAtEdge == 1)
     }
 
+    /// The person's motion with vhid's taken out can land at no place - vhid's own moves
+    /// as far as a Double reaches one way, the person's the other - and is counted, never
+    /// written as some other point.
+    @Test func motionAtNoPlaceIsCountedAndLeftOut() throws {
+        var recorder = Recorder(start: Self.start, flags: 0, vhid: [Self.vhid]) { _ in false }
+        recorder.take(event(10, .motion, at: point(1.7e308, 100), from: Self.vhid))
+        recorder.take(event(20, .motion, at: point(-1.7e308, 100)))
+        #expect(recorder.unplaced == 1)
+        expect(try replayed(recorder, stoppedAt: 40), [(0, keys()), (40, keys()), (40, .buttons([]))])
+    }
+
     /// An earlier Control-C, and a Control-A whose A came up inside the stop chord, are the
     /// person's: only the stop's own presses come out.
     @Test func onlyTheStopsOwnPressesComeOut() throws {

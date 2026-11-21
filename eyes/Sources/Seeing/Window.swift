@@ -87,7 +87,7 @@ public struct WindowExclusion: Sendable, Hashable {
         /// Zero-sized, so there is nowhere in it to look and nothing in it to click.
         case arealess
         /// The entry did not describe a window: no id, no owning process, no layer, or bounds that
-        /// would not read as four finite numbers. Kept apart from the other two because
+        /// would not read as a box: four finite numbers, no side under zero. Kept apart from the other two because
         /// this one is an anomaly rather than an ordinary invisible surface, and a caller
         /// seeing it climb is seeing something wrong.
         ///
@@ -196,12 +196,12 @@ public enum Geometry {
     /// and then passes every check downstream that looks like it would catch it: `NaN <=
     /// 0` is false, so a NaN-sized window is not `isEmpty` and is kept, and the first
     /// thing that touches it traps outright, because `Int(Double.nan)` is a fatal error
-    /// rather than a bad number. A window whose bounds are not numbers is an entry that
-    /// did not describe a window, which is what the `unreadable` count is for.
+    /// rather than a bad number. A window whose bounds are not a box - not numbers, not
+    /// finite, a side under zero - is an entry that did not describe a window, which is
+    /// what the `unreadable` count is for.
     private static func rect(from bounds: [String: Any]) -> ScreenRect? {
         guard let x = bounds["X"] as? Double, let y = bounds["Y"] as? Double,
-              let width = bounds["Width"] as? Double, let height = bounds["Height"] as? Double,
-              x.isFinite, y.isFinite, width.isFinite, height.isFinite
+              let width = bounds["Width"] as? Double, let height = bounds["Height"] as? Double
         else { return nil }
         return ScreenRect(x: x, y: y, width: width, height: height)
     }
@@ -211,7 +211,18 @@ public struct CannotReadWindows: Error, CustomStringConvertible {
     public var description: String { "the window server would not list its windows" }
 }
 
-public struct CannotReadDisplays: Error, Equatable, CustomStringConvertible {
-    public let error: CGError
-    public var description: String { "the window server would not list its displays (CGError \(error.rawValue))" }
+public enum CannotReadDisplays: Error, Equatable, CustomStringConvertible {
+    /// The display list itself was refused.
+    case list(CGError)
+    /// A display's bounds were no box: a number that is not finite, or a side under zero.
+    case bounds(CGDirectDisplayID, CGRect)
+
+    public var description: String {
+        switch self {
+        case .list(let error): "the window server would not list its displays (CGError \(error.rawValue))"
+        case .bounds(let id, let read):
+            "the window server gave display \(id) bounds that are no box: "
+                + [read.origin.x, read.origin.y, read.size.width, read.size.height].map { Double($0).positional }.joined(separator: ",")
+        }
+    }
 }

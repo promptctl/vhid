@@ -95,24 +95,26 @@ do {
     refuse("vhid's own devices could not be told apart: \(error)")
 }
 
-/// Whether a point is on the edge of a display, where motion can be stopped short.
+/// Whether a point is on the edge of a display, where motion can be stopped short, by the
+/// rule a path is kept off the edges by. [LAW:single-enforcer] A layout that will not read
+/// as displays - a bounds that is no box, or none with area - cannot rule an edge out, so
+/// it counts as one, and the recording's note says points after it may be off.
 @Sendable func atEdge(_ point: ScreenPoint) -> Bool {
     var count: UInt32 = 0
     CGGetActiveDisplayList(0, nil, &count)
-    var displays = [CGDirectDisplayID](repeating: 0, count: Int(count))
-    CGGetActiveDisplayList(count, &displays, &count)
-    let x = CGFloat(point.x), y = CGFloat(point.y)
-    return displays.map(CGDisplayBounds).contains { (bounds: CGRect) -> Bool in
-        let inside = bounds.insetBy(dx: -0.5, dy: -0.5).contains(CGPoint(x: x, y: y))
-        let onEdge = x <= bounds.minX || x >= bounds.maxX - 1 || y <= bounds.minY || y >= bounds.maxY - 1
-        return inside && onEdge
-    }
+    var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+    CGGetActiveDisplayList(count, &ids, &count)
+    let bounds = ids.prefix(Int(count)).map(CGDisplayBounds)
+    let frames = bounds.compactMap(ScreenRect.init)
+    guard frames.count == bounds.count, let displays = Displays(frames: frames) else { return true }
+    return displays.edge(at: point)
 }
 
 // Read here, not through vhidd: a recording taps this session's events, so it only
 // records in the session it can read the cursor in.
 guard let startPoint = CGEvent(source: nil)?.location else { refuse("the cursor could not be read") }
-guard let start = ScreenPoint(x: startPoint.x, y: startPoint.y) else { refuse("the cursor's position \(startPoint) is not a point") }
+let start: ScreenPoint
+do { start = try ScreenPoint.at(startPoint.x, startPoint.y) } catch { refuse("the cursor's position: \(error)") }
 let clock = ContinuousClock()
 /// The tap's own clock at the start: nanoseconds since boot, which every event's
 /// timestamp is on. An event's time is when it happened, not when the tap handed it over.
@@ -147,6 +149,7 @@ func sinceStart() -> Duration { .nanoseconds(Int64(clock_gettime_nsec_np(CLOCK_U
             var said = notes
             if recorder.unmapped > 0 { said.append("\(recorder.unmapped) key presses with no HID usage, fn among them, are not in the recording") }
             if recorder.vhidAtEdge > 0 { said.append("vhid's motion reached a screen edge \(recorder.vhidAtEdge) times while recording, so the pointer points after it may be off") }
+            if recorder.unplaced > 0 { said.append("\(recorder.unplaced) of the person's moves were at no place once vhid's motion was taken out, and are not in the recording") }
             do {
                 for note in said { try command.send(FromApp.note(note)) }
                 try command.send(FromApp.script(recorder.script(stoppedAt: stoppedAt, stopKeys: ending == .stop ? stopKeys : [])))
@@ -167,10 +170,11 @@ let session = MainActor.assumeIsolated {
     Session(recorder: Recorder(start: start, flags: CGEventSource.flagsState(.combinedSessionState).rawValue, vhid: initialSenders, atEdge: atEdge))
 }
 
-/// A tap event as the recorder reads it, or nil for a kind it does not record.
-func tapEvent(_ type: CGEventType, _ event: CGEvent) -> TapEvent? {
+/// A tap event as the recorder reads it, nil for a kind it does not record, or the refusal
+/// of a location that is no place, which leaves the recording with a gap if skipped.
+func tapEvent(_ type: CGEventType, _ event: CGEvent) throws(NotAPlace) -> TapEvent? {
     let location = event.location
-    guard let place = ScreenPoint(x: location.x, y: location.y) else { return nil }
+    let place = try ScreenPoint.at(location.x, location.y)
     let button = { Button(rawValue: UInt8(event.getIntegerValueField(.mouseEventButtonNumber) + 1)) }
     let code = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
     let kind: TapEvent.Kind?
@@ -199,8 +203,14 @@ guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .tailAppendEve
         // rather than carried on with a gap in it, and said so.
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             session.finish(.end, notes: ["macOS turned the tap off (\(type == .tapDisabledByTimeout ? "too slow" : "by user input")), so the recording ends there"])
-        } else if session.taking, let taken = tapEvent(type, event) {
-            if taken.at > hour { session.finish(.end, notes: [hourNote]) } else { session.recorder.take(taken) }
+        } else if session.taking {
+            do {
+                if let taken = try tapEvent(type, event) {
+                    if taken.at > hour { session.finish(.end, notes: [hourNote]) } else { session.recorder.take(taken) }
+                }
+            } catch {
+                session.finish(.end, notes: ["macOS gave an event at no place (\(error)), so the recording ends there"])
+            }
         }
     }
     return Unmanaged.passUnretained(event)

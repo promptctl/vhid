@@ -75,7 +75,8 @@ public struct Steering: Hashable, Sendable {
             // The longest report there is, in any direction, and still short: another.
             guard counts == Int(Count.limit) else { break }
         }
-        return (reports, ScreenPoint(x: at.x, y: at.y) ?? from)
+        // `from` and a few finite steps, each a report's counts times a measured gain.
+        return (reports, ScreenPoint(x: at.x, y: at.y)!)
     }
 
     /// The one report whose expected motion comes nearest `dx, dy`, its length in counts,

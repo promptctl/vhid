@@ -20,9 +20,25 @@ import Testing
                 count?.pointee = 0
                 return asks == failing ? .cannotComplete : .success
             }
-            #expect(throws: CannotReadDisplays(error: .cannotComplete)) { try Geometry.displays(list: refused) }
+            #expect(throws: CannotReadDisplays.list(.cannotComplete)) { try Geometry.displays(list: refused) }
         }
         #expect(try Geometry.displays { _, _, count in count?.pointee = 0; return .success }.isEmpty)
+    }
+
+    /// Bounds the window server gives that are no box are said by the display they came
+    /// from, never read as another box; empty bounds are a display showing nothing, kept.
+    @Test func displayBoundsThatAreNoBoxAreSaidAndEmptyOnesKept() throws {
+        let one: Geometry.DisplayList = { _, ids, count in
+            ids?.pointee = 7
+            count?.pointee = 1
+            return .success
+        }
+        let broken = CGRect(x: CGFloat.nan, y: 0, width: 10, height: 10)
+        let refused = try #require(throws: CannotReadDisplays.self) { try Geometry.displays(list: one, bounds: { _ in broken }) }
+        guard case .bounds(7, _) = refused else { Issue.record("\(refused)"); return }
+        #expect("\(refused)".contains("nan"))
+        let empty = try Geometry.displays(list: one, bounds: { _ in CGRect(x: 5, y: 5, width: 0, height: 0) })
+        #expect(empty.map(\.frame) == [ScreenRect(x: 5, y: 5, width: 0, height: 0)!])
     }
 
     private func entry(
@@ -48,7 +64,7 @@ import Testing
     @Test func anApplicationWindowKeepsItsOwnerAndItsBounds() {
         let listing = Geometry.listing(from: [entry(id: 7, owner: "Xcode", x: 14, y: 47, width: 1400, height: 900)])
         #expect(listing.windows == [
-            Window(id: 7, owner: "Xcode", pid: 400, frame: ScreenRect(x: 14, y: 47, width: 1400, height: 900), layer: 0),
+            Window(id: 7, owner: "Xcode", pid: 400, frame: ScreenRect(x: 14, y: 47, width: 1400, height: 900)!, layer: 0),
         ])
         #expect(listing.excluded.isEmpty)
     }
@@ -120,6 +136,16 @@ import Testing
             #expect(listing.windows.isEmpty, "a window at \(bad) is not a window anyone can click")
             #expect(listing.excluded == [WindowExclusion(reason: .unreadable, count: 1)])
         }
+    }
+
+    /// A size under zero is no box either: it is counted unreadable, never read as a box
+    /// reaching back the other way.
+    @Test func aSizeUnderZeroIsUnreadable() {
+        var broken = entry()
+        broken[kCGWindowBounds as String] = ["X": 0.0, "Y": 33.0, "Width": -1512.0, "Height": 949.0]
+        let listing = Geometry.listing(from: [broken])
+        #expect(listing.windows.isEmpty)
+        #expect(listing.excluded == [WindowExclusion(reason: .unreadable, count: 1)])
     }
 
     /// A NaN *size* is the same hazard by a different door: it slips past the area guard

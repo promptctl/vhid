@@ -16,7 +16,7 @@ import Testing
     }
 
     @Test func aRecognitionWaitsForAHeldVisionTurn() async throws {
-        let region = try #require(ScreenRect(x: 0, y: 0, width: 64, height: 64))
+        let region = try #require(ScreenRect(x: 0, y: 0, width: 64, height: 64)!)
         let image = try Self.blank(region)
         let recognised = try await PixelReader.vision.take(waited: {}) {
             let recognition = Task { try await PixelReader.recognise(image, of: region, in: region) }

@@ -281,6 +281,24 @@ import Testing
         #expect(steering.samples.map(\.perCount) == [1, 1, 1])
     }
 
+    /// A point on no display is one the cursor cannot be put at, so the play is refused at
+    /// the line naming it - the start's or a later one's - before anything moves.
+    @Test func aPointOnNoDisplayIsRefusedBeforeAnythingMoves() async throws {
+        let display = Displays(frames: [ScreenRect(x: 0, y: 0, width: 100, height: 100)!])!
+        for (script, line) in [(#"{"to":{"x":500,"y":50}}"# + "\n" + #"{"t_ms":0,"buttons":["left"]}"# + "\n" + #"{"t_ms":1,"buttons":[]}"#, nil as Int?),
+                               (#"{"to":{"x":50,"y":50}}"# + "\n" + #"{"t_ms":0,"at":{"x":50,"y":-1}}"#, 2)] {
+            let fake = FakeMouse(at: ScreenPoint(x: 50, y: 50)!)
+            let pointer = Pointer(mouse: fake, cursor: fake.cursor, displays: { display }, clock: ManualClock(),
+                                  randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in })
+            let refused = try await #require(throws: OffDisplays.self) {
+                try await Player(pointer: pointer, keyboard: fake.keyboard, wall: { Self.epoch }, lead: .zero).play(Schedule(Play.parse(script)))
+            }
+            #expect(refused.line == line)
+            #expect("\(refused)".contains("is on no display"))
+            #expect(fake.log.isEmpty)
+        }
+    }
+
     /// A cursor that will not move gives calibration nothing to steer by, and the play
     /// stops before its first act, saying so.
     @Test func aCursorThatWillNotMoveStopsCalibration() async throws {

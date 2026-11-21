@@ -8,7 +8,7 @@ import Testing
 /// "nothing matched" acts on it; a caller told that by a reader which saw nothing acts on
 /// a lie. [LAW:no-silent-failure]
 @Suite struct ReadingTests {
-    static let region = ScreenRect(x: 0, y: 0, width: 1512, height: 982)
+    static let region = ScreenRect(x: 0, y: 0, width: 1512, height: 982)!
 
     private func reading(outcome: Outcome, examined: Int, reach: Reach) -> Reading {
         Reading(outcome: outcome, scope: Scope(region: Self.region, examined: examined, reach: reach))
@@ -17,7 +17,7 @@ import Testing
     private func found(_ text: String) -> Found {
         Found(
             text: Text(text)!,
-            frame: ScreenRect(x: 10, y: 20, width: 30, height: 40),
+            frame: ScreenRect(x: 10, y: 20, width: 30, height: 40)!,
             source: .pixels(confidence: Confidence(0.9)!)
         )
     }
@@ -185,7 +185,7 @@ import Testing
     /// whose check found nothing to cut keeps the very value it had, and each row's hit
     /// tests and reason it went unchecked are summed.
     @Test func pressingChecksEveryPrintedRowAndCountsWhatItFound() {
-        let cut = ScreenRect(x: 12, y: 22, width: 20, height: 30)
+        let cut = ScreenRect(x: 12, y: 22, width: 20, height: 30)!
         let press: (Found) -> Checked = {
             switch $0.text.value { case "Allow": Checked(.narrowed(cut), calls: 9); case "Deny": Checked(.unchecked(.overTime), calls: 0)
             default: Checked(.kept, calls: 5) }

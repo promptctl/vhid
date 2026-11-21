@@ -152,16 +152,7 @@ private func point(_ line: KeyedDecodingContainer<AnyKey>, _ key: AnyKey) throws
     let place = try container(line.superDecoder(forKey: key), taking: ["x", "y"])
     let x = try place.decode(Double.self, forKey: AnyKey("x"))
     let y = try place.decode(Double.self, forKey: AnyKey("y"))
-    guard let point = ScreenPoint(x: x, y: y) else {
-        throw Refusal(reason: "\(key.stringValue) is (\(x.clean), \(y.clean)), which is not a place on the screen")
-    }
-    return point
-}
-
-private extension Double {
-    /// This number as a script would have written it: no trailing `.0` on a whole one, so
-    /// a refusal about `300` does not say `300.0` at somebody who never typed that.
-    var clean: String { self == rounded(.towardZero) && abs(self) < 1e15 ? String(Int(self)) : String(self) }
+    do { return try ScreenPoint.at(x, y) } catch { throw Refusal(reason: "\(key.stringValue): \(error)") }
 }
 
 /// `t_ms` and exactly one act.
@@ -180,7 +171,7 @@ private struct ReportLine: Decodable {
         }
         let milliseconds = try line.decode(Double.self, forKey: AnyKey("t_ms"))
         guard (0...Play.longest).contains(milliseconds) else {
-            throw Refusal(reason: "t_ms is \(milliseconds), and it is milliseconds from the start, 0 through \(Int(Play.longest)), an hour")
+            throw Refusal(reason: "t_ms is \(milliseconds.positional), and it is milliseconds from the start, 0 through \(Int(Play.longest)), an hour")
         }
         let key = AnyKey(kind)
         let decoded: Play.Report
@@ -242,7 +233,7 @@ private func button(_ list: inout UnkeyedDecodingContainer, _ key: String) throw
     // refusal below is the one that knows what the mistake was. [LAW:no-silent-failure]
     let number = try list.decode(Double.self)
     guard number == number.rounded(.towardZero), number >= 1, number <= 32, let button = Button(rawValue: UInt8(number)) else {
-        throw Refusal(reason: "\(key) has \(number.clean), and a button is a whole number from 1 to 32, or one of \(Button.named.keys.sorted().joined(separator: ", "))")
+        throw Refusal(reason: "\(key) has \(number.positional), and a button is a whole number from 1 to 32, or one of \(Button.named.keys.sorted().joined(separator: ", "))")
     }
     return button
 }
@@ -277,7 +268,7 @@ private func usage(_ list: inout UnkeyedDecodingContainer, _ key: String) throws
     }
     let number = try list.decode(Double.self)
     guard number == number.rounded(.towardZero), Double(Usage.keys.lowerBound) <= number, number <= Double(Usage.keys.upperBound) else {
-        throw Refusal(reason: "\(key) has \(number.clean), and a key is a usage number from \(Usage.keys.lowerBound) to \(Usage.keys.upperBound), or a name")
+        throw Refusal(reason: "\(key) has \(number.positional), and a key is a usage number from \(Usage.keys.lowerBound) to \(Usage.keys.upperBound), or a name")
     }
     return Usage(rawValue: UInt16(number))
 }
@@ -292,7 +283,7 @@ private func axes(_ line: KeyedDecodingContainer<AnyKey>, _ report: AnyKey, _ fi
     func count(_ axis: String) throws -> Count {
         let value = try axes.decode(Double.self, forKey: AnyKey(axis))
         guard value == value.rounded(.towardZero), abs(value) <= Double(Count.limit) else {
-            throw Refusal(reason: "\(report.stringValue).\(axis) is \(value.clean), and a report carries whole counts, -\(Count.limit) through \(Count.limit)")
+            throw Refusal(reason: "\(report.stringValue).\(axis) is \(value.positional), and a report carries whole counts, -\(Count.limit) through \(Count.limit)")
         }
         return Count(clamping: Int(value))
     }

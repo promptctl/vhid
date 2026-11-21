@@ -79,7 +79,7 @@ final class Trail: Sendable {
                                     "structure": .string(move.structure.rawValue),
                                     "bow": .double(move.bow),
                                     "halfway": .double(move.halfway),
-                                    "displays": .array(move.displays.frames.map { frame in .array([frame.minX, frame.minY, frame.width, frame.height].map { .double(Double($0)) }) }),
+                                    "displays": .array(move.displays.frames.map { frame in .array([frame.x, frame.y, frame.width, frame.height].map(JSON.double)) }),
                                     "ends_kept": .double(move.kept.ends),
                                     "bow_kept": .double(move.kept.bow),
                                     "steered_reports": .int(move.steered),
@@ -88,7 +88,7 @@ final class Trail: Sendable {
         path["landed"] = move.landed.map(point)
         // The box the aim was drawn inside, which with the seed and `from` draws the path
         // again; a point target is `aimed` itself.
-        if case .box(let box) = move.toward { path["box"] = .array([box.x, box.y, box.width, box.height].map(JSON.double)) }
+        if case .box(let box) = move.toward { path["box"] = .array([box.frame.x, box.frame.y, box.frame.width, box.frame.height].map(JSON.double)) }
         kept.withLock { $0.moves.append(.object(path)) }
     }
 

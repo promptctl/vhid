@@ -190,7 +190,7 @@ import Testing
     /// toward the elbow, and the whole move's speed peaks at a spread of shares of its time.
     @Test func aHundredMovesAreNotBuiltFromTheSameParts() {
         var generator = SeededGenerator(seed: 1)
-        let box = Target.box(ScreenRect(x: 820, y: 596, width: 83, height: 26)!)
+        let box = Target.box(Target.Box(ScreenRect(x: 820, y: 596, width: 83, height: 26)!)!)
         let start = ScreenPoint(x: 120, y: 250)!
         var bows: [Double] = [], peaks: [Double] = []
         for _ in 0 ..< 100 {
@@ -232,7 +232,7 @@ import Testing
 /// everything. Over 200 seeds each, seconds of work that would hold `make test`'s one-thread
 /// pool, hence its own thread.
 @Suite(.ownThread) struct TrajectoryOnTheDisplaysTests {
-    static let screen = Displays(frames: [CGRect(x: 0, y: 0, width: 1920, height: 1080)])!
+    static let screen = Displays(frames: [ScreenRect(x: 0, y: 0, width: 1920, height: 1080)!])!
     /// Ten points above the bottom edge, where an auto-hidden Dock waits, and across it.
     static let alongTheEdge = (ScreenPoint(x: 100, y: 1070)!, ScreenPoint(x: 1800, y: 1070)!)
 
@@ -322,7 +322,7 @@ import Testing
     /// Far from every edge, and across the seam between two displays side by side, the whole
     /// drawn path is kept: the same path as on a screen with no edges near.
     @Test func aPathFarFromTheEdgesKeepsItsWholeBow() {
-        let pair = Displays(frames: [CGRect(x: 0, y: 0, width: 1920, height: 1080), CGRect(x: 1920, y: 0, width: 1920, height: 1080)])!
+        let pair = Displays(frames: [ScreenRect(x: 0, y: 0, width: 1920, height: 1080)!, ScreenRect(x: 1920, y: 0, width: 1920, height: 1080)!])!
         for seed in UInt64(0) ..< 200 {
             let across = Self.trajectory(seed: seed, from: TrajectoryTests.start, to: TrajectoryTests.across)
             #expect(across == TrajectoryTests.trajectory(seed: seed), "seed \(seed)")
