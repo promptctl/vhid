@@ -71,40 +71,27 @@ struct Vhid: AsyncParsableCommand {
             running = invocation
             if first.taken != nil { invocation.cancel() }
         }
-        // A clean exit - `--help`, `--version` - ended the unit well, and is passed on now.
-        let ending = await invocation.result.flatMap { ran -> Result<Void, any Error> in
-            if case .answered(let answer) = ran { .failure(answer) } else { .success(()) }
-        }
+        let ending = await invocation.result
         withExtendedLifetime(watch) {}
         await Telemetry.drained()
         switch (ending, first.unanswered) {
-        case (.success, nil): return
+        case (.success(let ran), nil): ran.exit(under: Self.self)
         case (.success, let number?): die(by: number)
         case (.failure(let error), nil) where !error.isCancellation: exit(withError: error)
         case (.failure(let error), let number):
             // Said, because it can be the one report of what the verb had done when the
             // signal landed, in the words its record has. [LAW:no-silent-failure]
-            let words = said(for: error)
+            let words = Entry.said(for: error, under: Self.self)
             if !words.isEmpty { FileHandle.standardError.write(Data("vhid: \(words)\n".utf8)) }
             guard let number else { exit(withError: exitCode(for: error)) }
             die(by: number)
         }
     }
 
-    /// What the command line says of a verb that ended in `error`, which is what its
-    /// record carries; nothing for a verb that said everything itself on its way out, as
-    /// `doctor` does, or for `--help` and `--version`, which end well. A cancellation is
-    /// said in the words an MCP caller is given, since ArgumentParser has none of its own
-    /// for it. [LAW:one-source-of-truth]
-    static func said(for error: any Error) -> String {
-        if error.isCancellation { return error.reported }
-        return exitCode(for: error) == .success ? "" : message(for: error)
-    }
-
     /// Runs `work` as one command-line run's unit of work, named `event` until it names
     /// itself, with the signal that stopped it, if one did.
     static func dispatched<T>(_ event: String, _ work: () async throws -> T) async throws -> T {
-        try await Entry.cli.unit(event, said: said) {
+        try await Entry.cli.unit(event, said: { Entry.said(for: $0, under: Self.self) }) {
             defer { signals?.noted() }
             return try await work()
         }

@@ -24,14 +24,15 @@ struct Eye: AsyncParsableCommand {
     static func main() async {
         let ending: Result<Entry.Ran, any Error>
         do {
-            ending = .success(try await Entry.cli.unit(_commandName, said: message(for:)) { try await Entry.commandLine(Self.self, nil) })
+            ending = .success(try await Entry.cli.unit(_commandName, said: { Entry.said(for: $0, under: Self.self) }) {
+                try await Entry.commandLine(Self.self, nil)
+            })
         } catch {
             ending = .failure(error)
         }
         await Telemetry.drained()
         switch ending {
-        case .success(.ran): exit()
-        case .success(.answered(let answer)): exit(withError: answer)
+        case .success(let ran): ran.exit(under: Self.self)
         case .failure(let error): exit(withError: error)
         }
     }

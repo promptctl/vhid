@@ -15,7 +15,7 @@ public enum Entry: String, Sendable {
     /// quote text meant for a password field, and outlive the terminal and the conversation.
     public func unit<T>(_ name: String, trace: Telemetry.Trace = .joined, said: (any Error) -> String?,
                         _ work: () async throws -> T) async throws -> T {
-        try await Telemetry.unit(name, trace: trace, said: { ArgumentRefused.refuses($0) ? Telemetry.refusedArguments : said($0) }) {
+        try await Telemetry.unit(name, trace: trace, said: { $0 is ArgumentRefused ? Telemetry.refusedArguments : said($0) }) {
             Telemetry.note(.entry, .string(rawValue))
             return try await work()
         }
@@ -24,9 +24,34 @@ public enum Entry: String, Sendable {
     /// How a command line's verb ended well.
     public enum Ran: Sendable {
         case ran
+        /// The verb answered with a verdict, the exit status a script reads.
+        case judged(Int32)
         /// ArgumentParser answered in the verb's place - `--help`, `--version` - with an error
         /// that prints the answer and exits 0.
         case answered(by: any Error)
+
+        /// Ends the process as this run ended, once its records are drained.
+        public func exit(under root: any ParsableCommand.Type) -> Never {
+            switch self {
+            case .ran, .judged(0): root.exit()
+            case .judged(let status): root.exit(withError: ExitCode(status))
+            case .answered(let answer): root.exit(withError: answer)
+            }
+        }
+    }
+
+    /// What a command line's record and its last words say of a verb that ended in
+    /// `error`: nothing for `--help` and `--version`, which end well; that the arguments
+    /// were refused, never their words, which can quote text meant for a password field;
+    /// a cancellation as a caller is told it, since ArgumentParser has no words for one;
+    /// and otherwise ArgumentParser's. [LAW:single-enforcer] One rule for both executables.
+    public static func said(for error: any Error, under root: any ParsableCommand.Type) -> String {
+        if error.isCancellation { return error.reported }
+        switch root.exitCode(for: error) {
+        case .success: return ""
+        case .validationFailure: return Telemetry.refusedArguments
+        default: return root.message(for: error)
+        }
     }
 
     /// Parses `arguments` (argv when `nil`) under `root`, names the unit underway after the
@@ -41,6 +66,8 @@ public enum Entry: String, Sendable {
                 try command.run()
             }
             return .ran
+        } catch let verdict as Verdict {
+            return .judged(verdict.status)
         } catch where root.exitCode(for: error) == .success {
             return .answered(by: error)
         }
@@ -64,11 +91,13 @@ public enum Entry: String, Sendable {
 public struct ArgumentRefused: Error, CustomStringConvertible {
     public let description: String
     public init(_ description: String) { self.description = description }
+}
 
-    /// Whether `error` is a refusal of the arguments a unit was given: a tool's, or a command
-    /// line's, which ArgumentParser exits with its validation status.
-    static func refuses(_ error: any Error) -> Bool {
-        // Any command answers `exitCode(for:)`, which reads only the error.
-        error is ArgumentRefused || ReadGrants.exitCode(for: error) == .validationFailure
-    }
+/// A verb's verdict, the exit status a script reads, thrown as ArgumentParser's own clean
+/// exits are, once the verb has said everything. Not a failure: the verb did what it was
+/// for, so its record says it ran. [LAW:types-are-the-program] Apart from `ExitCode`, which
+/// ends a run that failed after saying why.
+public struct Verdict: Error {
+    public let status: Int32
+    public init(_ status: Int32) { self.status = status }
 }

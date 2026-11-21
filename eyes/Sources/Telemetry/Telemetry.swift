@@ -33,6 +33,22 @@ public extension Error {
     }
 }
 
+public extension Error {
+    /// What a report calls this failure.
+    ///
+    /// Every failure here says what it is, except the one the language supplies:
+    /// `CancellationError` has no description of its own, so interpolating it prints
+    /// `CancellationError()` at the front of a sentence an operator reads. It is the one
+    /// stop that is not a failure at all - the caller asked for it - so it is named as the
+    /// thing that happened. [LAW:comments-carry-meaning]
+    ///
+    /// This is the one place that translation happens, so a cancelled typing run, chord,
+    /// click and replay all report it the same way. [LAW:one-source-of-truth]
+    var reported: String {
+        self is CancellationError ? "the run was cancelled" : "\(self)"
+    }
+}
+
 /// One unit of work's record: everything known about it, made once, when it ends.
 /// [LAW:nothing-unseen] [LAW:types-are-the-program]
 public struct Record: Sendable, Equatable {

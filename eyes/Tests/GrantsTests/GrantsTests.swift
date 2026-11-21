@@ -7,6 +7,16 @@ import OwnThread
 import Testing
 
 @Suite(.eventsKept, .ownThread) struct GrantsTests {
+    /// The session-start hook reads a reading's verdict by its exit status alone, so its arms
+    /// are the statuses a reading exits with, and every other status is unknown.
+    @Test func theHookReadsTheStatusesAReadingExitsWith() throws {
+        let root = URL(filePath: #filePath).deletingLastPathComponent().appending(path: "../../..").standardized
+        let hook = try String(contentsOf: root.appending(path: "claude-plugin/hooks/session-start"), encoding: .utf8)
+        let arms = hook.split(separator: "\n").filter { $0.hasPrefix("  ") && $0.contains(") sight=") }
+            .map { String($0.drop { $0 == " " }.prefix { $0 != ")" }) }
+        #expect(arms == ["0", "\(GrantReading.lacking)", "*"])
+    }
+
     /// A reading survives the line a reading process prints for it.
     @Test func aReadingRoundTripsThroughItsLine() throws {
         for held in [(true, false), (false, true), (true, true), (false, false)] {

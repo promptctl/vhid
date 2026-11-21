@@ -22,7 +22,7 @@ struct DoctorCommand: AsyncParsableCommand {
         let installation = try service.installation()
         let readiness = try await reading { Readiness.read(for: installation, stoppedBy: $0) }
         print(Self.doctor(readiness, grants: try await Self.grants()))
-        guard readiness.ready else { throw ExitCode(1) }
+        guard readiness.ready else { throw Verdict(1) }
     }
 
     /// What the verb prints and its MCP tool answers: the verdict in a word, then the rows,

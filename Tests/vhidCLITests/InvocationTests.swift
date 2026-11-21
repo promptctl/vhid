@@ -341,6 +341,19 @@ import Testing
         _ = try? await cli(Vhid._commandName, into: collected) { try await Entry.commandLine(Vhid.self, arguments) }
     }
 
+    /// A verdict is the verb's answer, not a failure: `doctor` on a Mac that is not ready
+    /// ran, and its record says so, while the status it judged is what the process exits with.
+    @Test func aVerdictIsRecordedAsARunThatEndedWell() async throws {
+        let collected = Collected()
+        let ran = try await Self.cli(Vhid._commandName, into: collected) {
+            try await Entry.commandLine(Vhid.self, ["doctor", "--service", Installation.nobody.service])
+        }
+        guard case .judged(1) = ran else { Issue.record("\(ran)"); return }
+        let record = try #require(try collected.written.first { $0["event"] as? String == "doctor" })
+        #expect(record["outcome"] as? String == "ok")
+        #expect(record["error"] == nil)
+    }
+
     /// ArgumentParser answers `--help` with a `help` command it never declares among
     /// `vhid`'s subcommands.
     @Test func askingForHelpIsRecordedAsHelp() async throws {
@@ -438,8 +451,7 @@ import Testing
         stdio.call(4, then: [])
         for await _ in began { break }
         session.cancel()
-        for _ in 0..<200 where !(await transport.isWaitingOnCalls) { try await Task.sleep(for: .milliseconds(10)) }
-        #expect(await transport.isWaitingOnCalls, "the stopped session did not wait on the call it withdrew")
+        await transport.until { $0.isWaitingOnCalls }
         #expect(!served.withLock { $0 }, "the session ended under a call still stopping")
         handBack.yield()
         await #expect(throws: CancellationError.self) { try await session.value }

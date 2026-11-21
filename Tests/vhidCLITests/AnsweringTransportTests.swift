@@ -64,11 +64,10 @@ import Testing
         stdio.lines.finish()
         for await _ in read.prefix(2) {}
         // Parked: the only thing left for the relay to do is wait on id 7.
-        for _ in 0..<200 where !(await transport.isWaiting) { try await Task.sleep(for: .milliseconds(10)) }
-        #expect(await transport.isWaiting)
+        await transport.until { $0.isWaiting }
         session.cancel()
         _ = try? await session.value
-        for _ in 0..<200 where said.lines.count < 2 { try await Task.sleep(for: .milliseconds(10)) }
+        for await _ in said.logged.stream.prefix(2) {}
         #expect(said.lines == [
             #"stdin ended, waiting on answers owed owed="7"×1, 7×1"#,
             #"session stopped with answers owed owed="7"×1, 7×1"#,
@@ -98,8 +97,7 @@ import Testing
         stdio.call(3, then: [])
         for await _ in began { break }
         stdio.feed([.cancel(3), .end])
-        for _ in 0..<200 where !(await transport.isWaiting) { try await Task.sleep(for: .milliseconds(10)) }
-        #expect(await transport.isWaiting, "the session ended under a handler still running")
+        await transport.until { $0.isWaiting }
         #expect(said.lines.filter { $0.hasPrefix("stdin ended") } == ["stdin ended, waiting on answers owed owed=3×1 (1 withdrawn)"])
         done.finish()
         try await session.value
@@ -118,7 +116,7 @@ import Testing
         stdio.call(5, then: [.cancel(5), .cancel(5)])
         for await _ in read.prefix(1) {}
         // Both cancels are read once one is withdrawn and a probe sent after them is read.
-        for _ in 0..<200 where await transport.withdrawing(5) == 0 { try await Task.sleep(for: .milliseconds(10)) }
+        await transport.until { $0.withdrawing(5) > 0 }
         stdio.lines.yield(Data(#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#.utf8))
         for await _ in read.prefix(1) {}
         #expect(await transport.withdrawing(5) == 1)
@@ -184,6 +182,8 @@ private final class Said: LogHandler, @unchecked Sendable {
     private let lock = NSLock()
     private var kept: [String] = []
     var lines: [String] { lock.withLock { kept } }
+    /// Each line as it is logged, so a test waits on the logging rather than for it.
+    let logged = AsyncStream<String>.makeStream()
     var metadata: Logger.Metadata = [:]
     var logLevel: Logger.Level = .trace
     subscript(metadataKey key: String) -> Logger.Metadata.Value? {
@@ -191,7 +191,9 @@ private final class Said: LogHandler, @unchecked Sendable {
     }
     func log(level: Logger.Level, message: Logger.Message, metadata: Logger.Metadata?, source: String, file: String, function: String, line: UInt) {
         let fields = (metadata ?? [:]).sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }
-        lock.withLock { kept.append(([message.description] + fields).joined(separator: " ")) }
+        let line = ([message.description] + fields).joined(separator: " ")
+        lock.withLock { kept.append(line) }
+        logged.continuation.yield(line)
     }
 }
 

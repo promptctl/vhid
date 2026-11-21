@@ -44,7 +44,7 @@ public struct PixelReader: Reader {
         let region = try Self.resolve(query.region)
         let listing = try Geometry.onScreen()
         let owners = query.region.owners(in: listing, hit: hit)
-        let image = try Self.capture(region)
+        let image = try await Self.capture(region)
         // A run with no words in it is nil: examined, and counted as wordless.
         // One piece after another, never at once: measured, recognising the pieces in a
         // task group segfaulted inside TextRecognition in 4 runs of 15.
@@ -171,7 +171,11 @@ public struct PixelReader: Reader {
     /// [LAW:no-silent-failure] Its exit status is not evidence: measured, it exits 0 having
     /// written nothing when the path is unwritable. The file it wrote, decoded, is the only
     /// proof a capture happened.
-    nonisolated static func capture(_ region: ScreenRect) throws -> CGImage {
+    ///
+    /// A look withdrawn while it captures ends its capture with it, so a stopped session's
+    /// wait on its calls is not held by a child nobody is waiting for.
+    /// [LAW:no-ambient-temporal-coupling]
+    nonisolated static func capture(_ region: ScreenRect) async throws -> CGImage {
         let path = FileManager.default.temporaryDirectory
             .appendingPathComponent("eyes-\(UUID().uuidString).png")
         defer { try? FileManager.default.removeItem(at: path) }
@@ -182,8 +186,18 @@ public struct PixelReader: Reader {
         process.arguments = ["-x", "-t", "png", "-R\(Int(r.minX)),\(Int(r.minY)),\(Int(r.width)),\(Int(r.height))", path.path]
         let stderr = Pipe()
         process.standardError = stderr
+        // Under an MCP server this process's stdin is the client's JSON-RPC stream.
+        process.standardInput = FileHandle.nullDevice
+        let (ended, end) = AsyncStream<Void>.makeStream()
+        process.terminationHandler = { _ in end.finish() }
         try process.run()
-        process.waitUntilExit()
+        let child = process.processIdentifier
+        await withTaskCancellationHandler {
+            for await _ in ended {}
+        } onCancel: {
+            kill(child, SIGTERM)
+        }
+        try Task.checkCancellation()
 
         guard let source = CGImageSourceCreateWithURL(path as CFURL, nil),
               // Decoded now, not on first use: the image is lazy by default, and the file

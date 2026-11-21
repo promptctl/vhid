@@ -24,22 +24,6 @@ func failure(of release: () async throws -> Void, isolation: isolated (any Actor
     }
 }
 
-public extension Error {
-    /// What a report calls this failure.
-    ///
-    /// Every failure here says what it is, except the one the language supplies:
-    /// `CancellationError` has no description of its own, so interpolating it prints
-    /// `CancellationError()` at the front of a sentence an operator reads. It is the one
-    /// stop that is not a failure at all - the caller asked for it - so it is named as the
-    /// thing that happened. [LAW:comments-carry-meaning]
-    ///
-    /// This is the one place that translation happens, so a cancelled typing run, chord,
-    /// click and replay all report it the same way. [LAW:one-source-of-truth]
-    var reported: String {
-        self is CancellationError ? "the run was cancelled" : "\(self)"
-    }
-}
-
 public extension String {
     /// This report with `next` after it as a sentence of its own.
     ///

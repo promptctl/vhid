@@ -65,7 +65,8 @@ case "$status:$doctor" in
 esac
 # Whether look can read the screen, from the exit status `read-grants` answers it with -
 # 0 every grant held, 3 one not (GrantReading.exitStatus) - never from what it prints: the
-# reading is vhid's to judge, and the hook keeps no second reader of its line. Any other
+# reading is vhid's to judge, and the hook keeps no second reader of its line; GrantsTests
+# holds these arms to the statuses a reading exits with. Any other
 # status is a reading that failed, said as unknown. [LAW:one-source-of-truth] [LAW:no-silent-failure]
 grants=$("$vhid" read-grants 2>&1)
 status=$?
