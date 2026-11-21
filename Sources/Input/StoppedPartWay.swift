@@ -12,8 +12,9 @@ public protocol StoppedPartWay: Caused {}
 
 /// What `release` threw, answered rather than thrown: every run that stops lets its device
 /// go on the way out and reports a release that failed beside the stop, never over it, so
-/// the operator is told both. [LAW:no-silent-failure] The one copy of that shape, for the
-/// keyboard and the mouse alike. [LAW:one-source-of-truth]
+/// the operator is told both. [LAW:no-silent-failure] The one way a release is caught,
+/// for the keyboard and the mouse alike; each device says what was left held in its own
+/// words. [LAW:one-source-of-truth]
 func failure(of release: () async throws -> Void, isolation: isolated (any Actor)? = #isolation) async -> (any Error)? {
     do {
         try await release()

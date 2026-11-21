@@ -87,8 +87,12 @@ struct Devices {
             // because a connection that is working should hand the devices back rather
             // than make the next client wait on its disconnection. When the leave fails
             // too, it is almost always the same failure - the connection that just broke -
-            // and the disconnection that follows releases everything regardless.
-            try? await queue.run { try helper.leave() }
+            // and the disconnection that follows releases everything regardless. Said on
+            // stderr, as a leave after a verb that succeeded is, and never over the stop.
+            // [LAW:no-silent-failure]
+            do { try await queue.run { try helper.leave() } } catch let left {
+                FileHandle.standardError.write(Data("vhid: the devices were not handed back after the verb stopped: \(left.reported)\n".utf8))
+            }
             throw error
         }
         // On the queue, behind the last report this verb sent. A leave that fails after the

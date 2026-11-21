@@ -2,6 +2,7 @@ import ArgumentParser
 import DriverExtension
 import Foundation
 import Helper
+import Installations
 import RecordingTie
 
 /// Records the physical keyboard and mouse as a script `vhid play` replays.
@@ -99,13 +100,11 @@ struct RecordCommand: AsyncParsableCommand {
 
     /// The tap app, where this build's copy is: the pkg's in libexec, and a working tree's
     /// in ~/Applications, where System Settings can add it to Input Monitoring - a bundle
-    /// inside `.build` cannot be. Chosen the way `Installation.thisBuild` is, so a dev vhid
-    /// never runs the installed tap or the other way round. [LAW:one-source-of-truth]
-    #if DEBUG
-    static let appPath = NSHomeDirectory() + "/Applications/vhid-record-dev.app"
-    #else
-    static let appPath = "/usr/local/libexec/vhid-record.app"
-    #endif
+    /// inside `.build` cannot be. Chosen by `Installation.thisBuild`, so a dev vhid never
+    /// runs the installed tap or the other way round. [LAW:one-source-of-truth]
+    static let appPath = Installation.thisBuild == .development
+        ? NSHomeDirectory() + "/Applications/vhid-record-dev.app"
+        : "/usr/local/libexec/vhid-record.app"
 
     static func app() throws -> URL {
         guard FileManager.default.fileExists(atPath: appPath) else { throw RecordRefusal.noApp(appPath) }
