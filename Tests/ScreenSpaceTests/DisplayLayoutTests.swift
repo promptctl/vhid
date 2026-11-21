@@ -32,11 +32,11 @@ import Testing
     /// Bounds that are no box are refused by the display and the bounds it gave; no display
     /// is no layout; displays further apart than a Double spans are no layout either.
     @Test func whatIsNoLayoutIsRefusedByName() throws {
-        #expect(throws: LayoutUnreadable.bounds(display: 7, CGRect(x: 0, y: 0, width: -5, height: 900))) {
+        #expect(throws: LayoutUnreadable.bounds(display: 7, NotABox(x: 0, y: 0, width: -5, height: 900))) {
             try DisplayLayout([online(1, 0, 0, 1600, 900), online(7, 0, 0, -5, 900)])
         }
-        #expect(LayoutUnreadable.bounds(display: 7, CGRect(x: 0, y: 0, width: Double.nan, height: 900)).description
-            == "display 7 has bounds 0,0,nan,900, which are no box on the screen")
+        #expect(LayoutUnreadable.bounds(display: 7, NotABox(x: 0, y: 0, width: .nan, height: 900)).description
+            == "display 7's bounds: 0,0,nan,900 is not a box on the screen")
         #expect(throws: LayoutUnreadable.noDisplay) { try DisplayLayout([]) }
         let far = Double.greatestFiniteMagnitude
         #expect(throws: LayoutUnreadable.self) { try DisplayLayout([online(1, -far, 0, 10, 10), online(2, far / 2, 0, 10, 10)]) }
@@ -45,17 +45,14 @@ import Testing
         #expect(throws: LayoutUnreadable.self) { try DisplayLayout([online(1, -far / 2, -far / 2, 10, 10), online(2, far / 2 - 10, far / 2 - 10, 10, 10)]) }
     }
 
-    /// A list the window server would not give is said, at either of the two asks, and
-    /// never read as no display online.
-    @Test func aRefusedListIsSaid() {
-        for failing in [0, 1] {
-            var asks = 0
-            let refused: DisplayLayout.DisplayList = { _, _, count in
-                defer { asks += 1 }
-                count?.pointee = 0
-                return asks == failing ? .cannotComplete : .success
-            }
-            #expect(throws: LayoutUnreadable.list(.cannotComplete)) { try DisplayLayout.online(list: refused) }
+    /// A display's record is the six numbers either wire carries, read back as the display;
+    /// numbers that are not one display's are none.
+    @Test func aDisplayCrossesAWireAsItsRecord() {
+        let display = online(7, -1920, -100.5, 1920, 1080, active: false)
+        #expect(display.record == [7, -1920, -100.5, 1920, 1080, 0])
+        #expect(OnlineDisplay(record: display.record) == display)
+        for refused: [Double] in [[7, 0, 0, 1, 1], [7.5, 0, 0, 1, 1, 1], [-1, 0, 0, 1, 1, 1], [7, 0, 0, 1, 1, 2]] {
+            #expect(OnlineDisplay(record: refused) == nil)
         }
     }
 }

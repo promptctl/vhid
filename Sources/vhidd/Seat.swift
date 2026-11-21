@@ -114,14 +114,11 @@ final class Seat: NSObject, HelperService, @unchecked Sendable {
         }
     }
 
-    /// Where the displays are in the session in front, six numbers each, as
+    /// Where the displays are in the session in front, each display's record, as
     /// `HelperService.displays` says. Claims nothing, like `cursor`.
     func displays(reply: @escaping ([NSNumber], Error?) -> Void) {
         do {
-            reply(try screen.displays().flatMap { display in
-                [Double(display.id), display.bounds.origin.x, display.bounds.origin.y, display.bounds.size.width, display.bounds.size.height,
-                 display.isActive ? 1 : 0].map { NSNumber(value: Double($0)) }
-            }, nil)
+            reply(try screen.displays().flatMap(\.record).map { NSNumber(value: $0) }, nil)
         } catch {
             reply([], refusal(error))
         }

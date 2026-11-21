@@ -49,9 +49,10 @@ public struct Recorder {
     /// them is vhid's, not the person's.
     public var vhid: Set<UInt64>
     public let start: ScreenPoint
-    /// Whether a point is on a display's edge, where motion can be stopped short: the rule
-    /// `Displays.isAtEdge`, over the layout as it is when asked, which may not be readable.
-    private let atEdge: @Sendable (ScreenPoint) throws(LayoutUnreadable) -> Bool
+    /// The displays as they are when asked, which may not be readable: what tells vhid's
+    /// motion stopped at an edge, and what places the person's points by the rule a play of
+    /// them places by, so the recorder writes no point its player refuses. [LAW:single-enforcer]
+    private let displays: @Sendable () throws(LayoutUnreadable) -> Displays
 
     private var lines: [Line]
     /// Keys the person holds, modifiers apart.
@@ -72,8 +73,8 @@ public struct Recorder {
     public private(set) var unmapped = 0
     /// Motion of vhid's that ended on a screen edge, after which the offset may be wrong.
     public private(set) var vhidAtEdge = 0
-    /// The person's moves that were at no place once vhid's motion was taken out of them: an
-    /// offset gone wrong, left out rather than written where the person was not.
+    /// The person's moves that were on no display once vhid's motion was taken out of them:
+    /// an offset gone wrong, left out rather than written where the person was not.
     /// [LAW:no-silent-failure]
     public private(set) var unplaced = 0
 
@@ -92,18 +93,19 @@ public struct Recorder {
     /// A recording from `start`, with the session's modifier `flags` as they were then:
     /// the first keys line, at 0, is the modifiers already down. vhid holds nothing then,
     /// because recording refuses to start while it holds the devices.
-    public init(start: ScreenPoint, flags: UInt64, vhid: Set<UInt64>, atEdge: @escaping @Sendable (ScreenPoint) throws(LayoutUnreadable) -> Bool) {
+    public init(start: ScreenPoint, flags: UInt64, vhid: Set<UInt64>, displays: @escaping @Sendable () throws(LayoutUnreadable) -> Displays) {
         self.start = start
         self.vhid = vhid
-        self.atEdge = atEdge
+        self.displays = displays
         session = Self.modifiers(in: flags)
         last = start
         lines = [.keys(.zero, session)]
     }
 
     /// Takes one event, writing a line when it changed what the person holds or where
-    /// they put the cursor. Throws when a move of vhid's needs the layout to tell an edge
-    /// and the layout cannot be read, which leaves the offset unknown from there.
+    /// they put the cursor. Throws when a move needs the layout - vhid's to tell an edge, the
+    /// person's to be placed - and the layout cannot be read, which leaves where the cursor
+    /// is in the recording unknown from there.
     public mutating func take(_ event: TapEvent) throws(LayoutUnreadable) {
         // Never before the line before it: the tap can hand two devices' events over a
         // hair out of order, and a script's times may not go backwards.
@@ -112,7 +114,7 @@ public struct Recorder {
         if vhid.contains(event.sender) {
             try takeVhid(event)
         } else {
-            takePerson(event)
+            try takePerson(event)
         }
         // A modifier vhid let go of while the person held it stays down in the session;
         // once its bit clears it is nobody's, and the person's next press of it is theirs.
@@ -142,7 +144,7 @@ public struct Recorder {
         switch event.kind {
         case .motion:
             offset = (offset.x + event.location.x - last.x, offset.y + event.location.y - last.y)
-            vhidAtEdge += try atEdge(event.location) ? 1 : 0
+            vhidAtEdge += try displays().isAtEdge(event.location) ? 1 : 0
         case .flagsChanged(let code, let flags):
             session = Self.modifiers(in: flags)
             if let modifier = Usage(virtualKeyCode: code), let bit = Self.deviceBits[modifier] {
@@ -153,7 +155,7 @@ public struct Recorder {
         }
     }
 
-    private mutating func takePerson(_ event: TapEvent) {
+    private mutating func takePerson(_ event: TapEvent) throws(LayoutUnreadable) {
         switch event.kind {
         case .keyDown(_, autorepeat: true):
             break
@@ -174,8 +176,9 @@ public struct Recorder {
         case .flagsChanged(_, let flags):
             session = Self.modifiers(in: flags)
         case .motion:
-            if let point = try? ScreenPoint.at(event.location.x - offset.x, event.location.y - offset.y) {
-                lines.append(.at(event.at, point))
+            let layout = try displays()
+            if let point = try? ScreenPoint.at(event.location.x - offset.x, event.location.y - offset.y), let placed = try? layout.place(point) {
+                lines.append(.at(event.at, placed.value))
             } else {
                 unplaced += 1
             }
@@ -240,11 +243,10 @@ public struct Recorder {
         number(Double(duration.components.seconds) * 1000 + Double(duration.components.attoseconds) / 1e15)
     }
 
-    /// Three decimals at most, and no trailing zeros: a microsecond, or a thousandth of a
-    /// point, is finer than anything the tap reports.
+    /// Three decimals at most, spelled as every coordinate is: a microsecond, or a thousandth
+    /// of a point, is finer than anything the tap reports. [LAW:one-source-of-truth]
     private static func number(_ value: Double) -> String {
-        let rounded = (value * 1000).rounded() / 1000
-        return rounded == rounded.rounded() ? String(Int(rounded)) : String(rounded)
+        Coordinate.spelled((value * 1000).rounded() / 1000)
     }
 
     static let capsLockCode: UInt16 = 0x39

@@ -136,11 +136,14 @@ import ScreenSpace
         #expect { try garbled.displays() } throws: { "\($0)".contains("answered '0 0 1920'") }
     }
 
-    /// `refused` is the window server declining, whichever question it answers.
-    @Test func aChildSaysTheWindowServerRefused() throws {
-        let reader = try child("echo joined c0de; while read _; do echo refused; done")
+    /// `refused: ` is the window server declining, whichever question it answers, and what
+    /// follows is why, carried to the daemon's words.
+    @Test func aChildSaysTheWindowServerRefusedAndWhy() throws {
+        let reader = try child("echo joined c0de; while read _; do echo 'refused: CGError 1001'; done")
         defer { reader.stop() }
-        #expect { try reader.displays() } throws: { ($0 as? WindowServerRefused)?.question == .displays }
+        #expect { try reader.displays() } throws: {
+            ($0 as? WindowServerRefused)?.question == .displays && "\($0)".hasSuffix("would not answer 'displays': CGError 1001")
+        }
         #expect { try reader.cursor() } throws: { ($0 as? WindowServerRefused)?.question == .cursor }
     }
 

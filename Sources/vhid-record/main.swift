@@ -1,4 +1,5 @@
 import CoreGraphics
+import DisplayReading
 import Foundation
 import IOKit
 import IOKit.hid
@@ -96,16 +97,15 @@ do {
     refuse("vhid's own devices could not be told apart: \(error)")
 }
 
-/// Whether a point is on the edge of a display, where motion can be stopped short: the
-/// devices' own edge rule over the one layout, its sleeping displays included, as it is now.
-@Sendable func atEdge(_ point: ScreenPoint) throws(LayoutUnreadable) -> Bool {
-    Displays(try DisplayLayout.read()).isAtEdge(point)
-}
+/// The displays the cursor can be on: the one layout, its sleeping displays included, as it is
+/// now.
+@Sendable func displays() throws(LayoutUnreadable) -> Displays { Displays(try DisplayLayout.read()) }
 
 // Read here, not through vhidd: a recording taps this session's events, so it only
 // records in the session it can read the cursor in.
 guard let startPoint = CGEvent(source: nil)?.location else { refuse("the cursor could not be read") }
-guard let start = try? ScreenPoint.at(startPoint.x, startPoint.y) else { refuse("the cursor's position \(startPoint) is not a point") }
+let start: ScreenPoint
+do { start = try ScreenPoint.at(startPoint.x, startPoint.y) } catch { refuse("the cursor's position: \(error)") }
 let clock = ContinuousClock()
 /// The tap's own clock at the start: nanoseconds since boot, which every event's
 /// timestamp is on. An event's time is when it happened, not when the tap handed it over.
@@ -137,15 +137,10 @@ func sinceStart() -> Duration { .nanoseconds(Int64(clock_gettime_nsec_np(CLOCK_U
         let deadline = clock.now + .milliseconds(500)
         func send() {
             taking = false
-            var said = notes
-            if recorder.unmapped > 0 { said.append("\(recorder.unmapped) key presses with no HID usage, fn among them, are not in the recording") }
-            if recorder.vhidAtEdge > 0 { said.append("vhid's motion reached a screen edge \(recorder.vhidAtEdge) times while recording, so the pointer points after it may be off") }
-            if recorder.unplaced > 0 { said.append("\(recorder.unplaced) of the person's moves were at no place once vhid's motion was taken out, and are not in the recording") }
             let summary = Summary(ending: ending, unmappedKeys: recorder.unmapped, vhidAtEdge: recorder.vhidAtEdge, unplacedMoves: recorder.unplaced)
             do {
-                for note in said { try command.send(FromApp.note(note)) }
-                try command.send(FromApp.summary(summary))
-                try command.send(FromApp.script(recorder.script(stoppedAt: stoppedAt, stopKeys: ending == .stopped ? stopKeys : [])))
+                for note in notes { try command.send(FromApp.note(note)) }
+                try command.send(FromApp.recorded(summary, script: recorder.script(stoppedAt: stoppedAt, stopKeys: ending == .stopped ? stopKeys : [])))
                 exit(0)
             } catch {
                 exit(1)
@@ -160,7 +155,7 @@ func sinceStart() -> Duration { .nanoseconds(Int64(clock_gettime_nsec_np(CLOCK_U
 }
 
 let session = MainActor.assumeIsolated {
-    Session(recorder: Recorder(start: start, flags: CGEventSource.flagsState(.combinedSessionState).rawValue, vhid: initialSenders, atEdge: atEdge))
+    Session(recorder: Recorder(start: start, flags: CGEventSource.flagsState(.combinedSessionState).rawValue, vhid: initialSenders, displays: displays))
 }
 
 /// A tap event as the recorder reads it, or nil for a kind it does not record; an event at
@@ -218,7 +213,7 @@ guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .tailAppendEve
             } catch {
                 switch error {
                 case .notAPlace(let refused): session.finish(.tapAtNoPlace, notes: ["the tap gave an event at no place (\(refused)), so the recording ends there"])
-                case .layout(let unreadable): session.finish(.layoutUnreadable, notes: ["\(unreadable), so where vhid's motion left the cursor is unknown and the recording ends there"])
+                case .layout(let unreadable): session.finish(.layoutUnreadable, notes: ["\(unreadable), so where the cursor is in the recording is unknown and the recording ends there"])
                 }
             }
         }

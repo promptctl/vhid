@@ -64,6 +64,12 @@ let package = Package(
         // linking another. [LAW:one-source-of-truth] [LAW:one-way-deps]
         .target(name: "ScreenSpace"),
         .testTarget(name: "ScreenSpaceTests", dependencies: ["ScreenSpace"]),
+        // The one read of that layout from the window server, apart from the values so what
+        // only parses a layout - the daemon's wire, the devices' arithmetic - links no window
+        // server. Linked by the processes that read it where they draw: vhidd's front-session
+        // reader, vhid-record and eyes. [LAW:effects-at-boundaries]
+        .target(name: "DisplayReading", dependencies: ["ScreenSpace"]),
+        .testTarget(name: "DisplayReadingTests", dependencies: ["DisplayReading", "ScreenSpace"]),
         // Answering a signal rather than obeying it, for the daemon that has an ending of
         // its own to unwind through: a SIGTERM that killed it where it stood would leave a
         // key down on a device nothing is left to release. It links nothing.
@@ -111,8 +117,10 @@ let package = Package(
         // the framing is proven without root and without the driver.
         .testTarget(name: "VirtualHIDTests", dependencies: ["VirtualHID", "DriverExtension", "Keystrokes", "Pointing", "OwnThread"]),
         // What crosses the privilege boundary, and the client's side of it. It links the
-        // two vocabularies and nothing else: not the layout, because a root daemon must
-        // never read one, and not the device, because a client must never open one.
+        // two vocabularies and the screen space's values, for the displays it carries, and
+        // nothing else: not the keyboard layout, because a root daemon must never read one,
+        // not the display reading, because a root daemon reads the session in front only
+        // through its reader there, and not the device, because a client must never open one.
         // [LAW:one-way-deps]
         .target(name: "Helper", dependencies: ["Installations", "Keystrokes", "Pointing", "ScreenSpace"]),
         .testTarget(name: "HelperTests", dependencies: ["Helper", "Installations", "Keystrokes", "Pointing", "ScreenSpace", "OwnThread"]),
@@ -158,13 +166,15 @@ let package = Package(
         // Monitoring can be granted to it once. It reads the tap and the I/O Registry and
         // hands the events to Input's `Recorder`; it never reaches the devices.
         // [LAW:effects-at-boundaries]
-        .executableTarget(name: "vhid-record", dependencies: ["Input", "Keystrokes", "KeyboardLayouts", "Pointing", "RecordingTie", "ScreenSpace"]),
+        .executableTarget(name: "vhid-record", dependencies: ["DisplayReading", "Input", "Keystrokes", "KeyboardLayouts", "Pointing", "RecordingTie", "ScreenSpace"]),
         // The root daemon that owns the devices. It links DriverExtension for the identity
         // the keyboard files its Keyboard Setup Assistant answer under, and deliberately
         // not KeyboardLayouts: text never reaches this process. [LAW:one-way-deps]
+        // DisplayReading is for the reader it runs as a child in the session in front, the
+        // one place this executable reads the layout.
         .executableTarget(
             name: "vhidd",
-            dependencies: ["Helper", "VirtualHID", "DriverExtension", "ChildProcess", "Keystrokes", "Pointing", "ScreenSpace", "Signals", "Installations"]
+            dependencies: ["Helper", "VirtualHID", "DriverExtension", "ChildProcess", "DisplayReading", "Keystrokes", "Pointing", "ScreenSpace", "Signals", "Installations"]
         ),
         // The verbs, against the daemon over the helper connection - from a command line,
         // or as tools over MCP. It links Input for what the verbs mean and Helper for how
@@ -218,13 +228,14 @@ let package = Package(
         // device, no daemon, no input, and no device target links one of them. What links
         // both halves is the vhid executable, whose `look` reads with these and whose acts
         // press with those, and its tests. [LAW:one-way-deps] Both halves stand on Telemetry
-        // and Turns, here under eyes/, and ChildProcess, ScreenSpace and Version, under Sources/,
-        // which link neither half.
+        // and Turns, here under eyes/, and ChildProcess, ScreenSpace, DisplayReading and Version,
+        // under Sources/, which link neither half.
         //
-        // The vocabulary both readers speak and the protocol both conform to. It links
-        // ScreenSpace and nothing else - not Vision, not ApplicationServices - so the tree and
-        // the pixels share one language without either linking the other.
-        .target(name: "Seeing", dependencies: ["ScreenSpace"], path: "eyes/Sources/Seeing"),
+        // The vocabulary both readers speak and the protocol both conform to. It links the
+        // screen space and its one layout read and nothing else - not Vision, not
+        // ApplicationServices - so the tree and the pixels share one language without either
+        // linking the other.
+        .target(name: "Seeing", dependencies: ["DisplayReading", "ScreenSpace"], path: "eyes/Sources/Seeing"),
         // Every type there is a value, so the vocabulary is exercised with no display, no
         // capture and no grant. [LAW:effects-at-boundaries] The waits are kept on
         // a test's clock.

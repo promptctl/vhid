@@ -267,14 +267,12 @@ public struct PixelReader: Reader {
                                      word frame: (Substring) -> CGRect?) -> Recognised {
         let place = { (box: CGRect) in ScreenRect.fromImageSpace(normalized: box, on: tile).flatMap { $0.isEmpty ? nil : $0 } }
         let source = Source.pixels(confidence: confidence)
-        let words = string.split(whereSeparator: \.isWhitespace).compactMap { word in
-            Text(String(word)).map { (text: $0, frame: frame(word).flatMap(place)) }
-        }
-        guard let head = words.first else { return .wordless }
+        guard let text = Text(string) else { return .wordless }
+        let words = text.words.map { word in (text: word.text, frame: frame(word.span).flatMap(place)) }
         let placed = words.compactMap { word in word.frame.map { Word(text: word.text, frame: $0) } }
         if placed.count == words.count, let run = Found(first: placed[0], rest: Array(placed.dropFirst()), source: source) { return .run(run) }
         guard let frame = place(box) else { return .unlocated }
-        return .run(Found(text: Text(string) ?? head.text, frame: frame, source: source))
+        return .run(Found(text: text, frame: frame, source: source))
     }
 }
 

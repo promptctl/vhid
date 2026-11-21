@@ -23,15 +23,15 @@ public struct Displays: Sendable, Hashable {
         return Placed(point)
     }
 
-    /// `target` as a click presses it: a point a display holds, or the part of a box the
-    /// display showing most of it shows, when that part is itself a box a press can land in.
-    /// A document frame far wider than any screen is pressed where it is seen.
+    /// `target` as a click presses it: a point a display holds, or the largest part of a box
+    /// a display shows that is itself a box a press can land in. A document frame far wider
+    /// than any screen is pressed where it is seen.
     public func place(_ target: Target) throws(OffDisplays) -> Placed<Target> {
         switch target {
         case .point(let point): return Placed(.point(try place(point).value))
         case .box(let box):
-            let shown = frames.compactMap { $0.intersection(box.rect) }.max { $0.area < $1.area }
-            guard let part = shown.flatMap(Target.Box.init) else { throw OffDisplays(target: target) }
+            let pressable = frames.compactMap { $0.intersection(box.rect).flatMap(Target.Box.init) }
+            guard let part = pressable.max(by: { $0.rect.area < $1.rect.area }) else { throw OffDisplays(target: target) }
             return Placed(.box(part))
         }
     }

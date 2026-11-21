@@ -33,6 +33,15 @@ import ScreenSpace
         #expect(try Self.pair.place(.box(astride)).value == .box(try #require(Target.Box(ScreenRect(x: 0, y: 10, width: 300, height: 50)))))
     }
 
+    /// The largest part a press can land in wins, not the largest part: a box showing a
+    /// display a sliver 1000 points long and another a part 10 by 40 is pressed in the part.
+    @Test func aBoxIsPressedInTheLargestPartAPressCanLandIn() throws {
+        let rows = try Self.displays(OnlineDisplay(id: 1, bounds: CGRect(x: 0, y: 0, width: 1000, height: 100.5), isActive: true),
+                                     OnlineDisplay(id: 2, bounds: CGRect(x: 0, y: 100.5, width: 10, height: 100), isActive: true))
+        let box = try #require(Target.Box(ScreenRect(x: 0, y: 100, width: 1000, height: 40.5)))
+        #expect(try rows.place(.box(box)).value == .box(try #require(Target.Box(ScreenRect(x: 0, y: 100.5, width: 10, height: 40)))))
+    }
+
     /// A box that shows no display a point a side is refused, however much of it there is: on
     /// none, or meeting one in a sliver a press has no point of its own in.
     @Test func aBoxShowingLessThanAPointASideIsRefused() throws {

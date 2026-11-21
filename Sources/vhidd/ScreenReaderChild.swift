@@ -1,4 +1,5 @@
 import CoreGraphics
+import DisplayReading
 import Foundation
 import ScreenSpace
 
@@ -16,9 +17,10 @@ enum ScreenQuestion: String {
     case displays
 }
 
-/// The answer to either question when the window server would not give one: said apart
-/// from a garbled answer so the daemon's log names the window server.
-let refusedAnswer = "refused"
+/// What begins the answer to either question when the window server would not give one, the
+/// reason after it: said apart from a garbled answer so the daemon names the window server
+/// and why. [LAW:no-silent-failure]
+let refusedAnswer = "refused: "
 
 /// The child `FrontScreen` starts: joins `session` and says so, and which build it is,
 /// then answers each question on stdin on a line of stdout, until stdin closes.
@@ -42,20 +44,18 @@ func readScreen(in session: au_asid_t) -> Never {
     }
     while let line = readLine() {
         switch ScreenQuestion(rawValue: line) {
-        case .cursor: print(CGEvent(source: nil).map { "\($0.location.x) \($0.location.y)" } ?? refusedAnswer)
-        case .displays: print((try? DisplayLayout.online()).map(spelled) ?? refusedAnswer)
+        case .cursor: print(CGEvent(source: nil).map { "\($0.location.x) \($0.location.y)" } ?? refusedAnswer + "it gave no event to read the cursor from")
+        case .displays:
+            do { print(try spelled(OnlineDisplay.read())) } catch { print(refusedAnswer + "\(error)") }
         case nil: print("asked '\(line)', which is no question")
         }
     }
     exit(0)
 }
 
-/// The online displays as `displays` is answered: each its id, its bounds as given, and 1 when
-/// it is active, 0 when not, in the global space the cursor is read in. The one layout read's
-/// readings, `DisplayLayout.online`, so the daemon reads the displays as both halves do.
-/// [LAW:one-source-of-truth] The bounds are sent as read, never standardized: the client
-/// parses them, and refuses bounds that are no box by the display that gave them.
+/// The online displays as `displays` is answered: each display's record, its numbers apart by
+/// spaces, the displays by `;`. The one layout read's readings, so the daemon reads the
+/// displays as both halves do. [LAW:one-source-of-truth]
 private func spelled(_ displays: [OnlineDisplay]) -> String {
-    displays.map { "\($0.id) \($0.bounds.origin.x) \($0.bounds.origin.y) \($0.bounds.size.width) \($0.bounds.size.height) \($0.isActive ? 1 : 0)" }
-        .joined(separator: ";")
+    displays.map { $0.record.map { "\($0)" }.joined(separator: " ") }.joined(separator: ";")
 }

@@ -21,10 +21,10 @@ public enum FromApp: Codable, Equatable, Sendable {
     case recording
     /// Something the person should hear about the recording, on stderr.
     case note(String)
-    /// How the recording ended and what it left out, said once, just before the script.
-    case summary(Summary)
-    /// The recording, whole, as `vhid play` reads it. The last message.
-    case script(String)
+    /// The recording, whole, as `vhid play` reads it, with how it ended and what it left out:
+    /// the last message, and one, so no script arrives without its summary.
+    /// [LAW:types-are-the-program]
+    case recorded(Summary, script: String)
 }
 
 /// How a recording ended and what it left out, as the command keeps it on its record.
@@ -36,7 +36,7 @@ public struct Summary: Codable, Equatable, Sendable {
     public let unmappedKeys: Int
     /// Motion of vhid's that ended on a display's edge, after which the person's points may be off.
     public let vhidAtEdge: Int
-    /// The person's moves that, with vhid's motion taken out, were at no place, left out.
+    /// The person's moves that, with vhid's motion taken out, were on no display, left out.
     public let unplacedMoves: Int
 
     public init(ending: Ending, unmappedKeys: Int, vhidAtEdge: Int, unplacedMoves: Int) {
@@ -44,6 +44,16 @@ public struct Summary: Codable, Equatable, Sendable {
         self.unmappedKeys = unmappedKeys
         self.vhidAtEdge = vhidAtEdge
         self.unplacedMoves = unplacedMoves
+    }
+
+    /// What the person should hear of what the recording left out or may have wrong, one note
+    /// a count that is not zero: worded from these counts, so the notes and the record cannot
+    /// disagree. [LAW:one-source-of-truth]
+    public var notes: [String] {
+        [(unmappedKeys, "\(unmappedKeys) key presses with no HID usage, fn among them, are not in the recording"),
+         (vhidAtEdge, "vhid's motion reached a screen edge \(vhidAtEdge) times while recording, so the pointer points after it may be off"),
+         (unplacedMoves, "\(unplacedMoves) of the person's moves were on no display once vhid's motion was taken out, and are not in the recording")]
+            .filter { $0.0 > 0 }.map(\.1)
     }
 
     public enum Ending: String, Codable, Sendable {
@@ -59,7 +69,7 @@ public struct Summary: Codable, Equatable, Sendable {
         case devicesUntold = "devices_untold"
         /// The tap gave an event at no place on the screen.
         case tapAtNoPlace = "tap_at_no_place"
-        /// The display layout could not be read to tell an edge.
+        /// The display layout could not be read to tell an edge or place a point.
         case layoutUnreadable = "layout_unreadable"
     }
 }

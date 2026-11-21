@@ -63,16 +63,18 @@ struct RecordCommand: AsyncParsableCommand {
         }
     }
 
-    /// The app's messages from its start to its script: each note said by `say`, the summary
-    /// kept on the unit's record, and the script answered. [LAW:effects-at-boundaries] The
-    /// messages and where a note goes are handed in, so a test drives the loop with messages
-    /// it wrote and reads the record it leaves.
+    /// The app's messages from its start to its script: each note said by `say`, then the
+    /// summary's own notes, the summary kept on the unit's record, and the script answered.
+    /// [LAW:effects-at-boundaries] The messages and where a note goes are handed in, so a test
+    /// drives the loop with messages it wrote and reads the record it leaves.
     static func recorded(next: () throws -> FromApp?, say: (String) -> Void) throws -> String {
         while let message = try next() {
             switch message {
             case .note(let note): say(note)
-            case .summary(let summary): Telemetry.note(.recording, summary.recorded)
-            case .script(let script): return script
+            case .recorded(let summary, let script):
+                summary.notes.forEach(say)
+                Telemetry.note(.recording, summary.recorded)
+                return script
             case .recording, .refused: throw TieFailure("the tap app said \(message) while recording")
             }
         }

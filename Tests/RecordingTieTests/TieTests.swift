@@ -6,17 +6,19 @@ import Testing
 
 /// The tie between `vhid record` and its tap app, over a real socket and real processes.
 @Suite(.ownThread) struct TieTests {
-    /// Messages cross both ways whole, a script's newlines included, and a closed end
-    /// reads as the end.
+    /// Messages cross both ways whole, a script's newlines and its summary included, and a
+    /// closed end reads as the end.
     @Test func messagesCrossAndACloseEndsThem() throws {
         let listener = try TieListener()
         let app = try TieEnd.connect(to: listener.path)
         let command = try listener.accept(within: .seconds(1))
+        let recorded = FromApp.recorded(Summary(ending: .stopped, unmappedKeys: 1, vhidAtEdge: 0, unplacedMoves: 2),
+                                        script: "{\"to\":{\"x\":1,\"y\":2}}\n{\"t_ms\":0,\"keys\":[]}\n")
         try app.send(FromApp.recording)
-        try app.send(FromApp.script("{\"to\":{\"x\":1,\"y\":2}}\n{\"t_ms\":0,\"keys\":[]}\n"))
+        try app.send(recorded)
         try command.send(ToApp.stop)
         #expect(try command.receive(FromApp.self) == .recording)
-        #expect(try command.receive(FromApp.self) == .script("{\"to\":{\"x\":1,\"y\":2}}\n{\"t_ms\":0,\"keys\":[]}\n"))
+        #expect(try command.receive(FromApp.self) == recorded)
         #expect(try app.receive(ToApp.self) == .stop)
         _ = consume app
         #expect(try command.receive(FromApp.self) == nil)

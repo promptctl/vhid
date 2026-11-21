@@ -197,6 +197,7 @@ The devices' half, by layer. Lower rows depend on nothing above them.
 | `Installations` | an installation's names, built from one string |
 | `ChildProcess` | starting a child and running a command to its deadline or its stop, for both halves |
 | `ScreenSpace` | the one screen space both halves speak: a point, a box, how each is spelled, and the display layout |
+| `DisplayReading` | the one read of that layout from the window server, for the processes that read it where they draw |
 | `Signals`, `Version` | catching signals, the build's version |
 
 The rest of the tree:

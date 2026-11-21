@@ -200,8 +200,8 @@ enum Help {
 
         A finished play answers {"done":{"reports":…,"start_reports":…,"late_us":{"p50":…,"p90":…,"p99":…,"max":…}}}: \
         how many reports went out, how many the pointer took to reach the start, and how late \
-        they went out in microseconds, sent minus scheduled. A late report is sent late, never \
-        skipped. A play that stops releases every key and button and fails, saying how many \
+        they went out in microseconds, sent minus scheduled, absent when no report went out. A \
+        late report is sent late, never skipped. A play that stops releases every key and button and fails, saying how many \
         reports went out before it did.
         """, commandLine: ["""
         The script is read from stdin. Before the done line, stdout carries one \

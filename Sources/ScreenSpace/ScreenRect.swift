@@ -44,8 +44,10 @@ public struct ScreenRect: Hashable, Sendable {
     /// The bottom edge: the first y past the box.
     public var maxY: Double { y + height }
 
-    /// Whether the box holds no point: a side of zero, as a window or a Vision box can have.
-    public var isEmpty: Bool { width == 0 || height == 0 }
+    /// Whether the box holds no point, by `contains`'s own rule: a side of zero, as a window or
+    /// a Vision box can have, or one too small to move a far edge as large as the box's
+    /// coordinates. [LAW:single-enforcer]
+    public var isEmpty: Bool { maxX <= x || maxY <= y }
 
     public var area: Double { width * height }
 
@@ -82,17 +84,18 @@ public struct ScreenRect: Hashable, Sendable {
     public func overlap(_ other: ScreenRect) -> Double { intersection(other)?.area ?? 0 }
 
     /// The smallest box holding this one and every one of `others`: the one bounding-box rule,
-    /// for a run's frame and a layout's extent. Nil when that box's span is past what a Double
-    /// holds - two finite boxes can lie further apart than any number - which is the honest
-    /// type of the answer. [LAW:types-are-the-program]
+    /// for a run's frame and a layout's extent. A side whose edges are this box's own is this
+    /// box's size as given, never rebuilt from its edges. Nil when that box's span is past
+    /// what a Double holds - two finite boxes can lie further apart than any number - which is
+    /// the honest type of the answer. [LAW:types-are-the-program]
     public func union(_ others: some Sequence<ScreenRect>) -> ScreenRect? {
         let edges = others.reduce((left: x, top: y, right: maxX, bottom: maxY)) { edges, box in
             (min(edges.left, box.x), min(edges.top, box.y), max(edges.right, box.maxX), max(edges.bottom, box.maxY))
         }
-        return try? ScreenRect(x: edges.left, y: edges.top, width: edges.right - edges.left, height: edges.bottom - edges.top)
+        let width = (edges.left, edges.right) == (x, maxX) ? width : edges.right - edges.left
+        let height = (edges.top, edges.bottom) == (y, maxY) ? height : edges.bottom - edges.top
+        return try? ScreenRect(x: edges.left, y: edges.top, width: width, height: height)
     }
-
-    public func union(_ other: ScreenRect) -> ScreenRect? { union([other]) }
 
     /// The point of this box nearest `(x, y)`: each axis held within the box, by the half-open
     /// rule `contains` uses, so the answer is a point the box contains. A box with no area

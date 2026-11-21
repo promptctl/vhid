@@ -26,6 +26,15 @@ public struct Text: Sendable, Hashable, CustomStringConvertible {
     init(joining words: [Text]) {
         self.value = words.map(\.value).joined(separator: " ")
     }
+
+    private init(word: Substring) { value = String(word) }
+
+    /// The words, split at blank space, each with where it lies in `value` - a word has
+    /// something in it, so each is a `Text` - and at least one, since this text is not blank.
+    /// [LAW:types-are-the-program]
+    public var words: [(span: Substring, text: Text)] {
+        value.split(whereSeparator: \.isWhitespace).map { ($0, Text(word: $0)) }
+    }
 }
 
 /// One word on screen and where it is, the smallest piece a reader can place.

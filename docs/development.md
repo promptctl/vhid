@@ -18,7 +18,7 @@ Pull requests go to `master` and must pass the `vhid` and `pkg` checks.
 
 ## Two halves
 
-The package holds two halves that share no code: the devices, and eyes.
+The package holds two halves, neither linking the other: the devices, and eyes.
 
 | | what it is | where |
 |---|---|---|
@@ -28,9 +28,10 @@ The package holds two halves that share no code: the devices, and eyes.
 No target of either half links a target of the other. What links both is the `vhid`
 executable: its `look` reads with eyes and its acts press with the devices, so one MCP
 server does both. The `eyes` executable links eyes alone. The targets they both stand on,
-`ScreenSpace`, `Telemetry`, `Turns` and `ChildProcess`, link neither half, wherever their
-directory: every point and box either half takes or prints is `ScreenSpace`'s, read and
-spelled one way, and the display layout both read is its one reading; a command either
+`ScreenSpace`, `DisplayReading`, `Telemetry`, `Turns` and `ChildProcess`, link neither half,
+wherever their directory: every point and box either half takes or prints is `ScreenSpace`'s,
+read and spelled one way, and the display layout both read is `DisplayReading`'s one read of
+the window server; a command either
 half runs to read this Mac is run by `ChildProcess`'s `Command`, to a deadline. The
 manifest's comments say which target is
 which, and a `dependencies:` line that joins the halves anywhere but in `vhid` is the line

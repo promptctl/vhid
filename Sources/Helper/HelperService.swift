@@ -128,8 +128,7 @@ import Foundation
     func cursor(reply: @escaping (Double, Double, Error?) -> Void)
 
     /// The online displays, in the space `cursor` answers in, read in the session in front
-    /// for the reason `cursor` is: six numbers a display, its id, its left, top, width and
-    /// height as the window server gave them, and 1 when it is active or 0 when not. Claims
+    /// for the reason `cursor` is: each display's `OnlineDisplay.record`, end to end. Claims
     /// nothing and sends no report.
     ///
     /// A flat array of numbers because that is what the wire carries without a class of

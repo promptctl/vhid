@@ -167,7 +167,7 @@ extension Parameter where Taken == Target {
             if let box = $0.stringValue { return Target.Box(spelled: box).map(Target.box) }
             guard let object = $0.objectValue, Set(object.keys) == ["x", "y"],
                   let x = object["x"]?.number, let y = object["y"]?.number else { return nil }
-            return (try? ScreenPoint.at(x, y)).map(Target.point)
+            return .point(try ScreenPoint.at(x, y))
         }
     }
 }

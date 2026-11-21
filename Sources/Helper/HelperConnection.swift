@@ -198,18 +198,18 @@ public final class HelperConnection: @unchecked Sendable {
     /// The online displays, read in the session in front, as the window server gave them:
     /// what `DisplayLayout` is parsed from, on this side.
     ///
-    /// [LAW:parse-dont-validate] The wire's flat numbers become displays here, once: a count
-    /// that is not six to a display, an id that is not one, or an active flag that is neither
-    /// 0 nor 1, is a daemon this client does not understand.
+    /// [LAW:parse-dont-validate] The wire's flat numbers become displays here, once, by each
+    /// display's record: numbers that are not records are a daemon this client does not
+    /// understand.
     public func displays() throws -> [OnlineDisplay] {
         let numbers: [NSNumber] = try exchange { service, reply in service.displays { numbers, error in reply(error.map { .failed($0) } ?? .answered(numbers)) } }
-        guard numbers.count % 6 == 0 else { throw Unreachable(service: service, cause: .notAHelper) }
-        return try stride(from: 0, to: numbers.count, by: 6).map {
-            let fields = numbers[$0 ..< $0 + 6].map(\.doubleValue)
-            guard let id = CGDirectDisplayID(exactly: fields[0]), [0, 1].contains(fields[5]) else {
+        let width = OnlineDisplay.recordLength
+        guard numbers.count % width == 0 else { throw Unreachable(service: service, cause: .notAHelper) }
+        return try stride(from: 0, to: numbers.count, by: width).map {
+            guard let display = OnlineDisplay(record: numbers[$0 ..< $0 + width].map(\.doubleValue)) else {
                 throw Unreachable(service: service, cause: .notAHelper)
             }
-            return OnlineDisplay(id: id, bounds: CGRect(x: fields[1], y: fields[2], width: fields[3], height: fields[4]), isActive: fields[5] == 1)
+            return display
         }
     }
 

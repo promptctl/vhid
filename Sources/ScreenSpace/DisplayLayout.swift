@@ -8,7 +8,8 @@ import Foundation
 /// it and its Dock still rises: measured on studious, its one display asleep, the active list
 /// was empty and the online list held it at 0,0,1600,900. So the devices place against every
 /// display here; a capture shows only an active one, so the readers read those. The members of
-/// a mirror set are all online with one frame, which only says that frame twice.
+/// a mirror set are all online with one frame, which only says that frame twice; only the
+/// set's primary is active.
 ///
 /// [LAW:parse-dont-validate] A layout that exists has at least one display, every display's
 /// bounds a box, and an extent - the box holding them all - that is a box too and whose
@@ -30,13 +31,15 @@ public struct DisplayLayout: Sendable, Equatable {
     /// The displays that show what a capture can: the active ones.
     public var active: [Display] { displays.filter(\.isActive) }
 
-    /// The layout `online` reads: each display's bounds parsed as a box, refused by the display
-    /// and the bounds it gave when they are none. [LAW:no-silent-failure] Takes the readings as
-    /// values, so it is tested with no window server. [LAW:effects-at-boundaries]
+    /// The layout the window server's readings make: each display's bounds parsed as a box,
+    /// refused by the display and the refusal of its bounds when they are none.
+    /// [LAW:no-silent-failure] Takes the readings as values, so it is tested with no window
+    /// server; `DisplayReading` reads them. [LAW:effects-at-boundaries]
     public init(_ online: [OnlineDisplay]) throws(LayoutUnreadable) {
         var displays: [Display] = []
         for display in online {
-            guard let bounds = try? ScreenRect(display.bounds) else { throw .bounds(display: display.id, display.bounds) }
+            let bounds: ScreenRect
+            do { bounds = try ScreenRect(display.bounds) } catch { throw .bounds(display: display.id, error) }
             displays.append(Display(id: display.id, bounds: bounds, isActive: display.isActive))
         }
         guard let first = displays.first else { throw .noDisplay }
@@ -46,31 +49,14 @@ public struct DisplayLayout: Sendable, Equatable {
         self.extent = extent
     }
 
-    /// The layout as the window server has it now.
-    public static func read() throws(LayoutUnreadable) -> DisplayLayout { try DisplayLayout(online()) }
-
-    /// The shape of `CGGetOnlineDisplayList`: room for so many ids, where to put them, and how
-    /// many there are.
-    public typealias DisplayList = (UInt32, UnsafeMutablePointer<CGDirectDisplayID>?, UnsafeMutablePointer<UInt32>?) -> CGError
-
-    /// Every online display as the window server gives it. A list it would not give is said,
-    /// never taken for no display online. [LAW:no-silent-failure] `list` is the window server's
-    /// `CGGetOnlineDisplayList`, or a test's.
-    public static func online(list: DisplayList = CGGetOnlineDisplayList) throws(LayoutUnreadable) -> [OnlineDisplay] {
-        var count: UInt32 = 0
-        var error = list(0, nil, &count)
-        guard error == .success else { throw .list(error) }
-        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
-        error = list(count, &ids, &count)
-        guard error == .success else { throw .list(error) }
-        return ids.prefix(Int(count)).map { OnlineDisplay(id: $0, bounds: CGDisplayBounds($0), isActive: CGDisplayIsActive($0) != 0) }
-    }
 }
 
 /// One online display as the window server read it: what a `DisplayLayout` is parsed from.
 public struct OnlineDisplay: Sendable, Equatable {
     public let id: CGDirectDisplayID
     public let bounds: CGRect
+    /// Whether the window server lists it active, drawn on and so captured: not a sleeping
+    /// display, nor a hardware mirror set's members past its primary.
     public let isActive: Bool
 
     public init(id: CGDirectDisplayID, bounds: CGRect, isActive: Bool) {
@@ -78,14 +64,34 @@ public struct OnlineDisplay: Sendable, Equatable {
         self.bounds = bounds
         self.isActive = isActive
     }
+
+    /// The six numbers a display crosses a wire as: its id, its bounds as given - never
+    /// standardized, so the side that parses them refuses bounds that are no box - and 1 when
+    /// it is active, 0 when not. [LAW:one-source-of-truth] The one record both wires carry,
+    /// the screen reader's lines and the helper connection's numbers.
+    public var record: [Double] {
+        [Double(id), bounds.origin.x, bounds.origin.y, bounds.size.width, bounds.size.height, isActive ? 1 : 0]
+    }
+
+    /// How many numbers a `record` is, for a wire that carries records end to end.
+    public static let recordLength = 6
+
+    /// A display read back from its `record`, or nil for numbers that are not one: not
+    /// `recordLength` of them, an id that is not one, or an active flag that is neither 0 nor 1.
+    /// [LAW:parse-dont-validate]
+    public init?(record: some Collection<Double>) {
+        let fields = Array(record)
+        guard fields.count == Self.recordLength, let id = CGDirectDisplayID(exactly: fields[0]), [0, 1].contains(fields[5]) else { return nil }
+        self.init(id: id, bounds: CGRect(x: fields[1], y: fields[2], width: fields[3], height: fields[4]), isActive: fields[5] == 1)
+    }
 }
 
 /// A display layout that could not be read or is no layout.
 public enum LayoutUnreadable: Error, Equatable, CustomStringConvertible {
-    /// The window server would not list the displays.
+    /// The window server would not list the displays, online or active.
     case list(CGError)
     /// A display's bounds are no box.
-    case bounds(display: CGDirectDisplayID, CGRect)
+    case bounds(display: CGDirectDisplayID, NotABox)
     /// No display is online.
     case noDisplay
     /// The displays lie further apart than a Double spans.
@@ -95,8 +101,8 @@ public enum LayoutUnreadable: Error, Equatable, CustomStringConvertible {
         switch self {
         case .list(let error):
             "the window server would not list its displays (CGError \(error.rawValue))"
-        case .bounds(let id, let raw):
-            "display \(id) has bounds \([raw.origin.x, raw.origin.y, raw.size.width, raw.size.height].map { Coordinate.spelled(Double($0)) }.joined(separator: ",")), which are no box on the screen"
+        case .bounds(let id, let refused):
+            "display \(id)'s bounds: \(refused)"
         case .noDisplay:
             "no display is online"
         case .noExtent(let bounds):

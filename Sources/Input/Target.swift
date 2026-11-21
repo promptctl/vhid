@@ -11,15 +11,15 @@ public enum Target: Hashable, Sendable, CustomStringConvertible {
     case point(ScreenPoint)
     case box(Box)
 
-    /// A box a click is pressed inside: a screen box at least a point a side, the least a
-    /// press needs, since a box thinner than that has no point of its own to land on.
-    /// [LAW:parse-dont-validate] A frame of any size is a `ScreenRect`; this is the
-    /// pointer's own rule, kept here and nowhere else. [LAW:single-enforcer]
+    /// A box a click is pressed inside: a screen box at least a point a side and holding a
+    /// point, the least a press needs, since a box thinner than that has no point of its own
+    /// to land on. [LAW:parse-dont-validate] A frame of any size is a `ScreenRect`; this is
+    /// the pointer's own rule, kept here and nowhere else. [LAW:single-enforcer]
     public struct Box: Hashable, Sendable, CustomStringConvertible {
         public let rect: ScreenRect
 
         public init?(_ rect: ScreenRect) {
-            guard rect.width >= 1, rect.height >= 1 else { return nil }
+            guard rect.width >= 1, rect.height >= 1, !rect.isEmpty else { return nil }
             self.rect = rect
         }
 

@@ -28,6 +28,14 @@ import Testing
         ])
     }
 
+    /// A play can finish having sent no report - each at line under a count from the cursor -
+    /// and its done line says none went out and has no lateness, absent rather than zero.
+    @Test func aFinishedPlayThatSentNoReportHasNoLateness() throws {
+        #expect(try PlayCommand.lines(of: .finished(Played(startReports: 3, reports: []))) == [
+            #"{"done":{"reports":0,"start_reports":3}}"#,
+        ])
+    }
+
     /// The command's own discussion promises it: "A play that stops releases every button,
     /// prints the reports that did go out, and prints no done line - the missing done line
     /// is what says it stopped." A stopped play has no `Played` to summarise, so there is

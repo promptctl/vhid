@@ -144,8 +144,26 @@ func point(_ x: Double, _ y: Double) throws -> ScreenPoint { try ScreenPoint.at(
     /// infinity; one that fits holds both.
     @Test func aUnionPastADoubleIsNone() throws {
         let far = Double.greatestFiniteMagnitude
-        #expect(try box(-far, 0, 1, 1).union(try box(far - far / 4, 0, 1, 1)) == nil)
-        #expect(try box(0, 0, 10, 10).union(try box(20, 5, 5, 10)) == (try box(0, 0, 25, 15)))
+        #expect(try box(-far, 0, 1, 1).union([try box(far - far / 4, 0, 1, 1)]) == nil)
+        #expect(try box(0, 0, 10, 10).union([try box(20, 5, 5, 10)]) == (try box(0, 0, 25, 15)))
+    }
+
+    /// A frame is kept as given, so a union that adds nothing to a side keeps that side's
+    /// size, never one taken back from its edges: 102.028 at -2194 comes back 102.028.
+    @Test func aUnionKeepsASizeItDidNotWiden() throws {
+        let word = try box(-2194, 7.3, 102.028, 18.61)
+        #expect(word.union([]) == word)
+        #expect(word.union([try box(-2194, 7.3, 50, 5)]) == word)
+        #expect(word.union([try box(-2194, 0, 50, 5)])?.width == 102.028)
+    }
+
+    /// A box holds no point by the rule `contains` reads: a side of one at 1e20 does not move
+    /// the far edge, so it is empty though its width is not zero.
+    @Test func aBoxTooSmallToMoveItsEdgeIsEmpty() throws {
+        let thin = try box(1e20, 0, 1, 10)
+        #expect(thin.isEmpty)
+        #expect(!thin.contains(try point(1e20, 5)))
+        #expect(!(try box(0, 0, 1, 1)).isEmpty)
     }
 
     /// The point of a box nearest a place is one the box contains, by the half-open rule:

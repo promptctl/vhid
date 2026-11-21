@@ -139,7 +139,7 @@ import ScreenSpace
             Played.Report(line: 3, scheduled: Self.epoch + 1000, sent: Self.epoch + 3000, acked: Self.epoch + 6000),
             Played.Report(line: 4, scheduled: Self.epoch + 10000, sent: Self.epoch + 10000, acked: Self.epoch + 13000),
         ])
-        #expect(played.lateness.ranks == [0, 2000, 2000, 2000])
+        #expect(played.lateness?.ranks == [0, 2000, 2000, 2000])
         #expect(fake.log == ["hold [1]", "move 5 0", "hold []"])
         // Only the last report was still ahead of the clock: the first was due at the
         // start and the second overdue, and neither paid for a sleep.
@@ -193,7 +193,7 @@ import ScreenSpace
         let played = try await Player(pointer: fake.pointer(on: clock), keyboard: fake.keyboard, wall: { Self.epoch }, lead: .milliseconds(2)).play(Schedule(play, on: .vast))
         #expect(played.reports.map(\.scheduled) == [Self.epoch, Self.epoch + 10_000])
         // The watch put the clock exactly on the deadline, so nothing went out late.
-        #expect(played.lateness.max == 0)
+        #expect(played.lateness?.max == 0)
         #expect(fake.log == ["hold [1]", "hold []"])
     }
 
@@ -266,6 +266,20 @@ import ScreenSpace
         #expect(played.reports.count == 43)
     }
 
+    /// A script whose at lines all lie where the cursor already is sends no report, and that
+    /// is a play that finished: it says no report went out and has no lateness to read.
+    @Test func aPlayWhoseAtLinesSendNothingFinishesWithNoLateness() async throws {
+        let fake = FakeMouse(at: try ScreenPoint.at(100, 100))
+        let play = try Play.parse("""
+            {"to":{"x":100,"y":100}}
+            {"t_ms":0,"at":{"x":100,"y":100}}
+            {"t_ms":8,"at":{"x":100.2,"y":100}}
+            """)
+        let played = try await Player(pointer: fake.pointer(on: ManualClock()), keyboard: fake.keyboard, wall: { Self.epoch }, lead: .zero).play(Schedule(play, on: .vast))
+        #expect(played.reports.isEmpty)
+        #expect(played.lateness == nil)
+    }
+
     /// Calibration trusts only bursts that stayed inside the recording: heading for a point
     /// 20 points away, a burst of three 8-count reports would carry the cursor past it,
     /// where a screen edge may have stopped it, so the table stops at 4 counts.
@@ -301,8 +315,9 @@ import ScreenSpace
     }
 
     @Test func latenessIsReadByNearestRank() {
-        #expect(Lateness(of: (1...100).map(Int64.init).shuffled()).ranks == [50, 90, 99, 100])
-        #expect(Lateness(of: [7]).ranks == [7, 7, 7, 7])
+        #expect(Lateness(of: (1...100).map(Int64.init).shuffled())?.ranks == [50, 90, 99, 100])
+        #expect(Lateness(of: [7])?.ranks == [7, 7, 7, 7])
+        #expect(Lateness(of: []) == nil)
     }
 
     /// A refused report stops the play with what went out before it, releases every key

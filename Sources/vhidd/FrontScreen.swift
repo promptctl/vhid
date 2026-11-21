@@ -137,7 +137,9 @@ final class FrontScreen: ScreenSource, @unchecked Sendable {
 struct WindowServerRefused: Error, CustomStringConvertible {
     let session: FrontScreen.Session
     let question: ScreenQuestion
-    var description: String { "the window server in \(session) would not answer '\(question.rawValue)'" }
+    /// What the reader said of why, as the window server's refusal words it.
+    let reason: String
+    var description: String { "the window server in \(session) would not answer '\(question.rawValue)': \(reason)" }
 }
 
 /// Where the cursor is and where the displays are, as the daemon answers them.
@@ -233,9 +235,8 @@ final class ChildReader: FrontScreen.Reader {
     func displays() throws -> [OnlineDisplay] {
         let line = try ask(.displays)
         return try line.split(separator: ";").map { display in
-            guard let fields = Self.numbers(display), fields.count == 6, let id = CGDirectDisplayID(exactly: fields[0]), [0, 1].contains(fields[5])
-            else { throw Failed(session: session, what: "answered '\(line)'") }
-            return OnlineDisplay(id: id, bounds: CGRect(x: fields[1], y: fields[2], width: fields[3], height: fields[4]), isActive: fields[5] == 1)
+            guard let display = Self.numbers(display).flatMap(OnlineDisplay.init(record:)) else { throw Failed(session: session, what: "answered '\(line)'") }
+            return display
         }
     }
 
@@ -245,7 +246,7 @@ final class ChildReader: FrontScreen.Reader {
         let line = question.rawValue + "\n"
         guard Darwin.write(requests, line, line.utf8.count) == line.utf8.count else { throw Failed(session: session, what: "could not be asked: errno \(errno)") }
         let answer = try answerLine(within: patience, to: "answer")
-        guard answer != refusedAnswer else { throw WindowServerRefused(session: session, question: question) }
+        guard !answer.hasPrefix(refusedAnswer) else { throw WindowServerRefused(session: session, question: question, reason: String(answer.dropFirst(refusedAnswer.count))) }
         return answer
     }
 

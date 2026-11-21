@@ -157,7 +157,7 @@ public struct Schedule: Hashable, Sendable {
         self.start = start
         self.displays = displays
         self.acts = acts + steer(last.at, last.line)
-        self.calibration = points.isEmpty ? nil : Calibration(start: start, points: points)
+        self.calibration = steers ? Calibration(start: start, points: points) : nil
     }
 }
 
@@ -355,7 +355,9 @@ public struct Played: Hashable, Sendable {
         public let acked: Int64
     }
 
-    public var lateness: Lateness { Lateness(of: reports.map { $0.sent - $0.scheduled }) }
+    /// How late the reports went out, or nil when none did: a script whose at lines each lay
+    /// under a count from the cursor sends no report, and finishes. [LAW:types-are-the-program]
+    public var lateness: Lateness? { Lateness(of: reports.map { $0.sent - $0.scheduled }) }
 }
 
 /// How late reports went out, in microseconds, by nearest rank.
@@ -365,9 +367,10 @@ public struct Lateness: Hashable, Sendable, Encodable {
     public let p99: Int64
     public let max: Int64
 
-    /// [LAW:parse-dont-validate] A `Schedule` has at least one report, so a played one does too
-    /// and there is always a rank to read; the empty case is the caller's precondition.
-    init(of lateness: [Int64]) {
+    /// The ranks of `lateness`, or nil for no reports, which have none to read.
+    /// [LAW:parse-dont-validate]
+    init?(of lateness: [Int64]) {
+        guard !lateness.isEmpty else { return nil }
         let sorted = lateness.sorted()
         func rank(_ fraction: Double) -> Int64 { sorted[Swift.max(0, Int((fraction * Double(sorted.count)).rounded(.up)) - 1)] }
         p50 = rank(0.5)
