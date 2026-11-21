@@ -159,15 +159,15 @@ way AI apps call outside tools. In Claude Code the plugin sets everything up:
 /plugin install vhid@vhid
 ```
 
-The plugin adds both servers and two skills. One teaches the agent to work in a loop: look
-with `eyes`, act with `vhid`, then look again to see whether the act worked. The other
+The plugin adds vhid's server and two skills. One teaches the agent to work in a loop:
+look at the screen, act, then look again to see whether the act worked. The other
 reaches any app's menu items by name, through the Help menu's search. At the start of
 each session the plugin also checks `vhid doctor` and tells the agent what is missing, if
 anything is.
 
-The agent's `eyes` permissions belong to whichever app it runs in, such as your terminal
-app for Claude Code, or Claude itself for Claude Desktop.
-[mcp.md](mcp.md) shows how to add the servers to Claude Desktop or to Claude Code
+The agent's permissions to read the screen belong to whichever app it runs in, such as
+your terminal app for Claude Code, or Claude itself for Claude Desktop.
+[mcp.md](mcp.md) shows how to add the server to Claude Desktop or to Claude Code
 without the plugin, and lists every tool.
 
 ## Where the input reaches

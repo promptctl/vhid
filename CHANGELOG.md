@@ -4,6 +4,12 @@ Each release's section is its GitHub Release notes, which keep line breaks, so e
 
 ## [Unreleased]
 
+- vhid and eyes are one MCP server, `vhid mcp`, and `eyes mcp` is gone: a client adds one server, and the Claude Code plugin names only it. The server's new `look` tool takes the place of eyes' `windows`, `displays`, `find`, `read` and `hit`, with their arguments: alone it lists the displays and the windows and reads the app in front; with `text`, and `exact`, `edits`, `near`, `role`, `source`, `limit`, `until` and `timeout` as `find` took them, it answers with the matches alone, not the desk; `display`, `window`, `rect` or `page` read one place, and `x` and `y`, alone, say what a click there would land on. `look` asks nothing of the daemon, so it answers on a Mac that is not ready. Calls run one at a time, a look among them.
+- `look`'s `app`, and `eyes find` and `eyes read`'s `--app`, read a named app as a look with no place reads the app in front: its windows and what is over its front window, wherever it is stacked, not brought forward. The name is matched exactly; one no running app has is refused naming the apps that are, and an app with no window on screen, or the app eyes answers to, is refused saying so. The `front` record notes the name asked as `named`.
+- `vhid doctor`, and its MCP tool, end with the screen grants `look` reads with, Accessibility and Screen Recording, held or not and the app macOS charges them to, read fresh and never prompting, in place of eyes' `grants` tool. A grant missing leaves the verdict, which is the devices', as it was.
+- `vhid look` is `look` on the command line, with the same arguments as options.
+- Each event eyes' readers emit under `look` carries the trace id of the vhid call's record, so a call and the readings it waited on are found together.
+
 ## [0.6.0]
 
 - `eyes find` and `eyes read`, and their MCP tools, say a read that stopped short in the scope line's first words, `1 matched "Add" in the part read of rect …` and `"Add" not found in the part read of …`, where only its last clause said it, `stopped after 5s` or `parts left unread`: a match from part of the region may not be the one meant, and an absence from it proves nothing. A cut answer, `stopped at the limit of N`, read the whole region and is not said so. Each look's record notes its `reach`: `whole`, `result_limit`, `element_limit`, `time_budget` or `unread`, and for a merge that did not read whole each reader's, `tree_blind+pixels_whole`.

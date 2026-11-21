@@ -18,10 +18,10 @@ public struct Hit: AsyncParsableCommand {
     /// What the verb and the MCP tool both say of it; the shell's `--` is the verb's alone.
     static let about = "Asks the system's own hit test at the point, as vhid click takes it, and reads each element up to the area holding it - a window, a list, a toolbar, a web page. Says whether a look with no place named reads that app. Needs Accessibility."
 
-    @Argument(help: "The point's x, in the screen points vhid click takes.")
+    @Argument(help: Help.sentence(Help.x))
     var x: Double
 
-    @Argument(help: "The point's y, in the same points.")
+    @Argument(help: Help.sentence(Help.y))
     var y: Double
 
     public func validate() throws { _ = try Self.point(x, y) }

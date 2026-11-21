@@ -1,8 +1,10 @@
 import ArgumentParser
+import EyesVerbs
 import Foundation
 import Input
 import os
 import Signals
+import Telemetry
 import Version
 
 /// The verbs, against a daemon that owns the two virtual devices.
@@ -30,9 +32,9 @@ struct Vhid: AsyncParsableCommand {
             """,
         version: Version.current,
         subcommands: [
-            TypeCommand.self, PressCommand.self, GestureCommand.self, ClickCommand.self, MoveCommand.self, ScrollCommand.self,
+            LookCommand.self, TypeCommand.self, PressCommand.self, GestureCommand.self, ClickCommand.self, MoveCommand.self, ScrollCommand.self,
             DragCommand.self, CursorCommand.self, PlayCommand.self, RecordCommand.self, McpCommand.self, DriverCommand.self,
-            ServiceCommand.self, DoctorCommand.self,
+            ServiceCommand.self, DoctorCommand.self, ReadGrants.self,
         ])
 
     /// ArgumentParser's own `main`, run as one invocation: parsing argv is part of it, so
@@ -72,6 +74,9 @@ struct Vhid: AsyncParsableCommand {
             if first.taken != nil { invocation.cancel() }
         }
         let ending = await invocation.result
+        // A look's events are still on their way out when the server's stdin closes.
+        // [LAW:no-silent-failure]
+        await Telemetry.drained()
         withExtendedLifetime(watch) {}
         switch (ending, first.unanswered) {
         case (.success, nil): return

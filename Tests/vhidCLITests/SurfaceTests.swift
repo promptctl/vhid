@@ -13,7 +13,7 @@ import Testing
     /// Verbs only the command line has. Adding one here is the deliberate act: a new verb
     /// missing from `Tools.all` fails the test until it is listed. `help` is the argument
     /// parser's own.
-    static let commandLineOnly: Set = ["mcp", "driver", "service", "record", "help"]
+    static let commandLineOnly: Set = ["mcp", "driver", "service", "record", "help", "read-grants"]
 
     /// Options every verb on the command line takes and no tool does: a tool's daemon is
     /// the server's, chosen once when it starts, and the version is the server's initialize answer.
@@ -23,7 +23,7 @@ import Testing
     /// line alone. Read from `Help` because the dump cannot tell a note from the discussion;
     /// what is compared is still both renderings.
     static let commandLineNotes = Dictionary(uniqueKeysWithValues: [
-        Help.type, Help.press, Help.gesture, Help.click, Help.move, Help.scroll, Help.drag, Help.play, Help.cursor, Help.doctor,
+        Help.look, Help.type, Help.press, Help.gesture, Help.click, Help.move, Help.scroll, Help.drag, Help.play, Help.cursor, Help.doctor,
     ].map { ($0.name, $0.commandLine) })
 
     /// A tool argument the command line reads from stdin rather than from argv, by verb: a

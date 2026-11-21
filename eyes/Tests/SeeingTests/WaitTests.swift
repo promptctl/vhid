@@ -156,14 +156,18 @@ import Testing
         #expect(script.reads == 2)
     }
 
-    /// A timeout is an answer: the last reading, marked as not settled, not an error.
+    /// A timeout is an answer: the last reading, marked as not settled, not an error. It
+    /// ends at the timeout given: never before it, and well short of the default it would
+    /// run to were the timeout ignored. Bounded by those two, not by how fast this machine
+    /// is - the suite runs these beside hundreds of other tests.
     @Test func aTimeoutAnswersWithTheLastReading() async throws {
         let clock = ContinuousClock()
         let started = clock.now
         let waited = try await wait(.absent, 0.2, Script([Self.present]))
         #expect(!waited.settled)
         #expect(waited.reading == Self.present)
-        #expect(clock.now - started < .seconds(1))
+        #expect(waited.took >= .milliseconds(200))
+        #expect(clock.now - started < .seconds(Wait.defaultSeconds))
     }
 
     /// A reader that could not look mid-wait ends the wait with its error, never as "gone".

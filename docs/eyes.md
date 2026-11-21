@@ -12,11 +12,14 @@ eyes find OK --source tree        # only the accessibility tree: exact text, no 
 eyes find Saving --window 4127 --until absent --timeout 30   # returns once the text is gone
 eyes find Settings --page 219     # only the web page in browser window 219, not its toolbar or bookmarks
 eyes find Remove --near Beta      # every "Remove", the one beside "Beta" first
+eyes find Send --app Mail         # in Mail's windows, wherever Mail is stacked, read where they are
 eyes hit 169 426                  # what a click at 169,426 lands on: the app, its window, the element
 eyes grants                       # Screen Recording and Accessibility: held or not, and the app they are charged to
 eyes grants --ask                 # raise macOS's dialog for each missing grant (once per app); run eyes grants again once answered
-eyes mcp                          # the verbs as MCP tools over stdio: windows, displays, find, read, hit, grants
 ```
+
+Over MCP these are one tool, vhid's `look` ([mcp.md](mcp.md)): its arguments are the verbs'
+options, and it answers with what they print.
 
 `find` and `read` read with `--source`: `tree` walks the accessibility tree (exact text
 and roles; needs Accessibility), `pixels` recognises text on-device with Vision (anything
@@ -109,10 +112,16 @@ window that closes counts as gone. Absent needs two whole reads running without 
 A reader that cannot look ends the wait with its error rather than reporting "gone".
 When `--timeout` runs out, the answer is the last reading, marked as timed out.
 
+`--app` reads a named app as a look with no place reads the app in front: its windows and
+what is over its front window, on the display holding that window, matched by the name
+exactly as macOS spells it and `eyes windows` prints it. A name no running app has is
+refused naming the apps that are running; an app running with no window on screen, and
+the app eyes answers to, are refused saying so.
+
 ## Events
 
 Every look (`find`, `read`, and each wait), every `hit`, every grant check a reader makes, and every
-grants reading taken from a child emits one JSON event, from the verbs and the tools alike. Events go to the OTLP collector that
+grants reading taken from a child emits one JSON event, from the verbs and vhid's `look` alike; under `look`, each carries the trace id of the vhid call that ran it. Events go to the OTLP collector that
 `OTEL_EXPORTER_OTLP_ENDPOINT` names. With no collector set, or one that can't take them,
 they're appended to `~/Library/Logs/eyes/events.jsonl`. An event appended because the
 collector failed carries `sink_error`.

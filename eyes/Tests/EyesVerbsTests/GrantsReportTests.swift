@@ -11,7 +11,7 @@ struct GrantsReportTests {
     @Test func aMissingGrantNamesTheAppAndThePane() {
         let said = GrantsVerb.report(GrantReading { $0 == .accessibility }, holder: holder, asked: [])
         #expect(said == """
-            2 grants, read before any dialog. macOS charges them to iTerm (/Applications/iTerm.app), the app responsible for this eyes; that is the app to switch on.
+            2 grants, read before any dialog. macOS charges them to iTerm (/Applications/iTerm.app), the app responsible for this process; that is the app to switch on.
             Screen Recording\tnot granted\tpixels\tturn on iTerm in System Settings > Privacy & Security > Screen Recording
             Accessibility\tgranted\ttree
             """)

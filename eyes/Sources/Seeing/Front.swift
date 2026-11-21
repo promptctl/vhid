@@ -112,10 +112,66 @@ public struct Front: Sendable, Hashable {
         } else {
             throw NoFront(own: own.name, why: .onlyOwn)
         }
-        let window = listing.front(of: chosen.pid).map { listing.windows[$0] }
-        let display = window.flatMap { w in displays.first { $0.frame.contains(w.frame.centre) } } ?? displays.first { $0.isMain }
-        guard let display else { throw NoFront(own: own.name, why: .noDisplay) }
-        return Front(app: chosen, display: display.id, own: own, passedOver: passed)
+        guard let display = display(of: chosen, in: listing, displays) else { throw NoFront(own: own.name, why: .noDisplay) }
+        return Front(app: chosen, display: display, own: own, passedOver: passed)
+    }
+
+    /// The app a look naming one reads, from facts the caller gathered: `running`, every
+    /// ordinary app (AppKit's `.regular` activation policy) with its name.
+    ///
+    /// The name is matched exactly, as macOS spells it and as vhid's `into` matches it: a
+    /// looser match would let "Notes" read Sticky Notes. Of two processes of one name, the
+    /// one whose window is frontmost is read. [LAW:parse-dont-validate]
+    public static func named(_ name: String, own: Passed, running: [App], listing: WindowListing,
+                             displays: [Display]) throws(AppUnread) -> Front {
+        let matching = Set(running.filter { $0.name == name }.map(\.pid))
+        guard !matching.isEmpty else {
+            throw AppUnread(app: name, why: .notRunning(Set(running.compactMap(\.name)).sorted()))
+        }
+        guard matching.isDisjoint(with: own.pids) else { throw AppUnread(app: name, why: .own) }
+        guard let front = listing.front(where: matching.contains) else { throw AppUnread(app: name, why: .noWindow) }
+        let app = App(pid: listing.windows[front].pid, name: name)
+        guard let display = display(of: app, in: listing, displays) else { throw AppUnread(app: name, why: .noDisplay) }
+        return Front(app: app, display: display, own: own, passedOver: false)
+    }
+
+    /// The display holding an app's front window, or the main display when it has none listed.
+    /// [LAW:single-enforcer] One rule for the app in front and an app named.
+    private static func display(of app: App, in listing: WindowListing, _ displays: [Display]) -> CGDirectDisplayID? {
+        let window = listing.front(of: app.pid).map { listing.windows[$0] }
+        return (window.flatMap { w in displays.first { $0.frame.contains(w.frame.centre) } } ?? displays.first { $0.isMain })?.id
+    }
+}
+
+/// A look naming an app that it cannot read, and why. [LAW:no-silent-failure]
+public struct AppUnread: Error, Equatable, CustomStringConvertible {
+    public let app: String
+    public let why: Why
+
+    public enum Why: Sendable, Equatable {
+        /// No ordinary app of that name is running: the names of those that are.
+        case notRunning([String])
+        /// The app eyes answers to, whose windows echo the very text asked for.
+        case own
+        /// Running, with no ordinary window on screen: minimized, hidden, or on another Space.
+        case noWindow
+        /// Between a display detached and the next attached.
+        case noDisplay
+    }
+
+    public init(app: String, why: Why) {
+        self.app = app
+        self.why = why
+    }
+
+    public var description: String {
+        switch why {
+        case .notRunning(let names):
+            "no app called \(app.debugDescription) is running; names are matched exactly, and the running apps are \(names.joined(separator: ", "))"
+        case .own: "\(app) is the app eyes answers to, whose windows show the text an agent asks for, so it is never read"
+        case .noWindow: "\(app) is running with no window on screen: minimized, hidden, or on another Space"
+        case .noDisplay: "no display is attached, so there is no screen to read"
+        }
     }
 }
 

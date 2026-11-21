@@ -1,13 +1,13 @@
 #!/bin/bash
 # Claude Code's SessionStart hook for the vhid plugin. Says, before the agent reaches for
-# a tool, why vhid or eyes cannot answer on this Mac, or answer as the plugin's skills
-# describe, and the step that fixes it, so the first the agent hears of a missing install
-# or a binary of another version is not a server that failed to start or a click that was
-# refused. Prints nothing when both are installed at the plugin's version and `vhid
-# doctor` says `ready`; whatever it prints, Claude Code adds to the session's context.
+# a tool, why vhid cannot answer on this Mac, or answer as the plugin's skills describe,
+# and the step that fixes it, so the first the agent hears of a missing install or a
+# binary of another version is not a server that failed to start or a click that was
+# refused. Prints nothing when vhid is installed at the plugin's version and `vhid doctor`
+# says `ready`; whatever it prints, Claude Code adds to the session's context.
 #
-# The binaries are the ones the plugin's .mcp.json runs, read from it rather than named
-# again here, so the check and the servers cannot come to look in different places.
+# The binary is the one the plugin's .mcp.json runs, read from it rather than named again
+# here, so the check and the server cannot come to look in different places.
 # [LAW:one-source-of-truth]
 #
 # hooks.json gives it 90 seconds: `vhid doctor` reads in series, and its slowest probes,
@@ -26,45 +26,33 @@ command_of() {
     || { echo "vhid plugin: $servers names no command for the $1 server" >&2; exit 1; }
 }
 vhid=$(command_of vhid) || exit 1
-eyes=$(command_of eyes) || exit 1
 # [LAW:one-source-of-truth] The version the plugin was written for is the one its release's
 # binaries were built as: scripts/version reads this same file for every build, and refuses
 # to build from one that is not a version, so the release that shipped it has checked it.
 written_for=$(tr -d '[:space:]' <"$root/VERSION") && [ -n "$written_for" ] \
   || { echo "vhid plugin: $root/VERSION does not say the version the plugin was written for" >&2; exit 1; }
 
-# What each missing binary takes away, joined into the one sentence the agent is told.
-missing= cannot=
-[ -x "$vhid" ] || { missing=$vhid; cannot="type or click"; }
-[ -x "$eyes" ] || { missing="${missing:+$missing or }$eyes"; cannot="${cannot:+$cannot, or }read the screen"; }
-[ -z "$missing" ] || cat <<EOF
-vhid is not installed on this Mac, or not all of it: there is no $missing, so what this plugin's MCP servers run is missing and this session cannot $cannot. If the user asks for that, tell them so and give them the steps: \`brew install --cask promptctl/tap/vhid\` (or the pkg from https://github.com/promptctl/vhid/releases/latest), then turn on the driver extension as https://github.com/promptctl/vhid/blob/master/docs/guide.md#installing describes, then start a new Claude Code session.
-
+[ -x "$vhid" ] || { cat <<EOF
+vhid is not installed on this Mac: there is no $vhid, so what this plugin's MCP server runs is missing and this session cannot read the screen, type or click. If the user asks for that, tell them so and give them the steps: \`brew install --cask promptctl/tap/vhid\` (or the pkg from https://github.com/promptctl/vhid/releases/latest), then turn on the driver extension as https://github.com/promptctl/vhid/blob/master/docs/guide.md#installing describes, then start a new Claude Code session.
 EOF
-# Each installed binary that is not the plugin's version, with what it said. The versions
-# are said, not ordered: which is newer is for the agent to read off them, so the hook
-# keeps no second rule for it beside scripts/newest-release. The version is stdout alone, so
-# a diagnostic on stderr cannot make a match a mismatch; a --version that failed is asked
+  exit 0; }
+
+# The binary's version, when it is not the plugin's, with what it said. The versions are
+# said, not ordered: which is newer is for the agent to read off them, so the hook keeps no
+# second rule for it beside scripts/newest-release. The version is stdout alone, so a
+# diagnostic on stderr cannot make a match a mismatch; a --version that failed is asked
 # again for everything it printed, to say it, and so is one that printed no version.
-differ=
-for binary in "$vhid" "$eyes"; do
-  [ -x "$binary" ] || continue
-  reported=$("$binary" --version 2>/dev/null)
-  status=$?
-  case "$status:$reported" in
-    "0:$written_for") continue ;;
-    0:?*) differ="${differ:+$differ; }$binary is $reported" ;;
-    *) differ="${differ:+$differ; }$binary --version failed with exit status $status and printed: $("$binary" --version 2>&1)" ;;
-  esac
-done
+reported=$("$vhid" --version 2>/dev/null)
+status=$?
+case "$status:$reported" in
+  "0:$written_for") differ= ;;
+  0:?*) differ="$vhid is $reported" ;;
+  *) differ="$vhid --version failed with exit status $status and printed: $("$vhid" --version 2>&1)" ;;
+esac
 [ -z "$differ" ] || cat <<EOF
-This vhid plugin was written for vhid $written_for, and not every installed binary is that version: $differ. The plugin's skills describe the tools of $written_for, so a tool may refuse arguments a skill gives it. If a binary is older than $written_for, the step is \`brew upgrade --cask vhid\` (or the pkg from https://github.com/promptctl/vhid/releases/latest), then a new Claude Code session. If it is newer, the step is \`claude plugin marketplace update vhid\` and \`claude plugin update vhid@vhid\`, then a new session. A version with a tag after its number, such as -rc.1 or -dev+<commit>, is a pre-release or a development build, which no plugin release is written for, so updating the plugin does not clear this, and its tools may take other arguments than the skills describe; \`brew reinstall --cask vhid\` (or the pkg from https://github.com/promptctl/vhid/releases/latest) puts the release back. If a tool refuses what a skill told you to pass, tell the user this and the step.
+This vhid plugin was written for vhid $written_for, and the installed binary is not that version: $differ. The plugin's skills describe the tools of $written_for, so a tool may refuse arguments a skill gives it. If a binary is older than $written_for, the step is \`brew upgrade --cask vhid\` (or the pkg from https://github.com/promptctl/vhid/releases/latest), then a new Claude Code session. If it is newer, the step is \`claude plugin marketplace update vhid\` and \`claude plugin update vhid@vhid\`, then a new session. A version with a tag after its number, such as -rc.1 or -dev+<commit>, is a pre-release or a development build, which no plugin release is written for, so updating the plugin does not clear this, and its tools may take other arguments than the skills describe; \`brew reinstall --cask vhid\` (or the pkg from https://github.com/promptctl/vhid/releases/latest) puts the release back. If a tool refuses what a skill told you to pass, tell the user this and the step.
 
 EOF
-# Without vhid there is no doctor to ask. With it, the doctor is asked even when eyes is
-# missing, since vhid's tools answer without eyes and its readiness is still news.
-[ -x "$vhid" ] || exit 0
-
 doctor=$("$vhid" doctor 2>&1)
 status=$?
 # Exit 1 is the doctor's "not ready" only when its verdict says so: ArgumentParser also
@@ -79,5 +67,5 @@ $verdict
 
 $doctor
 
-If the user asks for input on screen, tell them this and the step the row names. A driver extension can be turned on only by the person at the Mac. The eyes tools do not need vhid to be ready.
+If the user asks for input on screen, tell them this and the step the row names. A driver extension can be turned on only by the person at the Mac. \`look\` reads the screen without the daemon, so it answers whatever state the daemon is in.
 EOF

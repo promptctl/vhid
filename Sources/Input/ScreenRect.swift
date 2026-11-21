@@ -2,7 +2,8 @@
 /// points.
 ///
 /// The box `eyes find` prints beside each point, and named as eyes names it: the two
-/// packages share no code, so each states the shape it speaks, as `ScreenPoint` explains.
+/// halves link none of each other's targets, so each states the shape it speaks, as
+/// `ScreenPoint` explains.
 public struct ScreenRect: Hashable, Sendable, CustomStringConvertible {
     public let x: Double
     public let y: Double

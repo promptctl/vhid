@@ -166,6 +166,46 @@ import Testing
         #expect(Owners.only([1]).union(.only([2])) == .only([1, 2]))
         #expect(Owners.only([1]).union(.every) == .every)
     }
+
+    static let running = [Front.App(pid: 80, name: "iTerm2"), Front.App(pid: 300, name: "System Settings"),
+                          Front.App(pid: 400, name: "Safari"), Front.App(pid: 500, name: "Mail")]
+
+    static func named(_ name: String, listing: WindowListing = desk) throws(AppUnread) -> Front {
+        try Front.named(name, own: terminal, running: running, listing: listing, displays: [main, left])
+    }
+
+    /// An app named is read on the display of its own front window, wherever it is stacked:
+    /// Safari, behind System Settings, is read all the same, and nothing is passed over.
+    @Test func anAppNamedIsReadOnItsOwnDisplayWhereverItIsStacked() throws {
+        #expect(try Self.named("Safari") == Front(app: Front.App(pid: 400, name: "Safari"), display: 1, own: Self.terminal, passedOver: false))
+        #expect(try Self.named("System Settings").display == 2)
+    }
+
+    /// Exact, as vhid's `into` matches: a name that is part of another's names no app.
+    @Test func aNameMatchesExactlyOrIsRefusedNamingTheRunningApps() {
+        #expect(throws: AppUnread(app: "safari", why: .notRunning(["Mail", "Safari", "System Settings", "iTerm2"]))) { try Self.named("safari") }
+        #expect(throws: AppUnread(app: "Settings", why: .notRunning(["Mail", "Safari", "System Settings", "iTerm2"]))) { try Self.named("Settings") }
+        #expect(AppUnread(app: "Notes", why: .notRunning(["Mail", "Safari"])).description
+            == "no app called \"Notes\" is running; names are matched exactly, and the running apps are Mail, Safari")
+    }
+
+    @Test func anAppRunningWithNoWindowOnScreenIsRefusedSayingWhereItsWindowsMayBe() {
+        #expect(throws: AppUnread(app: "Mail", why: .noWindow)) { try Self.named("Mail") }
+        #expect(AppUnread(app: "Mail", why: .noWindow).description == "Mail is running with no window on screen: minimized, hidden, or on another Space")
+    }
+
+    /// The agent's own terminal shows the text it asks for, so naming it reads nothing that
+    /// could be trusted: it is refused rather than read empty. [LAW:no-silent-failure]
+    @Test func theAppEyesAnswersToIsRefusedWhenNamed() {
+        #expect(throws: AppUnread(app: "iTerm2", why: .own)) { try Self.named("iTerm2") }
+    }
+
+    /// Two processes of one name: the one whose window is frontmost is read.
+    @Test func ofTwoProcessesOfOneNameTheOneInFrontIsRead() throws {
+        let twice = WindowListing(windows: [Self.window(8, "Safari", pid: 401), Self.window(4, "Safari", pid: 400)], excluded: [])
+        let running = Self.running + [Front.App(pid: 401, name: "Safari")]
+        #expect(try Front.named("Safari", own: Self.terminal, running: running, listing: twice, displays: [Self.main]).app.pid == 401)
+    }
 }
 
 /// Which runs a reader that sees what is on top keeps for the owners: the tree's rule for a

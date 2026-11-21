@@ -1,5 +1,6 @@
 import Dispatch
 import Doctor
+import EyesVerbs
 import Helper
 import Input
 import Installations
@@ -52,7 +53,7 @@ struct VerbTool: Sendable {
 /// Each is a CLI verb's core called with arguments read from JSON rather than from argv,
 /// so a tool and its verb cannot come to do different things. [LAW:one-source-of-truth]
 enum Tools {
-    static let all: [VerbTool] = [type, press, gesture, click, move, scroll, drag, play, cursor, doctor]
+    static let all: [VerbTool] = [look, type, press, gesture, click, move, scroll, drag, play, cursor, doctor]
 
     private static let x = Parameter.number("x", Help.x + ", given with y unless box is").optional
     private static let y = Parameter.number("y", Help.y + ", given with x unless box is").optional
@@ -73,6 +74,38 @@ enum Tools {
         default: throw ArgumentRefused("give x and y, or box, and not both")
         }
     }
+
+    /// What is on screen, read by eyes' own rules: the arguments by `Look.question`, the
+    /// screen by `Look.answer`, as the eyes verbs read them. It drives nothing, so it asks
+    /// nothing of the daemon. [LAW:single-enforcer]
+    static let look: VerbTool = {
+        typealias Said = EyesVerbs.Help
+        let app = Parameter.text("app", Said.app).optional
+        let text = Parameter.text("text", Said.text).optional
+        let exact = Parameter.flag("exact", Said.exact).absent(false)
+        let edits = Parameter.whole("edits", Said.edits).optional
+        let near = Parameter.text("near", Said.near).optional
+        let role = Parameter.text("role", Said.role).optional
+        let source = Parameter.text("source", Said.source).optional
+        let limit = Parameter.whole("limit", Said.limit).optional
+        let display = Parameter.id("display", Said.display).optional
+        let window = Parameter.id("window", Said.window).optional
+        let page = Parameter.id("page", Said.page).optional
+        let rect = Parameter.text("rect", Said.rect).optional
+        let x = Parameter.number("x", Help.lookX).optional
+        let y = Parameter.number("y", Help.lookY).optional
+        let until = Parameter.text("until", Said.until).optional
+        let timeout = Parameter.number("timeout", Said.timeout).optional
+        let parameters: [any DeclaredParameter] = [app, text, exact, edits, near, role, source, limit, display, window, page, rect, x, y, until, timeout]
+        return VerbTool(Help.look, readOnly: true, parameters) { arguments, _ in
+            let question = try Look.question(
+                app: try arguments[app], text: try arguments[text], exact: try arguments[exact], edits: try arguments[edits],
+                near: try arguments[near], role: try arguments[role], source: try arguments[source], limit: try arguments[limit],
+                display: try arguments[display], window: try arguments[window], page: try arguments[page], rect: try arguments[rect],
+                x: try arguments[x], y: try arguments[y], until: try arguments[until], timeout: try arguments[timeout], as: .argument)
+            return try await Look.answer(question, on: .live)
+        }
+    }()
 
     static let type: VerbTool = {
         let text = Parameter.text("text", Help.text)
@@ -157,6 +190,6 @@ enum Tools {
     /// `vhid doctor` as a tool. A Mac that is not ready is an answer and not a failure of
     /// the call, so it comes back as what the verb prints, whose first line says it.
     static let doctor: VerbTool = VerbTool(Help.doctor, readOnly: true, []) { _, installation in
-        DoctorCommand.doctor(try await reading { Readiness.read(for: installation, stoppedBy: $0) })
+        DoctorCommand.doctor(try await reading { Readiness.read(for: installation, stoppedBy: $0) }, grants: await GrantsVerb.reported())
     }
 }

@@ -1,6 +1,6 @@
 ---
 name: menu-item
-description: Invoke any app's menu item by its name on this Mac through its real keyboard and mouse - open the app's Help menu with vhid, search for the item, read the results with eyes, and choose it; or click down the menu path for items in the Help menu itself. Use when the user asks for a menu command, especially one with no shortcut ("choose File > Export as PDF in TextEdit", "use the Customize Toolbar menu item in Finder", "open Chrome's Task Manager from the Window menu", "invoke a menu command that has no shortcut"), or names a menu item in any app, in any language.
+description: Invoke any app's menu item by its name on this Mac through its real keyboard and mouse - open the app's Help menu, search for the item, read the results with look, and choose it; or click down the menu path for items in the Help menu itself. Use when the user asks for a menu command, especially one with no shortcut ("choose File > Export as PDF in TextEdit", "use the Customize Toolbar menu item in Finder", "open Chrome's Task Manager from the Window menu", "invoke a menu command that has no shortcut"), or names a menu item in any app, in any language.
 ---
 
 # Invoke a menu item by its name
@@ -12,9 +12,9 @@ search does not search the Help menu itself, so an item there is clicked down it
 
 Every step below is a look before an act; the look-click-look skill has the loop,
 the before-you-type check, the `until`/`timeout` wait and what to do when a tool
-refuses. One thing more than it says: eyes reads menus by pixels only. "…" reads as
-"...", case drifts ("Go" reads "GO"), and a menu bar can read as one run. Never `find`
-an item's full title with `exact`. Search with its name or its start; judge a row
+refuses. One thing more than it says: `look` reads menus by pixels only. "…" reads as
+"...", case drifts ("Go" reads "GO"), and a menu bar can read as one run. Never look
+for an item's full title with `exact`. Search with its name or its start; judge a row
 against the whole name, loosely.
 
 Not App Shortcuts, not `defaults write`, not `osascript` clicking menus: a shortcut
@@ -23,27 +23,27 @@ others reach around the devices.
 
 ## Help search
 
-1. **Front.** `windows` - the app's rows are marked `front`. Check the rows, not the
-   header: its "Frontmost:" name can differ from the owner ("Code" for "Visual
+1. **Front.** `look` alone - in its window list the app's rows are marked `front`.
+   Check the rows, not the header: its "Frontmost:" name can differ from the owner ("Code" for "Visual
    Studio Code"). An app with no windows listed is in front when the header's
    Frontmost names it. If the app is not in front, click one of its visible windows
    on the title bar, not content that could act, or its Dock icon found with
-   `find` naming the display the Dock is on (`displays` gives its id) - a `find` with
-   no place named reads only the app in front; then `windows` again, three looks in all, until its rows are `front`. Not
-   `open -a`, not `osascript`.
-2. **Find the Help title.** `find {"text": "Help", "rect": "0,0,800,30"}` - the strip
+   `look` naming `text` and the display the Dock is on (the display list gives its id) -
+   a look with no place named reads only the app in front; then `look` alone again,
+   three looks in all, until its rows are `front`. Not `open -a`, not `osascript`.
+2. **Find the Help title.** `look {"text": "Help", "rect": "0,0,800,30"}` - the strip
    of the main display's menu bar that reached Help in every app measured; widen the
    rect for an app with more titles. No titles in the strip (full screen, a hidden
    bar): `move {"x": 400, "y": 0}` to the top edge to show the bar; it slides in late,
    so find the title again with `until` `present` and a `timeout`.
    In a localized app the title is in its language ("Aide" in French); when you do
-   not know the word, `read` the strip: Help is the last of the app's titles, the run
+   not know the word, `look` at the strip with no text: Help is the last of the app's titles, the run
    after the Apple menu - not the rightmost text, which can be a status item or the
    clock. Several matches can come back: in TextEdit, `Edit` answers "TextEdit"
    first. Take the row whose text is the title alone, not the first row.
-3. **Click it,** then **look that it opened**: `windows` shows a window owned by the
+3. **Click it,** then **look that it opened**: `look` alone lists a window owned by the
    app on layer 101. It can come late - TextEdit's showed on the second look - so look
-   three times in all before calling the click a miss. Then `read` that window: the
+   three times in all before calling the click a miss. Then `look` at that window: the
    Help menu reads "Search", its search field (TextEdit: `433,41 Search`, `452,69
    TextEdit Help`). No "Search": the click opened another menu - escape until its
    window is gone, one press per look, and find and click the title once more. No
@@ -54,7 +54,7 @@ others reach around the devices.
    `type {"text": "Export as PDF"}`. Do not open search with ⇧⌘/: TextEdit's own Help
    took that key instead. The search field opens empty or holding the last query,
    selected; your typing replaces it.
-5. **Read the results:** `read {"window": <id>}` the layer-101 window, by id each
+5. **Read the results:** `look {"window": <id>}` at the layer-101 window, by id each
    time: it keeps its id and grows as results come in. Rows are point, box, text, role,
    and you compare the text. No "Menu Items" or "Help Topics" heading yet, and no "No
    Results Found": the results are not in - read again. Down takes the first row under
@@ -71,20 +71,20 @@ others reach around the devices.
    read the same way. Still not first: escape until the layer-101 window is gone, one
    press per look, as in "No item matches", then take the path route.
 6. **Choose it:** `press {"chords": ["down"]}`, then `press {"chords": ["return"]}`.
-7. **Look for what it does.** An item that opens a window or sheet: `windows` for
+7. **Look for what it does.** An item that opens a window or sheet: `look` alone for
    it - TextEdit's export sheet came back as a new window. The first look can still
    show leftover menus on layer 101 (and a layer-1000 window); look again, three
    looks in all - an early look is not "nothing happened", nor a reason to run the
-   item again. Then wait inside it: `find` text only that item's result has, with
+   item again. Then wait inside it: `look` for text only that item's result has, with
    `"window": <new id>`, `until` `present` and a `timeout`. Not "Save", not the
    window's size: a plain Save sheet of the same document is as large and has "Save
    As:", "Cancel" and "Save" too, but no "Show Details", which the export sheet has.
    An item that opens no window (a checkmark toggled, a panel shown or hidden): the
-   change is in the window it acts on, the front document window - `read` it, and
-   wait for the changed text there with `find`, `until` and a `timeout`.
+   change is in the window it acts on, the front document window - `look` at it, and
+   wait for the changed text there with `text`, `until` and a `timeout`.
    Done means you saw it.
 
-   Nothing by the third look or the timeout: `windows`. A layer-101 window still
+   Nothing by the third look or the timeout: `look` alone. A layer-101 window still
    there then means the item did not run - often disabled, which Help search still
    lists. Escape until it is gone, one press per look, as in "No item matches", and
    tell the user the item was listed but did not run. While the menu is open, type
@@ -94,7 +94,7 @@ others reach around the devices.
 
 The results read "No Results Found", or show Help Topics with no Menu Items. Then:
 
-- `press {"chords": ["escape"]}`, then look with `windows`. The first escape only
+- `press {"chords": ["escape"]}`, then `look` alone. The first escape only
   clears the search field; the menu stays open, reading "Search". Press escape again
   and look again, one press per look, until the layer-101 window is gone.
 - Tell the user no menu item was found under that name in that app, and what you
@@ -107,40 +107,40 @@ guess. If the item should be in the Help menu itself, take the path route instea
 
 For an item in the Help menu, or one you know the path of when search misses it:
 find the menu's title in the strip as in step 2, click it, look for the layer-101
-window as in step 3, `read` it, and `click` the next row of the path. A row that is a
-parent opens its submenu as another layer-101 window: find it with `windows`, `read`
-it, and keep down the path until you click the item itself; only then look for what
+window as in step 3, `look` at it, and `click` the next row of the path. A row that is a
+parent opens its submenu as another layer-101 window: find it with `look` alone, `look`
+at it, and keep down the path until you click the item itself; only then look for what
 it does, as in step 7. Every row is judged as in step 5: the whole name, loosely.
-Path unknown: open the app's menu titles in turn, each once - click, look, `read`,
+Path unknown: open the app's menu titles in turn, each once - click, look, look at it,
 escape until its window is gone - until one lists the item's menu or the item.
 
 ## Shape of a run
 
 ```
-eyes windows      -> ... Frontmost: TextEdit (pid N), its rows marked front.
-eyes find {"text": "Help", "rect": "0,0,800,30"}
+look {}           -> ... Frontmost: TextEdit (pid N), its rows marked front.
+look {"text": "Help", "rect": "0,0,800,30"}
                   -> (a scope line, then) 422,14	406,7,32,15	Help	pixels
-vhid click {"x": 422, "y": 14}
-eyes windows      -> no layer-101 window yet: look again
-eyes windows      -> 180	TextEdit	L101	395,25,360,59	front    a menu is open
-eyes read {"window": 180}
+click {"x": 422, "y": 14}
+look {}           -> no layer-101 window yet: look again
+look {}           -> 180	TextEdit	L101	395,25,360,59	front    a menu is open
+look {"window": 180}
                   -> 433,41	410,33,46,16	Search	pixels
                      452,69	410,61,84,16	TextEdit Help	pixels           "Search": the Help menu
-vhid type {"text": "Export as PDF"}
-eyes read {"window": 180}
+type {"text": "Export as PDF"}
+look {"window": 180}
                   -> Search, TextEdit Help only, still 59 high, no heading:
                      not in yet
-eyes read {"window": 180}
+look {"window": 180}
                   -> 457,40	410,32,94,16	Export as PDF	pixels
                      444,73	410,66,68,14	Menu Items	pixels
                      472,95	412,87,120,16	EJ Export as PDF...	pixels      first row, the whole name: this one
                      445,116	410,109,70,14	Help Topics	pixels
-eyes windows      -> 180	TextEdit	L101	395,25,360,151	front   same id, grown
-vhid press {"chords": ["down"]}
-vhid press {"chords": ["return"]}
-eyes windows      -> leftover layer-101 menus, no new window: look again
-eyes windows      -> 189	TextEdit	L0	501,125,800,448	front    a new window
-eyes find {"text": "Show Details", "window": 189, "until": "present", "timeout": 5}
+look {}           -> 180	TextEdit	L101	395,25,360,151	front   same id, grown
+press {"chords": ["down"]}
+press {"chords": ["return"]}
+look {}           -> leftover layer-101 menus, no new window: look again
+look {}           -> 189	TextEdit	L0	501,125,800,448	front    a new window
+look {"text": "Show Details", "window": 189, "until": "present", "timeout": 5}
                   -> a Show Details row at 816,543, which a plain Save sheet
                      lacks: the export sheet: invoked
 ```
@@ -148,17 +148,17 @@ eyes find {"text": "Show Details", "window": 189, "until": "present", "timeout":
 Not this:
 
 ```
-vhid click {"x": 422, "y": 14}
-vhid type {"text": "Export as PDF"}     (no layer-101 window was checked: the
-vhid press {"chords": ["down"]}          click missed, "Export as PDF" went into
-vhid press {"chords": ["return"]}        the document, and Return added a line)
+click {"x": 422, "y": 14}
+type {"text": "Export as PDF"}     (no layer-101 window was checked: the
+press {"chords": ["down"]}          click missed, "Export as PDF" went into
+press {"chords": ["return"]}        the document, and Return added a line)
 ```
 
 Nor this, asked for `Close`:
 
 ```
-eyes read {"window": 180}
+look {"window": 180}
                   -> 472,95	440,87,64,16	Close All	pixels
-vhid press {"chords": ["down"]}         (the row starts with the name but is
-vhid press {"chords": ["return"]}        another item: every window closed)
+press {"chords": ["down"]}         (the row starts with the name but is
+press {"chords": ["return"]}        another item: every window closed)
 ```

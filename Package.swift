@@ -161,12 +161,14 @@ let package = Package(
         // DriverExtension is for `vhid driver`, which reads the machine and not the
         // daemon, so scripts/virtual-hid-driver can ask it on a Mac with no daemon yet.
         // Doctor is for `vhid doctor`, which reads both and says what is left to do.
-        // [LAW:one-way-deps]
+        // EyesVerbs is for `look`, the one tool that reads the screen rather than drive it:
+        // the MCP server is where the two halves meet, and nowhere else. Telemetry, so a
+        // look's readings join the trace of the call that ran them. [LAW:one-way-deps]
         .executableTarget(
             name: "vhid",
             dependencies: [
                 "Input", "Helper", "Installations", "KeyboardLayouts", "Keystrokes", "Pointing", "DriverExtension", "Doctor",
-                "Version", "RecordingTie", "Signals",
+                "Version", "RecordingTie", "Signals", "EyesVerbs", "Telemetry",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "MCP", package: "swift-sdk"),
                 .product(name: "Logging", package: "swift-log"),

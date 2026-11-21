@@ -1,4 +1,5 @@
 import ArgumentParser
+import EyesVerbs
 import Input
 
 /// What a verb is, in words: its name and its description, as both surfaces show it.
@@ -239,12 +240,27 @@ enum Help {
         }
     }
 
+    static let look = VerbHelp(name: "look", abstract: "See what is on screen before acting: the displays, the windows front to back, and the text where you look, each run with the point a click takes to hit it.", discussion: """
+        With no place named, the app in front is read: its windows and whatever is stacked in \
+        front of them. app reads a named app the same way, where its windows are, without \
+        bringing it forward; display, window, rect or page read that place instead. text keeps \
+        the runs containing it, near orders them by what sits beside them, and until with a \
+        timeout waits for the text to appear or go. x and y, alone, ask what a click at that \
+        point would land on. The tree reader needs Accessibility and the pixels reader Screen \
+        Recording, both held by the app that runs this server; doctor says which are held.
+        """)
+
+    static let lookX = EyesVerbs.Help.x + ", given with y and nothing else: what a click there would land on"
+    static let lookY = EyesVerbs.Help.y + ", given with x"
+
     static let doctor = VerbHelp(name: "doctor", abstract: "Name every requirement a verb needs, and the step left for any that is not met.", discussion: """
         First ready or not ready, then one row per requirement - the driver extension, the \
         daemon's launchd job, the daemon, its admitting this vhid, who holds the devices, the \
         Keyboard Setup Assistant answer - in the order they depend on each other: what it is, \
         what was read on this Mac, and, indented under it, the step left for a person. Nothing \
         is fixed, and the devices are not taken from a client that holds them; a daemon launchd \
-        has a job for but has not started is started by the question, as it would be by any verb.
-        """, commandLine: ["Exits 1 when any row has a step."])
+        has a job for but has not started is started by the question, as it would be by any verb. \
+        Then the screen grants look reads with, Accessibility and Screen Recording, held or not \
+        and by which app, read without raising a dialog.
+        """, commandLine: ["Exits 1 when any row above the grants has a step."])
 }

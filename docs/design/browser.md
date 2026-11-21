@@ -1,6 +1,6 @@
 # Web pages: what eyes finds
 
-An agent clicks a web element by finding its text with `eyes find` and clicking the point with `vhid click`. This note records how far that gets in Safari, Chrome and Firefox today, and where it fails. None of it needs a browser extension or a DevTools connection. `eyes read` runs the same readers over the same region and lists every run `find` chooses among ([Find.swift](../../eyes/Sources/Command/Find.swift)), so what holds for `find` here holds for `read`.
+An agent clicks a web element by finding its text with `eyes find` and clicking the point with `vhid click`. This note records how far that gets in Safari, Chrome and Firefox today, and where it fails. None of it needs a browser extension or a DevTools connection. `eyes read` runs the same readers over the same region and lists every run `find` chooses among ([Find.swift](../../eyes/Sources/Verbs/Find.swift)), so what holds for `find` here holds for `read`.
 
 Measured on studious on 2026-10-03: macOS 15.0.1, Safari 18.0.1, Chrome 154.0.8037.58, Firefox 157.0, eyes and vhid 0.2.0 (eyes' sources are unchanged since). Each element was checked by clicking the merged answer's point with `vhid click`. The page reports which element took the click.
 

@@ -3,6 +3,7 @@ import Foundation
 import Input
 import Signals
 import Synchronization
+import Telemetry
 
 /// One verb, run once, and the record it leaves: which verb, how it ended, how long it
 /// took, and the facts it decided on the way.
@@ -67,7 +68,10 @@ final class Invocation: Sendable {
         let startedAt = Date(), started = ContinuousClock.now
         let ending: Result<T, any Error>
         do {
-            ending = .success(try await $current.withValue(invocation) { try await body(invocation) })
+            // eyes' units inside it join its trace. [LAW:nothing-unseen]
+            ending = .success(try await Telemetry.$trace.withValue(invocation.traceID) {
+                try await $current.withValue(invocation) { try await body(invocation) }
+            })
         } catch {
             ending = .failure(error)
         }

@@ -295,7 +295,7 @@ import Testing
         let events = Collected()
         let front = Front(app: Front.App(pid: 300, name: "System Settings"), display: 2, own: Front.Passed(pids: [80], name: "iTerm2"), passedOver: true)
         let region = try await Telemetry.$export.withValue(events.export) {
-            try await Where.Place.front.region(front: { front })
+            try await Where.Place.front(nil).region(front: { _ in front })
         }
         #expect(region == .front(front))
         let event = try #require(events.all.first)
@@ -305,12 +305,37 @@ import Testing
     }
 
     @Test func namingNoPlaceReadsWhatIsInFront() throws {
-        guard case .front = try Where.place(display: nil, window: nil, page: nil, rect: nil, as: .flag) else {
+        guard case .front(nil) = try Where.place(app: nil, display: nil, window: nil, page: nil, rect: nil, as: .flag) else {
             Issue.record("no place named is not the front"); return
         }
-        guard case .region(.display(4)) = try Where.place(display: 4, window: nil, page: nil, rect: nil, as: .flag) else {
+        guard case .region(.display(4)) = try Where.place(app: nil, display: 4, window: nil, page: nil, rect: nil, as: .flag) else {
             Issue.record("a display named is not that display"); return
         }
+    }
+
+    /// An app named is read as the app in front is, by the same rule and the same event,
+    /// which says which app was asked for. [LAW:nothing-unseen]
+    @Test func anAppNamedIsReadAsTheAppInFrontIsAndItsEventNamesIt() async throws {
+        guard case .front("Mail") = try Where.place(app: "Mail", display: nil, window: nil, page: nil, rect: nil, as: .argument) else {
+            Issue.record("an app named is not that app"); return
+        }
+        let events = Collected()
+        let mail = Front(app: Front.App(pid: 500, name: "Mail"), display: 1, own: Front.Passed(pids: [80], name: "iTerm2"), passedOver: false)
+        let region = try await Telemetry.$export.withValue(events.export) {
+            try await Where.Place.front("Mail").region(front: { name in
+                #expect(name == "Mail")
+                return mail
+            })
+        }
+        #expect(region == .front(mail))
+        #expect(events.all.first?.facts["named"] == "Mail")
+    }
+
+    /// An app is one more place, so it is refused beside another, and an empty name - an
+    /// unset shell variable - names nothing rather than every app.
+    @Test func anAppIsOnePlaceAmongTheOthersAndAnEmptyOneIsRefused() {
+        #expect(throws: (any Error).self) { try Where.place(app: "Mail", display: 4, window: nil, page: nil, rect: nil, as: .argument) }
+        #expect(throws: (any Error).self) { try Where.place(app: "", display: nil, window: nil, page: nil, rect: nil, as: .argument) }
     }
 
     /// Matches whose anchor is missing say which text was not found - the one the rows are

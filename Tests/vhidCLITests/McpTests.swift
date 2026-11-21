@@ -12,31 +12,35 @@ import Testing
 /// daemon: every refusal here is one that comes back before a connection is made.
 @Suite struct McpTests {
     @Test func theToolsAreListedInOrder() {
-        #expect(Tools.all.map(\.tool.name) == ["type", "press", "gesture", "click", "move", "scroll", "drag", "play", "cursor", "doctor"])
+        #expect(Tools.all.map(\.tool.name) == ["look", "type", "press", "gesture", "click", "move", "scroll", "drag", "play", "cursor", "doctor"])
     }
 
-    /// Only cursor and doctor promise to change nothing: cursor reaches no device, and
-    /// doctor asks the daemon a question that claims none.
-    @Test func onlyCursorAndDoctorAreReadOnly() {
-        #expect(Tools.all.filter { $0.tool.annotations.readOnlyHint == true }.map(\.tool.name) == ["cursor", "doctor"])
+    /// Only look, cursor and doctor promise to change nothing: look and cursor reach no
+    /// device, and doctor asks the daemon a question that claims none.
+    @Test func onlyLookCursorAndDoctorAreReadOnly() {
+        #expect(Tools.all.filter { $0.tool.annotations.readOnlyHint == true }.map(\.tool.name) == ["look", "cursor", "doctor"])
     }
 
-    /// The plugin's skill opens with the pairing as both servers word it at initialize, so a
-    /// client running a release whose servers send no instructions still reads it, and the
+    /// The plugin's skill opens with the guidance as the server words it at initialize, so a
+    /// client running a release whose server sends no instructions still reads it, and the
     /// two never become two versions. [LAW:one-source-of-truth]
     @Test func theSkillCarriesThePairingTheServersSend() throws {
         let root = URL(filePath: #filePath).deletingLastPathComponent().appending(path: "../..").standardized
-        let pairing = try String(contentsOf: root.appending(path: "docs/mcp-instructions.txt"), encoding: .utf8)
         let skill = try String(contentsOf: root.appending(path: "claude-plugin/skills/look-click-look/SKILL.md"), encoding: .utf8)
-        #expect(skill.contains(pairing.trimmingCharacters(in: .newlines)))
+        #expect(skill.contains(McpCommand.guidance))
     }
 
-    /// The doctor tool answers with every row, in order, under a one-word verdict. Against
-    /// a service nothing registers, the verdict is always "not ready" - whatever Mac runs
-    /// this - and a Mac that is not ready is an answer, not a failed call.
-    @Test func theDoctorToolAnswersEveryRowUnderItsVerdict() async throws {
+    /// The doctor tool answers with every row, in order, under a one-word verdict, then the
+    /// screen grants. Against a service nothing registers, the verdict is always "not
+    /// ready" - whatever Mac runs this - and a Mac that is not ready is an answer, not a
+    /// failed call.
+    @Test func theDoctorToolAnswersEveryRowUnderItsVerdictThenTheGrants() async throws {
         let said = try await Tools.doctor.call([:], on: Installation.nobody)
-        let lines = said.components(separatedBy: "\n")
+        let sections = said.components(separatedBy: "\n\n")
+        #expect(sections.count == 2, "\(said)")
+        // Whichever grants this Mac holds, the section reads them, or says it could not.
+        #expect(sections.last.map { $0.hasPrefix("2 grants, read before any dialog.") || $0.hasPrefix("The grants could not be read: ") } == true, "\(said)")
+        let lines = sections[0].components(separatedBy: "\n")
         #expect(lines.first == "not ready")
         let rows = lines.dropFirst().filter { !$0.hasPrefix(" ") }
         #expect(rows.count == Requirement.Row.allCases.count, "\(said)")

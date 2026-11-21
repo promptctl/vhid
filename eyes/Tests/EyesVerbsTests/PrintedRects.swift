@@ -10,7 +10,7 @@ func printedRects(_ line: String, sourceLocation: SourceLocation = #_sourceLocat
     let fields = line.split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "\n" }).map(String.init)
     #expect(!fields.contains { $0.wholeMatch(of: /\d+x\d+/) != nil }, "a rectangle in the old spelling: \(line)", sourceLocation: sourceLocation)
     return try fields.filter { $0.wholeMatch(of: /-?[\d.]+(,-?[\d.]+){3}/) != nil }.map { field in
-        guard case .region(.rect(let rect)) = try Where.place(display: nil, window: nil, page: nil, rect: field, as: .flag) else {
+        guard case .region(.rect(let rect)) = try Where.place(app: nil, display: nil, window: nil, page: nil, rect: field, as: .flag) else {
             Issue.record("\(field) did not read as a rect", sourceLocation: sourceLocation)
             return ScreenRect(x: 0, y: 0, width: 0, height: 0)
         }

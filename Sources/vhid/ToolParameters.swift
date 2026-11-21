@@ -63,6 +63,19 @@ extension Parameter where Taken == Int {
     }
 }
 
+extension Parameter where Taken == Bool {
+    static func flag(_ name: String, _ expected: String) -> Self {
+        Self(name: name, expected: expected, schema: ["type": "boolean"], absent: nil) { $0.boolValue }
+    }
+}
+
+extension Parameter where Taken == UInt32 {
+    /// A window server's id for a display or a window, as the listings print it.
+    static func id(_ name: String, _ expected: String) -> Self {
+        Self(name: name, expected: expected, schema: ["type": "integer", "minimum": 0], absent: nil) { $0.whole.flatMap(UInt32.init(exactly:)) }
+    }
+}
+
 extension Parameter where Taken == String {
     static func text(_ name: String, _ expected: String) -> Self {
         Self(name: name, expected: expected, schema: ["type": "string"], absent: nil) { $0.stringValue }

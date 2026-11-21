@@ -56,6 +56,11 @@ public enum Telemetry {
     /// exits, so an event in flight is not lost with the process. [LAW:no-silent-failure]
     public static func drained() async { await Outbox.standard.drained() }
 
+    /// The trace a unit started outside any other joins: the call's, when a process that
+    /// records its own work - vhid's server - runs a look inside it, so the call and the
+    /// readings it waited on read as one; a trace of its own when nil.
+    @TaskLocal public static var trace: String?
+
     /// The unit underway, which `note` and `count` annotate. A unit started inside another
     /// shares its trace, so a look and the grant readings it waited on read as one.
     @TaskLocal static var current: Recorder?
@@ -66,7 +71,7 @@ public enum Telemetry {
         _ name: String, isolation: isolated (any Actor)? = #isolation,
         outcome: (T) -> String = { _ in "ok" }, _ work: () async throws(Failure) -> T
     ) async throws(Failure) -> T {
-        let recorder = Recorder(trace: current?.trace ?? Self.newTrace())
+        let recorder = Recorder(trace: current?.trace ?? trace ?? Self.newTrace())
         let clock = ContinuousClock(), start = clock.now, startedAt = Date()
         func emit(_ outcome: String, _ error: String?) async {
             let (counts, facts) = recorder.taken()

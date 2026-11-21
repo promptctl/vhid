@@ -9,40 +9,52 @@ import Tree
 
 /// How a caller spells an argument's name in a refusal: `--limit` on the command line,
 /// `limit` to an MCP client.
-enum Spelling {
+public enum Spelling: Sendable {
     case flag, argument
 
     func callAsFunction(_ name: String) -> String { self == .flag ? "--\(name)" : name }
 }
 
-/// What each argument means, said once for a verb's help and its MCP tool's schema.
-/// [LAW:one-source-of-truth]
-enum Help {
-    static let text = "The text to look for. Matches any run that contains it."
-    static let exact = "Match only a run that is exactly this text."
-    static let edits = "Match a run within this many single-character edits of the text, for recogniser slips."
-    static let display = "Read this whole display, every app on it, by its window-server id, which `eyes displays` lists and every scope line names."
-        + " With no display, window, rect or page, eyes reads what is in front: the frontmost app's windows and what is stacked in front of them,"
-        + " or the app behind when the frontmost is the one eyes answers to, such as the terminal running it."
-    static let window = "Read this window's bounds, by the id `eyes windows` prints."
-    static let rect = "Read this rectangle: x,y,width,height in the points vhid clicks, the form every rectangle eyes prints is in: a row's box, a window's or display's bounds, a scope line's region."
-    static let page = "Read the web page this window shows, by the id `eyes windows` prints: the page alone,"
-        + " not the browser's toolbar and bookmarks around it. Needs Accessibility, which finds the page."
-    static let near = "Order the matches by how close each sits to a run containing this text, nearest first:"
-        + " the Remove in Beta's row before the others. With nothing on screen containing it, no match is answered:"
-        + " which one was meant is unknown, and a wait settles neither present nor absent."
-    static let until = "Read again until the text is present or absent, then answer once with the last reading."
-        + " Absent counts only a region read whole, twice running."
-    static let timeout = "With until, the most seconds to wait: at most \(Int(Wait.longest)). A wait that runs out answers"
-        + " with its last reading and says it timed out. Defaults to \(Int(Wait.defaultSeconds))."
-    static let role = "Only rows of this accessibility role, as rows print it: AXButton for buttons, AXLink for links."
-        + " A role is the tree's, so text the pixels alone saw is set aside as role unknown, and the read is not whole."
-    static let source = "Which reader looks: tree (the accessibility tree: exact text and roles),"
+/// What each argument means, said once for a verb's help and an MCP tool's schema. Each is
+/// a phrase, which a schema shows as it is and a refusal quotes after "and it is"; the
+/// command line shows it as a sentence. [LAW:one-source-of-truth]
+public enum Help {
+    public static let text = "the text to look for, matching any run that contains it"
+    public static let exact = "whether to match only a run that is exactly the text"
+    public static let edits = "how many single-character edits off the text a run may be and still match, for recogniser slips"
+    public static let display = "a whole display to read, every app on it, by its window-server id as the display list and every scope line name it;"
+        + " with no app, display, window, rect or page, what is in front is read: the frontmost app's windows and what is stacked in front of them,"
+        + " or the app behind when the frontmost is the one eyes answers to, such as the terminal running it"
+    public static let app = "an app whose windows to read, and what is stacked in front of them, as a look with no place reads the app in front:"
+        + " its name exactly as macOS spells it, the name the window list prints; its windows are read where they are, not brought forward"
+    public static let window = "a window whose bounds to read, by the id the window list prints"
+    public static let rect = "a rectangle to read, x,y,width,height in the points vhid clicks: the form every rectangle eyes prints is in,"
+        + " a row's box, a window's or display's bounds, a scope line's region"
+    public static let page = "a window whose web page to read, by the id the window list prints: the page alone,"
+        + " not the browser's toolbar and bookmarks around it; needs Accessibility, which finds the page"
+    public static let near = "text the matches are ordered beside, nearest a run containing it first:"
+        + " the Remove in Beta's row before the others; with nothing on screen containing it, no match is answered,"
+        + " since which one was meant is unknown, and a wait settles neither present nor absent"
+    public static let until = "present or absent: read again until the text is, then answer once with the last reading;"
+        + " absent counts only a region read whole, twice running"
+    public static let timeout = "with until, the most seconds to wait, at most \(Int(Wait.longest)), and \(Int(Wait.defaultSeconds)) when left out;"
+        + " a wait that runs out answers with its last reading and says it timed out"
+    public static let role = "an accessibility role every row must have, as rows print it: AXButton for buttons, AXLink for links;"
+        + " a role is the tree's, so text the pixels alone saw is set aside as role unknown, and the read is not whole"
+    public static let source = "which reader looks: tree (the accessibility tree: exact text and roles),"
         + " pixels (recognised text, anything drawn), or merged (both, each thing reported once;"
-        + " answers with either grant, naming a reader that could not look). Defaults to merged. " + needs
+        + " answers with either grant, naming a reader that could not look), merged when left out; " + needs
+    public static let limit = "the most rows to answer with, \(Limit.default.count) when left out"
+    public static let x = "the x of a point, in the screen points vhid clicks"
+    public static let y = "the y of a point, in the same points"
     /// Which grant each reader needs, built from the one mapping. [LAW:one-source-of-truth]
-    static let needs = Grant.allCases.sorted { $0.reader.rawValue > $1.reader.rawValue }
-        .map { "The \($0.reader.rawValue) reader needs \($0.name)" }.joined(separator: " and ") + "."
+    public static let needs = Grant.allCases.sorted { $0.reader.rawValue > $1.reader.rawValue }
+        .map { "the \($0.reader.rawValue) reader needs \($0.name)" }.joined(separator: " and ")
+
+    /// A phrase above as the command line shows it: capitalised, with a full stop.
+    static func sentence(_ phrase: String) -> ArgumentHelp {
+        ArgumentHelp(phrase.prefix(1).uppercased() + phrase.dropFirst() + ".")
+    }
 }
 
 /// Which reader a verb or tool reads with: every kind a reader can be. [LAW:one-source-of-truth]
@@ -75,74 +87,85 @@ extension SourceKind: ExpressibleByArgument {
 
 /// Where `find` and `read` look, shared so the two verbs cannot disagree about it.
 struct Where: ParsableArguments {
-    @Option(help: .init(stringLiteral: Help.display))
+    @Option(help: Help.sentence(Help.display))
     var display: UInt32?
 
-    @Option(help: .init(stringLiteral: Help.window))
+    @Option(help: Help.sentence(Help.window))
     var window: UInt32?
 
     /// Takes the next argument whatever it starts with: a box on a display left of or
     /// above the main one starts with a minus, which would otherwise read as a flag.
-    @Option(parsing: .unconditional, help: .init(stringLiteral: Help.rect))
+    @Option(parsing: .unconditional, help: Help.sentence(Help.rect))
     var rect: String?
 
-    @Option(help: .init(stringLiteral: Help.page))
+    @Option(help: Help.sentence(Help.page))
     var page: UInt32?
 
-    func validate() throws {
-        _ = try Self.place(display: display, window: window, page: page, rect: rect, as: .flag)
+    @Option(help: Help.sentence(Help.app))
+    var app: String?
+
+    public func validate() throws {
+        _ = try Self.place(app: app, display: display, window: window, page: page, rect: rect, as: .flag)
     }
 
     @MainActor var region: Region {
-        get async throws { try await Self.place(display: display, window: window, page: page, rect: rect, as: .flag).region() }
+        get async throws { try await Self.place(app: app, display: display, window: window, page: page, rect: rect, as: .flag).region() }
     }
 
-    /// The one place a region is spelled from its four arguments, for the verbs and the
+    /// The one place a region is spelled from its five arguments, for the verbs and the
     /// MCP tools alike, each naming an argument the way its caller spells it.
     /// [LAW:single-enforcer]
     ///
     /// Naming no place reads what is in front: what a caller that did not say where means is
-    /// the app it is working in, not every window on the desk. The scope line names the app.
-    static func place(display: UInt32?, window: UInt32?, page: UInt32?, rect: String?, as s: Spelling) throws -> Place {
-        guard [display != nil, window != nil, page != nil, rect != nil].filter({ $0 }).count <= 1 else {
-            throw ValidationError("give at most one of \(s("display")), \(s("window")), \(s("page")), \(s("rect"))")
+    /// the app it is working in, not every window on the desk. Naming an app reads that app
+    /// the same way. The scope line names the app.
+    static func place(app: String?, display: UInt32?, window: UInt32?, page: UInt32?, rect: String?, as s: Spelling) throws -> Place {
+        guard [app != nil, display != nil, window != nil, page != nil, rect != nil].filter({ $0 }).count <= 1 else {
+            throw ValidationError("give at most one of \(s("app")), \(s("display")), \(s("window")), \(s("page")), \(s("rect"))")
         }
+        guard app?.isEmpty != true else { throw ValidationError("\(s("app")) is empty, which names no app; leave it off to read the app in front") }
         return try page.map(Place.page)
             ?? rect.map { .region(.rect(try parsedRect($0, as: s))) }
             ?? window.map { .region(.window($0)) }
             ?? display.map { .region(.display($0)) }
-            ?? .front
+            ?? .front(app)
     }
 
     /// Where a verb was told to look: a region as spelled, a window's web page, whose frame
-    /// only the tree can find, or what is in front - each found when the look is made, not
-    /// when the arguments are parsed.
+    /// only the tree can find, or an app - the one in front, or the one named - each found
+    /// when the look is made, not when the arguments are parsed.
     enum Place {
         case region(Region)
         case page(UInt32)
-        case front
+        case front(String?)
 
         /// What a window's tree says of its pages: the tree in the process, a fake in a test.
         typealias Pages = @Sendable @MainActor (UInt32) async throws -> Paged
         static let tree: Pages = { try await TreeReader(granted: SourceKind.granted).pages(in: $0) }
 
-        /// What is in front now: AppKit and the responsibility call in the process, a fake in a test.
-        typealias Fronts = @Sendable @MainActor () async throws -> Front
-        static let live: Fronts = { try Front.now(own: try await .current(), listing: try Geometry.onScreen(), displays: Geometry.displays()) }
+        /// The app a look reads now, the one in front or the one named: AppKit and the
+        /// responsibility call in the process, a fake in a test.
+        typealias Fronts = @Sendable @MainActor (String?) async throws -> Front
+        static let live: Fronts = { name in
+            let (own, listing, displays) = (try await Front.Passed.current(), try Geometry.onScreen(), Geometry.displays())
+            return try name.map { try Front.now(named: $0, own: own, listing: listing, displays: displays) }
+                ?? Front.now(own: own, listing: listing, displays: displays)
+        }
 
         @MainActor func region(pages: Pages = tree, front: Fronts = live) async throws -> Region {
             switch self {
             case .region(let region): region
             case .page(let id): try await Self.page(id, pages: pages)
-            case .front: try await Self.front(front)
+            case .front(let name): try await Self.front(name, front)
             }
         }
 
         /// [LAW:nothing-unseen] Choosing what is in front is a decision of its own, before any
         /// look starts: which app, on which display, and which app it passed over.
-        @MainActor private static func front(_ fronts: Fronts) async throws -> Region {
+        @MainActor private static func front(_ name: String?, _ fronts: Fronts) async throws -> Region {
             try await Telemetry.unit("front") {
-                let front = try await fronts()
+                Telemetry.note("named", name ?? "")
+                let front = try await fronts(name)
                 Telemetry.note("front_app", front.app.name ?? "")
                 Telemetry.count("front_pid", Int(front.app.pid))
                 Telemetry.count("display", Int(front.display))
@@ -513,6 +536,14 @@ extension Front.Passed {
 }
 
 extension Front {
+    /// The app a look naming one reads now, from the apps running and the windows on screen.
+    @MainActor
+    static func now(named name: String, own: Passed, listing: WindowListing, displays: [Display]) throws(AppUnread) -> Front {
+        let running = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
+        return try named(name, own: own, running: running.map { App(pid: $0.processIdentifier, name: $0.localizedName) },
+                         listing: listing, displays: displays)
+    }
+
     /// What a look with no place named reads now, with the app eyes answers to and the window
     /// listing the caller already holds, so a hit judges the listing it found the window in.
     @MainActor

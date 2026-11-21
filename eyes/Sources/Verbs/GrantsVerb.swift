@@ -20,17 +20,7 @@ public struct GrantsVerb: AsyncParsableCommand {
     @Flag(help: "Raise macOS's dialog for each missing grant. macOS shows it once per app; run eyes grants again once it is answered.")
     var ask = false
 
-    /// The reading half: this process's own answer, printed as one line for the process
-    /// that started it. Hidden, because it is the mechanism of a fresh reading, not a
-    /// question a person asks. [LAW:one-source-of-truth] Every reading is one of these.
-    @Flag(help: .private)
-    var readHere = false
-
     public func run() async throws {
-        if readHere {
-            print(GrantReading.here().line)
-            return
-        }
         let (reading, holder) = try await Self.look()
         // The dialogs return before anyone answers them, so there is nothing new to read yet.
         let asked = ask ? Grant.allCases.filter { !reading.holds($0) } : []
@@ -46,21 +36,33 @@ public struct GrantsVerb: AsyncParsableCommand {
     }
 
     /// A fresh reading, from a child of this process. [LAW:no-ambient-temporal-coupling]
-    /// A long-lived `eyes mcp` keeps its first Screen Recording answer, so it never reads
+    /// A long-lived MCP server keeps its first Screen Recording answer, so it never reads
     /// its own; a child asks tccd anew every time.
     static func reading() async throws -> GrantReading {
-        guard let eyes = Bundle.main.executableURL else {
+        guard let own = Bundle.main.executableURL else {
             throw GrantReadingFailure("this process cannot name its own executable to start a reading")
         }
-        return try await GrantReading.taken(by: eyes, ["grants", "--read-here"])
+        return try await GrantReading.taken(by: own, [ReadGrants.configuration.commandName!])
     }
 
-    /// The scope line and a row per grant: what the verb prints and what the MCP tool
-    /// answers. Pure, so both are tested with readings a test wrote.
+    /// A fresh reading as its report, asking for nothing: what `vhid doctor` says of the
+    /// screen beside the devices. A reading that fails is said in its place, so it never
+    /// takes the device rows with it. [LAW:no-silent-failure]
+    public static func reported() async -> String {
+        do {
+            let (reading, holder) = try await look()
+            return report(reading, holder: holder, asked: [])
+        } catch {
+            return "The grants could not be read: \(error)"
+        }
+    }
+
+    /// The scope line and a row per grant: what the verb prints and what `vhid doctor`
+    /// says. Pure, so both are tested with readings a test wrote.
     /// [LAW:one-source-of-truth] [LAW:effects-at-boundaries]
     static func report(_ reading: GrantReading, holder: Holder, asked: [Grant]) -> String {
         let scope = "\(Grant.allCases.count) grants, read before any dialog."
-            + " macOS charges them to \(holder.name) (\(holder.path)), the app responsible for this eyes;"
+            + " macOS charges them to \(holder.name) (\(holder.path)), the app responsible for this process;"
             + " that is the app to switch on."
         // The dialog comes once per app, so one that never appears is the pane's to change.
         // [LAW:no-silent-failure]
@@ -76,5 +78,20 @@ public struct GrantsVerb: AsyncParsableCommand {
     static func row(_ grant: Grant, held: Bool, holder: Holder) -> String {
         "\(grant.name)\t\(held ? "granted" : "not granted")\t\(grant.reader.rawValue)"
             + (held ? "" : "\tturn on \(holder.name) in \(grant.pane)")
+    }
+}
+
+/// The child's half of a fresh grant reading: this process's own answer, printed as one
+/// line for the process that started it. Every executable that reads grants lists it, so
+/// `GrantsVerb.reading` can start its own executable whichever that is. Hidden, because it
+/// is the mechanism of a reading, not a question a person asks.
+/// [LAW:one-source-of-truth] Every reading is one of these.
+public struct ReadGrants: ParsableCommand {
+    public init() {}
+
+    public static let configuration = CommandConfiguration(commandName: "read-grants", shouldDisplay: false)
+
+    public func run() {
+        print(GrantReading.here().line)
     }
 }
