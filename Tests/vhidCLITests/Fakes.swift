@@ -107,25 +107,6 @@ extension Installation {
     static let nobody = Installation(service: "ai.promptctl.vhid.tests.nobody")!
 }
 
-extension EventExport {
-    /// An export to a file of its own under the temporary directory, and no collector, so
-    /// a test's records never reach the operator's log.
-    static func scratch() -> EventExport {
-        EventExport(collector: nil, file: FileManager.default.temporaryDirectory.appending(path: "vhid-tests-\(UUID().uuidString)/events.jsonl"),
-                    deliver: { _ in Issue.record("a scratch export has no collector to deliver to") })
-    }
-
-    /// Every record in the file, parsed back.
-    var written: [[String: Any]] {
-        get throws {
-            guard FileManager.default.fileExists(atPath: file.path) else { return [] }
-            return try String(contentsOf: file, encoding: .utf8).split(separator: "\n").map {
-                try #require(try JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any])
-            }
-        }
-    }
-}
-
 extension Displays {
     /// A screen whose edges are further than any test's path goes, for tests that are not
     /// about the edges.

@@ -2,11 +2,12 @@ import Foundation
 import Installations
 import Logging
 import MCP
+import TelemetryTesting
 import Testing
 @testable import vhid
 
 /// What the transport holds the session open for, driven through a stand-in for stdio.
-@Suite struct AnsweringTransportTests {
+@Suite(.eventsKept) struct AnsweringTransportTests {
     /// Two requests in flight under one id are two answers owed: the first settles one,
     /// and the end of stdin still waits on the other.
     @Test func aReusedIdIsOwedOnceForEachRequest() async throws {
@@ -90,7 +91,7 @@ import Testing
         let stdio = Stdio(), said = Said()
         let transport = AnsweringTransport(stdio, logger: Logger(label: "test") { _ in said })
         let session = Task {
-            let server = await McpCommand.server([stubborn], on: Installation(service: "ai.promptctl.vhid.tests.nobody")!, over: transport, recordingTo: .scratch(), carriedBy: Flights())
+            let server = await McpCommand.server([stubborn], on: Installation(service: "ai.promptctl.vhid.tests.nobody")!, over: transport)
             try await server.start(transport: transport)
             await server.waitUntilCompleted()
         }
@@ -162,7 +163,7 @@ import Testing
         }
         let stdio = Stdio(), transport = AnsweringTransport(stdio)
         let session = Task {
-            let server = await McpCommand.server([waiting], on: Installation(service: "ai.promptctl.vhid.tests.nobody")!, over: transport, recordingTo: .scratch(), carriedBy: Flights())
+            let server = await McpCommand.server([waiting], on: Installation(service: "ai.promptctl.vhid.tests.nobody")!, over: transport)
             try await server.start(transport: transport)
             await server.waitUntilCompleted()
         }

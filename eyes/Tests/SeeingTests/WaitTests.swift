@@ -1,10 +1,11 @@
+import OwnThread
 import Testing
 @testable import Seeing
 
 /// The wait, over a fake read whose answer changes on its third read. The dangerous case
 /// is a false "gone", so most of what is here is absence: when it may be believed, and
 /// when a read that could not see must end the wait instead. [LAW:no-silent-failure]
-@Suite struct WaitTests {
+@Suite(.ownThread) struct WaitTests {
     static let region = ScreenRect(x: 0, y: 0, width: 800, height: 600)
 
     static let present = Reading(

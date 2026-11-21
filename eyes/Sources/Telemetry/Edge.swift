@@ -1,25 +1,28 @@
 import Foundation
-import Input
 import System
 
-/// Where every invocation's record leaves the process: to an OpenTelemetry collector over
-/// OTLP/HTTP when one is configured, and appended as a line of JSON to a file when none is,
-/// or when the one configured could not take it.
+/// Where every record leaves the process: to an OpenTelemetry collector over OTLP/HTTP
+/// JSON when one is configured, and appended as a line of JSON to a file when none is, or
+/// when the one configured could not take it.
 ///
-/// [LAW:single-enforcer] The one export edge. A record written to the file because the
-/// collector failed says so on itself, in `sink_error`: a CLI invocation emits one record
-/// and exits, so there is no later moment to report what was not delivered.
-/// [LAW:nothing-unseen]
-struct EventExport: Sendable {
-    let collector: Collector?
-    let file: URL
-    let deliver: @Sendable (URLRequest) async throws -> Void
+/// [LAW:single-enforcer] The one export edge, for every executable here. A record written
+/// to the file because the collector failed says so on itself, in `sink_error`.
+public struct Edge: Sendable {
+    public let service: String
+    public let collector: Collector?
+    public let file: URL
+    public let deliver: @Sendable (URLRequest) async throws -> Void
 
-    /// The environment's collector, and `~/Library/Logs/vhid/events.jsonl`.
-    static func configured(_ environment: [String: String] = ProcessInfo.processInfo.environment) -> EventExport {
-        EventExport(collector: Collector(environment),
-                    file: FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library/Logs/vhid/events.jsonl"),
-                    deliver: post)
+    public init(service: String, collector: Collector?, file: URL, deliver: @escaping @Sendable (URLRequest) async throws -> Void) {
+        (self.service, self.collector, self.file, self.deliver) = (service, collector, file, deliver)
+    }
+
+    /// The environment's collector, and `~/Library/Logs/<service>/events.jsonl`.
+    public static func configured(_ environment: [String: String] = ProcessInfo.processInfo.environment,
+                                  service: String = Telemetry.service) -> Edge {
+        Edge(service: service, collector: Collector(environment),
+             file: FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library/Logs/\(service)/events.jsonl"),
+             deliver: post)
     }
 
     /// An OpenTelemetry collector's logs endpoint and the headers it is sent, as the OTLP
@@ -27,27 +30,26 @@ struct EventExport: Sendable {
     /// one, and an empty variable as unset, as the specification reads every one of them.
     /// Kept as written, and read when a record is sent, so that a variable that cannot be
     /// read is said on that record's `sink_error`.
-    struct Collector: Sendable, Equatable {
-        enum Endpoint: Sendable, Equatable {
+    public struct Collector: Sendable, Equatable {
+        public enum Endpoint: Sendable, Equatable {
             /// `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`: the logs URL itself.
             case logs(String)
             /// `OTEL_EXPORTER_OTLP_ENDPOINT`: the base URL the logs path `v1/logs` goes under.
             case base(String)
         }
 
-        let endpoint: Endpoint
+        public let endpoint: Endpoint
         /// `key=value` pairs, comma separated, each value percent-encoded.
-        let headers: String?
-        let `protocol`: String?
+        public let headers: String?
+        public let `protocol`: String?
 
-        init(endpoint: Endpoint, headers: String? = nil, protocol: String? = nil) {
+        public init(endpoint: Endpoint, headers: String? = nil, protocol: String? = nil) {
             (self.endpoint, self.headers, self.protocol) = (endpoint, headers, `protocol`)
         }
 
         /// Also read: `OTEL_SDK_DISABLED=true` and `OTEL_LOGS_EXPORTER=none` turn the
-        /// collector off, and a `grpc` protocol, which this does not speak, is refused on the
-        /// record rather than sent JSON it cannot read.
-        init?(_ environment: [String: String]) {
+        /// collector off.
+        public init?(_ environment: [String: String]) {
             func set(_ name: String) -> String? { environment[name].flatMap { $0.isEmpty ? nil : $0 } }
             func otlp(_ name: String) -> String? { set("OTEL_EXPORTER_OTLP_LOGS_\(name)") ?? set("OTEL_EXPORTER_OTLP_\(name)") }
             guard set("OTEL_SDK_DISABLED")?.lowercased() != "true", set("OTEL_LOGS_EXPORTER") != "none",
@@ -56,12 +58,15 @@ struct EventExport: Sendable {
             self.init(endpoint: endpoint, headers: otlp("HEADERS"), protocol: otlp("PROTOCOL"))
         }
 
-        /// Refusals never quote what was written: an endpoint can carry a password, and a
-        /// refusal is written to the file.
-        var url: URL {
+        /// Where records are posted. The protocol is parsed, not hoped for: this speaks
+        /// `http/json` alone, the protocol a collector is told when the variable is unset
+        /// too, and any other is refused on the record rather than sent JSON it cannot read.
+        /// Refusals never quote the endpoint: it can carry a password, and a refusal is
+        /// written to the file. [LAW:parse-dont-validate]
+        public var url: URL {
             get throws {
-                guard `protocol` != "grpc" else {
-                    throw Refused(description: "OTEL_EXPORTER_OTLP_PROTOCOL is grpc, and vhid sends OTLP/HTTP JSON")
+                if let named = `protocol`, named != "http/json" {
+                    throw Refused(description: "OTEL_EXPORTER_OTLP_PROTOCOL is \(named), and only http/json is sent")
                 }
                 let (variable, written) = switch endpoint {
                 case .logs(let url): ("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", url)
@@ -74,7 +79,7 @@ struct EventExport: Sendable {
             }
         }
 
-        var fields: [(name: String, value: String)] {
+        public var fields: [(name: String, value: String)] {
             get throws {
                 try (headers ?? "").split(separator: ",").enumerated().map { index, pair in
                     let parts = pair.split(separator: "=", maxSplits: 1)
@@ -88,30 +93,34 @@ struct EventExport: Sendable {
         }
     }
 
-    func export(_ record: InvocationRecord) async {
-        let sink: InvocationRecord.Sink
+    /// Sends one record, and says where it went.
+    @discardableResult
+    public func send(_ record: Record) async -> Sink {
+        let sink: Sink
         if let collector {
             do {
-                return try await deliver(try Self.request(record, to: collector))
+                try await deliver(try Self.request(record, to: collector))
+                return .otlp
             } catch {
-                sink = .fileAfter(collectorFailure: error.reported)
+                sink = .fileAfter(collectorFailure: "\(error)")
             }
         } else {
             sink = .file
         }
-        // A record that cannot be written does not fail the verb it records, which did
-        // what it did; it is said on stderr, where the verb's own diagnostics go.
+        // A record that cannot be written does not fail the work it records, which did
+        // what it did; it is said on stderr, which under an MCP server is not the protocol.
         // [LAW:no-silent-failure]
         do {
             try append(try JSON.object(record.fields(sink: sink)).line)
         } catch {
-            FileHandle.standardError.write(Data("vhid: the record of this \(record.event) was not written to \(file.path): \(error.reported)\n".utf8))
+            FileHandle.standardError.write(Data("\(service): the record of this \(record.event) was not written to \(file.path): \(error)\n".utf8))
         }
+        return sink
     }
 
     /// One `write` with `O_APPEND`, so lines from processes appending at once do not
-    /// interleave. Readable by its owner alone: it is a record of what this person had
-    /// their keyboard and mouse do.
+    /// interleave. Readable by its owner alone: it is a record of what this person's
+    /// screen showed and what their keyboard and mouse were made to do.
     private func append(_ line: Data) throws {
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         let descriptor = try FileDescriptor.open(FilePath(file.path), .writeOnly, options: [.append, .create],
@@ -119,15 +128,12 @@ struct EventExport: Sendable {
         try descriptor.closeAfter { _ = try descriptor.writeAll(line) }
     }
 
-    struct Refused: Error, CustomStringConvertible {
-        let description: String
+    public struct Refused: Error, CustomStringConvertible {
+        public let description: String
     }
 
     /// An OTLP/HTTP JSON logs export of `record`, to the logs path under `collector`.
-    ///
-    /// The command line waits on this before it exits, so it is given two seconds: a
-    /// collector that has not answered by then has not taken this record, and the file has.
-    static func request(_ record: InvocationRecord, to collector: Collector) throws -> URLRequest {
+    public static func request(_ record: Record, to collector: Collector) throws -> URLRequest {
         var request = URLRequest(url: try collector.url, timeoutInterval: 2)
         request.httpMethod = "POST"
         for (name, value) in try collector.fields { request.setValue(value, forHTTPHeaderField: name) }
@@ -137,20 +143,21 @@ struct EventExport: Sendable {
     }
 
     /// `record` as OTLP's `ExportLogsServiceRequest`, in its JSON encoding: one log record
-    /// whose attributes are the record's fields.
-    static func logs(_ record: InvocationRecord) -> JSON {
+    /// in the record's trace and span, whose attributes are the record's fields.
+    public static func logs(_ record: Record) -> JSON {
         let nanoseconds = Int(record.startedAt.timeIntervalSince1970 * 1e9)
         let attributes = record.fields(sink: .otlp).sorted { $0.key < $1.key }.map { keyValue($0.key, $0.value) }
         let log: JSON = .object([
             "timeUnixNano": .string(String(nanoseconds)),
             "traceId": .string(record.traceID),
+            "spanId": .string(record.spanID),
             "eventName": .string(record.event),
             "body": anyValue(.string(record.event)),
             "attributes": .array(attributes),
         ])
         return .object(["resourceLogs": .array([.object([
-            "resource": .object(["attributes": .array([keyValue("service.name", .string(InvocationRecord.service))])]),
-            "scopeLogs": .array([.object(["scope": .object(["name": .string(InvocationRecord.service)]), "logRecords": .array([log])])]),
+            "resource": .object(["attributes": .array([keyValue("service.name", .string(record.service))])]),
+            "scopeLogs": .array([.object(["scope": .object(["name": .string(record.service)]), "logRecords": .array([log])])]),
         ])])])
     }
 
@@ -170,7 +177,7 @@ struct EventExport: Sendable {
     }
 
     /// A request's `timeoutInterval` bounds only the silence between packets; this bounds
-    /// the whole exchange, which is what the two seconds a command line waits on are.
+    /// the whole exchange, which is what the two seconds a process waits on at exit are.
     private static let session = URLSession(configuration: {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForResource = 2
@@ -178,7 +185,7 @@ struct EventExport: Sendable {
     }())
 
     /// Sends `request`, and throws unless the collector answered 2xx.
-    static let post: @Sendable (URLRequest) async throws -> Void = { request in
+    public static let post: @Sendable (URLRequest) async throws -> Void = { request in
         // Without the URL's user and password, which a refusal must not carry into the file.
         let at = request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }
             .map { var bare = $0; (bare.user, bare.password) = (nil, nil); return bare.string ?? "" } ?? ""

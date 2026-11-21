@@ -6,6 +6,7 @@ import Installations
 import MCP
 import Signals
 import System
+import Telemetry
 import Version
 
 /// The verbs as MCP tools, over stdio, for an agent that drives a Mac in one session
@@ -59,23 +60,22 @@ struct McpCommand: AsyncParsableCommand {
     static let instructions = pairing + "\n\nThis is vhid \(Version.current)."
 
     /// The server as a client's initialize finds it, with `tools` attached to run against
-    /// `installation`, each call held `underway` on the transport it will be started on,
-    /// carried by `flights` until it and its record are done, and recorded as one
-    /// invocation to `export` - after its answer, which does not wait on a collector.
+    /// `installation`, each call held `underway` on the transport it will be started on and
+    /// recorded as one unit of work of its own trace - its record handed to the outbox before
+    /// its answer goes, and sent without the answer waiting on a collector.
     static func server(_ tools: [VerbTool] = Tools.all, on installation: Installation, over transport: AnsweringTransport,
-                       recordingTo export: EventExport, stoppedBy signals: FirstSignal? = nil, carriedBy flights: Flights) async -> Server {
+                       stoppedBy signals: FirstSignal? = nil) async -> Server {
         let server = Server(name: "vhid", version: Version.current, instructions: instructions,
                             capabilities: .init(tools: .init(listChanged: false)))
         let turns = Turns()
         await server.withMethodHandler(ListTools.self) { _ in .init(tools: tools.map(\.tool)) }
-        let hand: @Sendable (InvocationRecord) async -> Void = { record in await flights.launch { await export.export(record) } }
-        await server.withMethodHandler(CallTool.self) { request in try await flights.carry {
+        await server.withMethodHandler(CallTool.self) { request in
             let arrived = ContinuousClock.now
             // Recorded under the method, not the name: a name the client made up is not a
             // verb, and would make one event per made-up name. The error says which.
             guard let verb = tools.first(where: { $0.tool.name == request.name }) else {
                 let refusal = MCPError.invalidParams("there is no tool called \(request.name.debugDescription)")
-                return try await Invocation.record(CallTool.name, via: .mcp, stoppedBy: signals, to: hand) { _ in throw refusal }
+                return try await dispatched(CallTool.name, stoppedBy: signals) { throw refusal }
             }
             // A verb that could not do what it was asked is a tool error, whose words the
             // model reads; a protocol error is for a request that named no tool at all. A
@@ -85,9 +85,9 @@ struct McpCommand: AsyncParsableCommand {
             // verb had already done when it was withdrawn. [LAW:no-silent-failure]
             return try await transport.underway {
                 do {
-                    let said = try await Invocation.record(request.name, via: .mcp, stoppedBy: signals, to: hand) { _ in
+                    let said = try await dispatched(request.name, stoppedBy: signals) {
                         try await turns.take {
-                            Invocation.set(.queuedMilliseconds, .double((ContinuousClock.now - arrived) / .milliseconds(1)))
+                            Telemetry.note(.queuedMilliseconds, .double((ContinuousClock.now - arrived) / .milliseconds(1)))
                             return try await verb.call(request.arguments ?? [:], on: installation)
                         }
                     }
@@ -99,8 +99,24 @@ struct McpCommand: AsyncParsableCommand {
                     return .init(content: [.text(text: error.reported, annotations: nil, _meta: nil)], isError: true)
                 }
             }
-        } }
+        }
         return server
+    }
+
+    /// Runs `work` as one call's unit of work, of a trace of its own: the tool it named,
+    /// through this dispatcher, and the signal that stopped the session, if one did.
+    static func dispatched<T>(_ name: String, stoppedBy signals: FirstSignal?, _ work: () async throws -> T) async throws -> T {
+        try await Telemetry.unit(name, trace: .fresh, said: words) {
+            Telemetry.note(.entry, "mcp")
+            defer { signals?.noted() }
+            return try await work()
+        }
+    }
+
+    /// What a call's record says of the error it ended in: what the model was told, except
+    /// refused arguments' words.
+    static func words(for error: any Error) -> String? {
+        error is ArgumentRefused ? Telemetry.refusedArguments : error.reported
     }
 
     func run() async throws {
@@ -115,22 +131,21 @@ struct McpCommand: AsyncParsableCommand {
             throw Errno(rawValue: errno)
         }
 
-        try await Self.serve(on: installation, over: AnsweringTransport(StdioTransport(output: protocolOut)), recordingTo: .configured(),
-                             stoppedBy: Invocation.current?.signals)
+        try await Self.serve(on: installation, over: AnsweringTransport(StdioTransport(output: protocolOut)), stoppedBy: Vhid.signals)
     }
 
     /// Serves `tools` over `transport` until the client hangs up or the serving task is
     /// cancelled, as Control-C and SIGTERM cancel it. A cancel withdraws every call owed,
     /// so each one stops as a client's cancel would stop it, and ends the session. Returns
-    /// once every call has ended and every record is sent, throwing if it was cancelled.
+    /// once every call the transport received has been answered - each record in the
+    /// outbox by then, which the process drains at exit - throwing if it was cancelled.
     /// Each call's record names the signal in `signals` that stopped the session, if one did.
     ///
     /// The cancel has to be carried in by hand: the SDK serves from a task of its own,
     /// which no cancel of this one reaches.
     static func serve(_ tools: [VerbTool] = Tools.all, on installation: Installation, over transport: AnsweringTransport,
-                      recordingTo export: EventExport, stoppedBy signals: FirstSignal? = nil) async throws {
-        let flights = Flights()
-        let server = await server(tools, on: installation, over: transport, recordingTo: export, stoppedBy: signals, carriedBy: flights)
+                      stoppedBy signals: FirstSignal? = nil) async throws {
+        let server = await server(tools, on: installation, over: transport, stoppedBy: signals)
         try await server.start(transport: transport)
         await withTaskCancellationHandler {
             await server.waitUntilCompleted()
@@ -140,52 +155,7 @@ struct McpCommand: AsyncParsableCommand {
                 await server.stop()
             }
         }
-        await flights.landed()
         try Task.checkCancellation()
-    }
-}
-
-/// What the server has under way and must see done before the process exits: tool calls
-/// still running when the client hung up, and the records of calls already answered.
-///
-/// [LAW:nothing-unseen] Without it, a client that closed stdin mid-`type` would end the
-/// process under the keystrokes still going out, and they would leave no record.
-actor Flights {
-    private var underway = 0
-    private var waiting: [CheckedContinuation<Void, Never>] = []
-
-    /// Runs `body`, counted as under way until it returns.
-    nonisolated func carry<T: Sendable>(_ body: @Sendable () async throws -> T) async throws -> T {
-        await depart()
-        do {
-            let done = try await body()
-            await arrive()
-            return done
-        } catch {
-            await arrive()
-            throw error
-        }
-    }
-
-    /// Starts `work` in a task of its own, counted as under way until it finishes.
-    func launch(_ work: @escaping @Sendable () async -> Void) {
-        depart()
-        Task { await work(); arrive() }
-    }
-
-    /// Returns once nothing is under way.
-    func landed() async {
-        guard underway > 0 else { return }
-        await withCheckedContinuation { waiting.append($0) }
-    }
-
-    private func depart() { underway += 1 }
-
-    private func arrive() {
-        underway -= 1
-        guard underway == 0 else { return }
-        waiting.forEach { $0.resume() }
-        waiting = []
     }
 }
 

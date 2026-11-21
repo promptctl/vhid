@@ -3,6 +3,7 @@ import Foundation
 import Input
 import os
 import Signals
+import Telemetry
 import Version
 
 /// The verbs, against a daemon that owns the two virtual devices.
@@ -49,10 +50,10 @@ struct Vhid: AsyncParsableCommand {
     ///
     /// [LAW:single-enforcer] The one watch on these signals in a command-line run: a verb
     /// that answers them, as `record` does, hears the cancel, and reads which signal it
-    /// was from the invocation.
+    /// was from `signals`.
     static func main() async {
         let first = FirstSignal()
-        let running = OSAllocatedUnfairLock<Task<Void, any Error>?>(initialState: nil)
+        let running = OSAllocatedUnfairLock<Task<(any Error)?, any Error>?>(initialState: nil)
         // Watched before the verb starts, so that no signal finds it under the default
         // disposition; one that lands before the verb exists cancels it as it is made.
         // The cancel is handed to a thread of its own: a verb's cancel handler runs where
@@ -63,16 +64,16 @@ struct Vhid: AsyncParsableCommand {
             DispatchQueue.global().async { task?.cancel() }
         }
         let invocation = Task {
-            try await Invocation.record(_commandName, via: .commandLine, stoppedBy: first, to: EventExport.configured().export) {
-                try await run(nil, in: $0)
-            }
+            try await $signals.withValue(first) { try await dispatched(_commandName) { try await run(nil) } }
         }
         running.withLock { running in
             running = invocation
             if first.taken != nil { invocation.cancel() }
         }
-        let ending = await invocation.result
+        // A clean exit - `--help`, `--version` - ended the unit well, and is passed on now.
+        let ending = await invocation.result.flatMap { clean in clean.map { .failure($0) } ?? .success(()) }
         withExtendedLifetime(watch) {}
+        await Telemetry.drained()
         switch (ending, first.unanswered) {
         case (.success, nil): return
         case (.success, let number?): die(by: number)
@@ -97,15 +98,42 @@ struct Vhid: AsyncParsableCommand {
         return exitCode(for: error) == .success ? "" : message(for: error)
     }
 
-    /// Parses `arguments` (argv when `nil`), names `invocation` after the command they
-    /// chose, and runs it.
-    static func run(_ arguments: [String]?, in invocation: Invocation) async throws {
-        var command = try parseAsRoot(arguments)
-        invocation.named(name(of: type(of: command)))
-        if var command = command as? AsyncParsableCommand {
-            try await command.run()
-        } else {
-            try command.run()
+    /// Runs `work` as one command-line run's unit of work, named `event` until it names
+    /// itself: through this dispatcher, with the signal that stopped it, if one did.
+    static func dispatched<T>(_ event: String, _ work: () async throws -> T) async throws -> T {
+        try await Telemetry.unit(event, said: words) {
+            Telemetry.note(.entry, "cli")
+            defer { signals?.noted() }
+            return try await work()
+        }
+    }
+
+    /// What the record says of a verb that ended in `error`: what the command line said
+    /// of it, except refused arguments' words. [LAW:one-source-of-truth]
+    static func words(for error: any Error) -> String? {
+        exitCode(for: error) == .validationFailure ? Telemetry.refusedArguments : said(for: error)
+    }
+
+    /// The signals that stop a command-line run, for a verb that answers them itself, as
+    /// `record` does, and for the MCP server, whose every call's record names the signal
+    /// that stopped the session.
+    @TaskLocal static var signals: FirstSignal?
+
+    /// Parses `arguments` (argv when `nil`), names the unit underway after the command
+    /// they chose, and runs it. A clean exit - `--help`, `--version` - arrives as an error
+    /// that exits 0; it is returned, as the verb did what it was asked.
+    static func run(_ arguments: [String]?) async throws -> (any Error)? {
+        do {
+            var command = try parseAsRoot(arguments)
+            Telemetry.name(name(of: type(of: command)))
+            if var command = command as? AsyncParsableCommand {
+                try await command.run()
+            } else {
+                try command.run()
+            }
+            return nil
+        } catch where exitCode(for: error) == .success {
+            return error
         }
     }
 

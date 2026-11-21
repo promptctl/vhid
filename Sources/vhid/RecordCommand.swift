@@ -47,7 +47,7 @@ struct RecordCommand: AsyncParsableCommand {
         // nothing. Either is answered by finishing, so the process exits as the recording
         // ended. A failed send is the app gone, which the read below reports. A second
         // signal ends the process, whose exit the app's pid watch sees.
-        let signals = Invocation.current?.signals
+        let signals = Vhid.signals
         try await withTaskCancellationHandler {
             while let message = try app.receive(FromApp.self) {
                 switch message {

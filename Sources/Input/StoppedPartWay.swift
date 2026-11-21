@@ -1,13 +1,14 @@
+import Telemetry
+
 /// A run that stopped because something else failed under it, carrying that failure.
 ///
 /// Each layer that stops a run wraps what stopped it with what only that layer knows - how
 /// many characters landed, which actions were done - so the failure a caller has to act on
 /// sits several causes down. [LAW:locality-or-seam] Each wrapper declares this beside its
 /// `cause`, in place of `Error`, so a new wrapper is marked where it is written; one left
-/// unmarked hides everything under it from `causes`, as `PointingStopped` once did.
-public protocol StoppedPartWay: Error {
-    var cause: any Error { get }
-}
+/// unmarked hides everything under it from `causes`, as `PointingStopped` once did. The
+/// chain is Telemetry's, so a record reads a cancellation the way a caller does.
+public protocol StoppedPartWay: Caused {}
 
 /// What `release` threw, answered rather than thrown: every run that stops lets its device
 /// go on the way out and reports a release that failed beside the stop, never over it, so
@@ -23,17 +24,6 @@ func failure(of release: () async throws -> Void, isolation: isolated (any Actor
 }
 
 public extension Error {
-    /// This error and every cause under it, outermost first.
-    var causes: [any Error] {
-        Array(sequence(first: self as any Error) { ($0 as? any StoppedPartWay)?.cause })
-    }
-
-    /// Whether the run ended because it was cancelled: a cancellation among its causes,
-    /// however many layers wrapped it on the way out.
-    var isCancellation: Bool {
-        causes.contains { $0 is CancellationError }
-    }
-
     /// What a report calls this failure.
     ///
     /// Every failure here says what it is, except the one the language supplies:

@@ -2,13 +2,14 @@ import Foundation
 import Installations
 import MCP
 import OwnThread
+import TelemetryTesting
 import Testing
 import Version
 @testable import vhid
 
 /// One version, reported the same way by every surface that reports one, and the value
 /// scripts/version derives from claude-plugin/VERSION and git.
-@Suite(.ownThread) struct VersionTests {
+@Suite(.ownThread, .eventsKept) struct VersionTests {
     static let root = URL(filePath: #filePath).deletingLastPathComponent().appending(path: "../..").standardized
 
     /// What scripts/version prints for `repo`.
@@ -52,7 +53,7 @@ import Version
     @Test func mcpInitializeReportsItAndThePairingWithEyes() async throws {
         let (clientSide, serverSide) = await InMemoryTransport.createConnectedPair()
         let transport = AnsweringTransport(serverSide)
-        let server = await McpCommand.server(on: Installation(service: "ai.promptctl.vhid.tests.nobody")!, over: transport, recordingTo: .scratch(), carriedBy: Flights())
+        let server = await McpCommand.server(on: Installation(service: "ai.promptctl.vhid.tests.nobody")!, over: transport)
         try await server.start(transport: transport)
         let result: Initialize.Result
         do {

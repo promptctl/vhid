@@ -112,11 +112,13 @@ let package = Package(
         // vocabularies and the layout, and deliberately not Helper or VirtualHID: which
         // device answers is the caller's to pick, so this holds the protocols and the
         // caller supplies a conformance. [LAW:one-way-deps] [LAW:effects-at-boundaries]
-        .target(name: "Input", dependencies: ["KeyboardLayouts", "Keystrokes", "Pointing"]),
+        // Telemetry for the cause chain its stops are read by, so a record and a caller tell
+        // a withdrawn run from a failed one by one rule. [LAW:single-enforcer]
+        .target(name: "Input", dependencies: ["KeyboardLayouts", "Keystrokes", "Pointing", "Telemetry"]),
         // The pointer's loop against a fake screen with an acceleration curve of its own,
         // and the typist against a keyboard that can be made to fail at the third keystroke
         // of four: no device, no window server, no grant.
-        .testTarget(name: "InputTests", dependencies: ["Input", "KeyboardLayouts", "Keystrokes", "OwnThread", "Pointing", "TestClock"]),
+        .testTarget(name: "InputTests", dependencies: ["Input", "KeyboardLayouts", "Keystrokes", "OwnThread", "Pointing", "TestClock", "Telemetry"]),
         // What must hold before a verb can reach the devices, as a table from readings of
         // this Mac to a step for a person. The table reads nothing: every requirement is a
         // pure function of readings, so every combination is exercised in its tests,
@@ -166,7 +168,7 @@ let package = Package(
             name: "vhid",
             dependencies: [
                 "Input", "Helper", "Installations", "KeyboardLayouts", "Keystrokes", "Pointing", "DriverExtension", "Doctor",
-                "Version", "RecordingTie", "Signals",
+                "Version", "RecordingTie", "Signals", "Telemetry",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "MCP", package: "swift-sdk"),
                 .product(name: "Logging", package: "swift-log"),
@@ -179,11 +181,12 @@ let package = Package(
             name: "vhidCLITests",
             dependencies: [
                 "vhid", "Input", "Helper", "Installations", "Keystrokes", "Pointing", "Doctor", "DriverExtension", "Version", "OwnThread", "TestClock", "Signals",
+                "Telemetry", "TelemetryTesting",
                 .product(name: "MCP", package: "swift-sdk"),
             ]
         ),
         // The thread a test that waits is given, as a trait its suite names. A target of
-        // its own because the suites that wait are in eight test targets, and one test
+        // its own because the suites that wait are in many test targets, and one test
         // target cannot link another. No product names it, so nothing shipped carries it.
         .target(name: "OwnThread", path: "Tests/OwnThread"),
         .testTarget(name: "OwnThreadTests", dependencies: ["OwnThread"]),
@@ -209,8 +212,9 @@ let package = Package(
         // language without either linking the other.
         .target(name: "Seeing", path: "eyes/Sources/Seeing"),
         // Every type there is a value, so the vocabulary is exercised with no display, no
-        // capture and no grant. [LAW:effects-at-boundaries]
-        .testTarget(name: "SeeingTests", dependencies: ["Seeing"], path: "eyes/Tests/SeeingTests"),
+        // capture and no grant. [LAW:effects-at-boundaries] OwnThread for the waits, whose
+        // timeouts are real time.
+        .testTarget(name: "SeeingTests", dependencies: ["Seeing", "OwnThread"], path: "eyes/Tests/SeeingTests"),
         // The pixel reader: the grant, the capture and Vision. Its own target, so the
         // vocabulary stays linking nothing and the tree reader sits beside it unlinked.
         .target(name: "Pixels", dependencies: ["Seeing", "Grants"], path: "eyes/Sources/Pixels"),
@@ -227,7 +231,7 @@ let package = Package(
         // The libSystem calls tccd's attribution rests on, which the SDK has no header for:
         // a header of its own, so they are linked and type-checked, not looked up.
         .target(name: "Responsibility", path: "eyes/Sources/Responsibility"),
-        .testTarget(name: "GrantsTests", dependencies: ["Grants", "Seeing", "Telemetry", "TelemetryTesting"], path: "eyes/Tests/GrantsTests"),
+        .testTarget(name: "GrantsTests", dependencies: ["Grants", "Seeing", "Telemetry", "TelemetryTesting", "OwnThread"], path: "eyes/Tests/GrantsTests"),
         // One record per unit of work, and the one edge every record leaves a process by.
         // It links neither half, so both record through it. [LAW:nothing-unseen]
         .target(name: "Telemetry", path: "eyes/Sources/Telemetry"),

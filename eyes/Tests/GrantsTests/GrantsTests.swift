@@ -3,9 +3,10 @@ import Seeing
 import Grants
 import Telemetry
 import TelemetryTesting
+import OwnThread
 import Testing
 
-@Suite(.eventsKept) struct GrantsTests {
+@Suite(.eventsKept, .ownThread) struct GrantsTests {
     /// A reading survives the line a reading process prints for it.
     @Test func aReadingRoundTripsThroughItsLine() throws {
         for held in [(true, false), (false, true), (true, true), (false, false)] {
@@ -108,12 +109,12 @@ struct GrantMappingTests {
         /// Whether a gate asked now shares the reading or takes its own, read off its event.
         /// The gate is cancelled as it asks, so it gives up instead of waiting: the choice is
         /// made the moment it asks, whatever the reading is still doing.
-        func choice() async -> String? {
+        func choice() async -> JSON? {
             let events = Collected()
             let gate = Task { try await Telemetry.$export.withValue(events.export) { try await shared.holds(.accessibility) } }
             gate.cancel()
             await #expect(throws: CancellationError.self) { try await gate.value }
-            return events.all.first?.facts["reading"]
+            return events.all.first?.attributes["reading"]
         }
     }
 
@@ -176,9 +177,10 @@ struct GrantMappingTests {
     }
     let seen = events.all
     #expect(seen.map(\.event) == ["grant_reading", "grant_reading", "grant_reading"])
-    #expect(seen.map(\.outcome) == ["held", "not_held", "error"])
-    #expect(seen.map { $0.facts["reading"] } == ["taken", "shared", "taken"])
-    #expect(seen.map { $0.facts["grant"] } == ["accessibility", "screenRecording", "accessibility"])
+    #expect(seen.map(\.outcome) == [.ok, .ok, .failed])
+    #expect(seen.map { $0.attributes["result"] } == ["held", "not_held", nil])
+    #expect(seen.map { $0.attributes["reading"] } == ["taken", "shared", "taken"])
+    #expect(seen.map { $0.attributes["grant"] } == ["accessibility", "screenRecording", "accessibility"])
     #expect(seen[2].error == "no child")
 }
 
@@ -190,7 +192,7 @@ struct GrantMappingTests {
         _ = try? await GrantReading.taken(by: URL(fileURLWithPath: "/usr/bin/false"), [])
     }
     #expect(events.all.map(\.event) == ["grant_child", "grant_child"])
-    #expect(events.all.map(\.outcome) == ["ok", "error"])
+    #expect(events.all.map(\.outcome) == [.ok, .failed])
     #expect(events.all[1].error != nil)
 }
 
@@ -200,7 +202,7 @@ struct GrantMappingTests {
     let events = Collected()
     let holder = try await Telemetry.$export.withValue(events.export) { try await Holder.current() }
     #expect(events.all.map(\.event) == ["holder"])
-    let executable = try #require(events.all.first?.facts["executable"])
+    let executable = try #require(events.all.first?.attributes["executable"].flatMap { if case .string(let s) = $0 { s } else { nil } })
     #expect(executable.hasPrefix("/"))
     #expect(FileManager.default.isExecutableFile(atPath: executable))
     #expect(executable.hasPrefix(holder.path))

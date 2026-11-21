@@ -1,5 +1,6 @@
 import DriverExtension
 import Foundation
+import Telemetry
 
 /// Takes a reading of this Mac that blocks on the commands it runs, and ends the command
 /// running when the task is cancelled: Control-C or SIGTERM on the command line, a
@@ -29,7 +30,7 @@ func reading<T: Sendable>(_ read: @escaping @Sendable (Command.Stop) -> T) async
         stop.pull()
     }
     if Task.isCancelled {
-        Invocation.set(.stopped, .array(stop.ended.map(JSON.string)))
+        Telemetry.note(.stopped, .array(stop.ended.map(JSON.string)))
         throw CancellationError()
     }
     return taken

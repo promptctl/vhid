@@ -85,8 +85,8 @@ public actor SharedReading {
     /// and how long the gate waited. The child's own event is `grant_child`, on this trace.
     /// [LAW:nothing-unseen]
     public func holds(_ grant: Grant) async throws -> Bool {
-        try await Telemetry.unit("grant_reading", outcome: { $0 ? "held" : "not_held" }) {
-            Telemetry.note("grant", grant.rawValue)
+        try await Telemetry.unit("grant_reading", result: { $0 ? "held" : "not_held" }) {
+            Telemetry.note("grant", .string(grant.rawValue))
             return try await reading(grant)
         }
     }
@@ -186,8 +186,10 @@ public struct GrantReading: Sendable, Equatable {
         let process = Process()
         process.executableURL = reader
         process.arguments = arguments
+        // The child's records, if it makes any, belong under this reading's span.
+        process.environment = Telemetry.childEnvironment()
         let output = Pipe(), complaint = Pipe()
-        // Under `eyes mcp` this process's stdin is the client's JSON-RPC stream.
+        // Under an MCP server this process's stdin is the client's JSON-RPC stream.
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = output
         process.standardError = complaint
@@ -262,7 +264,7 @@ public struct Holder: Sendable, Equatable {
     public static func current() async throws(GrantReadingFailure) -> Holder {
         try await Telemetry.unit("holder") { () throws(GrantReadingFailure) -> Holder in
             let executable = try attributed()
-            Telemetry.note("executable", executable)
+            Telemetry.note("executable", .string(executable))
             return named(executable)
         }
     }

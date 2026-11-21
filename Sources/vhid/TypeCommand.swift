@@ -1,6 +1,7 @@
 import ArgumentParser
 import Input
 import KeyboardLayouts
+import Telemetry
 
 /// Types text on the virtual keyboard, wherever the keyboard happens to be pointed.
 struct TypeCommand: AsyncParsableCommand {
@@ -25,7 +26,7 @@ struct TypeCommand: AsyncParsableCommand {
     /// against a keyboard that records instead of typing.
     static func type(_ text: String, on layout: KeyboardLayout, into aim: Aim, with typist: Typist,
                      front: () async throws -> FrontApp?) async throws -> String {
-        Invocation.typesText()
+        Telemetry.withholdErrorWords()
         // [LAW:parse-dont-validate] Lowered whole before a key goes down, so text the
         // layout cannot type moves nothing: half a sentence in a document is worse than
         // none, because only one of the two is obviously wrong.

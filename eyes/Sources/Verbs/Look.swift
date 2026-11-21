@@ -143,10 +143,10 @@ struct Where: ParsableArguments {
         @MainActor private static func front(_ fronts: Fronts) async throws -> Region {
             try await Telemetry.unit("front") {
                 let front = try await fronts()
-                Telemetry.note("front_app", front.app.name ?? "")
+                Telemetry.note("front_app", .string(front.app.name ?? ""))
                 Telemetry.count("front_pid", Int(front.app.pid))
                 Telemetry.count("display", Int(front.display))
-                Telemetry.note("passed_over", front.passedOver ? front.own.name : "")
+                Telemetry.note("passed_over", .string(front.passedOver ? front.own.name : ""))
                 // How many processes were matched as the app eyes answers to: zero means none
                 // could be passed over or kept out, whatever is in front.
                 Telemetry.count("own_pids", front.own.pids.count)
@@ -162,7 +162,7 @@ struct Where: ParsableArguments {
                 let paged = try await pages(id)
                 Telemetry.count("examined", paged.examined)
                 Telemetry.count("pages", paged.pages.count)
-                Telemetry.note("reach", (paged.stop?.reach ?? .whole).kind)
+                Telemetry.note("reach", .string((paged.stop?.reach ?? .whole).kind))
                 return .page(window: id, frame: try paged.page(in: id))
             }
         }
@@ -422,11 +422,11 @@ extension Report {
     ) async throws -> String {
         // [LAW:nothing-unseen] One event per look, from the one path every verb and tool
         // reads through: which reader, what it read, and how it ended.
-        try await Telemetry.unit("look", outcome: \.outcome) {
-            Telemetry.note("source", source.rawValue)
-            Telemetry.note("region", query.region.kind)
-            Telemetry.note("order", query.near == nil ? "reading" : "near")
-            Telemetry.note("role", query.role?.rawValue ?? "none")
+        try await Telemetry.unit("look", result: { $0.result }) {
+            Telemetry.note("source", .string(source.rawValue))
+            Telemetry.note("region", .string(query.region.kind))
+            Telemetry.note("order", .string(query.near == nil ? "reading" : "near"))
+            Telemetry.note("role", .string(query.role?.rawValue ?? "none"))
             // Tallied as each read starts, so a look that fails says how many it spent.
             Telemetry.count("reads", 0)
             Telemetry.count("box_ms", 0)
@@ -445,14 +445,14 @@ extension Report {
                 let reading = try await counted(query).pressed()
                 Self.count(reading, query)
                 return (text: lines(reading, query: query, source: source, grantNote: grantNote).joined(separator: "\n"),
-                        outcome: reading.outcome.said)
+                        result: reading.outcome.said)
             }
-            Telemetry.note("until", wait.until.rawValue)
+            Telemetry.note("until", .string(wait.until.rawValue))
             let waited = try await waiting(for: wait, on: query, read: counted)
             Self.count(waited.reading, query)
             let said = lines(waited.reading, query: query, source: source, grantNote: grantNote)
             return (text: ([waitedClause(waited, wait) + said[0]] + said.dropFirst()).joined(separator: "\n"),
-                    outcome: waited.settled ? "settled" : "timed_out")
+                    result: waited.settled ? "settled" : "timed_out")
         }.text
     }
 
@@ -467,7 +467,7 @@ extension Report {
         }
         // How many processes' windows a front look took in; every other region reads them all.
         if case .only(let pids) = reading.scope.owners { Telemetry.count("owners", pids.count) }
-        Telemetry.note("reach", reading.scope.reach.kind)
+        Telemetry.note("reach", .string(reading.scope.reach.kind))
         switch reading.outcome {
         case .matched(let m):
             Telemetry.count("matched", m.count)

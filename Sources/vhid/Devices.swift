@@ -5,6 +5,7 @@ import Input
 import Installations
 import Keystrokes
 import Pointing
+import Telemetry
 
 /// The two devices an installation's daemon owns, as a client reaches them.
 ///
@@ -56,11 +57,11 @@ struct Devices {
         let queue = DeviceQueue()
         // [LAW:nothing-unseen] Every report a verb sends passes here, so here is where they
         // are counted, from zero: a verb that opened the devices and sent nothing says so.
-        for tally in Tally.allCases { Invocation.count(tally, by: 0) }
+        for tally in Tally.allCases { Telemetry.count(tally.rawValue, 0) }
         let mouse = TalliedMouse(mouse: QueuedMouse(pointing: helper.mouse, queue: queue))
         let cursor = cursor(helper, on: queue)
         let randomness = RandomSource(seed: UInt64.random(in: .min ... .max))
-        Invocation.set(.seed, .string(String(randomness.seed, radix: 16)))
+        Telemetry.note(.seed, .string(String(randomness.seed, radix: 16)))
         // Both are IOHIDSystem's parameters, HIDClickTime and HIDInitialKeyRepeat: one per
         // Mac, the values the HID system counts clicks and repeats keys by, so every process
         // reads the ones governing the session in front, whoever's it is. Not the user's
@@ -68,15 +69,15 @@ struct Devices {
         // studious, 2026-10-06: set there, NSEvent answered them for bmf and for a user with
         // no session alike; a user's `defaults write` left them alone. `Hand`, `Cadence`.
         let doubleClick = Duration.seconds(NSEvent.doubleClickInterval)
-        Invocation.set(.doubleClickMilliseconds, .double(doubleClick / .milliseconds(1)))
+        Telemetry.note(.doubleClickMilliseconds, .double(doubleClick / .milliseconds(1)))
         let keyRepeatDelay = Duration.seconds(NSEvent.keyRepeatDelay)
-        Invocation.set(.keyRepeatDelayMilliseconds, .double(keyRepeatDelay / .milliseconds(1)))
+        Telemetry.note(.keyRepeatDelayMilliseconds, .double(keyRepeatDelay / .milliseconds(1)))
         let keyboard = TalliedKeyboard(keyboard: QueuedKeyboard(keyboard: helper.keyboard, queue: queue))
         let devices = Devices(keyboard: keyboard, mouse: mouse, cursor: cursor, front: front(helper, on: queue),
                               pointer: Pointer(mouse: mouse, cursor: cursor, displays: displays(helper, on: queue), clock: ContinuousClock(),
-                                               randomness: randomness, hand: Hand(doubleClickInterval: doubleClick), traced: Invocation.traced),
+                                               randomness: randomness, hand: Hand(doubleClickInterval: doubleClick), traced: Telemetry.traced),
                               typist: Typist(keyboard: keyboard, clock: ContinuousClock(), randomness: randomness,
-                                             cadence: Cadence(keyRepeatDelay: keyRepeatDelay), traced: Invocation.typed))
+                                             cadence: Cadence(keyRepeatDelay: keyRepeatDelay), traced: Telemetry.typed))
         let done: T
         do {
             done = try await body(devices)
@@ -144,9 +145,9 @@ struct Devices {
 struct TalliedKeyboard: Keyboard {
     let keyboard: any Keyboard
 
-    func down(_ usage: Usage) async throws { try await keyboard.down(usage); Invocation.count(.keyboardReports) }
-    func releaseAll() async throws { try await keyboard.releaseAll(); Invocation.count(.keyboardReports) }
-    func hold(_ keys: HeldKeys) async throws { try await keyboard.hold(keys); Invocation.count(.keyboardReports) }
+    func down(_ usage: Usage) async throws { try await keyboard.down(usage); Telemetry.tally(.keyboardReports) }
+    func releaseAll() async throws { try await keyboard.releaseAll(); Telemetry.tally(.keyboardReports) }
+    func hold(_ keys: HeldKeys) async throws { try await keyboard.hold(keys); Telemetry.tally(.keyboardReports) }
 }
 
 /// A mouse that counts each report on the running invocation once it is acknowledged, and
@@ -154,14 +155,14 @@ struct TalliedKeyboard: Keyboard {
 struct TalliedMouse: Mouse {
     let mouse: any Mouse
 
-    func down(_ button: Button) async throws { try await mouse.down(button); Invocation.count(.mouseReports) }
-    func releaseAll() async throws { try await mouse.releaseAll(); Invocation.count(.mouseReports) }
-    func hold(_ buttons: Set<Button>) async throws { try await mouse.hold(buttons); Invocation.count(.mouseReports) }
-    func move(by delta: Move) async throws { try await mouse.move(by: delta); Invocation.count(.mouseReports) }
+    func down(_ button: Button) async throws { try await mouse.down(button); Telemetry.tally(.mouseReports) }
+    func releaseAll() async throws { try await mouse.releaseAll(); Telemetry.tally(.mouseReports) }
+    func hold(_ buttons: Set<Button>) async throws { try await mouse.hold(buttons); Telemetry.tally(.mouseReports) }
+    func move(by delta: Move) async throws { try await mouse.move(by: delta); Telemetry.tally(.mouseReports) }
     func scroll(by delta: Scroll) async throws {
         try await mouse.scroll(by: delta)
-        Invocation.count(.mouseReports)
-        Invocation.count(.verticalNotches, by: delta.vertical == .zero ? 0 : 1)
-        Invocation.count(.horizontalNotches, by: delta.horizontal == .zero ? 0 : 1)
+        Telemetry.tally(.mouseReports)
+        Telemetry.tally(.verticalNotches, by: delta.vertical == .zero ? 0 : 1)
+        Telemetry.tally(.horizontalNotches, by: delta.horizontal == .zero ? 0 : 1)
     }
 }
