@@ -1,17 +1,19 @@
 import ArgumentParser
-import Eyes
+import Seeing
 import Foundation
 
 /// Where the displays are, which a caller needs before it can name one to read or aim a
 /// click at one left of or above the main display, where every coordinate is negative.
 /// Nothing here captures, and it needs no grant.
-struct Displays: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
+public struct Displays: AsyncParsableCommand {
+    public init() {}
+
+    public static let configuration = CommandConfiguration(
         commandName: "displays",
         abstract: "List the active displays, main first, with their id, bounds and scale."
     )
 
-    func run() async throws {
+    public func run() async throws {
         print(Self.report(Geometry.displays()))
     }
 

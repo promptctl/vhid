@@ -1,14 +1,16 @@
 import AppKit
 import ArgumentParser
-import Eyes
+import Seeing
 import Telemetry
 import Tree
 
 /// What a click at a point would hit, asked right before acting on it: which app and window
 /// it goes to, and which element it presses. A question, never a guard - nothing is refused on
 /// its answer, and `vhid click` presses what is there whatever eyes said.
-struct Hit: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
+public struct Hit: AsyncParsableCommand {
+    public init() {}
+
+    public static let configuration = CommandConfiguration(
         abstract: "Say what a click at a point would hit: the app and window it lands in, and the element it presses with the ones that hold it.",
         discussion: about + " A negative coordinate, on a display left of or above the main one, follows --, as vhid click takes it: eyes hit -- -500 300."
     )
@@ -22,10 +24,10 @@ struct Hit: AsyncParsableCommand {
     @Argument(help: "The point's y, in the same points.")
     var y: Double
 
-    func validate() throws { _ = try Self.point(x, y) }
+    public func validate() throws { _ = try Self.point(x, y) }
 
     @MainActor
-    func run() async throws {
+    public func run() async throws {
         print(try await Self.answer(at: Self.point(x, y)) { try await Self.land(at: $0) })
     }
 

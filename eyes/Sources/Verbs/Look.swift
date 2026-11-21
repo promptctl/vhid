@@ -1,7 +1,7 @@
 import AppKit
 import ArgumentParser
 import CoreGraphics
-import Eyes
+import Seeing
 import Grants
 import Pixels
 import Telemetry

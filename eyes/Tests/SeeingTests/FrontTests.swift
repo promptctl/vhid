@@ -1,5 +1,5 @@
 import Testing
-@testable import Eyes
+@testable import Seeing
 
 /// What a look with no place named reads: the app an agent is working in, from listings a
 /// test writes.

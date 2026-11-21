@@ -1,11 +1,11 @@
 import CoreGraphics
-@testable import Eyes
+@testable import Seeing
 import Pixels
 import Telemetry
 import TelemetryTesting
 @testable import Tree
 import Testing
-@testable import EyesCommand
+@testable import EyesVerbs
 
 /// What `find` and `read` print, asked with a reading a test wrote.
 @Suite(.eventsKept) struct ReportTests {

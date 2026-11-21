@@ -1,7 +1,7 @@
 import ApplicationServices
 import CoreGraphics
 import Darwin
-import Eyes
+import Seeing
 import Foundation
 import Responsibility
 import Telemetry

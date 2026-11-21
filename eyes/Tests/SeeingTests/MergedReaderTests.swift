@@ -1,5 +1,5 @@
 import Testing
-@testable import Eyes
+@testable import Seeing
 
 /// A merged reader over two readers a test wrote, neither of which is the tree or pixels.
 @MainActor @Suite struct MergedReaderTests {

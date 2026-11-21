@@ -1,6 +1,6 @@
 import CoreGraphics
 import Testing
-@testable import Eyes
+@testable import Seeing
 
 /// The rule that turns the window server's list into the windows a person can see, asked
 /// with no window server.

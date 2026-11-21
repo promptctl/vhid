@@ -1,9 +1,11 @@
 import ArgumentParser
-import Eyes
+import Seeing
 
 /// Where a piece of text is, as the point `vhid click` presses.
-struct Find: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
+public struct Find: AsyncParsableCommand {
+    public init() {}
+
+    public static let configuration = CommandConfiguration(
         abstract: "Find text on screen and print the point vhid clicks to hit it, and the box around it.",
         discussion: "Case never matters. With nothing found, prints the nearest runs and how many edits off each is."
     )
@@ -37,7 +39,7 @@ struct Find: AsyncParsableCommand {
     @Option(help: .init(stringLiteral: Help.timeout))
     var timeout: Double?
 
-    func validate() throws {
+    public func validate() throws {
         _ = try Self.match(text, exact: exact, edits: edits, as: .flag)
         _ = try Self.near(near)
         _ = try Self.role(role, source: source, as: .flag)
@@ -46,7 +48,7 @@ struct Find: AsyncParsableCommand {
     }
 
     @MainActor
-    func run() async throws {
+    public func run() async throws {
         try await look(Query(match: Self.match(text, exact: exact, edits: edits, as: .flag),
                              region: await place.region, limit: Where.limit(limit, as: .flag), near: Self.near(near),
                              role: Self.role(role, source: source, as: .flag)),
@@ -101,8 +103,10 @@ struct Find: AsyncParsableCommand {
 }
 
 /// Every piece of text in a region, each with its point, in reading order.
-struct Read: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
+public struct Read: AsyncParsableCommand {
+    public init() {}
+
+    public static let configuration = CommandConfiguration(
         abstract: "Print the text in a region, one run per row, with the point vhid clicks to hit it and the box around it."
     )
 
@@ -117,13 +121,13 @@ struct Read: AsyncParsableCommand {
     @Option(help: .init(stringLiteral: Help.role))
     var role: String?
 
-    func validate() throws {
+    public func validate() throws {
         _ = try Where.limit(limit, as: .flag)
         _ = try Find.role(role, source: source, as: .flag)
     }
 
     @MainActor
-    func run() async throws {
+    public func run() async throws {
         try await look(Query(match: nil, region: await place.region, limit: Where.limit(limit, as: .flag),
                              role: Find.role(role, source: source, as: .flag)), source: source)
     }

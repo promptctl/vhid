@@ -1,6 +1,6 @@
-import Eyes
+import Seeing
 import Testing
-@testable import EyesCommand
+@testable import EyesVerbs
 
 /// What `eyes displays` prints, over displays written here.
 @Suite struct DisplaysCommandTests {

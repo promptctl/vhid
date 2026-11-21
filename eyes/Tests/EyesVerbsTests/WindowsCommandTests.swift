@@ -1,6 +1,6 @@
-import Eyes
+import Seeing
 import Testing
-@testable import EyesCommand
+@testable import EyesVerbs
 
 /// The sentence the binary prints before its rows, asked with no screen behind it.
 ///

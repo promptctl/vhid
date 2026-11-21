@@ -1,5 +1,5 @@
 import Testing
-@testable import Eyes
+@testable import Seeing
 
 /// What a reader's candidates become, asked with a list a test wrote.
 @Suite struct JudgeTests {

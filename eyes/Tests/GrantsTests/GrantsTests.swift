@@ -1,5 +1,5 @@
 import Foundation
-import Eyes
+import Seeing
 import Grants
 import Telemetry
 import TelemetryTesting
