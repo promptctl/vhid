@@ -242,7 +242,7 @@ import Testing
                                       wait: Wait(until: .present, seconds: 1)) { _, _ in
                 Judged(hit) { reading, _ in try await Task.sleep(for: .milliseconds(20)); return reading }
             }
-            _ = try? await Report.text(Query(match: nil, region: .display(12)), source: .merged) { _, _ in throw PixelsError.noGrant }
+            _ = try? await Report.text(Query(match: nil, region: .display(12)), source: .merged) { _, _ in throw PixelsError.noGrant(.screenRecording) }
             _ = try await Report.text(Query(match: .contains("OK"), region: .page(window: 7, frame: Self.display), near: .contains("Beta")),
                                       source: .merged) { _, _ in .standing(halfBlind) }
         }
@@ -273,7 +273,8 @@ import Testing
     /// event counts the processes whose windows it took in.
     @Test func aFrontLookNamesItsAppAndCountsItsOwners() async throws {
         let events = Collected()
-        let front = Front(app: Front.App(pid: 300, name: "System Settings"), display: 2, own: Front.Passed(pids: [80], name: "iTerm2"), passedOver: true)
+        let front = Front(app: Front.App(pid: 300, name: "System Settings"), display: 2, own: Front.Passed(pids: [80], name: "iTerm2"),
+                          passedOver: .own("iTerm2"))
         let reading = Reading(outcome: .nearest([]), scope: Scope(region: Self.display, examined: 3, reach: .whole, owners: .only([300, 900])))
         let text = try await Telemetry.$export.withValue(events.export) {
             try await Report.text(Query(match: .contains("Add"), region: .front(front)), source: .tree) { _, _ in .standing(reading) }
@@ -291,17 +292,23 @@ import Testing
     }
 
     /// Choosing what is in front is its own event: the app, its pid, the display, and the
-    /// app passed over.
+    /// app passed over - here Finder, frontmost over the desktop with no window open.
     @Test func choosingWhatIsInFrontIsOneEvent() async throws {
         let events = Collected()
-        let front = Front(app: Front.App(pid: 300, name: "System Settings"), display: 2, own: Front.Passed(pids: [80], name: "iTerm2"), passedOver: true)
+        let settings = Front.App(pid: 300, name: "System Settings")
+        let finder = Front.App(pid: 500, name: "Finder")
+        let display = Display(id: 2, frame: Self.display, isMain: true, scale: 2)
+        let window = Window(id: 3, owner: "System Settings", pid: 300, frame: ScreenRect(x: -1000, y: 0, width: 600, height: 400), layer: 0)
+        let desk = Desk(frontmost: finder, own: Front.Passed(pids: [80], name: "iTerm2"),
+                        running: [Desk.Running(app: settings, regular: true), Desk.Running(app: finder, regular: true)],
+                        listing: WindowListing(windows: [window], excluded: []), displays: [display])
         let region = try await Telemetry.$export.withValue(events.export) {
-            try await Where.Place.front.region(front: { front })
+            try await Where.Place.front.region(desk: { desk })
         }
-        #expect(region == .front(front))
+        #expect(region == .front(Front(app: settings, display: 2, own: desk.own, passedOver: .windowless(finder))))
         let event = try #require(events.all.first)
         #expect(event.event == "front")
-        #expect(event.attributes["front_app"] == "System Settings" && event.attributes["passed_over"] == "iTerm2")
+        #expect(event.attributes["front_app"] == "System Settings" && event.attributes["passed_over"] == "Finder")
         #expect(event.counts["front_pid"] == 300 && event.counts["display"] == 2 && event.counts["own_pids"] == 1)
     }
 

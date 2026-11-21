@@ -14,7 +14,7 @@ struct Eye: AsyncParsableCommand {
         commandName: "eyes",
         abstract: "Say what is on screen and where, in the coordinates vhid clicks.",
         version: Version.current,
-        subcommands: [Windows.self, Displays.self, Find.self, Read.self, Hit.self, GrantsVerb.self]
+        subcommands: [Windows.self, Displays.self, Find.self, Read.self, Hit.self, GrantsVerb.self, ReadGrants.self]
     )
 
     /// ArgumentParser's own entry point, run as one unit of work named for the verb it

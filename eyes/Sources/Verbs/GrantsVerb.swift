@@ -20,17 +20,7 @@ public struct GrantsVerb: AsyncParsableCommand {
     @Flag(help: "Raise macOS's dialog for each missing grant. macOS shows it once per app; run eyes grants again once it is answered.")
     var ask = false
 
-    /// The reading half: this process's own answer, printed as one line for the process
-    /// that started it. Hidden, because it is the mechanism of a fresh reading, not a
-    /// question a person asks. [LAW:one-source-of-truth] Every reading is one of these.
-    @Flag(help: .private)
-    var readHere = false
-
     public func run() async throws {
-        if readHere {
-            print(GrantReading.here().line)
-            return
-        }
         let (reading, holder) = try await Self.look()
         // The dialogs return before anyone answers them, so there is nothing new to read yet.
         let asked = ask ? Grant.allCases.filter { !reading.holds($0) } : []
@@ -45,14 +35,14 @@ public struct GrantsVerb: AsyncParsableCommand {
         try await Telemetry.unit("grants") { (try await reading(), try await Holder.current()) }
     }
 
-    /// A fresh reading, from a child of this process. [LAW:no-ambient-temporal-coupling]
-    /// A long-lived `eyes mcp` keeps its first Screen Recording answer, so it never reads
-    /// its own; a child asks tccd anew every time.
+    /// A fresh reading, from a child of this process: this executable, `vhid` or `eyes`, run
+    /// as `read-grants`. [LAW:no-ambient-temporal-coupling] A long-lived MCP server keeps its
+    /// first Screen Recording answer, so it never reads its own; a child asks tccd anew every time.
     static func reading() async throws -> GrantReading {
-        guard let eyes = Bundle.main.executableURL else {
+        guard let executable = Bundle.main.executableURL else {
             throw GrantReadingFailure("this process cannot name its own executable to start a reading")
         }
-        return try await GrantReading.taken(by: eyes, ["grants", "--read-here"])
+        return try await GrantReading.taken(by: executable, [ReadGrants._commandName])
     }
 
     /// The scope line and a row per grant: what the verb prints and what the MCP tool
@@ -77,4 +67,16 @@ public struct GrantsVerb: AsyncParsableCommand {
         "\(grant.name)\t\(held ? "granted" : "not granted")\t\(grant.reader.rawValue)"
             + (held ? "" : "\tturn on \(holder.name) in \(grant.pane)")
     }
+}
+
+/// The reading half of a fresh reading: this process's own answer, printed as one line for
+/// the process that started it. Hidden, because it is the mechanism of a fresh reading, not
+/// a question a person asks; both executables list it, so either reads with itself.
+/// [LAW:one-source-of-truth] Every reading is one of these.
+public struct ReadGrants: ParsableCommand {
+    public init() {}
+
+    public static let configuration = CommandConfiguration(commandName: "read-grants", shouldDisplay: false)
+
+    public func run() { print(GrantReading.here().line) }
 }

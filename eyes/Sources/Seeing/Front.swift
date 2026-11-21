@@ -1,29 +1,38 @@
 import CoreGraphics
 
-/// The app a look with no place named reads: the one an agent is working in.
+/// The app a look reads: the one it was told, or with no app named, the one a person sees
+/// in front.
 ///
-/// The frontmost app is where keys go, so it is that app - unless it is the app eyes answers
-/// to, the agent's own terminal or Claude app, which echoes on screen the very text it asks
-/// eyes to find. Then it is the app of the frontmost window behind it. What is read is that
-/// app's windows and whatever is stacked in front of its front window - a remote Open panel,
-/// a service's popover - derived afresh from each read's own window list by `owners(in:hit:)`,
-/// so a panel that opens during a wait is read from the next read on. Only what a wait must
-/// keep is held here. [LAW:one-source-of-truth]
+/// The frontmost app is where keys go, and with a window open it is what a person sees in
+/// front - unless it is the app eyes answers to, the agent's own terminal or Claude app,
+/// which echoes on screen the very text it asks eyes to find. Then, and when the frontmost
+/// app has no window open - Finder over the desktop, an app whose last window closed - it
+/// gives way to the app of the frontmost ordinary window, which is what is in front to see.
+/// What is read is that app's windows and whatever is stacked in front of its front window
+/// - a remote Open panel, a service's popover - derived afresh from each read's own window
+/// list by `owners(in:hit:)`, so a panel that opens during a wait is read from the next read
+/// on. Only what a wait must keep is held here. [LAW:one-source-of-truth]
 public struct Front: Sendable, Hashable {
     public let app: App
-    /// The display holding the app's front window, read whole and cut to the owners' windows.
+    /// The display holding most of the app's front window, read whole and cut to the owners' windows.
     public let display: CGDirectDisplayID
     /// The app eyes answers to: its windows are never read, wherever they are stacked - in
     /// front and passed over, or a window over the front app's.
     public let own: Passed
-    /// Whether the app eyes answers to was in front, and passed over for the app behind it.
-    public let passedOver: Bool
+    /// The frontmost app, when it gave way to the app behind it.
+    public let passedOver: PassedOver?
 
-    public init(app: App, display: CGDirectDisplayID, own: Passed, passedOver: Bool) {
+    public init(app: App, display: CGDirectDisplayID, own: Passed, passedOver: PassedOver?) {
         self.app = app
         self.display = display
         self.own = own
         self.passedOver = passedOver
+    }
+
+    /// Why the frontmost app gave way: it is the app eyes answers to, or it has no window open.
+    public enum PassedOver: Sendable, Hashable {
+        case own(String)
+        case windowless(App)
     }
 
     /// A running application, as the window server and AppKit both know it.
@@ -37,6 +46,11 @@ public struct Front: Sendable, Hashable {
         }
 
         public var description: String { "\(name ?? "(unnamed)") (pid \(pid))" }
+
+        /// Whether this is the app a caller named: by its name exactly as AppKit lists it,
+        /// so a name never means two apps that merely share words. [LAW:single-enforcer] The
+        /// one rule a named app is matched by, for a look and an act alike.
+        public func isCalled(_ name: String) -> Bool { self.name == name }
     }
 
     /// The app eyes answers to: every process running from its bundle, and its name.
@@ -48,6 +62,43 @@ public struct Front: Sendable, Hashable {
             self.pids = pids
             self.name = name
         }
+    }
+
+    /// The app a look with no app named reads, on `desk`. [LAW:single-enforcer]
+    public static func choose(on desk: Desk) throws(AppUnread) -> Front {
+        if let first = desk.frontmost, !desk.own.pids.contains(first.pid), desk.listing.front(of: first.pid) != nil {
+            return try Front(first, passedOver: nil, on: desk)
+        }
+        let readable = { (pid: Int32) in desk.isRegular(pid) && !desk.own.pids.contains(pid) }
+        guard let behind = desk.listing.front(where: readable) else {
+            throw desk.listing.front(where: { desk.own.pids.contains($0) }) == nil ? .nothingOnScreen : .noOrdinaryWindow(own: desk.own.name)
+        }
+        let passed = desk.frontmost.map { desk.own.pids.contains($0.pid) ? PassedOver.own(desk.own.name) : .windowless($0) }
+        return try Front(desk.app(of: desk.listing.windows[behind]), passedOver: passed, on: desk)
+    }
+
+    /// The app called `name` on `desk`: of the instances running under that name, other than
+    /// the app eyes answers to, the one whose window is frontmost.
+    public static func named(_ name: String, on desk: Desk) throws(AppUnread) -> Front {
+        let called = desk.running.map(\.app).filter { $0.isCalled(name) }
+        guard !called.isEmpty else {
+            throw .notRunning(name, ordinary: Set(desk.running.filter(\.regular).compactMap(\.app.name)).sorted())
+        }
+        let others = called.filter { !desk.own.pids.contains($0.pid) }
+        let place = { (app: App) in desk.listing.front(of: app.pid) ?? .max }
+        guard let chosen = others.min(by: { place($0) < place($1) }) else { throw .own(name) }
+        return try Front(chosen, passedOver: nil, on: desk)
+    }
+
+    /// `app` on the display holding most of its front window.
+    private init(_ app: App, passedOver: PassedOver?, on desk: Desk) throws(AppUnread) {
+        guard let window = desk.listing.front(of: app.pid).map({ desk.listing.windows[$0] }) else { throw .noWindow(app) }
+        let shown = { (display: Display) -> CGFloat in
+            let shared = display.frame.cgRect.intersection(window.frame.cgRect)
+            return shared.isNull ? 0 : shared.width * shared.height
+        }
+        guard let display = desk.displays.max(by: { shown($0) < shown($1) }), shown(display) > 0 else { throw .offDisplays(app) }
+        self.init(app: app, display: display.id, own: desk.own, passedOver: passedOver)
     }
 
     /// The processes this read takes in, from the windows on screen now: the app, and every
@@ -73,49 +124,21 @@ public struct Front: Sendable, Hashable {
 
     /// Where an app a click at `point` lands in stands to a look with no place named, by the
     /// rules that look reads by: `own`, its one display, the windows it walks, and `owners`.
-    /// [LAW:single-enforcer] `front` is nil when only the app eyes answers to has an ordinary
-    /// window open.
-    public static func standing(of pid: Int32, at point: ScreenPoint, own: Passed, front: Front?, in listing: WindowListing,
-                                displays: [Display], hit: (ScreenPoint) -> Heard<Int32>) -> Standing {
-        if own.pids.contains(pid) { return .own(own.name) }
-        guard let front else { return .behind(nil) }
-        guard displays.contains(where: { $0.id == front.display && $0.frame.contains(point) }) else {
-            return .otherDisplay(front.app, front.display)
+    /// [LAW:single-enforcer] `front` is what that look would read on `desk`, or why it reads nothing.
+    public static func standing(of pid: Int32, at point: ScreenPoint, on desk: Desk, front: Result<Front, AppUnread>,
+                                hit: (ScreenPoint) -> Heard<Int32>) -> Standing {
+        if desk.own.pids.contains(pid) { return .own(desk.own.name) }
+        let read: Front
+        switch front {
+        case .success(let front): read = front
+        case .failure(let why): return .unread(why)
         }
-        guard listing.windows.contains(where: { $0.pid == pid && $0.frame.contains(point) }) else { return .noWindow(front.app) }
-        if pid == front.app.pid { return .front(front.app) }
-        return front.owners(in: listing, hit: hit).contains(pid) ? .overFront(front.app) : .behind(front.app)
-    }
-
-    /// The app a look with no place named reads, from facts the caller gathered.
-    ///
-    /// - frontmost: the app AppKit names frontmost, when any is; when none is, the app of the
-    ///   frontmost ordinary window stands for it, by the same rule.
-    /// - own: the app eyes answers to.
-    /// - regular: the processes that are ordinary apps (AppKit's `.regular` activation
-    ///   policy), which is what "an app behind" can be - not the Dock, the menu bar or a
-    ///   service's panel.
-    /// - names: what each of those apps is called.
-    public static func choose(frontmost: App?, own: Passed, regular: Set<Int32>, names: [Int32: String],
-                              listing: WindowListing, displays: [Display]) throws(NoFront) -> Front {
-        let app = { (window: Window) in App(pid: window.pid, name: names[window.pid] ?? window.owner) }
-        let ordinary = { (pid: Int32) in regular.contains(pid) }
-        guard let first = frontmost ?? listing.front(where: ordinary).map({ app(listing.windows[$0]) }) else {
-            throw NoFront(own: own.name, why: .onlyOwn)
+        guard desk.displays.contains(where: { $0.id == read.display && $0.frame.contains(point) }) else {
+            return .otherDisplay(read.app, read.display)
         }
-        let chosen: App
-        let passed = own.pids.contains(first.pid)
-        if !passed {
-            chosen = first
-        } else if let behind = listing.front(where: { ordinary($0) && !own.pids.contains($0) }) {
-            chosen = app(listing.windows[behind])
-        } else {
-            throw NoFront(own: own.name, why: .onlyOwn)
-        }
-        let window = listing.front(of: chosen.pid).map { listing.windows[$0] }
-        let display = window.flatMap { w in displays.first { $0.frame.contains(w.frame.centre) } } ?? displays.first { $0.isMain }
-        guard let display else { throw NoFront(own: own.name, why: .noDisplay) }
-        return Front(app: chosen, display: display.id, own: own, passedOver: passed)
+        guard desk.listing.windows.contains(where: { $0.pid == pid && $0.frame.contains(point) }) else { return .noWindow(read.app) }
+        if pid == read.app.pid { return .front(read.app) }
+        return read.owners(in: desk.listing, hit: hit).contains(pid) ? .overFront(read.app) : .behind(read.app)
     }
 }
 
@@ -133,14 +156,16 @@ public enum Standing: Sendable, Hashable {
     case noWindow(Front.App)
     /// On a display that look does not read, with the app it reads and the display it does.
     case otherDisplay(Front.App, CGDirectDisplayID)
-    /// An app that look does not read, with the app it reads, nil when there is none.
-    case behind(Front.App?)
+    /// An app that look does not read, with the app it reads.
+    case behind(Front.App)
+    /// An app that look does not read, because it reads no app, and why.
+    case unread(AppUnread)
 
     /// The app a look with no place named reads, when there is one.
     public var front: Front.App? {
         switch self {
-        case .front(let app), .overFront(let app), .noWindow(let app), .otherDisplay(let app, _), .behind(let app?): app
-        case .own, .behind(nil): nil
+        case .front(let app), .overFront(let app), .noWindow(let app), .otherDisplay(let app, _), .behind(let app): app
+        case .own, .unread: nil
         }
     }
 
@@ -152,6 +177,7 @@ public enum Standing: Sendable, Hashable {
         case .otherDisplay: "other_display"
         case .noWindow: "no_window"
         case .behind: "behind"
+        case .unread: "unread"
         }
     }
 }
@@ -172,27 +198,37 @@ extension WindowListing {
     func front(of pid: Int32) -> Int? { front { $0 == pid } }
 }
 
-/// A look with no place named has nothing it could mean: no app but the one eyes answers to
-/// has a window on screen, or no display is attached. [LAW:no-silent-failure]
-public struct NoFront: Error, Equatable, CustomStringConvertible {
-    public let own: String
-    public let why: Why
-
-    public enum Why: Sendable, Equatable {
-        case onlyOwn
-        /// Between a display detached and the next attached, as when one is unplugged mid-read.
-        case noDisplay
-    }
-
-    public init(own: String, why: Why) {
-        self.own = own
-        self.why = why
-    }
+/// Why a look has no app to read: each state an app can be in that leaves nothing of it to
+/// read, built from what the desk said of it. [LAW:types-are-the-program] [LAW:no-silent-failure]
+public enum AppUnread: Error, Hashable, CustomStringConvertible {
+    /// No app but the one eyes answers to has a window on screen.
+    case noOrdinaryWindow(own: String)
+    /// No app has a window on screen at all.
+    case nothingOnScreen
+    /// No running app is called this; the ordinary apps that are running, by name.
+    case notRunning(String, ordinary: [String])
+    /// The app named is the one eyes answers to, whose windows a look never reads.
+    case own(String)
+    /// The app is running with no window on screen.
+    case noWindow(Front.App)
+    /// The app's front window is on no display attached.
+    case offDisplays(Front.App)
 
     public var description: String {
-        switch why {
-        case .onlyOwn: "no app but \(own), which eyes answers to, has a window on screen; name a display to read every app on it"
-        case .noDisplay: "no display is attached, so there is no screen to read"
+        switch self {
+        case .noOrdinaryWindow(let own):
+            "no app but \(own), which eyes answers to, has a window on screen; name a display to read every app on it"
+        case .nothingOnScreen:
+            "no app has a window on screen; name a display to read what is on it"
+        case .notRunning(let name, let ordinary):
+            "no running app is called \(name.debugDescription), named exactly as it is listed; running: "
+                + (ordinary.isEmpty ? "none" : ordinary.joined(separator: ", "))
+        case .own(let name):
+            "\(name) is the app eyes answers to, the agent's own, whose windows a look never reads"
+        case .noWindow(let app):
+            "\(app) has no window on screen, so there is nothing of it to read"
+        case .offDisplays(let app):
+            "\(app) has its front window on no display attached, so there is nothing of it to read"
         }
     }
 }

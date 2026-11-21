@@ -168,7 +168,7 @@ let package = Package(
             name: "vhid",
             dependencies: [
                 "Input", "Helper", "Installations", "KeyboardLayouts", "Keystrokes", "Pointing", "DriverExtension", "Doctor",
-                "Version", "RecordingTie", "Signals", "Telemetry", "Turns",
+                "Version", "RecordingTie", "Signals", "Telemetry", "Turns", "Seeing", "EyesVerbs",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "MCP", package: "swift-sdk"),
                 .product(name: "Logging", package: "swift-log"),
@@ -181,7 +181,7 @@ let package = Package(
             name: "vhidCLITests",
             dependencies: [
                 "vhid", "Input", "Helper", "Installations", "Keystrokes", "Pointing", "Doctor", "DriverExtension", "Version", "OwnThread", "TestClock", "Signals",
-                "Telemetry", "TelemetryTesting", "Turns",
+                "Telemetry", "TelemetryTesting", "Turns", "Seeing", "EyesVerbs",
                 .product(name: "MCP", package: "swift-sdk"),
             ]
         ),

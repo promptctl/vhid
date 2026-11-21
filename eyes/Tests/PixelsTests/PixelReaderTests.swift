@@ -87,6 +87,20 @@ import Testing
         }
     }
 
+    /// Which runs are the front app's is the hit test's to say, and it says nothing without
+    /// Accessibility: a front look by pixels without it is refused naming that grant, before
+    /// any capture, rather than read with every run set aside as unknown.
+    @Test @MainActor func aFrontLookWithoutAccessibilityIsRefusedNamingIt() async {
+        let reader = PixelReader(granted: { $0 == PixelReader.grant }, hit: { _ in .unanswered })
+        let front = Front(app: Front.App(pid: 300, name: "System Settings"), display: 1, own: Front.Passed(pids: [80], name: "iTerm2"), passedOver: nil)
+        await #expect {
+            _ = try await reader.look(Query(match: nil, region: .front(front)))
+        } throws: { error in
+            guard case PixelsError.noGrant(.accessibility) = error else { return false }
+            return "\(error)".contains("Accessibility") && "\(error)".contains(Grant.holderNamedBy)
+        }
+    }
+
     /// A line of words, one every 50 points from `from`, as the tile that read them saw it.
     private func line(_ words: [String], from: Double, y: Double = 100) -> Found {
         let placed = words.enumerated().map { i, w in

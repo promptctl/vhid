@@ -37,6 +37,10 @@ public enum Grant: String, CaseIterable, Sendable {
 
     public var pane: String { "System Settings > Privacy & Security > \(name)" }
 
+    /// Where a refusal points for the app that has to hold a grant, which is not this
+    /// binary but whichever app macOS charges it to: a terminal, an agent's app.
+    public static let holderNamedBy = "`vhid doctor` or `eyes grants`"
+
     /// Whether this process holds it, read without ever putting a dialog on screen.
     ///
     /// Reading Accessibility files the responsible app into the Accessibility list,

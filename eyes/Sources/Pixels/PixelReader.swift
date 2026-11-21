@@ -36,7 +36,11 @@ public struct PixelReader: Reader {
         // [LAW:no-silent-failure] The grant is asked explicitly because capturing without
         // it does not fail - it returns the desktop wallpaper with every window blanked,
         // and recognising that is a confident "nothing here".
-        guard try await granted(Self.grant) else { throw PixelsError.noGrant }
+        guard try await granted(Self.grant) else { throw PixelsError.noGrant(Self.grant) }
+        // Which runs are the front app's is settled by the system's hit test, which answers
+        // nothing without Accessibility; without it every run would be set aside as unknown
+        // rather than the read said to be missing a grant. [LAW:no-silent-failure]
+        if case .front = query.region, !(try await granted(.accessibility)) { throw PixelsError.noGrant(.accessibility) }
         let region = try Self.resolve(query.region)
         let listing = try Geometry.onScreen()
         let owners = query.region.owners(in: listing, hit: hit)
@@ -269,7 +273,7 @@ struct Piece {
 /// Everything that means the reader could not look, as opposed to having looked and found
 /// nothing. Each one throws, because a returned `Reading` is taken as proof of looking.
 public enum PixelsError: ReaderError, CustomStringConvertible {
-    case noGrant
+    case noGrant(Grant)
     case offScreen(ScreenRect)
     case spansDisplays(ScreenRect)
     case captureWrongShape(ScreenRect, width: Int, height: Int)
@@ -280,9 +284,10 @@ public enum PixelsError: ReaderError, CustomStringConvertible {
 
     public var description: String {
         switch self {
-        case .noGrant:
-            "\(PixelReader.grant.name) is not granted to the app responsible for eyes, so a capture would show only the wallpaper."
-                + " Grant it in \(PixelReader.grant.pane)."
+        case .noGrant(let grant):
+            "\(grant.name) is not granted to the app responsible for this process, so "
+                + (grant == PixelReader.grant ? "a capture would show only the wallpaper." : "the front app's text cannot be told from what covers it.")
+                + " Grant it in \(grant.pane); \(Grant.holderNamedBy) names that app."
         case .offScreen(let r):
             "\(r) is on no display, so there is nothing there to read"
         case .spansDisplays(let r):

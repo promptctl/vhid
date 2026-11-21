@@ -1,4 +1,5 @@
 import ArgumentParser
+import EyesVerbs
 import Foundation
 import Input
 import os
@@ -33,7 +34,7 @@ struct Vhid: AsyncParsableCommand {
         subcommands: [
             TypeCommand.self, PressCommand.self, GestureCommand.self, ClickCommand.self, MoveCommand.self, ScrollCommand.self,
             DragCommand.self, CursorCommand.self, PlayCommand.self, RecordCommand.self, McpCommand.self, DriverCommand.self,
-            ServiceCommand.self, DoctorCommand.self,
+            ServiceCommand.self, DoctorCommand.self, ReadGrants.self,
         ])
 
     /// ArgumentParser's own `main`, run as one invocation: parsing argv is part of it, so

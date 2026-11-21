@@ -23,7 +23,8 @@ enum Help {
     static let edits = "Match a run within this many single-character edits of the text, for recogniser slips."
     static let display = "Read this whole display, every app on it, by its window-server id, which `eyes displays` lists and every scope line names."
         + " With no display, window, rect or page, eyes reads what is in front: the frontmost app's windows and what is stacked in front of them,"
-        + " or the app behind when the frontmost is the one eyes answers to, such as the terminal running it."
+        + " or the app of the frontmost window behind when the frontmost app has no window open or is the one eyes answers to,"
+        + " such as the terminal running it."
     static let window = "Read this window's bounds, by the id `eyes windows` prints."
     static let rect = "Read this rectangle: x,y,width,height in the points vhid clicks, the form every rectangle eyes prints is in: a row's box, a window's or display's bounds, a scope line's region."
     static let page = "Read the web page this window shows, by the id `eyes windows` prints: the page alone,"
@@ -126,27 +127,29 @@ struct Where: ParsableArguments {
         typealias Pages = @Sendable @MainActor (UInt32) async throws -> Paged
         static let tree: Pages = { try await TreeReader(granted: SourceKind.granted).pages(in: $0) }
 
-        /// What is in front now: AppKit and the responsibility call in the process, a fake in a test.
-        typealias Fronts = @Sendable @MainActor () async throws -> Front
-        static let live: Fronts = { try Front.now(own: try await .current(), listing: try Geometry.onScreen(), displays: Geometry.displays()) }
+        /// The screen now: AppKit, the window server and the responsibility call in the
+        /// process, a fake in a test.
+        typealias Desks = @Sendable @MainActor () async throws -> Desk
+        static let live: Desks = { try await Desk.now() }
 
-        @MainActor func region(pages: Pages = tree, front: Fronts = live) async throws -> Region {
+        @MainActor func region(pages: Pages = tree, desk: Desks = live) async throws -> Region {
             switch self {
             case .region(let region): region
             case .page(let id): try await Self.page(id, pages: pages)
-            case .front: try await Self.front(front)
+            case .front: try await Self.front(desk)
             }
         }
 
         /// [LAW:nothing-unseen] Choosing what is in front is a decision of its own, before any
         /// look starts: which app, on which display, and which app it passed over.
-        @MainActor private static func front(_ fronts: Fronts) async throws -> Region {
+        @MainActor private static func front(_ desks: Desks) async throws -> Region {
             try await Telemetry.unit("front") {
-                let front = try await fronts()
+                let desk = try await desks()
+                let front = try Front.choose(on: desk)
                 Telemetry.note("front_app", .string(front.app.name ?? ""))
                 Telemetry.count("front_pid", Int(front.app.pid))
                 Telemetry.count("display", Int(front.display))
-                Telemetry.note("passed_over", .string(front.passedOver ? front.own.name : ""))
+                Telemetry.note("passed_over", front.passedOver.map { .string($0.said) })
                 // How many processes were matched as the app eyes answers to: zero means none
                 // could be passed over or kept out, whatever is in front.
                 Telemetry.count("own_pids", front.own.pids.count)
@@ -303,7 +306,7 @@ enum Report {
         case .rect: "rect"
         case .page(let id, _): "the page in window \(id)"
         case .front(let f):
-            "\(f.app) and what is in front of it\(f.passedOver ? ", passing over \(f.own.name), which eyes answers to," : "") on display \(f.display)"
+            "\(f.app) and what is in front of it\(f.passedOver.map { ", passing over \($0.clause)," } ?? "") on display \(f.display)"
         }
     }
 
@@ -512,18 +515,33 @@ extension Front.Passed {
     }
 }
 
-extension Front {
-    /// What a look with no place named reads now, with the app eyes answers to and the window
-    /// listing the caller already holds, so a hit judges the listing it found the window in.
+extension Front.PassedOver {
+    /// The app passed over, as a scope line names it.
+    var clause: String {
+        switch self {
+        case .own(let name): "\(name), which eyes answers to"
+        case .windowless(let app): "\(app), which has no window open"
+        }
+    }
+
+    /// The app passed over, as a record names it.
+    var said: String {
+        switch self {
+        case .own(let name): name
+        case .windowless(let app): app.name ?? ""
+        }
+    }
+}
+
+extension Desk {
+    /// The screen now, frontmost first: an activation lands before the listing that reflects it.
     @MainActor
-    static func now(own: Passed, listing: WindowListing, displays: [Display]) throws(NoFront) -> Front {
-        let running = NSWorkspace.shared.runningApplications
-        return try choose(
-            frontmost: App.now(),
-            own: own,
-            regular: Set(running.filter { $0.activationPolicy == .regular }.map(\.processIdentifier)),
-            names: Dictionary(running.compactMap { app in app.localizedName.map { (app.processIdentifier, $0) } }, uniquingKeysWith: { a, _ in a }),
-            listing: listing,
-            displays: displays)
+    static func now() async throws -> Desk {
+        let frontmost = Front.App.now()
+        let own = try await Front.Passed.current()
+        let running = NSWorkspace.shared.runningApplications.map {
+            Desk.Running(app: Front.App(pid: $0.processIdentifier, name: $0.localizedName), regular: $0.activationPolicy == .regular)
+        }
+        return Desk(frontmost: frontmost, own: own, running: running, listing: try Geometry.onScreen(), displays: Geometry.displays())
     }
 }

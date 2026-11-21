@@ -104,10 +104,10 @@ public struct Hit: AsyncParsableCommand {
         case .own: "the app eyes answers to, whose windows a look never reads: the agent's own terminal or app"
         case .otherDisplay(let front, let display):
             "on a display a look with no place named does not read: it reads \(front) on display \(display)"
-        case .behind(let front?): "not in front: a look with no place named reads \(front)"
+        case .behind(let front): "not in front: a look with no place named reads \(front)"
         case .noWindow(let front):
             "in no window of its own here - a menu bar, a menu - which a look with no place named never reads: it reads \(front)'s windows"
-        case .behind(nil): "not in front: only the app eyes answers to has an ordinary window open, so a look with no place named has no app to read"
+        case .unread(let why): "not in front: a look with no place named reads no app, as \(why)"
         }
     }
 
@@ -132,36 +132,30 @@ public struct Hit: AsyncParsableCommand {
             .joined(separator: "\t")
     }
 
-    /// The hit test and the window server, in the process. The window is looked for in the
-    /// listing read before the climb, so it and the front look it is judged by are one moment.
+    /// The hit test and the window server, in the process. The window, and the front look a
+    /// landing is judged by, come from the one desk read before the climb, so they are one moment.
     @MainActor
     static func land(at point: ScreenPoint) async throws -> Struck {
-        let displays = Geometry.displays()
-        guard displays.contains(where: { $0.frame.contains(point) }) else { throw NoSuchPlace.pointOffScreen(point) }
-        let listing = try Geometry.onScreen()
+        let desk = try await Desk.now()
+        guard desk.displays.contains(where: { $0.frame.contains(point) }) else { throw NoSuchPlace.pointOffScreen(point) }
         let climb: Landing.Climb
         switch try await TreeReader(granted: SourceKind.granted).climb(from: point, within: hitTesting) {
-        case .nothing(let calls): return .nothing(calls: calls, window: listing.windows.first { $0.frame.contains(point) })
+        case .nothing(let calls): return .nothing(calls: calls, window: desk.listing.windows.first { $0.frame.contains(point) })
         case .on(let climbed): climb = climbed
         }
-        let own = try await Front.Passed.current()
-        // Nothing but the app eyes answers to on screen is an answer here, not a refusal: a hit on
-        // that app, with nothing else on screen, is the case most worth saying.
-        let front: Front?
-        do { front = try Front.now(own: own, listing: listing, displays: displays) } catch {
-            guard error.why == .onlyOwn else { throw error }
-            front = nil
-        }
-        let window = listing.windows.first { $0.pid == climb.pid && $0.frame.contains(point) }
-        let name = NSRunningApplication(processIdentifier: climb.pid)?.localizedName ?? window?.owner
+        // No app to read is an answer here, not a refusal: a hit on the agent's own app, with
+        // nothing else on screen, is the case most worth saying.
+        let front = Result { () throws(AppUnread) in try Front.choose(on: desk) }
+        let window = desk.listing.windows.first { $0.pid == climb.pid && $0.frame.contains(point) }
+        let app = window.map(desk.app(of:)) ?? desk.running.first { $0.app.pid == climb.pid }?.app ?? Front.App(pid: climb.pid, name: nil)
         // The front look's own hit tests, unbounded as that look's are: one cut off by time would
         // say behind of an app that is over the front one. Counted apart from the climb's.
         var tests = 0
-        let standing = Front.standing(of: climb.pid, at: point, own: own, front: front, in: listing, displays: displays) {
+        let standing = Front.standing(of: climb.pid, at: point, on: desk, front: front) {
             tests += 1
             return TreeReader.hit($0)
         }
-        return .landed(Landing(point: point, app: Front.App(pid: climb.pid, name: name), standing: standing,
+        return .landed(Landing(point: point, app: app, standing: standing,
                                window: window, elements: climb.elements, end: climb.end, calls: climb.calls, frontCalls: tests))
     }
 }
