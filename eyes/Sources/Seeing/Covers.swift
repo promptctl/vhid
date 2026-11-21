@@ -82,7 +82,7 @@ public struct Covers {
     /// overlaps only the middle says nothing of the rest. Unanswered is not hidden - what
     /// is under it is read, and each finding asks for itself.
     public func hide(_ rect: ScreenRect) -> Bool {
-        let whole = windows.filter { $0.frame.cgRect.contains(rect.cgRect) }
+        let whole = windows.filter { $0.frame.contains(rect) }
         guard !whole.isEmpty else { return false }
         guard !whole.contains(where: { $0.pid == owner }) else { return true }
         guard case .answered(let pid) = hit(rect.centre) else { return false }

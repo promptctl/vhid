@@ -94,9 +94,8 @@ import Testing
     @Test func aPointThatIsNoPlaceIsRefused() throws {
         #expect(throws: (any Error).self) { try Hit.point(.infinity, 1) }
         #expect(throws: (any Error).self) { try Hit.point(1, .nan) }
+        #expect(throws: (any Error).self) { try Hit.point(1e19, 0) }
         #expect(try Hit.point(-5, 10) == ScreenPoint(x: -5, y: 10)!)
-        // A finite point past any screen is a number, said as one: it is refused off screen.
-        #expect(ScreenPoint(x: 1e19, y: 0)!.description == "1e+19,0")
     }
 
     /// One `hit` event per question, with the app, where it stands, the window, the rows and

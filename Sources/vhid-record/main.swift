@@ -147,6 +147,7 @@ func sinceStart() -> Duration { .nanoseconds(Int64(clock_gettime_nsec_np(CLOCK_U
             taking = false
             var said = notes
             if recorder.unmapped > 0 { said.append("\(recorder.unmapped) key presses with no HID usage, fn among them, are not in the recording") }
+            if recorder.unplaced > 0 { said.append("\(recorder.unplaced) pointer points, less vhid's motion, were no place on the screen and are not in the recording") }
             if recorder.vhidAtEdge > 0 { said.append("vhid's motion reached a screen edge \(recorder.vhidAtEdge) times while recording, so the pointer points after it may be off") }
             do {
                 for note in said { try command.send(FromApp.note(note)) }
@@ -168,10 +169,10 @@ let session = MainActor.assumeIsolated {
     Session(recorder: Recorder(start: start, flags: CGEventSource.flagsState(.combinedSessionState).rawValue, vhid: initialSenders, atEdge: atEdge))
 }
 
-/// A tap event as the recorder reads it, or nil for a kind it does not record.
-func tapEvent(_ type: CGEventType, _ event: CGEvent) -> TapEvent? {
-    let location = event.location
-    guard let place = ScreenPoint(x: location.x, y: location.y) else { return nil }
+/// A tap event as the recorder reads it, or nil for a kind it does not record; an event at
+/// no place on the screen is refused, not taken for a kind it does not record.
+func tapEvent(_ type: CGEventType, _ event: CGEvent) throws(NotAPlace) -> TapEvent? {
+    let place = try ScreenPoint.at(event.location.x, event.location.y)
     let button = { Button(rawValue: UInt8(event.getIntegerValueField(.mouseEventButtonNumber) + 1)) }
     let code = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
     let kind: TapEvent.Kind?
@@ -200,8 +201,14 @@ guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .tailAppendEve
         // rather than carried on with a gap in it, and said so.
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             session.finish(.end, notes: ["macOS turned the tap off (\(type == .tapDisabledByTimeout ? "too slow" : "by user input")), so the recording ends there"])
-        } else if session.taking, let taken = tapEvent(type, event) {
-            if taken.at > hour { session.finish(.end, notes: [hourNote]) } else { session.recorder.take(taken) }
+        } else if session.taking {
+            do {
+                if let taken = try tapEvent(type, event) {
+                    if taken.at > hour { session.finish(.end, notes: [hourNote]) } else { session.recorder.take(taken) }
+                }
+            } catch {
+                session.finish(.end, notes: ["macOS reported an event where \(error), so the recording ends there"])
+            }
         }
     }
     return Unmanaged.passUnretained(event)

@@ -21,7 +21,7 @@ import Testing
                 count?.pointee = 0
                 return asks == failing ? .cannotComplete : .success
             }
-            #expect(throws: CannotReadDisplays(error: .cannotComplete)) { try Geometry.displays(list: refused) }
+            #expect(throws: CannotReadDisplays.list(.cannotComplete)) { try Geometry.displays(list: refused) }
         }
         #expect(try Geometry.displays { _, _, count in count?.pointee = 0; return .success }.isEmpty)
     }
@@ -121,6 +121,14 @@ import Testing
             #expect(listing.windows.isEmpty, "a window at \(bad) is not a window anyone can click")
             #expect(listing.excluded == [WindowExclusion(reason: .unreadable, count: 1)])
         }
+    }
+
+    /// Bounds with a side under zero are no box, so the entry did not describe a window: it
+    /// is unreadable, not a window with no area.
+    @Test func aBoundWithASideUnderZeroIsUnreadable() {
+        var broken = entry()
+        broken[kCGWindowBounds as String] = ["X": 0.0, "Y": 33.0, "Width": -1.0, "Height": 949.0]
+        #expect(Geometry.listing(from: [broken]).excluded == [WindowExclusion(reason: .unreadable, count: 1)])
     }
 
     /// A NaN *size* is the same hazard by a different door: it slips past the area guard

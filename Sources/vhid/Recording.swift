@@ -80,7 +80,7 @@ final class Trail: Sendable {
                                     "structure": .string(move.structure.rawValue),
                                     "bow": .double(move.bow),
                                     "halfway": .double(move.halfway),
-                                    "displays": .array(move.displays.frames.map { frame in .array([frame.minX, frame.minY, frame.width, frame.height].map { .double(Double($0)) }) }),
+                                    "displays": .array(move.displays.frames.map { frame in .array([frame.x, frame.y, frame.width, frame.height].map { .double($0) }) }),
                                     "ends_kept": .double(move.kept.ends),
                                     "bow_kept": .double(move.kept.bow),
                                     "steered_reports": .int(move.steered),

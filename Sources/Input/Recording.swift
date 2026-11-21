@@ -71,6 +71,9 @@ public struct Recorder {
     public private(set) var unmapped = 0
     /// Motion of vhid's that ended on a screen edge, after which the offset may be wrong.
     public private(set) var vhidAtEdge = 0
+    /// Motion of the person's that, less vhid's offset, is no place on the screen, left out
+    /// of the recording.
+    public private(set) var unplaced = 0
 
     private enum Line {
         case keys(Duration, Set<Usage>)
@@ -168,7 +171,11 @@ public struct Recorder {
         case .flagsChanged(_, let flags):
             session = Self.modifiers(in: flags)
         case .motion:
-            lines.append(.at(event.at, ScreenPoint(x: event.location.x - offset.x, y: event.location.y - offset.y) ?? event.location))
+            if let point = ScreenPoint(x: event.location.x - offset.x, y: event.location.y - offset.y) {
+                lines.append(.at(event.at, point))
+            } else {
+                unplaced += 1
+            }
         case .buttonDown(let button):
             buttons.insert(button)
             lines.append(.buttons(event.at, buttons))

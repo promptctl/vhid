@@ -76,16 +76,19 @@ public extension Geometry {
     static func displays(list: DisplayList = CGGetActiveDisplayList) throws(CannotReadDisplays) -> [Display] {
         var count: UInt32 = 0
         var error = list(0, nil, &count)
-        guard error == .success else { throw CannotReadDisplays(error: error) }
+        guard error == .success else { throw .list(error) }
         var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
         error = list(count, &ids, &count)
-        guard error == .success else { throw CannotReadDisplays(error: error) }
-        return ids.prefix(Int(count)).map { id in
+        guard error == .success else { throw .list(error) }
+        return try ids.prefix(Int(count)).map { id throws(CannotReadDisplays) in
+            // A display shows some of the screen; bounds that are no box, or none of it, are
+            // a read that went wrong, as for a display unplugged once it was listed.
+            guard let frame = ScreenRect(CGDisplayBounds(id)), !frame.isEmpty else { throw .bounds(id) }
             // Both widths from the mode, which is unrotated; the bounds are rotated, and a
             // portrait display divided by them reads 1.78x instead of 1x.
             let mode = CGDisplayCopyDisplayMode(id)
             return Display(
-                id: id, frame: ScreenRect(CGDisplayBounds(id))!, isMain: CGDisplayIsMain(id) != 0,
+                id: id, frame: frame, isMain: CGDisplayIsMain(id) != 0,
                 scale: mode.flatMap { $0.width > 0 ? Double($0.pixelWidth) / Double($0.width) : nil })
         }.sorted { $0.isMain && !$1.isMain }
     }

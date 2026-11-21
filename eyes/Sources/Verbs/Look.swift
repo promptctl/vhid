@@ -202,10 +202,13 @@ public struct Where: ParsableArguments {
         return limit
     }
 
+    /// A region to read, which has area: an empty one holds nothing to see.
     private static func parsedRect(_ spelled: String, as s: Spelling) throws -> ScreenRect {
-        guard let rect = ScreenRect(spelled: spelled) else { throw ValidationError("\(s("rect")) wants \(ScreenRect.spelling) - got \(spelled)") }
+        guard let rect = ScreenRect(spelled: spelled), !rect.isEmpty else { throw ValidationError("\(s("rect")) wants \(rectSpelling) - got \(spelled)") }
         return rect
     }
+
+    private static let rectSpelling = "\(ScreenRect.spelling), with a size"
 }
 
 /// What `find` and `read` print. Pure, so the sentences a caller trusts are tested.
@@ -278,8 +281,7 @@ enum Report {
     /// The columns every row has in the same place - `then`, a near miss's distance, among
     /// them - before the element's other words, however many it says.
     private static func row(_ found: Found, then: [String] = []) -> String {
-        let at = clickPoint(found.frame.centre)
-        return (["\(at)", "\(box(found.frame, holding: at))", spelled(found.text.value), found.source.role?.rawValue ?? "pixels"]
+        return (["\(clickPoint(found.frame))", "\(found.frame)", spelled(found.text.value), found.source.role?.rawValue ?? "pixels"]
             + then + found.source.also.map { "\($0.attribute.rawValue) \(spelled($0.text.value))" }).joined(separator: "\t")
     }
 
@@ -303,14 +305,14 @@ enum Report {
         return line
     }
 
-    /// The whole point a click is sent to: the frame's centre, rounded.
-    private static func clickPoint(_ p: ScreenPoint) -> ScreenPoint { ScreenPoint(x: p.x.rounded(), y: p.y.rounded())! }
-
-    /// The frame grown to cover the cell of the point printed beside it. The rounded point
-    /// can fall past the frame's right or bottom edge, which half-open containment counts as
-    /// outside, so the point is covered by construction rather than by luck of the rounding.
-    private static func box(_ frame: ScreenRect, holding at: ScreenPoint) -> ScreenRect {
-        ScreenRect(frame.cgRect.union(CGRect(x: at.x, y: at.y, width: 1, height: 1)))!
+    /// The whole point a click is sent to: of the whole points in the box the row prints,
+    /// the one nearest the frame's centre. For a frame over a point across that is the
+    /// centre rounded; a narrower one's rounded centre can fall on the box's far edge, which
+    /// half-open containment counts as outside, so the point is held to the box by
+    /// construction rather than by luck of the rounding.
+    private static func clickPoint(_ frame: ScreenRect) -> ScreenPoint {
+        let (box, centre) = (frame.integral, frame.centre)
+        return box.nearest(x: min(centre.x.rounded(), box.x + box.width - 1), y: min(centre.y.rounded(), box.y + box.height - 1))
     }
 
     private static func wanted(_ match: Match) -> String {

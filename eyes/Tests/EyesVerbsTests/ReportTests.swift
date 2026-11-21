@@ -110,13 +110,14 @@ import Testing
     /// A row's box covers its frame in whole points, takes the form `rect` takes, and holds
     /// the centre printed beside it - fractional frames and negative coordinates included,
     /// where rounding each number its own way would cut the frame or miss the centre, and
-    /// a frame narrower than a point, whose rounded centre falls on its right edge.
+    /// a frame narrower than a point, whose rounded centre would fall on its right edge and
+    /// is held inside the box instead.
     @Test(arguments: [
         (ScreenRect(x: 10.4, y: 20.6, width: 80.3, height: 23.9)!, "10,20,81,25"),
         (ScreenRect(x: -1900.7, y: -60.2, width: 40.5, height: 19.4)!, "-1901,-61,41,21"),
         (ScreenRect(x: 0, y: 0, width: 40, height: 20)!, "0,0,40,20"),
         (ScreenRect(x: 10.9, y: 20, width: 10, height: 10)!, "10,20,11,10"),
-        (ScreenRect(x: 10.5, y: 20, width: 0.4, height: 10)!, "10,20,2,10"),
+        (ScreenRect(x: 10.5, y: 20, width: 0.4, height: 10)!, "10,20,1,10"),
     ])
     func aRowsBoxHoldsItsFrameAndItsCentre(frame: ScreenRect, box: String) throws {
         let found = Found(text: Text("Save")!, frame: frame, source: .tree(role: Role(rawValue: "AXButton"), also: []))

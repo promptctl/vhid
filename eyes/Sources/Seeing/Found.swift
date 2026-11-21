@@ -60,7 +60,7 @@ public struct Found: Sendable, Hashable {
         self.first = first
         self.rest = rest
         self.source = source
-        self.frame = ScreenRect(rest.reduce(first.frame.cgRect) { $0.union($1.frame.cgRect) })!
+        self.frame = rest.reduce(first.frame) { $0.union($1.frame) }
     }
 
     public var words: [Word] { [first] + rest }

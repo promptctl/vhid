@@ -222,6 +222,13 @@ extension Facts {
         #expect(descent(beside, "AXWebArea") == .prune)
     }
 
+    /// What clips to a frame outside where it can be drawn shows nothing, though its frame
+    /// is in the region: none of its children are drawn anywhere.
+    @Test func aScrollAreaSeenInTheRegionOutsideItsBoundIsPruned() {
+        let list = ScreenRect(x: 100, y: 100, width: 300, height: 200)!
+        #expect(descent(list, "AXScrollArea", bound: ScreenRect(x: 1000, y: 0, width: 100, height: 100)!) == .prune)
+    }
+
     /// Not seen, and its role would not say whether it clips: not read, counted unread. An
     /// app that answers `AXUnknown` has said it.
     @Test func anUnseenElementWhoseRoleWouldNotAnswerIsUnsure() {
@@ -526,8 +533,8 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
         var origin = CGPoint(x: -1500, y: -200)
         var size = CGSize(width: 80, height: 30)
         let frame = TreeReader.frame(AXValueCreate(.cgPoint, &origin), AXValueCreate(.cgSize, &size))
-        #expect(frame == ScreenRect(x: -1500, y: -200, width: 80, height: 30)!)
-        #expect(frame?.centre == ScreenPoint(x: -1460, y: -185)!)
+        #expect(frame == .answered(ScreenRect(x: -1500, y: -200, width: 80, height: 30)!))
+        #expect(ScreenRect(x: -1500, y: -200, width: 80, height: 30)!.centre == ScreenPoint(x: -1460, y: -185)!)
     }
 
     @Test func anElementOnADisplayAtANegativeOriginIsFoundThere() {
@@ -750,17 +757,21 @@ extension Covers {
         return (AXValueCreate(.cgPoint, &origin)!, AXValueCreate(.cgSize, &size)!)
     }
 
-    /// An app can claim a frame that is no place; it is no frame. A document's text area runs
-    /// past any screen and is a frame, printed whole however large.
-    @Test func aFrameThatIsNoPlaceIsNoFrame() {
+    /// An app can claim a frame that is no place - not a number, past the screen space, or a
+    /// side under zero - and what it claimed could not be read, which is not an element with
+    /// no frame. One that answers neither has none. A document's text area runs past any
+    /// screen and is a frame, printed whole.
+    @Test func aFrameThatIsNoPlaceIsUnanswered() {
         let placed = boxed(10, 20, 30, 40)
-        #expect(TreeReader.frame(placed.0, placed.1) == ScreenRect(x: 10, y: 20, width: 30, height: 40)!)
-        for (x, w) in [(Double.nan, 30.0), (10, .infinity)] {
+        #expect(TreeReader.frame(placed.0, placed.1) == .answered(ScreenRect(x: 10, y: 20, width: 30, height: 40)!))
+        for (x, w) in [(Double.nan, 30.0), (10, .infinity), (10, 1e20), (100, -50)] {
             let claimed = boxed(x, 20, w, 40)
-            #expect(TreeReader.frame(claimed.0, claimed.1) == nil)
+            #expect(TreeReader.frame(claimed.0, claimed.1) == .unanswered, "\(x), \(w)")
         }
-        let document = boxed(46, -1_280_000, 1e20, 1_300_000)
-        #expect(TreeReader.frame(document.0, document.1)?.description == "46,-1280000,100000000000000000000,1300000")
+        #expect(TreeReader.frame(nil, nil) == .answered(nil))
+        let document = boxed(46, -1_280_000, 1e15, 1_300_000)
+        #expect(TreeReader.frame(document.0, document.1) == .answered(ScreenRect(x: 46, y: -1_280_000, width: 1e15, height: 1_300_000)!))
+        #expect(ScreenRect(x: 46, y: -1_280_000, width: 1e15, height: 1_300_000)!.description == "46,-1280000,1000000000000000,1300000")
     }
 
     /// A checkbox's value is a number, said in figures, and a link's an address; a range or an

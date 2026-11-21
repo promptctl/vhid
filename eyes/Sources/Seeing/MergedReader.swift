@@ -80,6 +80,15 @@ public struct BothBlind: Error, CustomStringConvertible {
     public var description: String { "neither reader could look: \(first); \(second)" }
 }
 
+/// The two readers of a merged read looked at places that share no area, so there is no
+/// region both read for the merge to answer over.
+public struct LookedApart: Error, Equatable, CustomStringConvertible {
+    public let first: ScreenRect
+    public let second: ScreenRect
+
+    public var description: String { "the two readers looked at places that share nothing: \(first) and \(second)" }
+}
+
 public extension Candidates {
     /// What two readers saw, as what one merged reader saw.
     ///
@@ -92,7 +101,8 @@ public extension Candidates {
     /// "Says the same" forgives a recogniser's slip, one edit in five characters; two
     /// finds of one reader are never merged with each other.
     ///
-    /// The region is where both looked. The reach is whole only when both readers read
+    /// The region is where both looked, and two that looked at places sharing nothing are
+    /// `LookedApart`, never one reader's place said as both's. The reach is whole only when both readers read
     /// it whole; otherwise it names each reader's reach, and a reader that threw is
     /// named blind - so the other's empty answer never proves an absence over a region
     /// half of the merge did not see. [LAW:no-silent-failure] Pure, so every rule is
@@ -132,10 +142,13 @@ public extension Candidates {
             }
             extra += Found(loose, source: run.source)
         }
-        let both = seen.dropFirst().reduce(seen[0].region as ScreenRect?) { $0?.intersection($1.region) }
+        let region = try seen.dropFirst().reduce(seen[0].region) { both, next in
+            guard let shared = both.intersection(next.region) else { throw LookedApart(first: both, second: next.region) }
+            return shared
+        }
         return Candidates(
             found: (kept + extra).inReadingOrder,
-            region: both ?? seen[0].region,
+            region: region,
             examined: seen.map(\.examined).reduce(0, +),
             excluded: (seen.flatMap(\.excluded) + [Exclusion(reason: .duplicate, count: duplicates)]).summed,
             reach: a.part.isWhole && b.part.isWhole ? .whole : .stopped(.merged(a.part, b.part)),

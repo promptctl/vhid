@@ -76,7 +76,11 @@ public struct Steering: Hashable, Sendable {
             // The longest report there is, in any direction, and still short: another.
             guard counts == Int(Count.limit) else { break }
         }
-        return (reports, ScreenPoint(x: at.x, y: at.y) ?? from)
+        // Reports from one place to another end within a report of the second, so a landing
+        // past the screen space is a bug in the reckoning, stopped here, never a place made up.
+        // [LAW:no-silent-failure]
+        guard let lands = ScreenPoint(x: at.x, y: at.y) else { preconditionFailure("reports from \(from) to \(to) land at (\(at.x), \(at.y)), past the screen space") }
+        return (reports, lands)
     }
 
     /// The one report whose expected motion comes nearest `dx, dy`, its length in counts,

@@ -96,7 +96,7 @@ enum Candidate: Equatable {
 /// One rule for an element's children and for a window the tree cannot walk, so "could
 /// anything there be seen" means one thing. [LAW:single-enforcer]
 func visible(_ frame: ScreenRect, in clip: ScreenRect, under covers: Covers) -> ScreenRect? {
-    guard let shared = frame.intersection(clip), !shared.isEmpty, !covers.hide(shared) else { return nil }
+    guard let shared = frame.intersection(clip), !covers.hide(shared) else { return nil }
     return shared
 }
 
@@ -309,12 +309,14 @@ extension Facts {
     /// The one place the descend, probe and prune decision is made. [LAW:single-enforcer]
     func descent(clip: ScreenRect, bound: ScreenRect, under covers: Covers) -> Descent {
         guard case .answered(let placed?) = frame, !placed.isEmpty else { return .descend(clip: clip, bound: bound) }
-        let clipping = clips.contains(role)
-        if let shown = visible(placed, in: clip, under: covers) {
-            guard clipping else { return .descend(clip: clip, bound: bound) }
-            return self.bound(within: bound).map { .descend(clip: shown, bound: $0) } ?? .prune
+        // What clips shows its children only where it is seen, so unseen, or clipped to
+        // nowhere, nothing under it is.
+        guard !clips.contains(role) else {
+            guard let shown = visible(placed, in: clip, under: covers), let inner = self.bound(within: bound) else { return .prune }
+            return .descend(clip: shown, bound: inner)
         }
-        guard !clipping, placed.intersects(bound) else { return .prune }
+        guard visible(placed, in: clip, under: covers) == nil else { return .descend(clip: clip, bound: bound) }
+        guard placed.intersects(bound) else { return .prune }
         return named ? .probe : .unsure
     }
 }

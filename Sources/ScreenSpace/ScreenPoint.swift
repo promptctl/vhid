@@ -5,12 +5,13 @@
 /// frames in, so a point eyes reads off the screen is a point the pointer can be sent to
 /// with no conversion between. [FRAMING:representation] One space, named once, for the
 /// devices and the readers alike. [LAW:one-source-of-truth]
-public struct ScreenPoint: Hashable, Codable, Sendable, CustomStringConvertible {
+public struct ScreenPoint: Hashable, Sendable, CustomStringConvertible {
     public let x: Double
     public let y: Double
 
     /// [LAW:parse-dont-validate] The one place two doubles become a place on the screen,
-    /// and the one place a pair that is not a place is refused.
+    /// and the one place a pair that is not a place is refused: a coordinate past
+    /// `farthest`, which no NaN or infinity is within.
     ///
     /// **A NaN is the refusal that matters**, and it is not a hypothetical: every
     /// comparison against a NaN is false, so a NaN target passes the pointer's
@@ -20,30 +21,40 @@ public struct ScreenPoint: Hashable, Codable, Sendable, CustomStringConvertible 
     /// with nothing anywhere saying so. [LAW:no-silent-failure] Infinities go the same way
     /// for the same reason: no report brings the cursor any nearer to one.
     public init?(x: Double, y: Double) {
-        guard x.isFinite, y.isFinite else { return nil }
+        guard abs(x) <= Self.farthest, abs(y) <= Self.farthest else { return nil }
         self.x = x
         self.y = y
     }
 
-    /// Decoded through the same crossing, so a script or a request carrying `1e400` is
-    /// refused where it is read rather than becoming an infinity downstream.
+    /// The pair as a point, or why it is none, in the words every door refuses one with.
     /// [LAW:single-enforcer]
-    public init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        let x = try container.decode(Double.self, forKey: .x)
-        let y = try container.decode(Double.self, forKey: .y)
-        guard let point = ScreenPoint(x: x, y: y) else {
-            throw DecodingError.dataCorruptedError(forKey: .x, in: container, debugDescription: "(\(x), \(y)) is not a place on the screen")
-        }
-        self = point
+    public static func at(_ x: Double, _ y: Double) throws(NotAPlace) -> ScreenPoint {
+        guard let point = ScreenPoint(x: x, y: y) else { throw NotAPlace(x: x, y: y) }
+        return point
     }
 
-    /// `x,y`, each the shortest digits that read back as it and a whole number without its
-    /// `.0`: the form eyes prints a row's point in, so a point printed is the point passed on.
-    public var description: String {
-        [x, y].map { coordinate in
-            let digits = "\(coordinate)"
-            return digits.hasSuffix(".0") ? String(digits.dropLast(2)) : digits
-        }.joined(separator: ",")
-    }
+    /// The farthest from the origin a coordinate may be, in points: 2^53, the last whole
+    /// number a Double holds with every whole number below it. Past it a Double skips whole
+    /// points, so it is no place a point can be named at; and within it, the arithmetic of
+    /// points and boxes - a sum, a span, a square - stays finite, so what is derived from
+    /// places is a place. [LAW:types-are-the-program]
+    public static let farthest = 9_007_199_254_740_992.0
+
+    /// `x,y`, each in every digit it has.
+    public var description: String { "\(Self.spelled(x)),\(Self.spelled(y))" }
+
+    /// A coordinate in every digit it has, a whole one without its `.0`: the one form every
+    /// coordinate in this space is printed in, so a value printed is the value passed on,
+    /// and a point and a box beside it never spell one number two ways.
+    /// [LAW:one-source-of-truth] Within `farthest` a whole number fits an `Int` and a Double
+    /// prints in figures, never as an exponent of ten.
+    static func spelled(_ coordinate: Double) -> String { Int(exactly: coordinate).map(String.init) ?? "\(coordinate)" }
+}
+
+/// Two numbers that are not a place on the screen.
+public struct NotAPlace: Error, Equatable, CustomStringConvertible {
+    public let x: Double
+    public let y: Double
+
+    public var description: String { "(\(ScreenPoint.spelled(x)), \(ScreenPoint.spelled(y))) is not a place on the screen" }
 }

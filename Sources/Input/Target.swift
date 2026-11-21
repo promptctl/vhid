@@ -33,7 +33,7 @@ public enum Target: Hashable, Sendable, CustomStringConvertible {
         }
 
         /// What a refusal names as the form wanted.
-        public static let spelling = "x,y,width,height in points - each side at least a point, nothing past \(Int(ScreenRect.limit))"
+        public static let spelling = "\(ScreenRect.spelling), each side at least a point"
 
         public var description: String { "\(frame)" }
     }
@@ -91,7 +91,16 @@ public enum Target: Hashable, Sendable, CustomStringConvertible {
         let over = abs(start.x - centre.x) <= reach.x && abs(start.y - centre.y) <= reach.y
         let held = over ? scatter : scatter.held(to: (start.x, start.y), across: (-dy / distance, dx / distance), straying: Self.directionalError * distance)
         let (x, y) = held.draw(within: (centre.x - half.x ... centre.x + half.x, centre.y - half.y ... centre.y + half.y), using: &generator)
-        return ScreenPoint(x: x, y: y)!
+        // Drawn inside the target, so it is the target's own point nearest the draw.
+        return area.nearest(x: x, y: y)
+    }
+
+    /// Everywhere the target is: a box's frame, and a point as a box of no size.
+    private var area: ScreenRect {
+        switch self {
+        case .point(let point): .spanning(point, point)
+        case .box(let box): box.frame
+        }
     }
 
     /// The centre, how far either side of it on each axis the target reaches, and how far a

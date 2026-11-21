@@ -197,8 +197,9 @@ public enum Geometry {
     /// and then passes every check downstream that looks like it would catch it: `NaN <=
     /// 0` is false, so a NaN-sized window is not `isEmpty` and is kept, and the first
     /// thing that touches it traps outright, because `Int(Double.nan)` is a fatal error
-    /// rather than a bad number. A window whose bounds are not numbers is an entry that
-    /// did not describe a window, which is what the `unreadable` count is for.
+    /// rather than a bad number. A window whose bounds are no box - not numbers, or a side
+    /// under zero - is an entry that did not describe a window, which is what the
+    /// `unreadable` count is for; one with no area is a window, and `arealess`.
     private static func rect(from bounds: [String: Any]) -> ScreenRect? {
         guard let x = bounds["X"] as? Double, let y = bounds["Y"] as? Double,
               let width = bounds["Width"] as? Double, let height = bounds["Height"] as? Double
@@ -211,7 +212,17 @@ public struct CannotReadWindows: Error, CustomStringConvertible {
     public var description: String { "the window server would not list its windows" }
 }
 
-public struct CannotReadDisplays: Error, Equatable, CustomStringConvertible {
-    public let error: CGError
-    public var description: String { "the window server would not list its displays (CGError \(error.rawValue))" }
+public enum CannotReadDisplays: Error, Equatable, CustomStringConvertible {
+    /// The list itself would not come.
+    case list(CGError)
+    /// A listed display's bounds came back as no box, as a display unplugged after it was
+    /// listed can.
+    case bounds(CGDirectDisplayID)
+
+    public var description: String {
+        switch self {
+        case .list(let error): "the window server would not list its displays (CGError \(error.rawValue))"
+        case .bounds(let id): "the window server would not say where display \(id) is"
+        }
+    }
 }

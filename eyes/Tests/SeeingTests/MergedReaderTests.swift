@@ -45,6 +45,18 @@ import Testing
         return m.all
     }
 
+    /// The region is where both looked; two readers that looked at places sharing nothing
+    /// have no region both read, and are refused rather than answered over one's place.
+    @Test func readersThatLookedApartAreRefused() async throws {
+        let elsewhere = ScreenRect(x: 1000, y: 0, width: 500, height: 800)!
+        await #expect(throws: LookedApart(first: Self.region, second: elsewhere)) {
+            try await read(Fake(source: .tree, found: []), Fake(source: .pixels, found: [], region: elsewhere))
+        }
+        let part = ScreenRect(x: 500, y: 0, width: 1000, height: 800)!
+        let r = try await read(Fake(source: .tree, found: []), Fake(source: .pixels, found: [], region: part))
+        #expect(r.scope.region == ScreenRect(x: 500, y: 0, width: 500, height: 800)!)
+    }
+
     @Test func disjointFindsAreAllReportedInReadingOrder() async throws {
         let r = try await read(
             Fake(source: .tree, found: [at("Cancel", 10, 100, Self.role)]),

@@ -153,10 +153,7 @@ private func point(_ line: KeyedDecodingContainer<AnyKey>, _ key: AnyKey) throws
     let place = try container(line.superDecoder(forKey: key), taking: ["x", "y"])
     let x = try place.decode(Double.self, forKey: AnyKey("x"))
     let y = try place.decode(Double.self, forKey: AnyKey("y"))
-    guard let point = ScreenPoint(x: x, y: y) else {
-        throw Refusal(reason: "\(key.stringValue) is (\(x.clean), \(y.clean)), which is not a place on the screen")
-    }
-    return point
+    do { return try ScreenPoint.at(x, y) } catch { throw Refusal(reason: "\(key.stringValue): \(error)") }
 }
 
 private extension Double {

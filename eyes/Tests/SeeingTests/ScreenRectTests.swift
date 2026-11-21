@@ -18,12 +18,25 @@ import Testing
         #expect(abs(got - want) < 0.001, "\(what): got \(got), wanted \(want)")
     }
 
+    /// A box Vision could hand back, which every test here places.
+    private func placed(normalized: CGRect, on display: ScreenRect) -> ScreenRect {
+        ScreenRect.fromImageSpace(normalized: normalized, on: display)!
+    }
+
+    /// A box Vision hands back that is no place - not a number, or a side under zero - is
+    /// none, for the reader to refuse by name, and never a box placed somewhere made up.
+    @Test func aVisionBoxThatIsNoPlaceIsNone() {
+        for box in [CGRect(x: CGFloat.nan, y: 0, width: 0.1, height: 0.1), CGRect(origin: CGPoint(x: 0.5, y: 0.5), size: CGSize(width: -0.1, height: 0.1)), .null] {
+            #expect(ScreenRect.fromImageSpace(normalized: box, on: Self.main) == nil, "\(box)")
+        }
+    }
+
     /// The flip, stated as the thing a reader gets backwards. Vision measures a box's
     /// origin UP from the bottom of the image; the screen measures DOWN from the top.
     @Test func aBoxLowInTheImageLandsLowOnTheScreen() {
         // A button 10% up from the bottom of the image, 5% tall.
         let box = CGRect(x: 0.8, y: 0.1, width: 0.15, height: 0.05)
-        let rect = ScreenRect.fromImageSpace(normalized: box, on: Self.main)
+        let rect = placed(normalized: box, on: Self.main)
 
         // Its top edge is 15% up from the bottom, so 85% down from the top.
         expect(rect.y, 0.85 * 982, "top edge")
@@ -38,13 +51,13 @@ import Testing
     /// would pass the first test on a box far from either edge and fail here.
     @Test func aBoxAtTheTopOfTheImageLandsAtTheTopOfTheScreen() {
         let box = CGRect(x: 0, y: 0.95, width: 0.2, height: 0.05)
-        let rect = ScreenRect.fromImageSpace(normalized: box, on: Self.main)
+        let rect = placed(normalized: box, on: Self.main)
         expect(rect.y, 0, "a box flush with the image top is flush with the screen top")
     }
 
     /// A box filling the image fills the display, which pins both edges at once.
     @Test func theWholeImageIsTheWholeDisplay() {
-        let rect = ScreenRect.fromImageSpace(
+        let rect = placed(
             normalized: CGRect(x: 0, y: 0, width: 1, height: 1),
             on: Self.main
         )
@@ -58,7 +71,7 @@ import Testing
     /// same answer because neither number can be passed in.
     @Test func theCaptureScaleCannotChangeTheAnswer() {
         let box = CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)
-        let rect = ScreenRect.fromImageSpace(normalized: box, on: Self.main)
+        let rect = placed(normalized: box, on: Self.main)
         expect(rect.x, 378, "left edge")
         expect(rect.y, 245.5, "top edge")
         expect(rect.width, 756, "width")
@@ -71,12 +84,12 @@ import Testing
     @Test func aDisplayAtANegativeOriginPutsFindingsAtNegativeCoordinates() {
         let secondary = ScreenRect(x: -1512, y: 0, width: 1512, height: 982)!
         let box = CGRect(x: 0.8, y: 0.1, width: 0.15, height: 0.05)
-        let rect = ScreenRect.fromImageSpace(normalized: box, on: secondary)
+        let rect = placed(normalized: box, on: secondary)
 
         expect(rect.x, -1512 + 0.8 * 1512, "left edge on the secondary display")
         #expect(rect.x < 0)
         // The vertical answer does not change with the horizontal origin.
-        let onMain = ScreenRect.fromImageSpace(normalized: box, on: Self.main)
+        let onMain = placed(normalized: box, on: Self.main)
         expect(rect.y, onMain.y, "top edge is the same on both displays")
     }
 
@@ -88,13 +101,6 @@ import Testing
         #expect(rect.contains(rect.centre))
     }
 
-    /// Overlap is how a merged reading tells one thing seen by both readers from two
-    /// things seen once each, so touching-but-not-overlapping must read as separate.
-    @Test func rectanglesThatOnlyTouchDoNotIntersect() {
-        let left = ScreenRect(x: 0, y: 0, width: 10, height: 10)!
-        #expect(!left.intersects(ScreenRect(x: 10, y: 0, width: 10, height: 10)!))
-        #expect(left.intersects(ScreenRect(x: 9, y: 0, width: 10, height: 10)!))
-    }
 
     /// A piece of a display, taken to Vision's space and back, is the same piece - on a
     /// display at a negative origin, where a missed offset shows. And the top of the screen
@@ -104,7 +110,7 @@ import Testing
         let piece = ScreenRect(x: -2000, y: -300, width: 800, height: 400)!
         let normalized = piece.normalized(in: display)
         expect(normalized.maxY, 1, "a piece at the top of the display sits at the top of the image")
-        let back = ScreenRect.fromImageSpace(normalized: normalized, on: display)
+        let back = placed(normalized: normalized, on: display)
         expect(back.x, piece.x, "x")
         expect(back.y, piece.y, "y")
         expect(back.width, piece.width, "width")

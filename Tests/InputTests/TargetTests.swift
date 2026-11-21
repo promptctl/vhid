@@ -135,9 +135,18 @@ private func box(_ x: Double, _ y: Double, _ width: Double, _ height: Double) ->
         #expect(Target.box(Self.button).description == "the box 800,290,80,24")
         #expect(Target.Box(ScreenRect(x: 0, y: 0, width: 0.5, height: 10)!) == nil)
         #expect(Target.Box(ScreenRect(x: 0, y: 0, width: 10, height: 0)!) == nil)
-        for refused in ["", "1,2,3", "1,2,0,4", "1,2,0.5,4", "0,0,1e-320,10", "1,2,inf,4"] {
+        for refused in ["", "1,2,3", "1,2,0,4", "1,2,0.5,4", "0,0,1e-320,10", "1,2,inf,4", "999999,0,999999,1"] {
             #expect(Target.Box(spelled: refused) == nil, "\(refused)")
         }
+    }
+
+    /// vhid names a box it pressed as eyes prints one, in whole points rounded out, so the
+    /// box it names holds every point of the one it was given, and reads back as a box.
+    @Test func aBoxIsNamedRoundedOutToWholePoints() {
+        let given = try! #require(Target.Box(spelled: "1.5,2,3,4"))
+        #expect(given.description == "1,2,4,4")
+        let named = try! #require(Target.Box(spelled: given.description))
+        #expect(named.frame.contains(given.frame))
     }
 
     /// A click given a box lands on the point its move aimed at, inside the box, and says

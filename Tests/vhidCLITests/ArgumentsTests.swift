@@ -144,7 +144,7 @@ import Testing
     @Test(arguments: [
         (["1,2,3"], "1,2,3 is not a box"), (["1,2,0,4"], "1,2,0,4 is not a box"), (["1,2,3,nan"], "1,2,3,nan is not a box"),
         (["1,2,3,4,5"], "1,2,3,4,5 is not a box"), (["1"], "1 is not a point"), (["1", "x"], "1 x is not a point"),
-        (["1", "2", "3", "4"], "1 2 3 4 is 2 places, and this takes 1"), (["inf", "2"], "(inf, 2.0) is not a place"),
+        (["1", "2", "3", "4"], "1 2 3 4 is 2 places, and this takes 1"), (["inf", "2"], "(inf, 2) is not a place"),
     ])
     func whatIsNotAPlaceIsRefusedByName(words: [String], said: String) {
         #expect { try places(words, count: 1) } throws: { "\($0)".contains(said) }

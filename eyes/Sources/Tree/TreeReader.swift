@@ -153,13 +153,13 @@ public struct TreeReader: Reader {
                                  of: window, as: [.structure, .structure, .structure, .structure])
             guard case .answered(let position) = reads[0], case .answered(let size) = reads[1],
                   reads[2].answer.flatMap({ $0 as? Bool }) != true,
-                  let frame = frame(position, size) else { continue }
+                  case .answered(let frame?) = frame(position, size) else { continue }
             windows.append((window, frame))
             for child in elements(reads[3].answer ?? nil) {
                 let sheet = try read([kAXRoleAttribute, kAXPositionAttribute, kAXSizeAttribute], of: child, as: [.structure, .structure, .structure])
                 guard sheet[0].answer.flatMap({ $0 as? String }) == kAXSheetRole,
                       case .answered(let position) = sheet[1], case .answered(let size) = sheet[2],
-                      let frame = Self.frame(position, size) else { continue }
+                      case .answered(let frame?) = Self.frame(position, size) else { continue }
                 windows.append((child, frame))
             }
         }
@@ -200,10 +200,11 @@ public struct TreeReader: Reader {
         let names = [kAXRoleAttribute, kAXPositionAttribute, kAXSizeAttribute, kAXParentAttribute]
         let reads = try read(names, of: element, as: [.structure, .structure, .structure, .structure])
         guard case .answered(let role) = reads[0], case .answered(let position) = reads[1],
-              case .answered(let size) = reads[2], case .answered(let parent) = reads[3]
+              case .answered(let size) = reads[2], case .answered(let parent) = reads[3],
+              case .answered(let placed) = frame(position, size)
         else { return .unanswered }
         return .answered(Lineage(role: Role(rawValue: role as? String ?? kAXUnknownRole),
-                                 frame: frame(position, size),
+                                 frame: placed,
                                  parent: parent.flatMap(Self.element).map(bounded)))
     }
 
@@ -251,7 +252,7 @@ public struct TreeReader: Reader {
     static func node(_ element: AXUIElement) throws(TreeError) -> Node<AXUIElement> {
         let reads = try read(attributes, of: element, as: parts)
         let frame: Heard<ScreenRect?> = switch (reads[4], reads[5]) {
-        case (.answered(let position), .answered(let size)): .answered(Self.frame(position, size))
+        case (.answered(let position), .answered(let size)): Self.frame(position, size)
         default: .unanswered
         }
         return Node(
@@ -292,12 +293,17 @@ public struct TreeReader: Reader {
         return AXValueGetValue(value as! AXValue, .axError, &error) ? error : nil
     }
 
-    /// Nil as well for a frame that is no place - NaN or infinite - which an app can claim.
-    /// [LAW:parse-dont-validate]
-    static func frame(_ position: CFTypeRef?, _ size: CFTypeRef?) -> ScreenRect? {
-        unboxed(position, as: .cgPoint, CGPoint.zero).flatMap { origin in
-            unboxed(size, as: .cgSize, CGSize.zero).flatMap { ScreenRect(CGRect(origin: origin, size: $0)) }
-        }
+    /// The frame an element's position and size answer: none for an element that says it has
+    /// neither, and unanswered for one whose answer is no box - not a point and a size, or one
+    /// past the screen space, or with a side under zero, which an app can claim. A claim that
+    /// could not be read is not an element with no frame, so it leaves what is there unread
+    /// rather than unplaced. [LAW:parse-dont-validate] [LAW:no-silent-failure]
+    static func frame(_ position: CFTypeRef?, _ size: CFTypeRef?) -> Heard<ScreenRect?> {
+        guard position != nil || size != nil else { return .answered(nil) }
+        guard let origin = unboxed(position, as: .cgPoint, CGPoint.zero), let size = unboxed(size, as: .cgSize, CGSize.zero),
+              let frame = ScreenRect(CGRect(origin: origin, size: size))
+        else { return .unanswered }
+        return .answered(frame)
     }
 
     private static func bounded(_ element: AXUIElement) -> AXUIElement {

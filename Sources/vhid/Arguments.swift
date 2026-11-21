@@ -6,15 +6,12 @@ import ScreenSpace
 /// Two coordinates from a command line as a place on the screen, or the refusal that says
 /// they are not one.
 ///
-/// [LAW:parse-dont-validate] `ScreenPoint` refuses what is not a place on the screen, and
-/// `inf` and `nan` are both things a shell hands over as a Double without complaint.
-/// [LAW:single-enforcer] Every verb that takes a place reads it through here, from both
-/// its `validate` and its `run`, so the refusal is worded one way everywhere.
+/// [LAW:parse-dont-validate] `ScreenPoint` refuses what is not a place on the screen, in the
+/// words every door refuses one with, and `inf` and `nan` are both things a shell hands
+/// over as a Double without complaint. [LAW:single-enforcer] Every verb that takes a place
+/// reads it through here, from both its `validate` and its `run`.
 func place(_ x: Double, _ y: Double) throws -> ScreenPoint {
-    guard let point = ScreenPoint(x: x, y: y) else {
-        throw ValidationError("(\(x), \(y)) is not a place on the screen")
-    }
-    return point
+    do { return try ScreenPoint.at(x, y) } catch { throw ValidationError(error.description) }
 }
 
 /// `count` places from a command line's words, in order: each a point as two numbers, `x y`,

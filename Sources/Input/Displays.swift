@@ -6,16 +6,16 @@ import ScreenSpace
 /// rises, a hot corner fires - so a path that means to touch nothing has to know where
 /// they are.
 public struct Displays: Sendable, Equatable {
-    public let frames: [CGRect]
+    public let frames: [ScreenRect]
 
-    /// [LAW:parse-dont-validate] At least one display, each a finite rectangle with area:
-    /// a layout with none is no screen to keep a path on, and an empty or infinite frame is
-    /// a read that went wrong, not a display.
+    /// [LAW:parse-dont-validate] At least one display, each a box with area: a layout with
+    /// none is no screen to keep a path on, and a frame that is no box, or an empty one, is
+    /// a read that went wrong, not a display. Whether a frame is a box is `ScreenRect`'s to
+    /// say. [LAW:single-enforcer]
     public init?(frames: [CGRect]) {
-        guard !frames.isEmpty,
-              frames.allSatisfy({ [$0.minX, $0.minY, $0.width, $0.height].allSatisfy(\.isFinite) && $0.width > 0 && $0.height > 0 })
-        else { return nil }
-        self.frames = frames
+        let boxes = frames.compactMap(ScreenRect.init)
+        guard !boxes.isEmpty, boxes.count == frames.count, !boxes.contains(where: \.isEmpty) else { return nil }
+        self.frames = boxes
     }
 
     /// Whether the square of half-side `reach` about `point` lies on the displays: each of
@@ -26,8 +26,9 @@ public struct Displays: Sendable, Equatable {
     /// displays side by side is on the screen though it is on neither display entirely; a
     /// test against one display at a time would see an edge at every seam.
     func covers(_ point: Submovement.Point, by reach: Double) -> Bool {
+        // A corner that is no place is on no display.
         [(-reach, -reach), (-reach, reach), (reach, -reach), (reach, reach)].allSatisfy { corner in
-            frames.contains { $0.contains(CGPoint(x: point.x + corner.0, y: point.y + corner.1)) }
+            ScreenPoint(x: point.x + corner.0, y: point.y + corner.1).map { place in frames.contains { $0.contains(place) } } ?? false
         }
     }
 

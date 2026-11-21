@@ -32,11 +32,11 @@ public struct Hit: AsyncParsableCommand {
         print(try await Self.answer(at: Self.point(x, y)) { try await Self.land(at: $0) })
     }
 
-    /// Two numbers as a point, or the refusal: `inf` and `nan` are numbers a shell hands over.
-    /// [LAW:parse-dont-validate] One rule for the verb and the MCP tool. [LAW:single-enforcer]
+    /// Two numbers as a point, or `ScreenPoint`'s refusal: `inf` and `nan` are numbers a shell
+    /// hands over. [LAW:parse-dont-validate] One rule for the verb and the MCP tool.
+    /// [LAW:single-enforcer]
     static func point(_ x: Double, _ y: Double) throws -> ScreenPoint {
-        guard let point = ScreenPoint(x: x, y: y) else { throw ValidationError("(\(x), \(y)) is not a place on the screen") }
-        return point
+        do { return try ScreenPoint.at(x, y) } catch { throw ValidationError(error.description) }
     }
 
     /// Where a click at a point lands, or that nothing is there: the process in it, a fake in
