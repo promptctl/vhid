@@ -147,7 +147,7 @@ public struct PixelReader: Reader {
     /// clipped to the display it lies on.
     @MainActor
     static func resolve(_ region: Region) throws -> ScreenRect {
-        try onOneDisplay(region.bounds(), displays: Geometry.displays().map(\.frame))
+        try onOneDisplay(region.bounds(), displays: try Geometry.displays().map(\.frame))
     }
 
     /// The part of `rect` a capture can see, on the one display it lies on, in whole points.
@@ -232,7 +232,9 @@ public struct PixelReader: Reader {
         }
     }
 
-    /// The one gate on Vision for this process.
+    /// The one gate on Vision for this process. [LAW:no-shared-mutable-globals] Owned
+    /// here, and taken only by `recognise`, the one call into Vision: a second gate would let
+    /// two recognitions run together, which crashes the process.
     nonisolated static let vision = Turns()
 
     private nonisolated static func recognised(_ image: CGImage, of region: ScreenRect, in tile: ScreenRect) async throws -> [Found?] {

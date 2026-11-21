@@ -85,9 +85,10 @@ public struct Front: Sendable, Hashable {
             throw .notRunning(name, ordinary: Set(desk.running.filter(\.regular).compactMap(\.app.name)).sorted())
         }
         let others = called.filter { !desk.own.pids.contains($0.pid) }
-        let place = { (app: App) in desk.listing.front(of: app.pid) ?? .max }
-        guard let chosen = others.min(by: { place($0) < place($1) }) else { throw .own(name) }
-        return try Front(chosen, passedOver: nil, on: desk)
+        guard let first = others.first else { throw .own(name) }
+        let shown = others.compactMap { app in desk.listing.front(of: app.pid).map { (app: app, place: $0) } }
+        guard let chosen = shown.min(by: { $0.place < $1.place }) else { throw .noWindow(first) }
+        return try Front(chosen.app, passedOver: nil, on: desk)
     }
 
     /// `app` on the display holding most of its front window.

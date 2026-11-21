@@ -72,6 +72,16 @@ import Testing
         #expect(await Self.refusal(Tools.drag, ["from": ["x": 1, "y": 2], "to": ["x": 3, "y": 4], "modifiers": 3])?.hasPrefix("modifiers is 3") == true)
     }
 
+    /// A window-server id past 32 bits is refused saying the range, however it is written;
+    /// a number that is not whole is no id at all.
+    @Test func anIdPastItsRangeIsRefusedSayingTheRange() async {
+        for display: Value in [4_294_967_296, 1e300] {
+            #expect(await Self.refusal(Tools.look(), ["display": display])?.hasSuffix("which is no window-server id: those run from 0 to 4294967295") == true,
+                    "\(display)")
+        }
+        #expect(await Self.refusal(Tools.look(), ["display": 1.5])?.hasPrefix("display is 1.5, and it is") == true)
+    }
+
     /// The schema offers it, not required.
     @Test func thePointerToolsTakeModifiers() {
         for tool in [Tools.click, Tools.scroll, Tools.drag] {

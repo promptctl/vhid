@@ -9,8 +9,8 @@ struct ScrollCommand: AsyncParsableCommand {
     @Argument(help: .sentence(Help.target))
     var place: [String]
 
-    // [LAW:no-silent-failure] Unconditional, because a negative count is half of what this
-    // takes and the default reads `-3` as a flag, refusing `--vertical -3` as missing.
+    // Unconditional, because a negative count is half of what this takes and the default
+    // reads `-3` as a flag, refusing `--vertical -3` as missing.
     @Option(parsing: .unconditional, help: .sentence(Help.vertical))
     var vertical: Int = 0
 

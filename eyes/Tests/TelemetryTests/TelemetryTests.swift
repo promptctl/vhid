@@ -112,7 +112,7 @@ import Testing
 
     private static func edge(_ collector: Edge.Collector?, at file: URL = scratch(),
                              deliver: @escaping @Sendable (URLRequest) async throws -> Void = { _ in Issue.record("nothing was to be sent") }) -> Edge {
-        Edge(service: "vhid", collector: collector, file: file, deliver: deliver)
+        Edge(collector: collector, file: file, deliver: deliver)
     }
 
     private static func written(_ edge: Edge) throws -> [[String: Any]] {
@@ -125,6 +125,16 @@ import Testing
         let written = try written(edge)
         try #require(written.count == 1, "\(written)")
         return written[0]
+    }
+
+    /// A file an earlier version made readable to all is its owner's alone once it is
+    /// appended to.
+    @Test func aFileReadableByAllIsMadeTheOwnersAloneWhenAppendedTo() async throws {
+        let edge = Self.edge(nil)
+        try FileManager.default.createDirectory(at: edge.file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        #expect(FileManager.default.createFile(atPath: edge.file.path, contents: Data(), attributes: [.posixPermissions: 0o644]))
+        await edge.send(Self.record())
+        #expect(try FileManager.default.attributesOfItem(atPath: edge.file.path)[.posixPermissions] as? Int == 0o600)
     }
 
     @Test func withNoCollectorTheRecordGoesToTheFileReadableByItsOwnerAlone() async throws {
@@ -198,11 +208,13 @@ import Testing
         ]).collector)
         #expect(logs == .init(endpoint: .logs("http://l:4318/logs"), headers: "b=2"))
         #expect(try logs.url.absoluteString == "http://l:4318/logs")
+        // A scheme is case-insensitive (RFC 3986).
+        #expect(try Edge.Collector(endpoint: .base("HTTPS://c:4318")).url.absoluteString == "HTTPS://c:4318/v1/logs")
         #expect(Edge.configured([:], service: "eyes").file.path.hasSuffix("Library/Logs/eyes/events.jsonl"))
     }
 
     @Test func headersThatAreNotKeyValuePairsLeaveTheRecordInTheFileSayingWhy() async throws {
-        let edge = Self.edge(.init(endpoint: .base("http://c:4318"), headers: "a=1,oops"))
+        let edge = Self.edge(.init(endpoint: .base("http://c:4318"), headers: "a=1,=token"))
         await edge.send(Self.record())
         #expect(try Self.only(edge)["sink_error"] as? String == "OTLP header 2 is not a key=value pair with its value percent-encoded")
     }

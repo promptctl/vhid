@@ -14,7 +14,7 @@ public struct Displays: AsyncParsableCommand {
     )
 
     public func run() async throws {
-        print(Self.report(Geometry.displays()))
+        print(Self.report(try Geometry.displays()))
     }
 
     /// The scope line and a row per display: what the verb prints and what the MCP tool

@@ -84,9 +84,15 @@ extension Parameter where Taken == UInt32 {
     /// number is refused saying the range rather than read as some other id.
     static func id(_ name: String, _ expected: String) -> Self {
         Self(name: name, expected: expected, schema: ["type": "integer", "minimum": 0, "maximum": .int(Int(UInt32.max))], absent: nil) {
-            guard let whole = $0.whole else { return nil }
-            guard let id = UInt32(exactly: whole) else {
-                throw ArgumentRefused("\(name) is \(whole), which is no window-server id: those run from 0 to \(UInt32.max)")
+            // Any whole number, however large, so one past the range is refused saying it.
+            let number: Double? = switch $0 {
+            case .int(let whole): Double(whole)
+            case .double(let number) where number.rounded() == number: number
+            default: nil
+            }
+            guard let number else { return nil }
+            guard let id = UInt32(exactly: number) else {
+                throw ArgumentRefused("\(name) is \($0.json), which is no window-server id: those run from 0 to \(UInt32.max)")
             }
             return id
         }

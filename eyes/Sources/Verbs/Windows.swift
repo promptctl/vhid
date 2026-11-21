@@ -30,8 +30,7 @@ public struct Windows: AsyncParsableCommand {
         try Self.refuseEmpty(owner, named: "--owner", " (A shell variable that did not expand?)")
     }
 
-    /// One wording for the command line and the MCP tool alike, each naming the argument
-    /// the way its caller spelled it. [LAW:single-enforcer]
+    /// The refusal of an empty `--owner`, naming the argument as its caller spelled it.
     static func refuseEmpty(_ owner: String?, named name: String, _ hint: String = "") throws {
         guard owner?.isEmpty != true else {
             throw ValidationError(

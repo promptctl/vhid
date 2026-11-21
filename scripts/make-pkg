@@ -46,8 +46,8 @@
 set -euo pipefail
 
 # [LAW:one-source-of-truth] The team whose Developer ID signs a release, and the only
-# place it is written. The certificates are found by it, so a renewed certificate - a
-# new SHA-1 under the same team - needs no edit here.
+# place a script reads it from. The certificates are found by it, so a renewed
+# certificate - a new SHA-1 under the same team - needs no edit here.
 TEAM=6R988MUU27
 # The receipt this pkg leaves, which `pkgutil --pkgs` lists and `pkgutil --forget` takes.
 IDENTIFIER=ai.promptctl.vhid

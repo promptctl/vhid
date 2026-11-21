@@ -17,8 +17,9 @@ struct RecordCommand: AsyncParsableCommand {
     @OptionGroup var service: ServiceOption
 
     func run() async throws {
-        // [LAW:parse-dont-validate] Every refusal the command can make is made before the
-        // app is launched, so a refused recording leaves nothing running.
+        // [LAW:parse-dont-validate] Every refusal this side can make is made before the
+        // app is launched, so a recording vhid refuses leaves nothing running. The app's own
+        // refusal, and a first word that is not one, come after it.
         let installation = try service.installation()
         let holder = try HelperConnection(installation: installation).status()
         let (system, session) = try await reading { stop in

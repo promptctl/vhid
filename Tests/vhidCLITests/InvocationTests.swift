@@ -266,7 +266,7 @@ import Testing
     /// outbox the process drains at exit is drained.
     @Test func anMcpCallIsAnsweredWithoutWaitingOnItsRecord() async throws {
         let answered = Mutex(false), sawAnswer = Mutex<Bool?>(nil)
-        let outbox = Outbox(Edge(service: "vhid", collector: .init(endpoint: .base("http://c:4318")),
+        let outbox = Outbox(Edge(collector: .init(endpoint: .base("http://c:4318")),
                                  file: FileManager.default.temporaryDirectory.appending(path: "vhid-tests-\(UUID().uuidString)/events.jsonl"),
                                  deliver: { _ in
                                      while !answered.withLock({ $0 }) { try await Task.sleep(for: .milliseconds(5)) }

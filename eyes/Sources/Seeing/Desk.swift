@@ -37,7 +37,12 @@ public struct Desk: Sendable {
     func isRegular(_ pid: Int32) -> Bool { running.contains { $0.app.pid == pid && $0.regular } }
 
     /// The app a window belongs to, by the name AppKit gives it, or the window server's.
-    public func app(of window: Window) -> Front.App {
-        running.first { $0.app.pid == window.pid }?.app ?? Front.App(pid: window.pid, name: window.owner)
+    public func app(of window: Window) -> Front.App { app(window.pid, owner: window.owner) }
+
+    /// The app running as `pid`, by the name AppKit gives it, or else `owner`, the name the
+    /// window server lists its window under. [LAW:one-source-of-truth] The one way a pid
+    /// is named, so one pid is not called two things.
+    public func app(_ pid: Int32, owner: String?) -> Front.App {
+        running.first { $0.app.pid == pid }?.app ?? Front.App(pid: pid, name: owner)
     }
 }

@@ -47,7 +47,7 @@ let package = Package(
         .target(name: "Keystrokes"),
         // The version the binaries report, stamped at build time from claude-plugin/VERSION
         // and git by the plugin, so no copy of the number is written down anywhere else.
-        // [LAW:one-source-of-truth]
+        // It links nothing, so both halves' executables take it. [LAW:one-source-of-truth]
         .target(name: "Version", plugins: ["VersionStamp"]),
         .plugin(name: "VersionStamp", capability: .buildTool()),
         // The vocabulary stands on its own, so its tests do too: nothing here imports a
@@ -163,6 +163,9 @@ let package = Package(
         // DriverExtension is for `vhid driver`, which reads the machine and not the
         // daemon, so scripts/virtual-hid-driver can ask it on a Mac with no daemon yet.
         // Doctor is for `vhid doctor`, which reads both and says what is left to do.
+        // Seeing, EyesVerbs and Grants are the screen half, for `look` and doctor's grants:
+        // this executable is the one place the halves meet. Telemetry and Turns link neither
+        // half, so a call is recorded, and waits its turn, by the rule every unit is.
         // [LAW:one-way-deps]
         .executableTarget(
             name: "vhid",
@@ -262,7 +265,9 @@ let package = Package(
             path: "eyes/Tests/EyesVerbsTests"
         ),
         // The eyes command line: the verbs, and the version every binary here is stamped with.
-        // Named for its product, as a target swiftbuild links with a `_main` must be.
+        // Version is the one root target an eyes target names, and it links nothing, so no
+        // device target comes in under eyes through it. Named for its product, as a target
+        // swiftbuild links with a `_main` must be. [LAW:one-way-deps]
         .executableTarget(
             name: "eyes",
             dependencies: ["EyesVerbs", "Telemetry", "Version", .product(name: "ArgumentParser", package: "swift-argument-parser")],

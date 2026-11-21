@@ -71,8 +71,11 @@ extension SourceKind: ExpressibleByArgument {
 
     /// Every reader's gate: a fresh reading, the one `eyes grants` and `vhid doctor` print, so
     /// a reader and the grants it is said to have cannot disagree - and a grant switched on
-    /// under a running `vhid mcp` is seen by its next read. [LAW:one-source-of-truth]
+    /// under a running `vhid mcp` is seen by the first read that takes a reading after it;
+    /// one taken under a second before is shared. [LAW:one-source-of-truth]
     static let granted: Gate = { try await readings.holds($0) }
+    /// [LAW:no-shared-mutable-globals] The process's one grant reading in flight, shared
+    /// by every gate that asks while it is taken; private, so `granted` is its one user.
     private static let readings = SharedReading(take: GrantsVerb.reading)
 
     /// The scope line's name for who looked.
@@ -205,15 +208,13 @@ struct Where: ParsableArguments {
 /// What `find` and `read` print. Pure, so the sentences a caller trusts are tested.
 /// [LAW:effects-at-boundaries]
 enum Report {
-    /// `grantNote` follows each missing grant named: where the grant is held, when that is
-    /// not the process printing - an MCP server's host app.
-    static func lines(_ reading: Reading, query: Query, source: SourceKind, grantNote: String = "") -> [String] {
-        [scope(reading, query: query, source: source, grantNote: grantNote)] + rows(reading.outcome)
+    static func lines(_ reading: Reading, query: Query, source: SourceKind) -> [String] {
+        [scope(reading, query: query, source: source)] + rows(reading.outcome)
     }
 
     /// Names where it looked, how much it read, and every narrowing, before any row.
     /// [LAW:no-silent-failure]
-    static func scope(_ reading: Reading, query: Query, source: SourceKind, grantNote: String = "") -> String {
+    static func scope(_ reading: Reading, query: Query, source: SourceKind) -> String {
         let s = reading.scope
         let role = query.role.map { " as \($0.rawValue)" } ?? ""
         let asked = query.match.map { match in wanted(match) + role + (query.near.map { " near \(wanted($0))" } ?? "") }
@@ -234,7 +235,7 @@ enum Report {
             "\(s.examined) run\(s.examined == 1 ? "" : "s") read",
             s.excluded.isEmpty ? nil : s.excluded.map { "\($0.count) \($0.reason.rawValue)" }.joined(separator: ", "),
             boxes(s.boxes),
-            reach(s.reach, grantNote),
+            reach(s.reach),
             reading.outcome.misses.isEmpty ? nil : "nearest follow",
         ]
         return clauses.compactMap { $0 }.joined(separator: "; ") + ". Each row's point is its centre and its box holds it, x,y,width,height, in vhid click coordinates."
@@ -275,7 +276,8 @@ enum Report {
     /// them - before the element's other words, however many it says.
     private static func row(_ found: Found, then: [String] = []) -> String {
         let at = clickPoint(found.frame.centre)
-        return (["\(Int(at.x)),\(Int(at.y))", "\(box(found.frame, holding: at))", spelled(found.text.value), found.source.role?.rawValue ?? "pixels"]
+        // The point as every point is spelled, which a frame too large or not finite cannot trap.
+        return (["\(ScreenPoint(x: at.x, y: at.y))", "\(box(found.frame, holding: at))", spelled(found.text.value), found.source.role?.rawValue ?? "pixels"]
             + then + found.source.also.map { "\($0.attribute.rawValue) \(spelled($0.text.value))" }).joined(separator: "\t")
     }
 
@@ -336,23 +338,23 @@ enum Report {
         return "by \((a.isBlind ? b : a).kind.rawValue) alone"
     }
 
-    private static func reach(_ reach: Reach, _ grantNote: String = "") -> String {
+    private static func reach(_ reach: Reach) -> String {
         switch reach {
         case .whole: "whole region read"
         case .stopped(.resultLimit(let l)): "stopped at the limit of \(l.count)"
         case .stopped(.elementLimit(let l)): "stopped at \(l.count) elements"
         case .stopped(.timeBudget(let d)): "stopped after \(d)"
         case .stopped(.unread): "parts left unread"
-        case .stopped(.merged(let a, let b)): "\(part(a, grantNote)), \(part(b, grantNote))"
+        case .stopped(.merged(let a, let b)): "\(part(a)), \(part(b))"
         }
     }
 
-    private static func part(_ part: Part, _ grantNote: String) -> String {
+    private static func part(_ part: Part) -> String {
         switch part {
-        case .read(let kind, let r): "\(kind.rawValue) \(reach(r, grantNote))"
+        case .read(let kind, let r): "\(kind.rawValue) \(reach(r))"
         // One line whatever the error printed, since the scope is one line.
-        case .blind(let kind, let why, let grant):
-            "\(kind.rawValue) could not look (\(why.split(whereSeparator: \.isNewline).joined(separator: " "))\(grant ? grantNote : ""))"
+        case .blind(let kind, let why, _):
+            "\(kind.rawValue) could not look (\(why.split(whereSeparator: \.isNewline).joined(separator: " ")))"
         }
     }
 
@@ -439,7 +441,7 @@ extension Report {
     /// with a wait, the read the wait ended on, its scope line led by how the wait went.
     /// [LAW:one-source-of-truth]
     static func text(
-        _ query: Query, source: SourceKind, wait: Wait? = nil, grantNote: String = "",
+        _ query: Query, source: SourceKind, wait: Wait? = nil,
         reading read: @Sendable (SourceKind, Query) async throws -> Judged
     ) async throws -> String {
         // [LAW:nothing-unseen] One event per look, from the one path every verb and tool
@@ -466,13 +468,13 @@ extension Report {
             guard let wait else {
                 let reading = try await counted(query).pressed()
                 Self.count(reading, query)
-                return (text: lines(reading, query: query, source: source, grantNote: grantNote).joined(separator: "\n"),
+                return (text: lines(reading, query: query, source: source).joined(separator: "\n"),
                         result: reading.outcome.said)
             }
             Telemetry.note(.until, .string(wait.until.rawValue))
             let waited = try await waiting(for: wait, on: query, read: counted)
             Self.count(waited.reading, query)
-            let said = lines(waited.reading, query: query, source: source, grantNote: grantNote)
+            let said = lines(waited.reading, query: query, source: source)
             return (text: ([waitedClause(waited, wait) + said[0]] + said.dropFirst()).joined(separator: "\n"),
                     result: waited.settled ? "settled" : "timed_out")
         }.text
@@ -563,6 +565,6 @@ extension Desk {
             Desk.Running(app: Front.App(pid: $0.processIdentifier, name: $0.localizedName), regular: $0.activationPolicy == .regular)
         }
         return Desk(frontmost: frontmost, own: Front.Passed(holder: holder, among: apps), running: running,
-                    listing: try Geometry.onScreen(), displays: Geometry.displays())
+                    listing: try Geometry.onScreen(), displays: try Geometry.displays())
     }
 }

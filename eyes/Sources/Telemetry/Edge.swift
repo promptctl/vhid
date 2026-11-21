@@ -8,19 +8,18 @@ import System
 /// [LAW:single-enforcer] The one export edge, for every executable here. A record written
 /// to the file because the collector failed says so on itself, in `sink_error`.
 public struct Edge: Sendable {
-    public let service: String
     public let collector: Collector?
     public let file: URL
     public let deliver: @Sendable (URLRequest) async throws -> Void
 
-    public init(service: String, collector: Collector?, file: URL, deliver: @escaping @Sendable (URLRequest) async throws -> Void) {
-        (self.service, self.collector, self.file, self.deliver) = (service, collector, file, deliver)
+    public init(collector: Collector?, file: URL, deliver: @escaping @Sendable (URLRequest) async throws -> Void) {
+        (self.collector, self.file, self.deliver) = (collector, file, deliver)
     }
 
     /// The environment's collector, and `~/Library/Logs/<service>/events.jsonl`.
     public static func configured(_ environment: [String: String] = ProcessInfo.processInfo.environment,
                                   service: String = Telemetry.service) -> Edge {
-        Edge(service: service, collector: Collector(environment),
+        Edge(collector: Collector(environment),
              file: FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library/Logs/\(service)/events.jsonl"),
              deliver: post)
     }
@@ -72,7 +71,7 @@ public struct Edge: Sendable {
                 case .logs(let url): ("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", url)
                 case .base(let url): ("OTEL_EXPORTER_OTLP_ENDPOINT", url)
                 }
-                guard let url = URL(string: written), ["http", "https"].contains(url.scheme) else {
+                guard let url = URL(string: written), ["http", "https"].contains(url.scheme?.lowercased()) else {
                     throw Refused(description: "\(variable) is not an http or https URL")
                 }
                 return if case .base = endpoint { url.appending(path: "v1/logs") } else { url }
@@ -84,10 +83,11 @@ public struct Edge: Sendable {
                 try (headers ?? "").split(separator: ",").enumerated().map { index, pair in
                     let parts = pair.split(separator: "=", maxSplits: 1)
                     // By position: a header is where a collector's token goes.
-                    guard parts.count == 2, let value = String(parts[1]).trimmingCharacters(in: .whitespaces).removingPercentEncoding else {
+                    let name = parts.first.map { String($0).trimmingCharacters(in: .whitespaces) } ?? ""
+                    guard parts.count == 2, !name.isEmpty, let value = String(parts[1]).trimmingCharacters(in: .whitespaces).removingPercentEncoding else {
                         throw Refused(description: "OTLP header \(index + 1) is not a key=value pair with its value percent-encoded")
                     }
-                    return (String(parts[0]).trimmingCharacters(in: .whitespaces), value)
+                    return (name, value)
                 }
             }
         }
@@ -113,19 +113,24 @@ public struct Edge: Sendable {
         do {
             try append(try JSON.object(record.fields(sink: sink)).line)
         } catch {
-            FileHandle.standardError.write(Data("\(service): the record of this \(record.event) was not written to \(file.path): \(error)\n".utf8))
+            FileHandle.standardError.write(Data("\(record.service): the record of this \(record.event) was not written to \(file.path): \(error)\n".utf8))
         }
         return sink
     }
 
     /// One `write` with `O_APPEND`, so lines from processes appending at once do not
     /// interleave. Readable by its owner alone: it is a record of what this person's
-    /// screen showed and what their keyboard and mouse were made to do.
+    /// screen showed and what their keyboard and mouse were made to do. Made so on every
+    /// append, not only when created, so a file an earlier version made readable to all is
+    /// not appended to as it is. [LAW:single-enforcer]
     private func append(_ line: Data) throws {
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         let descriptor = try FileDescriptor.open(FilePath(file.path), .writeOnly, options: [.append, .create],
                                                  permissions: .ownerReadWrite)
-        try descriptor.closeAfter { _ = try descriptor.writeAll(line) }
+        try descriptor.closeAfter {
+            guard fchmod(descriptor.rawValue, 0o600) == 0 else { throw Errno(rawValue: errno) }
+            _ = try descriptor.writeAll(line)
+        }
     }
 
     public struct Refused: Error, CustomStringConvertible {

@@ -147,7 +147,7 @@ public struct Hit: AsyncParsableCommand {
         // nothing else on screen, is the case most worth saying.
         let front = Result { () throws(AppUnread) in try Front.choose(on: desk) }
         let window = desk.listing.windows.first { $0.pid == climb.pid && $0.frame.contains(point) }
-        let app = window.map(desk.app(of:)) ?? desk.running.first { $0.app.pid == climb.pid }?.app ?? Front.App(pid: climb.pid, name: nil)
+        let app = desk.app(climb.pid, owner: window?.owner)
         // The front look's own hit tests, unbounded as that look's are: one cut off by time would
         // say behind of an app that is over the front one. Counted apart from the climb's.
         var tests = 0

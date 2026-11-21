@@ -243,8 +243,8 @@ public enum Telemetry {
         return environment
     }
 
-    /// The trace and span `TRACEPARENT` names, read once: what the first unit in a process
-    /// joins. A header that is not version, 32 and 16 hex digits and flags is no parent.
+    /// The trace and span `TRACEPARENT` names, read once: what every `.joined` unit begun
+    /// outside another joins. A header that is not version, 32 and 16 hex digits and flags is no parent.
     static let inherited: (trace: String, span: String)? = traceparent(ProcessInfo.processInfo.environment["TRACEPARENT"])
 
     static func traceparent(_ header: String?) -> (trace: String, span: String)? {

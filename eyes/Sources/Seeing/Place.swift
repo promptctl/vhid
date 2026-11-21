@@ -14,11 +14,11 @@ public extension Region {
         case .rect(let rect):
             // A rectangle on no display has nothing in it to read, and a reader that walked
             // it would report a blank screen. [LAW:no-silent-failure]
-            guard Geometry.displays().contains(where: { $0.frame.intersects(rect) }) else { throw NoSuchPlace.offScreen(rect) }
+            guard try Geometry.displays().contains(where: { $0.frame.intersects(rect) }) else { throw NoSuchPlace.offScreen(rect) }
             return rect
         case .display(let id):
             // The listing `eyes displays` prints, so an id it did not list is refused here.
-            guard let display = Geometry.displays().first(where: { $0.id == id }) else { throw NoSuchPlace.display(id) }
+            guard let display = try Geometry.displays().first(where: { $0.id == id }) else { throw NoSuchPlace.display(id) }
             return display.frame
         case .window(let id):
             guard let window = try Geometry.onScreen().windows.first(where: { $0.id == id }) else {
@@ -64,12 +64,15 @@ public struct Display: Sendable, Hashable {
 public extension Geometry {
     /// Every active display, main first - sorted so, because under mirroring the display
     /// list puts the largest drawable display first, not the main one. One reading for every caller, so the displays `eyes displays` lists are the
-    /// ones a region is checked against. [LAW:one-source-of-truth]
-    static func displays() -> [Display] {
+    /// ones a region is checked against. [LAW:one-source-of-truth] A list the window server
+    /// would not give is said, never taken for no display active. [LAW:no-silent-failure]
+    static func displays() throws(CannotReadDisplays) -> [Display] {
         var count: UInt32 = 0
-        CGGetActiveDisplayList(0, nil, &count)
+        var error = CGGetActiveDisplayList(0, nil, &count)
+        guard error == .success else { throw CannotReadDisplays(error: error) }
         var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
-        CGGetActiveDisplayList(count, &ids, &count)
+        error = CGGetActiveDisplayList(count, &ids, &count)
+        guard error == .success else { throw CannotReadDisplays(error: error) }
         return ids.prefix(Int(count)).map { id in
             // Both widths from the mode, which is unrotated; the bounds are rotated, and a
             // portrait display divided by them reads 1.78x instead of 1x.

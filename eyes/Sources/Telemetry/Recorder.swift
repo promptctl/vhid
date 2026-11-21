@@ -66,6 +66,8 @@ final class Recorder: Sendable {
 /// answer. The send is detached, so a unit withdrawn by cancellation still delivers its
 /// record, which is the one most worth delivering, where URLSession would give it up at once.
 public final class Outbox: Sendable {
+    /// The process's outbox. [LAW:no-shared-mutable-globals] One per process, owned here:
+    /// `Telemetry.export` adds to it and each main drains it, and nothing else touches it.
     static let standard = Outbox(Edge.configured())
 
     private let edge: Edge

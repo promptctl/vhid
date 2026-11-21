@@ -22,7 +22,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
-# [LAW:one-source-of-truth] The one place the toolchain is chosen, for every job: the
+# [LAW:one-source-of-truth] Where the toolchain is chosen, for every job - release.yaml says
+# the same, and a step below holds the two to each other: the
 # Xcode developers build with, named rather than left to the runner's default, which
 # moves under us. A Swift older than the one the code was written against can refuse
 # code that compiles locally, and a newer one can accept code that does not.
