@@ -15,7 +15,7 @@ import Testing
     }
 }
 
-private func mouse(on fake: FakeDaemon, reportTimeout: Duration = .seconds(2)) throws -> VirtualPointing {
+private func mouse(on fake: FakeDaemon, reportTimeout: Duration = FakeDaemon.hangGuard) throws -> VirtualPointing {
     VirtualPointing(daemon: try DaemonConnection(fileDescriptor: fake.clientDescriptor), reportTimeout: reportTimeout)
 }
 
@@ -30,21 +30,24 @@ private func pointingReports(_ fake: FakeDaemon) -> [[UInt8]] {
     /// nothing about its mouse.
     @Test func initializeCarriesNoPayloadAndWaitsForThePointingDevice() throws {
         let fake = FakeDaemon(handling: daemonWhoseMouseComesUp)
-        let startup = try mouse(on: fake).start(within: .seconds(2))
+        let startup = try mouse(on: fake).start(within: FakeDaemon.hangGuard)
         let sent = requestSent(fake.requestPayloads[0])
         #expect(sent.version == 7)
         #expect(sent.request == DaemonConnection.Request.pointingInitialize.rawValue)
         #expect(sent.bytes.isEmpty)
-        #expect(startup.ready < .seconds(2))
     }
 
-    @Test func aKeyboardThatIsReadyIsNotAMouseThatIsReady() {
+    /// The daemon says the keyboard is ready before it answers, so the answer is read after
+    /// it, and a wait for the mouse given a deadline already spent ends on that alone.
+    @Test func aKeyboardThatIsReadyIsNotAMouseThatIsReady() throws {
         let fake = FakeDaemon { frame, fake in
             guard case .request(let id, _) = frame else { return }
-            try fake.send(.response(id: id, payload: []))
             try fake.push([(.keyboardReady, true)])
+            try fake.send(.response(id: id, payload: []))
         }
-        #expect(throws: DaemonError.notReady(awaiting: .pointingReady, said: [.keyboardReady: true])) { try mouse(on: fake).start(within: .milliseconds(200)) }
+        let connection = try DaemonConnection(fileDescriptor: fake.clientDescriptor)
+        try connection.request(.pointingInitialize, by: .now + FakeDaemon.hangGuard)
+        #expect(throws: DaemonError.notReady(awaiting: .pointingReady, said: [.keyboardReady: true])) { try connection.wait(for: .pointingReady, by: .now) }
     }
 }
 
@@ -68,7 +71,7 @@ private func pointingReports(_ fake: FakeDaemon) -> [[UInt8]] {
     @Test func motionAndWheelCarryTheButtonsHeld() throws {
         let fake = FakeDaemon(handling: daemonWhoseMouseComesUp)
         let device = try mouse(on: fake)
-        try device.start(within: .seconds(2))
+        try device.start(within: FakeDaemon.hangGuard)
         try device.down(.left)
         try device.move(by: Move(x: Count(clamping: 10), y: Count(clamping: -2)))
         try device.scroll(by: Scroll(vertical: Count(clamping: 3), horizontal: .zero))
@@ -90,7 +93,7 @@ private func pointingReports(_ fake: FakeDaemon) -> [[UInt8]] {
     @Test func aHoldReplacesTheButtonsDown() throws {
         let fake = FakeDaemon(handling: daemonWhoseMouseComesUp)
         let device = try mouse(on: fake)
-        try device.start(within: .seconds(2))
+        try device.start(within: FakeDaemon.hangGuard)
         try device.hold([.left, .right])
         try device.hold([.left])
         try device.hold([.left])
@@ -107,19 +110,13 @@ private func pointingReports(_ fake: FakeDaemon) -> [[UInt8]] {
     }
 
     /// The record may over-report what the device holds and may never under-report: a
-    /// button it has already forgotten is one nothing will lift. Presses are answered and
-    /// releases are not, which is the mid-drag timeout this is about.
+    /// button it has already forgotten is one nothing will lift. Nothing is answered, so
+    /// every limit runs out with nothing racing it: the press is recorded held all the same,
+    /// and each release is the mid-drag timeout this is about.
     @Test func anUnansweredReleaseLeavesTheButtonRecordedAsHeld() throws {
-        let fake = FakeDaemon { frame, fake in
-            guard case .request(let id, let payload) = frame else { return }
-            let sent = requestSent(payload)
-            let releasing = sent.request == DaemonConnection.Request.pointingReset.rawValue
-                || (sent.request == DaemonConnection.Request.postPointingInputReport.rawValue && sent.bytes.allSatisfy { $0 == 0 })
-            guard !releasing else { return }
-            try fake.send(.response(id: id, payload: []))
-        }
+        let fake = FakeDaemon { _, _ in }
         let device = try mouse(on: fake, reportTimeout: .milliseconds(200))
-        try device.down(.right)
+        #expect(throws: DaemonError.silent) { try device.down(.right) }
         #expect(throws: DaemonError.silent) { try device.releaseAll() }
         #expect(device.buttonsDown == [.right])
         #expect(throws: DaemonError.silent) { try device.reset() }
@@ -136,7 +133,7 @@ private func pointingReports(_ fake: FakeDaemon) -> [[UInt8]] {
     @Test func resetAsksTheDaemonToClearTheDeviceAndForgetsWhatWasHeld() throws {
         let fake = FakeDaemon(handling: daemonWhoseMouseComesUp)
         let device = try mouse(on: fake)
-        try device.start(within: .seconds(2))
+        try device.start(within: FakeDaemon.hangGuard)
         try device.down(.left)
         try device.reset()
         #expect(device.buttonsDown.isEmpty)

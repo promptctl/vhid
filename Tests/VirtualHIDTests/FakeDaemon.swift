@@ -16,7 +16,8 @@ final class FakeDaemon: @unchecked Sendable {
     let clientDescriptor: Int32
 
     private let descriptor: Int32
-    private let lock = NSLock()
+    /// Guards the log and the hang-up, and is broadcast on each, for whoever waits on them.
+    private let logged = NSCondition()
     private var log: [Frame] = []
     private var pushID: UInt64 = 10_000
     private var clientGone = false
@@ -44,10 +45,10 @@ final class FakeDaemon: @unchecked Sendable {
             while true {
                 do {
                     let frame = try readFrame()
-                    lock.lock(); log.append(frame); lock.unlock()
+                    logged.lock(); log.append(frame); logged.broadcast(); logged.unlock()
                     try answer(frame, self)
                 } catch is Closed {
-                    lock.lock(); clientGone = true; lock.unlock()
+                    logged.lock(); clientGone = true; logged.broadcast(); logged.unlock()
                     break
                 } catch {
                     // The framing is what this suite exists to check, so a frame this
@@ -75,7 +76,7 @@ final class FakeDaemon: @unchecked Sendable {
 
     /// Every frame the client has sent, in order.
     var received: [Frame] {
-        lock.lock(); defer { lock.unlock() }
+        logged.lock(); defer { logged.unlock() }
         return log
     }
 
@@ -83,25 +84,36 @@ final class FakeDaemon: @unchecked Sendable {
     /// to a health check, say. Every other frame is logged before the response the client
     /// is blocked on, so only these need waiting for; asserting on them straight after the
     /// call under test returns is a race, and one that passes most of the time.
-    func awaitFrame(_ wanted: Frame, within limit: Duration = .seconds(2)) -> Bool {
-        let deadline = ContinuousClock.now + limit
-        while ContinuousClock.now < deadline {
-            if received.contains(wanted) { return true }
-            Thread.sleep(forTimeInterval: 0.002)
-        }
-        return received.contains(wanted)
+    func awaitFrame(_ wanted: Frame) -> Bool {
+        awaitReceived { $0.contains(wanted) }
     }
 
-    /// Whether the client ended the stream within `limit`, which is what tells the real
-    /// daemon to take down the devices it kept for that client.
-    func awaitClientHangUp(within limit: Duration = .seconds(2)) -> Bool {
-        let deadline = ContinuousClock.now + limit
-        repeat {
-            lock.lock(); let gone = clientGone; lock.unlock()
-            if gone { return true }
-            Thread.sleep(forTimeInterval: 0.002)
-        } while ContinuousClock.now < deadline
-        return false
+    /// Waits for what the client has sent to hold `holds`: a frame whose answer the client
+    /// stopped waiting on, say, which it may have given up on before this thread read it.
+    func awaitReceived(_ holds: ([Frame]) -> Bool) -> Bool {
+        awaitLogged { holds($0.log) }
+    }
+
+    /// Whether the client ended the stream, which is what tells the real daemon to take
+    /// down the devices it kept for that client.
+    func awaitClientHangUp() -> Bool {
+        awaitLogged { $0.clientGone }
+    }
+
+    /// The limit on anything the fake does: it answers at once, so this only ends a hang
+    /// on a runner too loaded to run its thread. A test that needs a limit to run out
+    /// leaves the request unanswered, so nothing races it. [LAW:no-ambient-temporal-coupling]
+    static let hangGuard: Duration = .seconds(60)
+
+    /// Waits on the daemon's thread having logged what `holds` asks after. Woken by each
+    /// frame and by the hang-up, so the wait ends on the event.
+    private func awaitLogged(_ holds: (FakeDaemon) -> Bool) -> Bool {
+        let limit = Date(timeIntervalSinceNow: Self.hangGuard.timeInterval)
+        logged.lock(); defer { logged.unlock() }
+        while !holds(self) {
+            guard logged.wait(until: limit) else { return holds(self) }
+        }
+        return true
     }
 
     /// The payload of each request the client sent, which is where the version, the
@@ -117,7 +129,7 @@ final class FakeDaemon: @unchecked Sendable {
     /// A status push, which the daemon sends as a request of its own and the client is
     /// expected to answer.
     func push(_ statuses: [(DaemonConnection.Status, Bool)]) throws {
-        lock.lock(); pushID += 1; let id = pushID; lock.unlock()
+        logged.lock(); pushID += 1; let id = pushID; logged.unlock()
         try send(.request(id: id, payload: statuses.flatMap { [$0.0.rawValue, $0.1 ? 1 : 0] }))
     }
 
@@ -168,6 +180,11 @@ final class FakeDaemon: @unchecked Sendable {
     /// than a failure the loop has to recognise by its message. [LAW:types-are-the-program]
     struct Closed: Error {}
     struct Failed: Error { let what: String }
+}
+
+extension Duration {
+    /// This duration in the seconds Foundation and Dispatch take.
+    var timeInterval: TimeInterval { TimeInterval(components.seconds) + TimeInterval(components.attoseconds) / 1e18 }
 }
 
 /// The request byte and payload the client actually sent, unwrapped from the two-byte

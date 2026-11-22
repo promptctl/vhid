@@ -77,6 +77,11 @@ public final class DaemonConnection: Sendable {
     }
 
     private let link: Link
+    /// What a startup is timed by. A parameter so a test can make the timing exact: when
+    /// it is read is the event a timing is of, which a fake on the far end of the socket
+    /// cannot see. [LAW:no-ambient-temporal-coupling] Deadlines stay on `ContinuousClock`,
+    /// because the waits under them are real.
+    private let now: @Sendable () -> ContinuousClock.Instant
 
     /// Connects to the daemon at the path above.
     ///
@@ -105,7 +110,8 @@ public final class DaemonConnection: Sendable {
     ///
     /// The heartbeat interval and the patience are parameters so a test can watch a
     /// heartbeat go out, or a silence be noticed, without waiting the daemon's seconds.
-    init(fileDescriptor: Int32, heartbeatEvery interval: Duration = DaemonConnection.heartbeatInterval, patience: Duration = DaemonConnection.patience, whenLost: @escaping @Sendable (DaemonError) -> Void = { _ in }) throws {
+    init(fileDescriptor: Int32, heartbeatEvery interval: Duration = DaemonConnection.heartbeatInterval, patience: Duration = DaemonConnection.patience, now: @escaping @Sendable () -> ContinuousClock.Instant = { .now }, whenLost: @escaping @Sendable (DaemonError) -> Void = { _ in }) throws {
+        self.now = now
         // The link owns the descriptor from this line, so an initializer that throws past
         // it still closes exactly once, when the link goes.
         link = Link(socket: fileDescriptor, heartbeatEvery: interval, patience: patience, whenLost: whenLost)
@@ -169,16 +175,16 @@ public final class DaemonConnection: Sendable {
     /// devices start this way and differ only in the three values, so the bringing up is
     /// one function of them. [LAW:one-type-per-behavior]
     func initialize(_ request: Request, _ payload: [UInt8], until ready: Status, within limit: Duration) throws -> Startup {
-        let began = ContinuousClock.now
-        let deadline = began + limit
+        let deadline = ContinuousClock.now + limit
+        let began = now()
         try self.request(request, payload, by: deadline)
         // Taken here because `request` returns on the daemon's answer to it. Timing the
         // first frame of the readiness wait instead - as this did, and low-talker's spike
         // before it - reports the first status push under a name that says the daemon had
         // not spoken yet, when answering the request is exactly what it just did.
-        let answered = ContinuousClock.now
+        let answered = now()
         try wait(for: ready, by: deadline)
-        return Startup(answered: answered - began, ready: ContinuousClock.now - began)
+        return Startup(answered: answered - began, ready: now() - began)
     }
 
     /// The daemon's status payload, decoded: pairs of (status, value). Pure, and separate

@@ -25,7 +25,7 @@ import Testing
         let fake = FakeDaemon()
         let connection = try DaemonConnection(fileDescriptor: fake.clientDescriptor)
         try fake.push([(.keyboardReady, true)])
-        #expect(throws: Never.self) { try connection.wait(for: .keyboardReady, by: .now + .seconds(2)) }
+        #expect(throws: Never.self) { try connection.wait(for: .keyboardReady, by: .now + FakeDaemon.hangGuard) }
         #expect(fake.awaitFrame(.response(id: 10_001, payload: [])))
     }
 
@@ -35,7 +35,7 @@ import Testing
     @Test func theDaemonHangingUpIsToldOnceAndFailsEveryLaterRequest() throws {
         let fake = FakeDaemon()
         let lost = Lost()
-        let device = VirtualKeyboard(daemon: try DaemonConnection(fileDescriptor: fake.clientDescriptor, whenLost: lost.record), reportTimeout: .seconds(2))
+        let device = VirtualKeyboard(daemon: try DaemonConnection(fileDescriptor: fake.clientDescriptor, whenLost: lost.record), reportTimeout: FakeDaemon.hangGuard)
         fake.hangUp()
         #expect(lost.await() == .closed)
         #expect(throws: DaemonError.closed) { try device.down(.leftShift) }
@@ -57,9 +57,9 @@ import Testing
         let connection = try DaemonConnection(fileDescriptor: fake.clientDescriptor, whenLost: lost.record)
         #expect(shutdown(fake.clientDescriptor, SHUT_WR) == 0)
         let failed = DaemonError.socket("write", EPIPE)
-        #expect(throws: failed) { try connection.request(.keyboardInitialize, by: .now + .seconds(2)) }
+        #expect(throws: failed) { try connection.request(.keyboardInitialize, by: .now + FakeDaemon.hangGuard) }
         #expect(lost.await() == failed)
-        #expect(throws: failed) { try connection.request(.keyboardReset, by: .now + .seconds(2)) }
+        #expect(throws: failed) { try connection.request(.keyboardReset, by: .now + FakeDaemon.hangGuard) }
         #expect(lost.count == 1)
     }
 
@@ -96,7 +96,7 @@ import Testing
         }
         let lost = Lost()
         let connection = try DaemonConnection(fileDescriptor: fake.clientDescriptor, whenLost: lost.record)
-        #expect(throws: DaemonError.driverVersionMismatched) { try connection.request(.keyboardInitialize, by: .now + .seconds(2)) }
+        #expect(throws: DaemonError.driverVersionMismatched) { try connection.request(.keyboardInitialize, by: .now + FakeDaemon.hangGuard) }
         #expect(lost.await() == .driverVersionMismatched)
     }
 
@@ -111,11 +111,11 @@ import Testing
         let fake = FakeDaemon()
         let lost = Lost()
         let daemon = try DaemonConnection(fileDescriptor: fake.clientDescriptor, whenLost: lost.record)
-        let keyboard = VirtualKeyboard(daemon: daemon, reportTimeout: .seconds(2))
-        let mouse = VirtualPointing(daemon: daemon, reportTimeout: .seconds(2))
+        let keyboard = VirtualKeyboard(daemon: daemon, reportTimeout: FakeDaemon.hangGuard)
+        let mouse = VirtualPointing(daemon: daemon, reportTimeout: FakeDaemon.hangGuard)
         try fake.push(Self.said(connected: true, keyboard: true, pointing: true))
-        try keyboard.start(within: .seconds(2))
-        try mouse.start(within: .seconds(2))
+        try keyboard.start(within: FakeDaemon.hangGuard)
+        try mouse.start(within: FakeDaemon.hangGuard)
         try keyboard.down(.leftShift)
         let sentWhileUp = fake.requestPayloads.count
 
@@ -134,9 +134,9 @@ import Testing
     @Test func theDriverComingBackDoesNotReviveTheConnectionThatLostIt() throws {
         let fake = FakeDaemon()
         let lost = Lost()
-        let keyboard = VirtualKeyboard(daemon: try DaemonConnection(fileDescriptor: fake.clientDescriptor, whenLost: lost.record), reportTimeout: .seconds(2))
+        let keyboard = VirtualKeyboard(daemon: try DaemonConnection(fileDescriptor: fake.clientDescriptor, whenLost: lost.record), reportTimeout: FakeDaemon.hangGuard)
         try fake.push(Self.said(connected: true, keyboard: true, pointing: true))
-        try keyboard.start(within: .seconds(2))
+        try keyboard.start(within: FakeDaemon.hangGuard)
         try fake.push(Self.said(connected: true, keyboard: false, pointing: true))
         let gone = try #require(lost.await())
         guard case .withdrawn(.keyboardReady, _) = gone else { Issue.record("lost to \(gone)"); return }
@@ -153,7 +153,7 @@ import Testing
         let lost = Lost()
         let daemon = try DaemonConnection(fileDescriptor: fake.clientDescriptor, whenLost: lost.record)
         try fake.push(Self.said(connected: true, keyboard: true, pointing: true))
-        try daemon.wait(for: .pointingReady, by: .now + .seconds(2))
+        try daemon.wait(for: .pointingReady, by: .now + FakeDaemon.hangGuard)
         try fake.push(Self.said(connected: true, keyboard: false, pointing: true))
         #expect(lost.await() != nil)
         #expect(fake.awaitClientHangUp())
@@ -179,10 +179,10 @@ import Testing
         }
         let lost = Lost()
         let daemon = try DaemonConnection(fileDescriptor: fake.clientDescriptor, whenLost: lost.record)
-        let keyboard = VirtualKeyboard(daemon: daemon, reportTimeout: .seconds(2))
-        let mouse = VirtualPointing(daemon: daemon, reportTimeout: .seconds(2))
-        try keyboard.start(within: .seconds(2))
-        try mouse.start(within: .seconds(2))
+        let keyboard = VirtualKeyboard(daemon: daemon, reportTimeout: FakeDaemon.hangGuard)
+        let mouse = VirtualPointing(daemon: daemon, reportTimeout: FakeDaemon.hangGuard)
+        try keyboard.start(within: FakeDaemon.hangGuard)
+        try mouse.start(within: FakeDaemon.hangGuard)
         #expect(throws: Never.self) { try keyboard.down(.leftShift) }
         #expect(lost.count == 0)
     }
@@ -202,9 +202,11 @@ import Testing
         }
         let connection = try DaemonConnection(fileDescriptor: fake.clientDescriptor)
         #expect(throws: DaemonError.silent) { try connection.request(.keyboardInitialize, by: .now + .milliseconds(50)) }
-        let forgotten = try #require(fake.received.compactMap { if case .request(let id, _) = $0 { id } else { nil } }.first)
+        let asked = { (frames: [Frame]) in frames.compactMap { if case .request(let id, _) = $0 { id } else { nil } }.first }
+        #expect(fake.awaitReceived { asked($0) != nil })
+        let forgotten = try #require(asked(fake.received))
         try fake.send(.response(id: forgotten, payload: []))
-        #expect(throws: Never.self) { try connection.request(.keyboardReset, by: .now + .seconds(2)) }
+        #expect(throws: Never.self) { try connection.request(.keyboardReset, by: .now + FakeDaemon.hangGuard) }
     }
 
     /// A daemon that stops draining its socket without hanging up - and keeps talking, so
@@ -244,8 +246,10 @@ import Testing
             }
             ended.signal()
         }.start()
-        #expect(ended.wait(timeout: .now() + .seconds(4)) == .success, "the stalled write did not end within 4 s")
-        #expect(lost.await(within: .zero) == .silent)
+        // The fake talks for as long as the client is there, so a stalled write ending at
+        // all is its patience given out; the limit only ends a hang.
+        #expect(ended.wait(timeout: .now() + FakeDaemon.hangGuard.timeInterval) == .success, "the stalled write did not end")
+        #expect(lost.all.first == .silent)
         #expect(lost.count == 1)
         #expect(thrown.all.allSatisfy { $0 == .silent })
         #expect(thrown.count == 2, "\(thrown.count) requests ended before the connection did, not the one unanswered and the one stalled")
@@ -255,41 +259,49 @@ import Testing
     @Test func hangingUpOurselvesTellsNobody() throws {
         let fake = FakeDaemon()
         let lost = Lost()
+        let letGo = DispatchSemaphore(value: 0)
         do {
-            let connection = try DaemonConnection(fileDescriptor: fake.clientDescriptor, whenLost: lost.record)
+            let witness = Witness(letGo)
+            let connection = try DaemonConnection(fileDescriptor: fake.clientDescriptor, whenLost: { error in
+                withExtendedLifetime(witness) { lost.record(error) }
+            })
             withExtendedLifetime(connection) {}
         }
-        // The fake's thread ends on the client's end of stream, which is the same event
-        // the callback would fire on; once it has ended, the callback has had its chance.
-        Thread.sleep(forTimeInterval: 0.05)
+        // The reading thread holds the callback until it has read the end of the stream and
+        // let go of the link: once the callback is gone, it has had its every chance.
+        #expect(letGo.wait(timeout: .now() + FakeDaemon.hangGuard.timeInterval) == .success)
         #expect(lost.count == 0)
+    }
+
+    /// Signals when the last hold on it goes.
+    private final class Witness: Sendable {
+        private let gone: DispatchSemaphore
+        init(_ gone: DispatchSemaphore) { self.gone = gone }
+        deinit { gone.signal() }
     }
 }
 
 /// What `whenLost` was told, readable from the test's thread.
 private final class Lost: @unchecked Sendable {
-    private let lock = NSLock()
+    private let told = NSCondition()
     private var errors: [DaemonError] = []
 
     @Sendable func record(_ error: DaemonError) {
-        lock.lock(); errors.append(error); lock.unlock()
+        told.lock(); errors.append(error); told.broadcast(); told.unlock()
     }
 
     var all: [DaemonError] {
-        lock.lock(); defer { lock.unlock() }
+        told.lock(); defer { told.unlock() }
         return errors
     }
 
     var count: Int { all.count }
 
-    /// The first error, waited for within `limit`; a limit of zero reads what is there.
-    func await(within limit: Duration = .seconds(2)) -> DaemonError? {
-        let deadline = ContinuousClock.now + limit
-        repeat {
-            lock.lock(); let first = errors.first; lock.unlock()
-            if let first { return first }
-            Thread.sleep(forTimeInterval: 0.002)
-        } while ContinuousClock.now < deadline
-        return nil
+    /// The first error, waited for until it is told; the limit only ends a hang.
+    func await() -> DaemonError? {
+        let limit = Date(timeIntervalSinceNow: FakeDaemon.hangGuard.timeInterval)
+        told.lock(); defer { told.unlock() }
+        while errors.isEmpty, told.wait(until: limit) {}
+        return errors.first
     }
 }
