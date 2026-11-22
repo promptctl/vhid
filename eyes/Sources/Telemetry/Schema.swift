@@ -142,5 +142,9 @@ extension Telemetry {
         /// named, zeros included.
         case ending
         case leftOut = "left_out"
+        /// What the displays did under a finished play, `kept`, `changed` or `unread`, and
+        /// why the read once its last report was out failed, absent when it did not.
+        case layout
+        case layoutUnread = "layout_unread"
     }
 }

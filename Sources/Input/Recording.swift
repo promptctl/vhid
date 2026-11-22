@@ -106,10 +106,10 @@ public struct Recorder {
         lines = [.keys(.zero, session)]
     }
 
-    /// The layout the window server says the displays changed to, counted when it differs
-    /// from the one the recording was placing on.
+    /// The layout the window server says the displays changed to, counted when it presses
+    /// otherwise than the one the recording was placing on.
     public mutating func relayout(_ displays: Displays) {
-        layoutChanges += displays == self.displays ? 0 : 1
+        layoutChanges += displays.pressesAlike(self.displays) ? 0 : 1
         self.displays = displays
     }
 
@@ -125,10 +125,11 @@ public struct Recorder {
         return whole + ((value - whole) * 1000).rounded() / 1000
     }
 
-    /// Whether `point` is less than a point from the displays' edge, where motion can be
-    /// stopped short: `covers`' rule, so the seam between two displays is no edge.
+    /// Whether `point` is on a display and less than a point from the displays' edge, where
+    /// motion can be stopped short: `covers`' rule, so the seam between two displays is no
+    /// edge, and a point on no display is not at one.
     private func atEdge(_ point: ScreenPoint) -> Bool {
-        !displays.covers((x: point.x, y: point.y), by: 1)
+        displays.covers((x: point.x, y: point.y), by: 0) && !displays.covers((x: point.x, y: point.y), by: 1)
     }
 
     /// Takes one event, writing a line when it changed what the person holds or where

@@ -11,8 +11,8 @@ import ScreenSpaceTesting
 @Suite(.eventsKept) struct HitCommandTests {
     static let settings = Front.App(pid: 300, name: "System Settings")
     static let window = Window(id: 4127, owner: "System Settings", pid: 300, frame: try! ScreenRect(x: 0, y: 25, width: 800, height: 600), layer: 0)
-    static let add = Landing.Element(role: Role(rawValue: "AXButton"), texts: [Said(.description, Text("Add")!, .words)], frame: try! ScreenRect(x: 160, y: 417, width: 18, height: 18))
-    static let list = Landing.Element(role: Role(rawValue: "AXList"), texts: [], unanswered: 1, frame: nil)
+    static let add = Landing.Element(role: Role(rawValue: "AXButton"), texts: [Said(.description, Text("Add")!, .words)], frame: .box(try! ScreenRect(x: 160, y: 417, width: 18, height: 18)))
+    static let list = Landing.Element(role: Role(rawValue: "AXList"), texts: [], unanswered: 1, frame: .none)
 
     /// The case the epic began with: the button "Add" in System Settings, the front app.
     static let button = Landing(point: try! ScreenPoint(x: 169, y: 426.5), app: settings, standing: .front(settings), window: window,

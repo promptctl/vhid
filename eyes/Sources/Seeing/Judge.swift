@@ -69,12 +69,19 @@ public extension Reading {
         let narrowed = admitted.kept.map { query.match.narrowing($0.found, by: $0.fit) }
         let matching = narrowed.flatMap(\.rows)
         // Absent `near` is one anchor everywhere at once: every match beside it, reading
-        // order kept by the stable sort. Anchors are any text on screen, whatever its role,
-        // and never rows of the answer, so a stretch of one that makes no row is no anchor
-        // and is not counted. [LAW:dataflow-not-control-flow]
+        // order kept by the stable sort. Anchors are any text on screen, whatever its role.
+        // [LAW:dataflow-not-control-flow]
         let nearFits = query.near.map { near in (near: near, fits: candidates.map { (found: $0, fit: near.fit($0)) }) }
-        let anchors = nearFits.map { near, fits in
-            distinct(fits.filter { near.tolerates($0.fit.distance) }, by: \.found).kept.flatMap { near.narrowing($0.found, by: $0.fit).rows }
+        let anchoring = nearFits.map { near, fits in
+            distinct(fits.filter { near.tolerates($0.fit.distance) }, by: \.found).kept.map { near.narrowing($0.found, by: $0.fit) }
+        }
+        let anchors = anchoring.map { $0.flatMap(\.rows) }
+        // A stretch matched that makes no row is counted once, whether the text asked for or
+        // the anchor matched it: an anchor on no display is not "no such anchor".
+        // [LAW:no-silent-failure]
+        var refused: [Unfound] = []
+        for unfound in narrowed.flatMap(\.unfound) + (anchoring ?? []).flatMap(\.unfound) where !refused.contains(unfound) {
+            refused.append(unfound)
         }
         // The rows a miss shows: the asked-for text's of the asked-for role, the anchor's of any.
         func misses(among pool: [(found: Found, fit: Fit)]) -> [Near] {
@@ -97,7 +104,7 @@ public extension Reading {
             : Matches(kept).map(Outcome.matched) ?? .nearest(misses(among: fits.filter { query.role.cast($0.found) == .admitted }))
         // Rows set aside for their role are things on screen too, each counted once.
         let set: [Exclusion] = [Exclusion(reason: .duplicate, count: admitted.dropped)]
-            + Unfound.counted(narrowed.flatMap(\.unfound))
+            + Unfound.counted(refused)
             + [Exclusion(reason: .otherRole, count: distinct(cast[.other] ?? [], by: \.found).kept.count),
                                 Exclusion(reason: .roleUnknown, count: distinct(cast[.unknown] ?? [], by: \.found).kept.count),
                                 Exclusion(reason: .ranked, count: cut)]

@@ -191,15 +191,20 @@ import ScreenSpaceTesting
         #expect(recorder.vhidAtEdge == 0)
         try recorder.take(event(30, .motion, at: point(199.5, 50), from: Self.vhid))
         #expect(recorder.vhidAtEdge == 1)
+        // Off every display is no edge: a display attached before the layout says so.
+        try recorder.take(event(40, .motion, at: point(250, 50), from: Self.vhid))
+        #expect(recorder.vhidAtEdge == 1)
     }
 
-    /// A layout the window server says changed is counted only when it differs, and the
-    /// recorder places on it from then on.
+    /// A layout the window server says changed is counted only when it presses otherwise -
+    /// a display asleep presses as it did - and the recorder places on it from then on.
     @Test func aLayoutChangeIsCountedAndPlacedOn() throws {
-        let narrow = DisplayLayout.at(try! ScreenRect(x: 0, y: 0, width: 200, height: 200)).online
+        let frame = try! ScreenRect(x: 0, y: 0, width: 200, height: 200)
+        let narrow = DisplayLayout.at(frame).online
         let wide = DisplayLayout.at(try! ScreenRect(x: 0, y: 0, width: 400, height: 200)).online
         var recorder = try Recorder(start: Self.start, flags: 0, vhid: [], displays: narrow)
         recorder.relayout(narrow)
+        recorder.relayout(DisplayLayout.at(frame, asleep: [1]).online)
         #expect(recorder.layoutChanges == 0)
         recorder.relayout(wide)
         #expect(recorder.layoutChanges == 1)

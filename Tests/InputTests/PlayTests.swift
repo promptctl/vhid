@@ -323,6 +323,47 @@ import ScreenSpaceTesting
         #expect(fake.log.isEmpty)
     }
 
+    /// The first point written is the first refused: a start on no display is named by its
+    /// line, though a later line is on none too.
+    @Test func theStartIsPlacedFirst() throws {
+        let script = try Schedule<ScreenPoint>(Play.parse("""
+            {"to":{"x":5000,"y":0}}
+            {"t_ms":0,"at":{"x":6000,"y":10}}
+            """))
+        let one = DisplayLayout.at(try! ScreenRect(x: 0, y: 0, width: 1920, height: 1080)).online
+        let refused = try #require(throws: Play.ScriptInvalid.self) { try script.placed(on: one) }
+        #expect(refused.line == 1)
+    }
+
+    /// Once the last report is out the layout is read again: a display asleep presses as it
+    /// did, one moved does not, and a read that fails leaves the play whole and says why.
+    @Test(arguments: [("asleep", "kept"), ("moved", "changed"), ("unreadable", "unread")])
+    func whatTheDisplaysDidUnderAPlayIsSaid(after: String, said: String) async throws {
+        let fake = FakeMouse(at: try! ScreenPoint(x: 10, y: 10))
+        let frame = try! ScreenRect(x: 0, y: 0, width: 1920, height: 1080)
+        let before = DisplayLayout.at(frame).online
+        let later: Displays? = switch after {
+        case "asleep": DisplayLayout.at(frame, asleep: [1]).online
+        case "moved": DisplayLayout.at(try! ScreenRect(x: 0, y: 0, width: 1280, height: 800)).online
+        default: nil
+        }
+        // The layout is the later one once the release has gone. [LAW:no-ambient-temporal-coupling]
+        let displays: @Sendable () async throws -> Displays = {
+            guard fake.log.contains("hold []") else { return before }
+            guard let later else { throw CancellationError() }
+            return later
+        }
+        let play = try Play.parse("""
+            {"to":{"x":10,"y":10}}
+            {"t_ms":0,"buttons":["left"]}
+            {"t_ms":1,"buttons":[]}
+            """)
+        let pointer = Pointer(mouse: fake, cursor: fake.cursor, displays: displays, clock: ManualClock(), randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in })
+        let played = try await Player(pointer: pointer, keyboard: fake.keyboard, wall: { Self.epoch }, lead: .zero).play(Schedule(play))
+        #expect(played.reports.count == 2)
+        #expect(played.layout.description == said)
+    }
+
     @Test func latenessIsReadByNearestRank() {
         #expect(Lateness(of: (1...100).map(Int64.init).shuffled())?.ranks == [50, 90, 99, 100])
         #expect(Lateness(of: [7])?.ranks == [7, 7, 7, 7])

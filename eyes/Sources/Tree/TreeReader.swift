@@ -154,13 +154,13 @@ public struct TreeReader: Reader {
                                  of: window, as: [.structure, .structure, .structure, .structure])
             guard case .answered(let position) = reads[0], case .answered(let size) = reads[1],
                   reads[2].answer.flatMap({ $0 as? Bool }) != true,
-                  case .success(let frame)? = frame(position, size) else { continue }
+                  case .box(let frame) = frame(position, size) else { continue }
             windows.append((window, frame))
             for child in elements(reads[3].answer ?? nil) {
                 let sheet = try read([kAXRoleAttribute, kAXPositionAttribute, kAXSizeAttribute], of: child, as: [.structure, .structure, .structure])
                 guard sheet[0].answer.flatMap({ $0 as? String }) == kAXSheetRole,
                       case .answered(let position) = sheet[1], case .answered(let size) = sheet[2],
-                      case .success(let frame)? = Self.frame(position, size) else { continue }
+                      case .box(let frame) = Self.frame(position, size) else { continue }
                 windows.append((child, frame))
             }
         }
@@ -204,7 +204,7 @@ public struct TreeReader: Reader {
               case .answered(let size) = reads[2], case .answered(let parent) = reads[3]
         else { return .unanswered }
         return .answered(Lineage(role: Role(rawValue: role as? String ?? kAXUnknownRole),
-                                 frame: frame(position, size).flatMap { if case .success(let box) = $0 { box } else { nil } },
+                                 frame: frame(position, size),
                                  parent: parent.flatMap(Self.element).map(bounded)))
     }
 
@@ -251,7 +251,7 @@ public struct TreeReader: Reader {
     /// One element: every attribute in one round trip, each outcome decided by `Answer`.
     static func node(_ element: AXUIElement) throws(TreeError) -> Node<AXUIElement> {
         let reads = try read(attributes, of: element, as: parts)
-        let frame: Heard<Result<ScreenRect, NotABox>?> = switch (reads[4], reads[5]) {
+        let frame: Heard<Frame> = switch (reads[4], reads[5]) {
         case (.answered(let position), .answered(let size)): .answered(Self.frame(position, size))
         default: .unanswered
         }
@@ -293,12 +293,14 @@ public struct TreeReader: Reader {
         return AXValueGetValue(value as! AXValue, .axError, &error) ? error : nil
     }
 
-    /// An element's frame as its app gave it: nil for an element with no frame, and a frame
-    /// that is no box - NaN, infinite, or a side under zero, which an app can claim - kept as
-    /// its refusal, which the walk counts `notABox`. [LAW:parse-dont-validate]
-    static func frame(_ position: CFTypeRef?, _ size: CFTypeRef?) -> Result<ScreenRect, NotABox>? {
-        unboxed(position, as: .cgPoint, CGPoint.zero).flatMap { origin in
-            unboxed(size, as: .cgSize, CGSize.zero).map { size in Result { () throws(NotABox) in try ScreenRect(CGRect(origin: origin, size: size)) } }
+    /// An element's frame as its app gave it, a frame that is no box - NaN, infinite, or a side
+    /// under zero, which an app can claim - kept as its refusal. [LAW:parse-dont-validate]
+    static func frame(_ position: CFTypeRef?, _ size: CFTypeRef?) -> Frame {
+        guard let origin = unboxed(position, as: .cgPoint, CGPoint.zero), let size = unboxed(size, as: .cgSize, CGSize.zero) else { return .none }
+        do throws(NotABox) {
+            return .box(try ScreenRect(CGRect(origin: origin, size: size)))
+        } catch {
+            return .refused(error)
         }
     }
 

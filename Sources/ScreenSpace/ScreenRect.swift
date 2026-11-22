@@ -57,8 +57,12 @@ public struct ScreenRect: Hashable, Sendable, CustomStringConvertible {
     /// Half-open: the left and top edges are in the box, the right and bottom are not, so two
     /// boxes edge to edge never both hold a point. The rule every point of a box answered
     /// below keeps to.
-    public func contains(_ point: ScreenPoint) -> Bool {
-        point.x >= x && point.x - x < width && point.y >= y && point.y - y < height
+    public func contains(_ point: ScreenPoint) -> Bool { contains(x: point.x, y: point.y) }
+
+    /// The same rule for coordinates computed on the way to a point, such as a path's: one
+    /// that is not finite is in no box, which is the answer, not a refusal.
+    public func contains(x pointX: Double, y pointY: Double) -> Bool {
+        pointX >= x && pointX - x < width && pointY >= y && pointY - y < height
     }
 
     /// The box both hold, nil when they share no area. Each side is taken from the nearer
@@ -104,7 +108,7 @@ public struct ScreenRect: Hashable, Sendable, CustomStringConvertible {
 
 /// Four numbers that are not a box: one is not finite, a side is under zero, or a far edge is
 /// past what a Double holds.
-public struct NotABox: Error, Equatable, CustomStringConvertible {
+public struct NotABox: Error, Hashable, CustomStringConvertible {
     public let x: Double
     public let y: Double
     public let width: Double

@@ -13,7 +13,7 @@ extension Displays {
     /// test against one display at a time would see an edge at every seam.
     func covers(_ point: Submovement.Point, by reach: Double) -> Bool {
         [(-reach, -reach), (-reach, reach), (reach, -reach), (reach, reach)].allSatisfy { corner in
-            (try? ScreenPoint(x: point.x + corner.0, y: point.y + corner.1)).map { corner in frames.contains { $0.contains(corner) } } ?? false
+            frames.contains { $0.contains(x: point.x + corner.0, y: point.y + corner.1) }
         }
     }
 

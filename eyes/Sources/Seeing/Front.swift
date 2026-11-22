@@ -126,7 +126,8 @@ public struct Front: Sendable, Hashable {
     /// Where an app a click at `point` lands in stands to a look with no place named, by the
     /// rules that look reads by: `own`, its one display, the windows it walks, and `owners`.
     /// [LAW:single-enforcer] `front` is what that look would read on `desk`, or why it reads nothing.
-    public static func standing(of pid: Int32, at point: ScreenPoint, on desk: Desk, front: Result<Front, AppUnread>,
+    /// The point comes placed on the desk's active displays, so the display it is on is known.
+    public static func standing(of pid: Int32, at placed: Placed<ScreenPoint>, on desk: Desk, front: Result<Front, AppUnread>,
                                 hit: (ScreenPoint) -> Heard<Int32>) -> Standing {
         if desk.own.pids.contains(pid) { return .own(desk.own.name) }
         let read: Front
@@ -134,9 +135,8 @@ public struct Front: Sendable, Hashable {
         case .success(let front): read = front
         case .failure(let why): return .unread(why)
         }
-        // The display a click at the point is placed on, by the one rule. [LAW:single-enforcer]
-        let on = Result { () throws(Unplaced) in try desk.layout.active.place(point) }
-        guard case .success(let placed) = on, placed.display.id == read.display else { return .otherDisplay(read.app, read.display) }
+        let point = placed.value
+        guard placed.display.id == read.display else { return .otherDisplay(read.app, read.display) }
         guard desk.listing.windows.contains(where: { $0.pid == pid && $0.frame.contains(point) }) else { return .noWindow(read.app) }
         if pid == read.app.pid { return .front(read.app) }
         return read.owners(in: desk.listing, hit: hit).contains(pid) ? .overFront(read.app) : .behind(read.app)

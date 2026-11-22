@@ -315,9 +315,9 @@ import ScreenSpaceTesting
         let desk = Desk(frontmost: finder, own: Front.Passed(pids: [80], name: "iTerm2"),
                         running: [Desk.Running(app: settings, regular: true), Desk.Running(app: finder, regular: true)],
                         listing: WindowListing(windows: [window], excluded: []),
-                        layout: try! DisplayLayout([OnlineDisplay(id: 2, bounds: Self.display, active: true)]), describe: { _ in [display] })
+                        layout: try! DisplayLayout([OnlineDisplay(id: 2, bounds: Self.display, active: true)]), describe: { _ in display })
         let located = try await Telemetry.$export.withValue(events.export) {
-            try await Where.Place.front.located(desk: { desk })
+            try await Where.Place.front.located(on: Screen(desk: { desk }))
         }
         #expect(located.region == .front(Front(app: settings, display: 2, own: desk.own, passedOver: .windowless(finder))))
         // Found on the layout of the desk it was chosen on, so the choice and the first read
@@ -360,10 +360,10 @@ import ScreenSpaceTesting
         let events = Collected()
         let viewport = try! ScreenRect(x: 22, y: 190, width: 1200, height: 688)
         try await Telemetry.$export.withValue(events.export) {
-            let found = try await Where.Place.page(219).located(pages: { _ in Paged(pages: [viewport], examined: 40, stop: nil) }, layouts: { .vast }).region
+            let found = try await Where.Place.page(219).located(on: Screen(layouts: { .vast }, pages: { _ in Paged(pages: [viewport], examined: 40, stop: nil) })).region
             #expect(found == .page(window: 219, frame: viewport))
-            _ = try? await Where.Place.page(219).located(pages: { _ in Paged(pages: [viewport, viewport], examined: 52, stop: nil) }, layouts: { .vast })
-            _ = try? await Where.Place.page(219).located(pages: { _ in Paged(pages: [], examined: 4000, stop: .elementLimit(Limit(4000)!)) }, layouts: { .vast })
+            _ = try? await Where.Place.page(219).located(on: Screen(layouts: { .vast }, pages: { _ in Paged(pages: [viewport, viewport], examined: 52, stop: nil) }))
+            _ = try? await Where.Place.page(219).located(on: Screen(layouts: { .vast }, pages: { _ in Paged(pages: [], examined: 4000, stop: .elementLimit(Limit(4000)!)) }))
         }
         let seen = events.all
         #expect(seen.map(\.event) == ["page", "page", "page"])

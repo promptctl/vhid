@@ -67,19 +67,23 @@ public struct Display: Sendable, Hashable {
 }
 
 public extension Geometry {
-    /// The layout's active displays - the ones a capture shows - main first: sorted so,
-    /// because under mirroring the display list puts the largest drawable display first, not
-    /// the main one. [LAW:one-source-of-truth] The displays `eyes displays` lists are the
-    /// ones a region is checked against, from the one layout a look read.
-    static func displays(of layout: DisplayLayout) -> [Display] {
-        layout.displays.filter(\.active).map { display in
-            // Both widths from the mode, which is unrotated; the bounds are rotated, and a
-            // portrait display divided by them reads 1.78x instead of 1x.
-            let mode = CGDisplayCopyDisplayMode(display.id)
-            return Display(
-                id: display.id, frame: display.bounds, isMain: CGDisplayIsMain(display.id) != 0,
-                scale: mode.flatMap { $0.width > 0 ? Double($0.pixelWidth) / Double($0.width) : nil })
-        }.sorted { $0.isMain && !$1.isMain }
+    /// The layout's active displays - the ones a capture shows - each as `describe` says it,
+    /// main first: sorted so, because under mirroring the display list puts the largest
+    /// drawable display first, not the main one. [LAW:one-source-of-truth] The displays
+    /// `eyes displays` lists are the ones a region is placed on, from the one layout a look
+    /// read, whatever describes them.
+    static func displays(of layout: DisplayLayout, describe: (OnlineDisplay) -> Display = display) -> [Display] {
+        layout.active.displays.map(describe).sorted { $0.isMain && !$1.isMain }
+    }
+
+    /// A display as the window server describes it: whether it is main, and its scale.
+    static func display(_ display: OnlineDisplay) -> Display {
+        // Both widths from the mode, which is unrotated; the bounds are rotated, and a
+        // portrait display divided by them reads 1.78x instead of 1x.
+        let mode = CGDisplayCopyDisplayMode(display.id)
+        return Display(
+            id: display.id, frame: display.bounds, isMain: CGDisplayIsMain(display.id) != 0,
+            scale: mode.flatMap { $0.width > 0 ? Double($0.pixelWidth) / Double($0.width) : nil })
     }
 }
 

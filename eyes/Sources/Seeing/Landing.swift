@@ -34,15 +34,14 @@ public struct Landing: Sendable, Equatable {
     }
 
     /// One element as it says itself: its role, the value, title and description it answered
-    /// that are not blank, in that order, how many of those three would not say, and its frame,
-    /// nil without a position or a size.
+    /// that are not blank, in that order, how many of those three would not say, and its frame.
     public struct Element: Sendable, Hashable {
         public let role: Role
         public let texts: [Said]
         public let unanswered: Int
-        public let frame: ScreenRect?
+        public let frame: Frame
 
-        public init(role: Role, texts: [Said], unanswered: Int = 0, frame: ScreenRect?) {
+        public init(role: Role, texts: [Said], unanswered: Int = 0, frame: Frame) {
             self.role = role
             self.texts = texts
             self.unanswered = unanswered

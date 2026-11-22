@@ -187,6 +187,20 @@ import ScreenSpaceTesting
         #expect(Match.contains("save").narrowing(run, by: .drawn(0)).rows.map(\.frame) == [words[0].frame])
     }
 
+    /// An anchor on no display is counted, not taken for no such anchor, and a stretch both
+    /// the text and the anchor matched is counted once.
+    @Test func anAnchorNoDisplayShowsIsCountedOnce() {
+        let one = DisplayLayout.at(try! ScreenRect(x: 0, y: 0, width: 1000, height: 800)).active
+        let words = [Word(text: Text("Save")!, frame: try! ScreenRect(x: 900, y: 0, width: 40, height: 20)),
+                     Word(text: Text("Cancel")!, frame: try! ScreenRect(x: 1100, y: 0, width: 60, height: 20))]
+        let run = try! Found(first: words[0], rest: [words[1]], source: .pixels(confidence: Confidence(1)!), on: one)
+        let ok = pixels("OK", at: try! ScreenRect(x: 100, y: 100, width: 30, height: 20))
+        let anchored = judged([run, ok], .contains("ok"), near: .contains("cancel"))
+        #expect(anchored.scope.excluded == [Exclusion(reason: .unshown, count: 1)])
+        #expect(anchored.scope.reach == .stopped(.unread))
+        #expect(judged([run, ok], .contains("cancel"), near: .contains("cancel")).scope.excluded == [Exclusion(reason: .unshown, count: 1)])
+    }
+
     /// A near miss printed one off must match when the caller widens by one edit - inside
     /// a longer run too, which is where Vision puts a menu item.
     @Test func wideningByTheDistanceShownFindsTheNearMiss() {

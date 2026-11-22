@@ -17,7 +17,7 @@ import ScreenSpaceTesting
     /// Finder frontmost over the desktop, Safari's window behind it.
     static let desk = Desk(frontmost: finder, own: Front.Passed(pids: [80], name: "iTerm2"),
                            running: [Desk.Running(app: safari, regular: true), Desk.Running(app: finder, regular: true)],
-                           listing: WindowListing(windows: [window], excluded: []), layout: .at(main.frame), describe: { _ in [main] })
+                           listing: WindowListing(windows: [window], excluded: []), layout: .at(main.frame), describe: { _ in main })
 
     nonisolated static let found = try! Found(text: Text("Reload")!, frame: try! ScreenRect(x: 20, y: 50, width: 40, height: 20), source: .tree(role: Role(rawValue: "AXButton"), also: []), on: .vast)
 

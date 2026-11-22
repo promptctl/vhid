@@ -70,9 +70,8 @@ struct Facts {
     let role: Role
     /// Its value, title and description, in that order.
     let texts: [Heard<Said?>]
-    /// Where it is: nil inside when it has no position or no size, and the refusal when what
-    /// the app gave is no box.
-    let frame: Heard<Result<ScreenRect, NotABox>?>
+    /// Where it is, as its app said, or that the read failed.
+    let frame: Heard<Frame>
     /// Whether the app answered its role, even with nothing. Apart from `role` because
     /// `AXUnknown` is also a role apps answer - measured, Safari names elements that - and
     /// the two are not one fact. No default: a caller building one says which it is.
@@ -136,26 +135,26 @@ extension Node {
     /// [LAW:effects-at-boundaries] Decided from facts and a hit test handed in, so every
     /// rule an element is kept or dropped by is tested with both written by a test.
     func candidate(in clip: ScreenRect, under covers: Covers, on displays: Displays) -> Candidate {
+        // Where the element is cannot be said, whatever it is and says. [LAW:no-silent-failure]
+        if case .answered(.refused) = facts.frame { return .excluded(.notABox) }
         let leaf = if case .answered(let children) = children { children.isEmpty } else { false }
         guard leaf || !areas.contains(facts.role) else { return .excluded(.area) }
-        // Where a display shows it in the region, or why it makes no row: nil while the frame
-        // would not say. Whether it is in the region is the clip's to say, and whether a
-        // display shows it is the one rule's. [LAW:single-enforcer]
-        var placement: Result<Placed<Shown>, Unfound>?
-        if case .answered(let frame) = facts.frame {
-            switch frame {
-            case nil: return .excluded(.unplaced)
-            case .failure(let refused)?: placement = .failure(.notABox(refused))
-            case .success(let frame)?:
-                guard !frame.isThin, clip.intersects(frame) else { return .excluded(.unplaced) }
-                placement = Result { () throws(Unplaced) in try displays.place(frame) }.mapError(Unfound.unshown)
-                if case .success(let shown) = placement, !clip.contains(shown.value.press) { return .excluded(.unplaced) }
-            }
+        // Where a display shows the part of it drawn in the region, or why it makes no row:
+        // nil while the frame would not say. Whether it is in the region is the clip's to
+        // say, and where it is pressed the one rule's. [LAW:single-enforcer]
+        var placement: Result<Placed<Shown>, Unplaced>?
+        switch facts.frame {
+        case .unanswered: break
+        case .answered(.none): return .excluded(.unplaced)
+        case .answered(.refused): return .excluded(.notABox)
+        case .answered(.box(let frame)):
+            guard !frame.isThin, let drawn = frame.intersection(clip), !drawn.isThin else { return .excluded(.unplaced) }
+            placement = Result { () throws(Unplaced) in try displays.place(frame, clippedTo: clip) }
         }
         let words = facts.texts.compactMap { $0.answer??.words }
         let text = words.first?.text
         guard text != nil || facts.texts.contains(.unanswered) else { return .excluded(.wordless) }
-        if case .failure(let unfound) = placement { return .excluded(unfound.reason) }
+        if case .failure = placement { return .excluded(.unshown) }
         let shown: Placed<Shown>? = if case .success(let shown) = placement { shown } else { nil }
         if let shown {
             switch covers.hide(shown.value.press) {
@@ -172,8 +171,8 @@ extension Node {
 }
 
 extension ScreenRect {
-    /// No more than a point across in either direction: nothing a person reads or clicks.
-    /// Measured on studious: Chrome places a page element scrolled wholly out of view on
+    /// No more than a point across in either direction: nothing a person reads or clicks, as
+    /// an element or as the part of one its clip lets show. Measured on studious: Chrome places a page element scrolled wholly out of view on
     /// the edge of the viewport nearest it, a strip one point thick and its full length the
     /// other way, so its centre is inside the page while the element is not.
     var isThin: Bool { width <= 1 || height <= 1 }
@@ -239,11 +238,11 @@ func pages<Element>(
         // not say where it is leaves unknown which page is shown and how much of it:
         // descending into the first finds its iframes, dropping the second could leave a
         // DevTools pane the one page or hand back the toolbar. [LAW:no-silent-failure]
-        guard node.facts.named, !(clips.contains(node.facts.role) && node.facts.frame == .unanswered) else { unread = true; continue }
+        guard node.facts.named, !(clips.contains(node.facts.role) && !node.facts.saysWhere) else { unread = true; continue }
         // An element whose frame misses the bound draws nothing under it anywhere.
         guard let inner = node.facts.bound(within: bound) else { continue }
         if node.facts.role == webArea {
-            if case .answered(.success(let placed)?) = node.facts.frame, !placed.isEmpty, !inner.isThin { pages.append(inner) }
+            if case .answered(.box(let placed)) = node.facts.frame, !placed.isEmpty, !inner.isThin { pages.append(inner) }
             continue
         }
         guard case .answered(let children) = node.children else { unread = true; continue }
@@ -289,9 +288,9 @@ enum Descent: Equatable {
     case probe
     /// Nothing under it can be seen.
     case prune
-    /// It is not seen, it could still hold something that is, and its role read failed -
-    /// so whether it clips its children is unknown. They are not read, and are counted as a
-    /// part left unread. [LAW:no-silent-failure]
+    /// What it lets show cannot be known: it is not seen and its role read failed, so whether
+    /// it clips is unknown, or it clips and its frame is no box. What is under it is not
+    /// read, and is counted as a part left unread. [LAW:no-silent-failure]
     case unsure
 }
 
@@ -317,14 +316,25 @@ extension Facts {
     /// clips - the one rule the reading walk and the page search narrow by - and nil when the
     /// two do not meet, so nothing under it is drawn anywhere. [LAW:single-enforcer]
     func bound(within bound: ScreenRect) -> ScreenRect? {
-        guard clips.contains(role), case .answered(.success(let placed)?) = frame, !placed.isEmpty else { return bound }
+        guard clips.contains(role), case .answered(.box(let placed)) = frame, !placed.isEmpty else { return bound }
         return bound.intersection(placed)
+    }
+
+    /// Whether the frame says where the element is, or that it is nowhere: not when its read
+    /// failed, nor when what the app gave is no box. One that clips and does not say leaves
+    /// unknown what it lets show.
+    var saysWhere: Bool {
+        switch frame {
+        case .unanswered, .answered(.refused): false
+        case .answered(.none), .answered(.box): true
+        }
     }
 
     /// The one place the descend, probe and prune decision is made. [LAW:single-enforcer]
     func descent(clip: ScreenRect, bound: ScreenRect, under covers: Covers) -> Descent {
-        guard case .answered(.success(let placed)?) = frame, !placed.isEmpty else { return .descend(clip: clip, bound: bound) }
         let clipping = clips.contains(role)
+        if clipping, case .answered(.refused) = frame { return .unsure }
+        guard case .answered(.box(let placed)) = frame, !placed.isEmpty else { return .descend(clip: clip, bound: bound) }
         if let shown = visible(placed, in: clip, under: covers) {
             guard clipping else { return .descend(clip: clip, bound: bound) }
             guard let inner = self.bound(within: bound) else { return .prune }
@@ -398,11 +408,13 @@ func walk<Element>(
             let node = try read(root.element)
             examined += 1
             let candidate = node.candidate(in: root.clip, under: root.covers, on: displays)
-            // A probe not seen - off the clip, or with a frame that says nothing - was never
-            // placed in the region: nothing to count, unless a read it needed failed, which
-            // leaves unknown whether it was.
-            let quiet = root.probe && candidate != .excluded(.unanswered) && {
-                guard case .answered(.success(let placed)?) = node.facts.frame, !placed.isEmpty else { return true }
+            // Counted already as a part left unread, for a read that failed or a frame that is
+            // no box: whether it, or anything under it, is in the region is unknown.
+            let unread = candidate == .excluded(.unanswered) || candidate == .excluded(.notABox)
+            // A probe not seen - off the clip, or with no frame to place it by - was
+            // never placed in the region: nothing to count, unless it is one of those.
+            let quiet = root.probe && !unread && {
+                guard case .answered(.box(let placed)) = node.facts.frame, !placed.isEmpty else { return true }
                 return visible(placed, in: root.clip, under: root.covers) == nil
             }()
             switch candidate {
@@ -410,7 +422,6 @@ func walk<Element>(
             case .found(let run): found.append(run)
             case .excluded(let reason): counts[reason, default: 0] += 1
             }
-            let unread = candidate == .excluded(.unanswered)
             switch (node.children, node.facts.descent(clip: root.clip, bound: root.bound, under: root.covers)) {
             // An element whose frame says nothing about where it is does not end a probe.
             case (.answered(let children), .descend(let clip, let bound)):

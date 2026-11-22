@@ -20,9 +20,9 @@ import ScreenSpaceTesting
     static let text = try! ScreenRect(x: 825, y: 629, width: 78, height: 18)
 
     static let lineages: [Int: Lineage<Int>] = [
-        0: Lineage(role: page, frame: try! ScreenRect(x: 0, y: 105, width: 1500, height: 795), parent: nil),
-        1: Lineage(role: button, frame: frame, parent: 0),
-        2: Lineage(role: label, frame: text, parent: 1),
+        0: Lineage(role: page, frame: .box(try! ScreenRect(x: 0, y: 105, width: 1500, height: 795)), parent: nil),
+        1: Lineage(role: button, frame: .box(frame), parent: 0),
+        2: Lineage(role: label, frame: .box(text), parent: 1),
     ]
 
     static func safari(_ p: ScreenPoint) -> Heard<Int?> {
@@ -107,9 +107,9 @@ import ScreenSpaceTesting
     /// own ancestors - one parent read - never to the top of the tree.
     @Test func aClimbFromBesideStopsAtTheElementsAncestor() throws {
         var lineages = Self.lineages
-        lineages[0] = Lineage(role: Self.page, frame: try! ScreenRect(x: 0, y: 105, width: 1500, height: 795), parent: 10)
-        for at in 10..<20 { lineages[at] = Lineage(role: Self.page, frame: nil, parent: at == 19 ? nil : at + 1) }
-        lineages[3] = Lineage(role: Self.label, frame: nil, parent: 0)
+        lineages[0] = Lineage(role: Self.page, frame: .box(try! ScreenRect(x: 0, y: 105, width: 1500, height: 795)), parent: 10)
+        for at in 10..<20 { lineages[at] = Lineage(role: Self.page, frame: .none, parent: at == 19 ? nil : at + 1) }
+        lineages[3] = Lineage(role: Self.label, frame: .none, parent: 0)
         var beside = 0
         let hit: (ScreenPoint) -> Heard<Int?> = { p in
             guard Self.element.cgRect.contains(CGPoint(x: p.x, y: p.y)) else { beside += 1; return .answered(3) }
@@ -133,7 +133,7 @@ import ScreenSpaceTesting
     /// no part of the frame is claimed for it.
     @Test func aRowWhosePointLandsOnSomethingElseIsUnchecked() throws {
         var lineages = Self.lineages
-        lineages[9] = Lineage(role: Self.page, frame: try! ScreenRect(x: 0, y: 0, width: 1500, height: 900), parent: nil)
+        lineages[9] = Lineage(role: Self.page, frame: .box(try! ScreenRect(x: 0, y: 0, width: 1500, height: 900)), parent: nil)
         #expect(try probe(hit: { _ in .answered(9) }, lineages: lineages).press(row()) == Checked(.unchecked(.elsewhere), calls: 2))
         #expect(try probe(hit: { _ in .answered(nil) }).press(row()) == Checked(.unchecked(.elsewhere), calls: 1))
     }
@@ -151,8 +151,8 @@ import ScreenSpaceTesting
     /// Parents that run in a loop end the climb as unknown.
     @Test func parentsInALoopLeaveTheBoxUnchecked() throws {
         let loop: [Int: Lineage<Int>] = [
-            1: Lineage(role: Self.label, frame: Self.text, parent: 2),
-            2: Lineage(role: Self.label, frame: Self.text, parent: 1),
+            1: Lineage(role: Self.label, frame: .box(Self.text), parent: 2),
+            2: Lineage(role: Self.label, frame: .box(Self.text), parent: 1),
         ]
         #expect(try probe(hit: { _ in .answered(1) }, lineages: loop).press(row()).pressed == .unchecked(.unanswered))
     }
@@ -201,15 +201,15 @@ import ScreenSpaceTesting
     @Test func aClimbListsTheTextsThatAnsweredAndCountsTheRest() throws {
         let texts: [Int: [Heard<String?>]] = [1: [.answered(nil), .answered("Add"), .unanswered], 2: [.answered("+"), .answered("  "), .answered(nil)]]
         let c = try #require(climbed(try probe(texts: texts).climb(from: Self.text.centre)))
-        #expect(c.elements[0] == Landing.Element(role: Self.label, texts: [Said(.value, Text("+")!, .words)], unanswered: 0, frame: Self.text))
-        #expect(c.elements[1] == Landing.Element(role: Self.button, texts: [Said(.title, Text("Add")!, .words)], unanswered: 1, frame: Self.frame))
+        #expect(c.elements[0] == Landing.Element(role: Self.label, texts: [Said(.value, Text("+")!, .words)], unanswered: 0, frame: .box(Self.text)))
+        #expect(c.elements[1] == Landing.Element(role: Self.button, texts: [Said(.title, Text("Add")!, .words)], unanswered: 1, frame: .box(Self.frame)))
     }
 
     /// With no area above it, the climb reads to the top of the tree and says so.
     @Test func aClimbWithNoAreaEndsAtTheTop() throws {
         let lineages: [Int: Lineage<Int>] = [
-            1: Lineage(role: Self.button, frame: Self.frame, parent: 2),
-            2: Lineage(role: Self.label, frame: nil, parent: nil),
+            1: Lineage(role: Self.button, frame: .box(Self.frame), parent: 2),
+            2: Lineage(role: Self.label, frame: .none, parent: nil),
         ]
         let c = try #require(climbed(try probe(hit: { _ in .answered(1) }, lineages: lineages).climb(from: Self.frame.centre)))
         #expect(c.elements.map(\.role) == [Self.button, Self.label])
@@ -241,8 +241,8 @@ import ScreenSpaceTesting
         #expect(overTime.end == .short(.overTime))
 
         let loop: [Int: Lineage<Int>] = [
-            1: Lineage(role: Self.label, frame: Self.text, parent: 2),
-            2: Lineage(role: Self.label, frame: Self.text, parent: 1),
+            1: Lineage(role: Self.label, frame: .box(Self.text), parent: 2),
+            2: Lineage(role: Self.label, frame: .box(Self.text), parent: 1),
         ]
         let looped = try #require(climbed(try probe(hit: { _ in .answered(1) }, lineages: loop).climb(from: Self.text.centre)))
         #expect(looped.elements.count == Probe<Int>.depth)
@@ -253,7 +253,7 @@ import ScreenSpaceTesting
     @Test func aClimbThatReachesTheTopOnItsLastReadEndsAtTheTop() throws {
         let depth = Probe<Int>.depth
         var lineages: [Int: Lineage<Int>] = [:]
-        for at in 1...depth { lineages[at] = Lineage(role: Self.label, frame: nil, parent: at == depth ? nil : at + 1) }
+        for at in 1...depth { lineages[at] = Lineage(role: Self.label, frame: .none, parent: at == depth ? nil : at + 1) }
         let c = try #require(climbed(try probe(hit: { _ in .answered(1) }, lineages: lineages).climb(from: Self.text.centre)))
         #expect(c.elements.count == depth)
         #expect(c.end == .top)

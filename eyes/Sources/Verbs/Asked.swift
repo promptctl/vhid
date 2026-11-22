@@ -1,5 +1,4 @@
 import ArgumentParser
-import DisplayReading
 import ScreenSpace
 import Seeing
 import Telemetry
@@ -66,7 +65,7 @@ public struct Asked: Sendable {
         case .at(let point):
             return try await Hit.answer(at: point, landing: screen.land)
         case .find(let sight, let match, let near, let wait):
-            return try await sight.text(match, near: near, wait: wait, on: screen, desk: screen.desk, layouts: screen.layouts)
+            return try await sight.text(match, near: near, wait: wait, on: screen)
         case .overview(let sight):
             // [LAW:nothing-unseen] One unit for the overview, whose result says whether the
             // place was read; the displays and windows are answered either way.
@@ -76,7 +75,7 @@ public struct Asked: Sendable {
                 do {
                     // The place found and read on the desk's layout, so the displays listed and
                     // the text read are of one moment.
-                    place = .success(try await sight.text(nil, near: nil, wait: nil, on: screen, desk: { desk }, layouts: { desk.layout }))
+                    place = .success(try await sight.text(nil, near: nil, wait: nil, on: screen.once(desk)))
                 } catch where !error.isCancellation {
                     place = .failure(error)
                 }
@@ -99,12 +98,12 @@ public struct Asked: Sendable {
 }
 
 extension Asked.Sight {
-    /// This place's text, matched against `match` when there is one, with the place found
-    /// on `desk` or on a layout `layouts` reads, and its first read on that layout.
+    /// This place's text, matched against `match` when there is one: the place found on
+    /// `screen`, its first read on the layout it was found on, and each later read of a wait
+    /// on one the same screen reads for it. [LAW:one-source-of-truth] One screen a look.
     @MainActor
-    func text(_ match: Match?, near: Match?, wait: Wait?, on screen: Screen, desk: @escaping Where.Place.Desks,
-              layouts: @escaping Where.Place.Layouts) async throws -> String {
-        let located = try await place.located(pages: screen.pages, desk: desk, layouts: layouts)
+    func text(_ match: Match?, near: Match?, wait: Wait?, on screen: Screen) async throws -> String {
+        let located = try await place.located(on: screen)
         return try await Report.text(Query(match: match, region: located.region, limit: limit, near: near, role: role),
                                      on: located.layout, source: source, wait: wait, layouts: screen.layouts, reading: screen.read)
     }
@@ -138,6 +137,12 @@ public struct Screen: Sendable {
     }
 
     public static let live = Screen()
+
+    /// This screen as `desk` read it, for an answer that reads one moment: its desk and its
+    /// layout are the desk's.
+    func once(_ desk: Desk) -> Screen {
+        Screen(desk: { desk }, layouts: { desk.layout }, pages: pages, read: read, land: land)
+    }
 
     /// The reader of each kind, in the process, on the layout the look's pass was given.
     static let reader: Read = { @MainActor in try await $0.reader.judged($1, on: $2) }

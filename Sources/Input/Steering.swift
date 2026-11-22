@@ -108,8 +108,8 @@ extension Pointer {
     ///
     /// `timeline` paces the bursts and the wait after them, so a test runs it on a clock of
     /// its own. [LAW:effects-at-boundaries]
-    func calibrate(_ calibration: Calibration<Placed<ScreenPoint>>, from start: Placed<ScreenPoint>) async throws -> Steering {
-        let toward = calibration.toward.value
+    func calibrate(_ calibration: Calibration, from start: Placed<ScreenPoint>) async throws -> Steering {
+        let toward = calibration.toward
         let away = hypot(toward.x - start.value.x, toward.y - start.value.y)
         let unit = away > 0 ? ((toward.x - start.value.x) / away, (toward.y - start.value.y) / away) : (1.0, 0.0)
         var samples: [Steering.Sample] = []

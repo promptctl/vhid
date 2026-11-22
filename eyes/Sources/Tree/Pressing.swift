@@ -4,8 +4,8 @@ import Seeing
 /// What one element says of itself for a row to be found by it, or for a climb to list it.
 struct Lineage<Element> {
     let role: Role
-    /// Nil when it has no position or no size.
-    let frame: ScreenRect?
+    /// Where it is, as its app said.
+    let frame: Frame
     /// Nil at the top of its tree.
     let parent: Element?
 }
@@ -55,8 +55,8 @@ struct Probe<Element> {
     /// bound on an app whose parents run in a loop, past which the check is unanswered.
     static var depth: Int { 64 }
 
-    /// How close a cut edge is found: half a point, finer than the whole points a box
-    /// prints in.
+    /// How close a cut edge is found: half a point, as near as the cursor lands to where it
+    /// is sent.
     static var resolution: Double { 0.5 }
 
     /// A row's box, checked against where a click lands on the element the row names.
@@ -214,7 +214,7 @@ private final class Check<Element> {
         for _ in 0..<Probe<Element>.depth {
             guard let current = element else { return nil }
             let said = try lineage(current)
-            if said.role == role, let placed = said.frame, placed.same(as: frame) { return current }
+            if said.role == role, let placed = said.frame.box, placed.same(as: frame) { return current }
             element = said.parent
         }
         throw Stop(why: .unanswered)

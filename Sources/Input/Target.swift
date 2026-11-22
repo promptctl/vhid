@@ -73,10 +73,9 @@ public enum PlacedTarget: Hashable, Sendable {
         }
     }
 
-    /// How far inside a shown part's edge every drawn point stays, in points. A look rounds a box out
-    /// to whole points, up to a point bigger on each side than what it found, and the cursor
-    /// lands within half a point of where it is sent wherever one count moves it less than
-    /// that; two points is clear of both. A Mac whose tracking speed carries the cursor
+    /// How far inside a shown part's edge every drawn point stays, in points. The cursor lands
+    /// within half a point of where it is sent wherever one count moves it less than that,
+    /// and two points is clear of it with room to spare. A Mac whose tracking speed carries the cursor
     /// further a count lands further off, which `Click.at` reports.
     public static let margin = 2.0
 
@@ -123,7 +122,7 @@ public enum PlacedTarget: Hashable, Sendable {
         case .point(let point): return ((point.value.x, point.value.y), (0, 0), (0, 0))
         case .box(let box):
             let part = box.value.part
-            return ((part.x + part.width / 2, part.y + part.height / 2), (part.width / 2, part.height / 2),
+            return ((part.centre.x, part.centre.y), (part.width / 2, part.height / 2),
                     (max(0, part.width / 2 - Self.margin), max(0, part.height / 2 - Self.margin)))
         }
     }

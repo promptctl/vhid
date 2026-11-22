@@ -127,7 +127,7 @@ public struct Hit: AsyncParsableCommand {
     /// row's other words are, and how many would not say.
     /// Tab-separated, like every row eyes prints.
     private static func row(_ element: Landing.Element) -> String {
-        ([element.role.rawValue, element.frame.map(String.init(describing:)) ?? "(no frame)"] + element.texts.map { "\($0.attribute.rawValue) \(Report.spelled($0.text.value))" }
+        ([element.role.rawValue, element.frame.description] + element.texts.map { "\($0.attribute.rawValue) \(Report.spelled($0.text.value))" }
             + (element.unanswered > 0 ? ["(\(element.unanswered) of its texts unanswered)"] : []))
             .joined(separator: "\t")
     }
@@ -138,7 +138,7 @@ public struct Hit: AsyncParsableCommand {
     static func land(at point: ScreenPoint) async throws -> Struck {
         let desk = try await Desk.now()
         // A point no active display holds is refused by the rule every place is. [LAW:single-enforcer]
-        _ = try desk.layout.active.place(point)
+        let placed = try desk.layout.active.place(point)
         let climb: Landing.Climb
         switch try await TreeReader(granted: SourceKind.granted).climb(from: point, within: hitTesting) {
         case .nothing(let calls): return .nothing(calls: calls, window: desk.listing.windows.first { $0.frame.contains(point) })
@@ -152,7 +152,7 @@ public struct Hit: AsyncParsableCommand {
         // The front look's own hit tests, unbounded as that look's are: one cut off by time would
         // say behind of an app that is over the front one. Counted apart from the climb's.
         var tests = 0
-        let standing = Front.standing(of: climb.pid, at: point, on: desk, front: front) {
+        let standing = Front.standing(of: climb.pid, at: placed, on: desk, front: front) {
             tests += 1
             return TreeReader.hit($0)
         }

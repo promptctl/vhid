@@ -42,8 +42,8 @@ import ScreenSpaceTesting
     /// `listing` on `layout`, each active display of it listed as its fixture is.
     static func desk(_ frontmost: Front.App?, _ listing: WindowListing = listing, running: [Desk.Running] = running,
                      layout: DisplayLayout = both) -> Desk {
-        Desk(frontmost: frontmost, own: terminal, running: running, listing: listing, layout: layout) { layout in
-            [main, left].filter { display in layout.active.displays.contains { $0.id == display.id } }
+        Desk(frontmost: frontmost, own: terminal, running: running, listing: listing, layout: layout) { online in
+            [main, left].first { $0.id == online.id }!
         }
     }
 
@@ -138,7 +138,7 @@ import ScreenSpaceTesting
         let listing = WindowListing(windows: [Self.window(5, "Safari", pid: 401), Self.window(4, "Safari", pid: 400)], excluded: [])
         let desk = Self.desk(nil, listing, running: Self.running + [Desk.Running(app: second, regular: true)])
         #expect(try Front.named("Safari", on: desk).app == second)
-        let ownTwin = Desk(frontmost: nil, own: Front.Passed(pids: [401], name: "Safari"), running: desk.running, listing: listing, layout: desk.layout) { _ in desk.displays }
+        let ownTwin = Desk(frontmost: nil, own: Front.Passed(pids: [401], name: "Safari"), running: desk.running, listing: listing, layout: desk.layout) { online in desk.displays.first { $0.id == online.id }! }
         #expect(try Front.named("Safari", on: ownTwin).app == Self.safari)
     }
 
@@ -193,7 +193,7 @@ import ScreenSpaceTesting
         let desk = Self.desk(Front.App(pid: 80, name: "iTerm2"), panel)
         let landsInPanel: (ScreenPoint) -> Heard<Int32> = { _ in .answered(900) }
         let standing = { (pid: Int32, front: Result<Front, AppUnread>) in
-            Front.standing(of: pid, at: try! ScreenPoint(x: 100, y: 100), on: desk, front: front, hit: landsInPanel)
+            Front.standing(of: pid, at: try! desk.layout.active.place(ScreenPoint(x: 100, y: 100)), on: desk, front: front, hit: landsInPanel)
         }
         #expect(standing(300, .success(front)) == .front(Self.settings))
         #expect(standing(900, .success(front)) == .overFront(Self.settings))
@@ -206,13 +206,13 @@ import ScreenSpaceTesting
         // A front look reads one display: a hit on another is not read, the front app's own
         // window there included.
         let onLeft = { (pid: Int32) in
-            Front.standing(of: pid, at: try! ScreenPoint(x: -500, y: 100), on: desk, front: .success(front), hit: landsInPanel)
+            Front.standing(of: pid, at: try! desk.layout.active.place(ScreenPoint(x: -500, y: 100)), on: desk, front: .success(front), hit: landsInPanel)
         }
         #expect(onLeft(300) == .otherDisplay(Self.settings, 1))
         #expect(onLeft(900) == .otherDisplay(Self.settings, 1))
         #expect(onLeft(80) == .own("iTerm2"))
         // The front app's menu bar is no window of its own, which that look never walks.
-        #expect(Front.standing(of: 300, at: try! ScreenPoint(x: 100, y: 10), on: desk, front: .success(front), hit: landsInPanel)
+        #expect(Front.standing(of: 300, at: try! desk.layout.active.place(ScreenPoint(x: 100, y: 10)), on: desk, front: .success(front), hit: landsInPanel)
             == .noWindow(Self.settings))
     }
 

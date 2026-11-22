@@ -35,13 +35,13 @@ public struct Desk: Sendable {
     /// `describe` says how each active display of `layout` is listed: the window server's
     /// main display and scale in the process, written by a test.
     public init(frontmost: Front.App?, own: Front.Passed, running: [Running], listing: WindowListing, layout: DisplayLayout,
-                describe: (DisplayLayout) -> [Display]) {
+                describe: (OnlineDisplay) -> Display) {
         self.frontmost = frontmost
         self.own = own
         self.running = running
         self.listing = listing
         self.layout = layout
-        displays = describe(layout)
+        displays = Geometry.displays(of: layout, describe: describe)
     }
 
     func isRegular(_ pid: Int32) -> Bool { running.contains { $0.app.pid == pid && $0.regular } }

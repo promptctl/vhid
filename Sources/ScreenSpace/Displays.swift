@@ -116,6 +116,11 @@ public struct Displays: Hashable, Sendable {
     /// Where each display sits, in the same order.
     public var frames: [ScreenRect] { displays.map(\.bounds) }
 
+    /// Whether `other` presses every point and box where these do: the same frames in the
+    /// same order, whatever is asleep. [LAW:single-enforcer] What "the layout changed" means
+    /// to the devices, a play's and a recording's alike.
+    public func pressesAlike(_ other: Displays) -> Bool { frames == other.frames }
+
     /// A point is pressed where it is, when a display holds it, on the first that does.
     public func place(_ point: ScreenPoint) throws(Unplaced) -> Placed<ScreenPoint> {
         guard let display = displays.first(where: { $0.bounds.contains(point) }) else { throw .point(point) }
@@ -134,6 +139,18 @@ public struct Displays: Hashable, Sendable {
         let part = shown.part
         let press = ScreenPoint(between: (nearest(part.x, part.width), nearest(part.y, part.height)))
         return Placed(value: Shown(box: box, part: part, press: press), on: shown.display, of: self)
+    }
+
+    /// A box drawn only inside `clip` - a row in its list's viewport - pressed by the same rule
+    /// in the part of it `clip` lets show, and kept as given, so what it was is still known.
+    public func place(_ box: ScreenRect, clippedTo clip: ScreenRect) throws(Unplaced) -> Placed<Shown> {
+        guard let drawn = box.intersection(clip) else { throw .box(box) }
+        do throws(Unplaced) {
+            let placed = try place(drawn)
+            return Placed(value: Shown(box: box, part: placed.value.part, press: placed.value.press), on: placed.display, of: self)
+        } catch {
+            throw .box(box)
+        }
     }
 
     /// Each part of `box` a display shows that is at least a point a side, with that display,

@@ -199,11 +199,11 @@ enum Help {
         the start - so every press and release lands where the script says, and later lines wait for \
         as long as that took. A cursor that will not get there stops the play at that line.
 
-        A finished play answers {"done":{"reports":…,"start_reports":…,"late_us":{"p50":…,"p90":…,"p99":…,"max":…},"layout_changed":…}}: \
+        A finished play answers {"done":{"reports":…,"start_reports":…,"late_us":{"p50":…,"p90":…,"p99":…,"max":…},"layout":…}}: \
         how many reports went out, how many the pointer took to reach the start, how late \
         they went out in microseconds, sent minus scheduled - absent when none went out - and \
-        whether the displays had moved by the end of the play, when a point placed before it may \
-        have been on no display as it went. A late report is sent late, never skipped. A play \
+        what the displays did by the end of the play: kept, changed - when a point placed before it may \
+        have been on no display as it went - or unread, when they could not be read again. A late report is sent late, never skipped. A play \
         that stops releases every key and button and fails, saying how many reports went out \
         before it did.
         """, commandLine: ["""

@@ -2,6 +2,7 @@ import ArgumentParser
 import Foundation
 import Input
 import ScreenSpace
+import Telemetry
 
 /// Replays a script of keyboard and mouse acts at fixed times, and says when each report
 /// went out.
@@ -40,7 +41,10 @@ struct PlayCommand: AsyncParsableCommand {
 
     /// The verb itself, over devices from anywhere. [LAW:decomposition]
     static func play(_ schedule: Schedule<ScreenPoint>, with devices: Devices) async throws -> Played {
-        try await Player(pointer: devices.pointer, keyboard: devices.keyboard, wall: epochMicroseconds, lead: lead).play(schedule)
+        let played = try await Player(pointer: devices.pointer, keyboard: devices.keyboard, wall: epochMicroseconds, lead: lead).play(schedule)
+        Telemetry.note(.layout, .string(played.layout.description))
+        if case .unread(let why) = played.layout { Telemetry.note(.layoutUnread, .string(why)) }
+        return played
     }
 
     /// What a play left behind: the reports that went out, and - only when it finished -
@@ -89,7 +93,7 @@ struct PlayCommand: AsyncParsableCommand {
     /// context and a harness reads from the command line instead.
     static func done(_ played: Played) throws -> String {
         try line(DoneLine(done: .init(reports: played.reports.count, startReports: played.startReports, lateUs: played.lateness,
-                                      layoutChanged: played.layoutChanged)))
+                                      layout: played.layout.description)))
     }
 
     /// How early each report is woken for. `Player` sleeps until this much before the
@@ -160,7 +164,7 @@ struct PlayCommand: AsyncParsableCommand {
             let startReports: Int
             /// Absent for a play that sent no report.
             let lateUs: Lateness?
-            let layoutChanged: Bool
+            let layout: String
         }
     }
 }

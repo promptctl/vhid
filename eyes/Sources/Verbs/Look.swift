@@ -115,8 +115,9 @@ public struct Where: ParsableArguments {
         _ = try Self.place(display: display, window: window, page: page, rect: rect, app: app, as: .flag)
     }
 
-    @MainActor var located: Located {
-        get async throws { try await Self.place(display: display, window: window, page: page, rect: rect, app: app, as: .flag).located() }
+    /// The place these flags name.
+    var named: Place {
+        get throws { try Self.place(display: display, window: window, page: page, rect: rect, app: app, as: .flag) }
     }
 
     /// The one place a region is spelled from its five arguments, for the verbs and the
@@ -164,12 +165,12 @@ public struct Where: ParsableArguments {
         /// The region, on the layout it was found on: the desk's, when the app in front was
         /// chosen on it, so the choice and the read are of one moment, and one read for it
         /// otherwise. [LAW:one-source-of-truth]
-        @MainActor func located(pages: Pages = tree, desk: Desks = live, layouts: Layouts = layouts) async throws -> Located {
+        @MainActor func located(on screen: Screen) async throws -> Located {
             switch self {
-            case .region(let region): Located(region: region, layout: try await layouts())
-            case .page(let id): Located(region: try await Self.page(id, pages: pages), layout: try await layouts())
-            case .front: try await Self.front(desk, "in_front") { try Front.choose(on: $0) }
-            case .app(let name): try await Self.front(desk, "named") { try Front.named(name, on: $0) }
+            case .region(let region): Located(region: region, layout: try await screen.layouts())
+            case .page(let id): Located(region: try await Self.page(id, pages: screen.pages), layout: try await screen.layouts())
+            case .front: try await Self.front(screen.desk, "in_front") { try Front.choose(on: $0) }
+            case .app(let name): try await Self.front(screen.desk, "named") { try Front.named(name, on: $0) }
             }
         }
 
@@ -440,12 +441,6 @@ private extension Outcome {
     }
 }
 
-/// Reads with the chosen reader and prints. The one place the verbs meet the screen.
-@MainActor
-func look(_ query: Query, on layout: DisplayLayout, source: SourceKind, wait: Wait? = nil) async throws {
-    print(try await Report.text(query, on: layout, source: source, wait: wait, layouts: Screen.live.layouts, reading: Screen.live.read))
-}
-
 extension Report {
     /// A query's reading as the text the verbs print and the MCP tools answer: one read, or
     /// with a wait, the read the wait ended on, its scope line led by how the wait went.
@@ -577,6 +572,6 @@ extension Desk {
             Desk.Running(app: Front.App(pid: $0.processIdentifier, name: $0.localizedName), regular: $0.activationPolicy == .regular)
         }
         return Desk(frontmost: frontmost, own: Front.Passed(holder: holder, among: apps), running: running,
-                    listing: try Geometry.onScreen(), layout: try DisplayReading.layout(), describe: Geometry.displays(of:))
+                    listing: try Geometry.onScreen(), layout: try DisplayReading.layout(), describe: Geometry.display)
     }
 }
