@@ -12,6 +12,14 @@ public enum ToApp: String, Codable, Sendable {
     case stop
     /// Any other ending - SIGTERM - which drops nothing.
     case end
+
+    /// How the recording ends for this message.
+    public var ending: RecordingEnd.Ending {
+        switch self {
+        case .stop: .stop
+        case .end: .end
+        }
+    }
 }
 
 public enum FromApp: Codable, Equatable, Sendable {
@@ -21,8 +29,59 @@ public enum FromApp: Codable, Equatable, Sendable {
     case recording
     /// Something the person should hear about the recording, on stderr.
     case note(String)
-    /// The recording, whole, as `vhid play` reads it. The last message.
-    case script(String)
+    /// The recording, whole, as `vhid play` reads it, and how it ended. The last message.
+    case script(String, RecordingEnd)
+}
+
+/// How a recording ended and what it left out: what the command's record says of it.
+/// [LAW:nothing-unseen] A recording that wrote every move and one that dropped half of them
+/// off the displays are told apart by this, not by reading the script.
+public struct RecordingEnd: Codable, Equatable, Sendable {
+    public let ending: Ending
+    /// Key presses with no HID usage, fn among them.
+    public let unmappedKeys: Int
+    /// The person's moves to a point no display holds.
+    public let offDisplay: Int
+    /// Motion to a point that is not a place on the screen.
+    public let unlocated: Int
+    /// How many times the layout came to press otherwise while recording.
+    public let layoutChanges: Int
+    /// How many times vhid's own motion ended on a screen edge, after which the points
+    /// written may be off: not left out, but not exact.
+    public let vhidAtEdge: Int
+
+    public init(ending: Ending, unmappedKeys: Int, offDisplay: Int, unlocated: Int, layoutChanges: Int, vhidAtEdge: Int) {
+        self.ending = ending
+        self.unmappedKeys = unmappedKeys
+        self.offDisplay = offDisplay
+        self.unlocated = unlocated
+        self.layoutChanges = layoutChanges
+        self.vhidAtEdge = vhidAtEdge
+    }
+
+    /// What ended it: the person's stop, the command's end, or the app's own.
+    public enum Ending: String, Codable, Sendable {
+        /// Control-C, whose keys came out.
+        case stop
+        /// SIGTERM, or the command's cancel, which dropped nothing.
+        case end
+        /// macOS turned the tap off, so what came after was missed.
+        case tapOff = "tap_off"
+        /// An hour, the longest a script plays.
+        case hour
+        /// vhid's devices came back and could not be told apart again.
+        case devicesLost = "devices_lost"
+        /// The layout changed and could not be read again.
+        case layoutLost = "layout_lost"
+
+        /// Whether the person's stop chord ended it: its keys are waited for and come out.
+        public var isStopChord: Bool {
+            switch self {
+            case .stop: true
+            case .end, .tapOff, .hour, .devicesLost, .layoutLost: false
+            }
+        }
+    }
 }
 
 /// One end of the socket, as lines of messages.

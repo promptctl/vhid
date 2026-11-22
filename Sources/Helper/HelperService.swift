@@ -127,13 +127,20 @@ import Foundation
     /// this read is the daemon's.
     func cursor(reply: @escaping (Double, Double, Error?) -> Void)
 
-    /// Where the online displays are, in the space `cursor` answers in, read in the session
-    /// in front for the reason `cursor` is: four numbers a display, its left, top, width
-    /// and height. Claims nothing and sends no report.
+    /// The display layout, in the space `cursor` answers in, read in the session in front
+    /// for the reason `cursor` is: `DisplayLayout.record`, six numbers a display. Claims
+    /// nothing and sends no report.
     ///
     /// A flat array of numbers because that is what the wire carries without a class of
-    /// its own; `HelperConnection.displays` is where they become rectangles.
-    func displays(reply: @escaping ([NSNumber], Error?) -> Void)
+    /// its own; `HelperConnection.layout` is where they become a layout.
+    ///
+    /// **A record whose shape changes gets a new name.** It was `displays(reply:)`, four
+    /// numbers a display. A client and a daemon from builds either side of the change then
+    /// ask for a method the other has none of - the call fails, or goes unanswered until
+    /// `HelperConnection.replyTimeout` - instead of reading one record's numbers as the
+    /// other's. Which of the two a mismatched pair sees has not been checked against a
+    /// running daemon. [LAW:no-silent-failure]
+    func layout(reply: @escaping ([NSNumber], Error?) -> Void)
 }
 
 public extension NSXPCInterface {
@@ -142,7 +149,7 @@ public extension NSXPCInterface {
     /// so a reply's classes are allowed at one place and not at each end separately.
     static func helper() -> NSXPCInterface {
         let interface = NSXPCInterface(with: HelperService.self)
-        interface.setClasses(NSSet(objects: NSArray.self, NSNumber.self) as! Set<AnyHashable>, for: #selector(HelperService.displays(reply:)), argumentIndex: 0, ofReply: true)
+        interface.setClasses(NSSet(objects: NSArray.self, NSNumber.self) as! Set<AnyHashable>, for: #selector(HelperService.layout(reply:)), argumentIndex: 0, ofReply: true)
         return interface
     }
 }

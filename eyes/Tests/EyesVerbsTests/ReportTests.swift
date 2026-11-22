@@ -1,6 +1,8 @@
 import CoreGraphics
 @testable import Seeing
 import Pixels
+import ScreenSpace
+import ScreenSpaceTesting
 import Telemetry
 import TelemetryTesting
 @testable import Tree
@@ -9,10 +11,27 @@ import Testing
 
 /// What `find` and `read` print, asked with a reading a test wrote.
 @Suite(.eventsKept) struct ReportTests {
-    static let display = ScreenRect(x: -2400, y: -300, width: 2400, height: 1600)
+    static let display = ScreenRect.at(-2400, -300, 2400, 1600)
 
     private func found(_ text: String, x: Double) -> Found {
-        Found(text: Text(text)!, frame: ScreenRect(x: x, y: -60, width: 40, height: 20), source: .pixels(confidence: Confidence(1)!))
+        Self.row(text, .at(x, -60, 40, 20), .pixels(confidence: Confidence(1)!))
+    }
+
+    /// A row as its reader placed it: drawn whole within its own frame.
+    private static func row(_ text: String, _ frame: ScreenRect, _ source: Source) -> Found {
+        try! Found(text: Text(text)!, frame: frame, source: source, within: frame, on: .vast)
+    }
+
+    /// A row the tree placed at `frame` as `role`.
+    private static func tree(_ text: String, _ frame: ScreenRect, _ role: String = "AXButton", also: [Words] = []) -> Found {
+        row(text, frame, .tree(role: Role(rawValue: role), frame: frame, also: also))
+    }
+
+    /// The text a look answers on a screen whose only reader is `read`, its layouts the one
+    /// display, never the host's.
+    private func answer(_ query: Query, source: SourceKind, wait: Wait? = nil,
+                      read: @escaping @Sendable (SourceKind, Query) async throws -> Judged) async throws -> String {
+        try await Report.text(query, source: source, wait: wait, on: .single, from: Screen(layouts: { .single }, read: { source, query, _ in try await read(source, query) }))
     }
 
     /// The done criterion for an absence: it carries where it looked, how much it read,
@@ -25,7 +44,8 @@ import Testing
         )
         #expect(Report.lines(reading, query: query, source: .pixels) == [
             "\"Settings\" not found in display 12 -2400,-300,2400,1600 by pixels; 47 runs read; 3 duplicate;"
-                + " whole region read; nearest follow. Each row's point is its centre and its box holds it, x,y,width,height, in vhid click coordinates.",
+                + " whole region read; nearest follow. Each row's box is the part of it a display shows, x,y,width,height,"
+                + " and its point the whole point a click presses it at, in that box, in vhid click coordinates.",
             "-1880,-50\t-1900,-60,40,20\tSetlings\tpixels\t1 off",
         ])
     }
@@ -48,12 +68,12 @@ import Testing
     /// Each row says what it is: the tree's role, kept through a merge, or `pixels` for text
     /// only pixels saw - so a page's button is told from a bookmark of the same name.
     @Test func aRowNamesItsRole() {
-        let frame = ScreenRect(x: 0, y: 0, width: 40, height: 20)
-        let button = Source.tree(role: Role(rawValue: "AXButton"), also: [])
+        let frame = ScreenRect.at(0, 0, 40, 20)
+        let button = Source.tree(role: Role(rawValue: "AXButton"), frame: frame, also: [])
         let rows = Report.rows(.matched(Matches([
-            Found(text: Text("Settings")!, frame: frame, source: .tree(role: Role(rawValue: "AXLink"), also: [])),
-            Found(text: Text("Settings")!, frame: frame, source: .merged(button, .pixels(confidence: Confidence(1)!))),
-            Found(text: Text("Canvas")!, frame: frame, source: .pixels(confidence: Confidence(1)!)),
+            Self.tree("Settings", frame, "AXLink"),
+            Self.row("Settings", frame, .merged(button, .pixels(confidence: Confidence(1)!))),
+            Self.row("Canvas", frame, .pixels(confidence: Confidence(1)!)),
         ])!))
         #expect(rows == ["20,10\t0,0,40,20\tSettings\tAXLink", "20,10\t0,0,40,20\tSettings\tAXButton", "20,10\t0,0,40,20\tCanvas\tpixels"])
     }
@@ -61,8 +81,8 @@ import Testing
     /// A row keeps the text its element shows and then says what else the element says in
     /// words, each after its attribute: the "+" button found as "Add" still reads "+".
     @Test func aRowSaysWhatElseItsElementSays() {
-        let frame = ScreenRect(x: 160, y: 417, width: 18, height: 18)
-        let plus = Found(text: Text("+")!, frame: frame, source: .tree(role: Role(rawValue: "AXButton"), also: [Words(.description, Text("Add")!)]))
+        let frame = ScreenRect.at(160, 417, 18, 18)
+        let plus = Self.tree("+", frame, also: [Words(.description, Text("Add")!)])
         #expect(Report.rows(.matched(Matches([plus])!)) == ["169,426\t160,417,18,18\t+\tAXButton\tdescription Add"])
         let reading = Reading(outcome: .matched(Matches([plus])!), scope: Scope(region: frame, examined: 1, reach: .whole))
         #expect(Report.scope(reading, query: Query(match: .contains("Add"), region: .rect(frame), role: Role(rawValue: "AXButton")), source: .tree)
@@ -77,8 +97,8 @@ import Testing
     /// Every text a row prints is on one line, so a row is one element; a near miss says how
     /// far off it was in the column after its role, whatever else its element says.
     @Test func aRowsTextsAreSpelledOnOneLineAndItsDistanceStaysPut() {
-        let frame = ScreenRect(x: 160, y: 417, width: 18, height: 18)
-        let close = Found(text: Text("x")!, frame: frame, source: .tree(role: Role(rawValue: "AXImage"), also: [Words(.description, Text("Close\n(Esc)")!)]))
+        let frame = ScreenRect.at(160, 417, 18, 18)
+        let close = Self.tree("x", frame, "AXImage", also: [Words(.description, Text("Close\n(Esc)")!)])
         #expect(Report.rows(.nearest([Near(found: close, distance: 2)])) == ["169,426\t160,417,18,18\tx\tAXImage\t2 off\tdescription Close (Esc)"])
     }
 
@@ -86,12 +106,12 @@ import Testing
     /// element's words than the one they show.
     @Test func aLookNotesItsRoleAndCountsMatchesByOtherWords() async throws {
         let events = Collected()
-        let frame = ScreenRect(x: 160, y: 417, width: 18, height: 18)
-        let plus = Found(text: Text("+")!, frame: frame, source: .tree(role: Role(rawValue: "AXButton"), also: [Words(.description, Text("Add")!)]))
-        let add = Found(text: Text("Add")!, frame: ScreenRect(x: 0, y: 0, width: 30, height: 18), source: .tree(role: Role(rawValue: "AXButton"), also: []))
+        let frame = ScreenRect.at(160, 417, 18, 18)
+        let plus = Self.tree("+", frame, also: [Words(.description, Text("Add")!)])
+        let add = Self.tree("Add", .at(0, 0, 30, 18))
         let reading = Reading(outcome: .matched(Matches([plus, add])!), scope: Scope(region: frame, examined: 2, reach: .whole))
         _ = try await Telemetry.$export.withValue(events.export) {
-            try await Report.text(Query(match: .contains("Add"), region: .rect(frame), role: Role(rawValue: "AXButton")), source: .tree) { _, _ in .standing(reading) }
+            try await answer(Query(match: .contains("Add"), region: .rect(frame), role: Role(rawValue: "AXButton")), source: .tree) { _, _ in .standing(reading) }
         }
         #expect(events.all.first?.attributes["role"] == "AXButton")
         #expect(events.all.first?.counts["matched"] == 2)
@@ -106,31 +126,39 @@ import Testing
         #expect(throws: (any Error).self) { try Read.parse(["--role", "AXButton", "--source", "pixels"]) }
     }
 
-    /// A row's box covers its frame in whole points, takes the form `rect` takes, and holds
-    /// the centre printed beside it - fractional frames and negative coordinates included,
-    /// where rounding each number its own way would cut the frame or miss the centre, and
-    /// a frame narrower than a point, whose rounded centre falls on its right edge.
+    /// A row's box is the part of it a display shows, spelled as `rect` takes it, and its
+    /// point is a whole point inside that box - fractional frames and negative coordinates
+    /// included, where the middle rounded falls on the box's right or bottom edge - so
+    /// either one passed to a click as printed presses the row.
     @Test(arguments: [
-        (ScreenRect(x: 10.4, y: 20.6, width: 80.3, height: 23.9), "10,20,81,25"),
-        (ScreenRect(x: -1900.7, y: -60.2, width: 40.5, height: 19.4), "-1901,-61,41,21"),
-        (ScreenRect(x: 0, y: 0, width: 40, height: 20), "0,0,40,20"),
-        (ScreenRect(x: 10.9, y: 20, width: 10, height: 10), "10,20,11,10"),
-        (ScreenRect(x: 10.5, y: 20, width: 0.4, height: 10), "10,20,2,10"),
+        (ScreenRect.at(10.4, 20.6, 80.3, 23.9), "10.4,20.6,80.3,23.9", "51,33"),
+        (ScreenRect.at(-1900.7, -60.2, 40.5, 19.4), "-1900.7,-60.2,40.5,19.4", "-1880,-51"),
+        (ScreenRect.at(0, 0, 40, 20), "0,0,40,20", "20,10"),
+        (ScreenRect.at(10.9, 20, 10, 10), "10.9,20,10,10", "16,25"),
+        (ScreenRect.at(10.5, 20, 1, 10), "10.5,20,1,10", "11,25"),
     ])
-    func aRowsBoxHoldsItsFrameAndItsCentre(frame: ScreenRect, box: String) throws {
-        let found = Found(text: Text("Save")!, frame: frame, source: .tree(role: Role(rawValue: "AXButton"), also: []))
-        let columns = try #require(Report.rows(.matched(Matches([found])!)).first).split(separator: "\t").map(String.init)
+    func aRowsBoxIsItsDrawnPartAndHoldsItsPoint(frame: ScreenRect, box: String, point: String) throws {
+        let columns = try #require(Report.rows(.matched(Matches([Self.tree("Save", frame)])!)).first).split(separator: "\t").map(String.init)
         #expect(columns[1] == box)
-        let c = columns[0].split(separator: ",").compactMap { Double($0) }
-        let printed = try #require(try printedRects(columns.joined(separator: "\t")).first).cgRect
-        #expect(printed.contains(frame.cgRect))
-        #expect(printed.contains(CGPoint(x: c[0], y: c[1])))
+        #expect(columns[0] == point)
+        let printed = try #require(try printedRects(columns.joined(separator: "\t")).first)
+        #expect(printed == frame)
+        #expect(printed.contains(try ScreenPoint(spelled: columns[0])))
         #expect(try Find.parse(["Save", "--rect", columns[1]]).place.rect == columns[1])
+    }
+
+    /// A row half under its list's bottom edge is printed as the part drawn, and pressed
+    /// there: never at the middle of the frame, which is under the edge.
+    @Test func aRowHalfUnderItsListsEdgeIsPrintedAndPressedInThePartDrawn() throws {
+        let frame = ScreenRect.at(0, 80, 200, 40)
+        let half = try Found(text: Text("Inbox")!, frame: frame, source: .tree(role: Role(rawValue: "AXRow"), frame: frame, also: []),
+                             within: .at(0, 0, 400, 100), on: .vast)
+        #expect(Report.rows(.matched(Matches([half])!)) == ["100,90\t0,80,200,20\tInbox\tAXRow"])
     }
 
     /// The scope says a match was ordered beside other text, and that a page was read.
     @Test func theScopeNamesTheNearTextAndThePage() {
-        let page = ScreenRect(x: 22, y: 190, width: 1200, height: 688)
+        let page = ScreenRect.at(22, 190, 1200, 688)
         let reading = Reading(outcome: .matched(Matches([found("Remove", x: 100)])!), scope: Scope(region: page, examined: 9, reach: .whole))
         let query = Query(match: .contains("Remove"), region: .page(window: 219, frame: page), near: .contains("Beta"))
         #expect(Report.scope(reading, query: query, source: .tree)
@@ -237,13 +265,13 @@ import Testing
         let halfBlind = Reading(outcome: hit.outcome, scope: Scope(region: Self.display, examined: 9, reach: .stopped(.merged(
             .blind(.tree, "no grant", missingGrant: true), .read(.pixels, .stopped(.timeBudget(.seconds(5))))))))
         try await Telemetry.$export.withValue(events.export) {
-            _ = try await Report.text(Query(match: .contains("OK"), region: .display(12)), source: .tree) { _, _ in .standing(near) }
-            _ = try await Report.text(Query(match: .contains("OK"), region: .display(12)), source: .pixels,
+            _ = try await answer(Query(match: .contains("OK"), region: .display(12)), source: .tree) { _, _ in .standing(near) }
+            _ = try await answer(Query(match: .contains("OK"), region: .display(12)), source: .pixels,
                                       wait: Wait(until: .present, seconds: 1)) { _, _ in
                 Judged(hit) { reading, _ in try await Task.sleep(for: .milliseconds(20)); return reading }
             }
-            _ = try? await Report.text(Query(match: nil, region: .display(12)), source: .merged) { _, _ in throw PixelsError.noGrant(.screenRecording) }
-            _ = try await Report.text(Query(match: .contains("OK"), region: .page(window: 7, frame: Self.display), near: .contains("Beta")),
+            _ = try? await answer(Query(match: nil, region: .display(12)), source: .merged) { _, _ in throw PixelsError.noGrant(.screenRecording) }
+            _ = try await answer(Query(match: .contains("OK"), region: .page(window: 7, frame: Self.display), near: .contains("Beta")),
                                       source: .merged) { _, _ in .standing(halfBlind) }
         }
         let seen = events.all
@@ -281,7 +309,7 @@ import Testing
                           passedOver: .own("iTerm2"))
         let reading = Reading(outcome: .nearest([]), scope: Scope(region: Self.display, examined: 3, reach: .whole, owners: .only([300, 900])))
         let text = try await Telemetry.$export.withValue(events.export) {
-            try await Report.text(Query(match: .contains("Add"), region: .front(front)), source: .tree) { _, _ in .standing(reading) }
+            try await answer(Query(match: .contains("Add"), region: .front(front)), source: .tree) { _, _ in .standing(reading) }
         }
         #expect(text.hasPrefix("\"Add\" not found in System Settings (pid 300) and what is in front of it, passing over iTerm2,"
             + " the agent's own, on display 2 -2400,-300,2400,1600 by the tree; 3 runs read;"))
@@ -290,7 +318,7 @@ import Testing
         // A display read takes in every process, which no count stands for.
         let display = Reading(outcome: .nearest([]), scope: Scope(region: Self.display, examined: 3, reach: .whole))
         _ = try await Telemetry.$export.withValue(events.export) {
-            try await Report.text(Query(match: .contains("Add"), region: .display(2)), source: .tree) { _, _ in .standing(display) }
+            try await answer(Query(match: .contains("Add"), region: .display(2)), source: .tree) { _, _ in .standing(display) }
         }
         #expect(events.all.last?.counts["owners"] == nil)
     }
@@ -301,15 +329,18 @@ import Testing
         let events = Collected()
         let settings = Front.App(pid: 300, name: "System Settings")
         let finder = Front.App(pid: 500, name: "Finder")
-        let display = Display(id: 2, frame: Self.display, isMain: true, scale: 2)
-        let window = Window(id: 3, owner: "System Settings", pid: 300, frame: ScreenRect(x: -1000, y: 0, width: 600, height: 400), layer: 0)
+        let window = Window(id: 3, owner: "System Settings", pid: 300, frame: ScreenRect.at(-1000, 0, 600, 400), layer: 0)
         let desk = Desk(frontmost: finder, own: Front.Passed(pids: [80], name: "iTerm2"),
                         running: [Desk.Running(app: settings, regular: true), Desk.Running(app: finder, regular: true)],
-                        listing: WindowListing(windows: [window], excluded: []), displays: [display])
-        let region = try await Telemetry.$export.withValue(events.export) {
-            try await Where.Place.front.region(desk: { desk })
+                        listing: WindowListing(windows: [window], excluded: []),
+                        layout: try DisplayLayout([OnlineDisplay(id: 2, frame: Self.display, active: true)]),
+                        describe: { Display($0, isMain: true, scale: 2) })
+        let located = try await Telemetry.$export.withValue(events.export) {
+            try await Where.Place.front.located(on: Screen(layouts: { .single }), desk: { desk })
         }
-        #expect(region == .front(Front(app: settings, display: 2, own: desk.own, passedOver: .windowless(finder))))
+        #expect(located.region == .front(Front(app: settings, display: 2, own: desk.own, passedOver: .windowless(finder))))
+        // Chosen on the desk's layout, it is read on that one, not on one read after.
+        #expect(located.layout == desk.layout)
         let event = try #require(events.all.first)
         #expect(event.event == "front")
         #expect(event.attributes["front_app"] == "System Settings" && event.attributes["passed_over"] == .string("\(finder)"))
@@ -333,7 +364,7 @@ import Testing
         let unanchored = Reading(outcome: .unanchored([beta]), scope: Scope(region: Self.display, examined: 6, reach: .whole))
         let query = Query(match: .exact("Remove"), region: .display(12), near: .contains("Bta"))
         let text = try await Telemetry.$export.withValue(events.export) {
-            try await Report.text(query, source: .tree) { _, _ in .standing(unanchored) }
+            try await answer(query, source: .tree) { _, _ in .standing(unanchored) }
         }
         #expect(text.hasPrefix("\"Bta\" not found to place exactly \"Remove\" near in "))
         #expect(text.contains("nearest follow"))
@@ -345,12 +376,15 @@ import Testing
     /// pages it saw, and how far it got.
     @MainActor @Test func findingAPageIsOneEvent() async throws {
         let events = Collected()
-        let viewport = ScreenRect(x: 22, y: 190, width: 1200, height: 688)
+        let viewport = ScreenRect.at(22, 190, 1200, 688)
+        func page(_ paged: Paged) async throws -> Region {
+            try await Where.Place.page(219).located(on: Screen(layouts: { .single }, pages: { _ in paged }), desk: Where.Place.live).region
+        }
         try await Telemetry.$export.withValue(events.export) {
-            let found = try await Where.Place.page(219).region { _ in Paged(pages: [viewport], examined: 40, stop: nil) }
+            let found = try await page(Paged(pages: [viewport], examined: 40, stop: nil))
             #expect(found == .page(window: 219, frame: viewport))
-            _ = try? await Where.Place.page(219).region { _ in Paged(pages: [viewport, viewport], examined: 52, stop: nil) }
-            _ = try? await Where.Place.page(219).region { _ in Paged(pages: [], examined: 4000, stop: .elementLimit(Limit(4000)!)) }
+            _ = try? await page(Paged(pages: [viewport, viewport], examined: 52, stop: nil))
+            _ = try? await page(Paged(pages: [], examined: 4000, stop: .elementLimit(Limit(4000)!)))
         }
         let seen = events.all
         #expect(seen.map(\.event) == ["page", "page", "page"])

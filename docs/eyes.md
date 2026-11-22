@@ -50,9 +50,15 @@ accessibility tree gives the element (`AXButton`, `AXLink`, `AXTextField`, ...),
 `pixels` for text only the pixels reader saw, such as words drawn on a canvas. The role
 is what tells a page's Settings button from a browser bookmark of the same name, or a
 field from its label. The box is `x,y,width,height` in the same points, the form `--rect`
-takes, rounded outward to whole points so it covers the run and holds the point printed
-beside it. Every rectangle eyes prints is in that form, a window's or display's bounds and
-a scope line's region too, so any of them can be passed back as `--rect`.
+takes: the part of the run a display shows within what the run is drawn in, so a row half
+under its list's edge, or narrowed to the words matched, prints only what is drawn. The
+point is the whole point nearest that part's middle: `click` given the point presses it
+exactly, and given the box lands on a point drawn inside it, as a person's clicks scatter
+on a button and never within 2 points of its edge. Every rectangle eyes prints is in that form, as
+given, a window's or display's bounds and a scope line's region too, so any of them can be
+passed back as `--rect`. Text whose element claims a frame that is no box - not finite, a
+side under zero - is counted `not_a_box`, and text read but shown by no display a point a
+side, once narrowed to or split off, `unshown`; either leaves the region not read whole.
 
 A row the tree found is its element's first text in words, of its value, title and
 description. Whatever else the element says in words follows the role, each after the

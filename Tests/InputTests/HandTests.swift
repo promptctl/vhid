@@ -4,17 +4,20 @@ import Synchronization
 import TestClock
 import Testing
 @testable import Input
+import ScreenSpace
+import ScreenSpaceTesting
+import InputTesting
 
 /// The pauses a pointer makes around its presses, on a fake clock: a rest before the
 /// button goes down, the button held, the clicks of a double click a gap apart, and the
 /// wheel's notches spaced. `docs/design/human.md`, "Clicks" and "Scrolling".
 @Suite @MainActor struct HandTests {
-    static let origin = ScreenPoint(x: 0, y: 0)!
+    static let origin = ScreenPoint.at(0, 0)
 
     /// A mouse that logs every report with the time on `clock` it went out at, in whole
     /// milliseconds, and a pointer over it whose pauses are collected as traced.
     final class Timed: Mouse {
-        let mouse = FakeMouse(at: ScreenPoint(x: 0, y: 0)!)
+        let mouse = FakeMouse(at: ScreenPoint.at(0, 0))
         let clock = ManualClock()
         private let state = Mutex<(log: [String], pauses: [Pause])>(([], []))
 
@@ -30,7 +33,7 @@ import Testing
         func scroll(by delta: Scroll) throws { try mouse.scroll(by: delta); logged("notch") }
 
         func pointer(hand: Hand = .macOSDefault, seed: UInt64 = 1) -> Pointer {
-            Pointer(mouse: self, cursor: mouse.cursor, displays: { .vast }, clock: clock, randomness: RandomSource(seed: seed), hand: hand,
+            Pointer(mouse: self, cursor: mouse.cursor, clock: clock, randomness: RandomSource(seed: seed), hand: hand,
                     traced: { [self] in if case .paused(let pause) = $0 { self.state.withLock { $0.pauses.append(pause) } } })
         }
     }
@@ -114,7 +117,7 @@ import Testing
     /// before letting go.
     @Test func aDragRestsHoldsCarriesAndRestsBeforeLettingGo() async throws {
         let timed = Timed()
-        _ = try await timed.pointer().drag(from: .point(Self.origin), to: .point(ScreenPoint(x: 40, y: 0)!), button: .left)
+        _ = try await timed.pointer().drag(from: .point(Self.origin), to: .point(ScreenPoint.at(40, 0)), button: .left)
         #expect(timed.pauses.map(\.kind) == [.hand(.rest), .hand(.dragHold), .hand(.rest)])
         let rest = timed.pauses[0].length
         #expect(timed.log.first == "\(rest / .milliseconds(1)) down")

@@ -12,11 +12,12 @@ struct MoveCommand: AsyncParsableCommand {
     @OptionGroup var service: ServiceOption
 
     func validate() throws {
-        _ = try places(place, count: 1)
+        _ = try onePlace(place)
     }
 
     func run() async throws {
-        print(try await Devices.using(try service.installation()) { try await Self.move(to: try places(place, count: 1)[0], with: $0.pointer) })
+        let asked = try onePlace(place)
+        print(try await Devices.using(try service.installation()) { try await Self.move(to: try await $0.placed(asked), with: $0.pointer) })
     }
 
     /// The verb itself, over a pointer from anywhere. [LAW:decomposition]

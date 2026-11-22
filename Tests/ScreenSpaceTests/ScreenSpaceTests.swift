@@ -1,0 +1,109 @@
+import Foundation
+import Testing
+@testable import ScreenSpace
+
+/// The point, the box, their spelling and the layout record, as values.
+@Suite struct ScreenSpaceTests {
+    /// A side no cut touches is the side as given, so a part prints as the box it is part
+    /// of on that axis; a side that is cut is what is left of it.
+    @Test func anUncutSideIsTheSideAsGiven() throws {
+        let row = try ScreenRect(x: 10.9, y: 20, width: 10, height: 10)
+        let list = try ScreenRect(x: 0, y: 24, width: 100, height: 100)
+        let part = try #require(row.intersection(list))
+        #expect(part.description == "10.9,24,10,6")
+        #expect(try #require(list.intersection(row)).description == "10.9,24,10,6")
+        #expect(try #require(row.intersection(row)) == row)
+    }
+
+    /// A union one box spans on a side keeps that side as given, so a row joined from words
+    /// prints in the numbers its outer word was read in.
+    @Test func aUnionKeepsTheSideOneBoxSpans() throws {
+        let outer = try ScreenRect(x: 10.9, y: 20.3, width: 100.1, height: 10.7)
+        let inner = try ScreenRect(x: 40, y: 22, width: 10, height: 5)
+        #expect(try outer.union(inner) == outer)
+        let right = try ScreenRect(x: 200, y: 20.3, width: 10, height: 10.7)
+        let both = try outer.union(right)
+        #expect((both.x, both.y, both.height, both.maxX) == (10.9, 20.3, 10.7, 210))
+    }
+
+    /// [LAW:parse-dont-validate] A pair that is not a place is refused where it is made.
+    /// The NaN is the one that matters: every comparison against it is false, so it would
+    /// pass the pointer's arrival test on both axes and a click would land wherever the
+    /// cursor was.
+    @Test(arguments: [(Double.nan, 0.0), (0.0, Double.nan), (.infinity, 0.0), (0.0, -.infinity), (.nan, .nan)])
+    func aPairThatIsNotFiniteIsNotAPlace(x: Double, y: Double) {
+        #expect(throws: NotAPlace.self) { try ScreenPoint(x: x, y: y) }
+    }
+
+    /// And refused again on the way in from a script or a request, so nothing decodes into
+    /// a point the constructor would not have made. [LAW:single-enforcer]
+    @Test func aDecodedPairCrossesTheSameRefusal() throws {
+        #expect(throws: (any Error).self) { try JSONDecoder().decode(ScreenPoint.self, from: Data(#"{"x":1e400,"y":1}"#.utf8)) }
+        #expect(try JSONDecoder().decode(ScreenPoint.self, from: Data(#"{"x":800,"y":500.5}"#.utf8)) == ScreenPoint(x: 800, y: 500.5))
+    }
+
+    @Test func aBoxRefusesWhatNoArithmeticOnItHolds() {
+        #expect(throws: NotABox.self) { try ScreenRect(x: .nan, y: 0, width: 1, height: 1) }
+        #expect(throws: NotABox.self) { try ScreenRect(x: 0, y: 0, width: -1, height: 1) }
+        // A far edge past what a Double holds, from two finite numbers.
+        #expect(throws: NotABox.self) { try ScreenRect(x: 1.7e308, y: 0, width: 1.7e308, height: 1) }
+    }
+
+    @Test func anEmptyBoxIsABox() throws {
+        #expect(try ScreenRect(x: 5, y: 5, width: 0, height: 10).isEmpty)
+    }
+
+    @Test func aUnionPastADoubleIsRefused() throws {
+        let left = try ScreenRect(x: -1.7e308, y: 0, width: 1, height: 1)
+        let right = try ScreenRect(x: 1.7e308, y: 0, width: 1, height: 1)
+        #expect(throws: NotABox.self) { try left.union(right) }
+    }
+
+    @Test func boxesEdgeToEdgeShareNoArea() throws {
+        let left = try ScreenRect(x: 0, y: 0, width: 10, height: 10)
+        #expect(left.intersection(try ScreenRect(x: 10, y: 0, width: 10, height: 10)) == nil)
+        #expect(left.intersection(try ScreenRect(x: 9, y: 0, width: 10, height: 10)) == (try ScreenRect(x: 9, y: 0, width: 1, height: 10)))
+    }
+
+    @Test func containmentIsHalfOpen() throws {
+        let box = try ScreenRect(x: 0, y: 0, width: 10, height: 10)
+        #expect(box.contains(try ScreenPoint(x: 0, y: 0)))
+        #expect(!box.contains(try ScreenPoint(x: 10, y: 5)))
+        #expect(!box.contains(x: .nan, y: 5))
+    }
+
+    /// Rounded outward, so a negative coordinate is not moved toward zero.
+    @Test func theIntegralBoxRoundsOutward() throws {
+        #expect(try ScreenRect(x: -0.6, y: 10.5, width: 99.6, height: 20).integral == (try ScreenRect(x: -1, y: 10, width: 100, height: 21)))
+    }
+
+    /// What is printed reads back as itself, fractions and all.
+    @Test func eachSpellingReadsBackAsItself() throws {
+        let point = try ScreenPoint(x: -12.25, y: 1e20)
+        #expect(try ScreenPoint(spelled: point.description) == point)
+        #expect(try ScreenPoint(x: 100, y: 200).description == "100,200")
+        let box = try ScreenRect(x: 0.1, y: -3, width: 2e20, height: 7)
+        #expect(try ScreenRect(spelled: box.description) == box)
+        #expect(try ScreenRect(x: 1, y: 2, width: 3, height: 4).description == "1,2,3,4")
+    }
+
+    @Test func aSpellingOfTheWrongFormOrNumbersIsRefused() {
+        #expect(throws: Misspelled.self) { try ScreenPoint(spelled: "1,2,3") }
+        #expect(throws: Misspelled.self) { try ScreenPoint(spelled: "1,x") }
+        #expect(throws: Misspelled.self) { try ScreenPoint(spelled: "inf,2") }
+        #expect(throws: Misspelled.self) { try ScreenRect(spelled: "1,2,-3,4") }
+    }
+
+    @Test func theLayoutRecordReadsBackAsTheLayout() throws {
+        let layout = try DisplayLayout([OnlineDisplay(id: 1, frame: ScreenRect(x: 0, y: 0, width: 1600, height: 900), active: true),
+                                        OnlineDisplay(id: 7, frame: ScreenRect(x: -1000, y: -200, width: 1000, height: 800), active: false)])
+        #expect(try DisplayLayout(record: layout.record) == layout)
+    }
+
+    @Test func aRecordThatIsNotALayoutIsRefusedByName() {
+        #expect(throws: LayoutUnreadable.noDisplay) { try DisplayLayout(record: []) }
+        #expect(throws: LayoutUnreadable.self) { try DisplayLayout(record: [1, 0, 0, 10, 10]) }
+        #expect(throws: LayoutUnreadable.self) { try DisplayLayout(record: [1, 0, 0, -10, 10, 1]) }
+        #expect(throws: LayoutUnreadable.self) { try DisplayLayout(record: [1, 0, 0, 10, 10, 2]) }
+    }
+}

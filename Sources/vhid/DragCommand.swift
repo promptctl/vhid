@@ -19,13 +19,14 @@ struct DragCommand: AsyncParsableCommand {
     @OptionGroup var service: ServiceOption
 
     func validate() throws {
-        _ = try vhid.places(places, count: 2)
+        _ = try twoPlaces(places)
     }
 
     func run() async throws {
-        let ends = try vhid.places(places, count: 2)
+        let asked = try twoPlaces(places)
         print(try await Devices.using(try service.installation()) {
-            try await Self.drag(from: ends[0], to: ends[1], button: button, holding: modifiers, with: $0.pointer, $0.keyboard)
+            let ends = try await $0.placed(asked.from, asked.to)
+            return try await Self.drag(from: ends.from, to: ends.to, button: button, holding: modifiers, with: $0.pointer, $0.keyboard)
         })
     }
 

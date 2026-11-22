@@ -77,6 +77,19 @@ extension Telemetry {
         case stopped
         /// Why the devices were not handed back when the verb ended. Absent when they were.
         case leaveFailed = "leave_failed"
+        /// Whether the displays still pressed as they did when a play was placed on them, once
+        /// it finished or stopped: `kept`, `changed` or `unread`. Absent for a verb that placed no play.
+        case layout
+        /// Why a play's layout went unread. Absent when it was read.
+        case layoutUnread = "layout_unread"
+        /// How a recording ended - `stop`, `end`, `tap_off`, `hour`, `devices_lost` or
+        /// `layout_lost` - and what it left out, by reason, zeros included. Absent for a
+        /// verb that recorded nothing.
+        case ending
+        case leftOut = "left_out"
+        /// How many times vhid's own motion ended on a screen edge while recording, after which
+        /// the points written may be off. Absent for a verb that recorded nothing.
+        case vhidAtEdge = "vhid_at_edge"
 
         /// The double-click interval the pointer's hand was fitted to, and the delay until a
         /// held key repeats the typist's key holds were fitted to, as the HID system holds

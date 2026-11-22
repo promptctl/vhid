@@ -1,5 +1,6 @@
 import ChildProcess
 import CoreGraphics
+import ScreenSpace
 import Foundation
 import IOKit
 
@@ -37,7 +38,7 @@ final class FrontScreen: ScreenSource, @unchecked Sendable {
     /// Something that reads the screen in one session, until it is stopped.
     protocol Reader: AnyObject {
         func cursor() throws -> (x: Double, y: Double)
-        func displays() throws -> [CGRect]
+        func layout() throws -> DisplayLayout
         func stop()
     }
 
@@ -65,7 +66,7 @@ final class FrontScreen: ScreenSource, @unchecked Sendable {
 
     func cursor() throws -> (x: Double, y: Double) { try read { try $0.cursor() } }
 
-    func displays() throws -> [CGRect] { try read { try $0.displays() } }
+    func layout() throws -> DisplayLayout { try read { try $0.layout() } }
 
     /// `question` asked of the front session's reader.
     private func read<Answer>(_ question: (any Reader) throws -> Answer) throws -> Answer {
@@ -131,18 +132,19 @@ final class FrontScreen: ScreenSource, @unchecked Sendable {
     }
 }
 
-/// A reader that answered, saying the window server in its session would not: told apart
-/// from a reader that failed so the log names the window server.
+/// A reader that answered, saying what it was asked could not be read in its session, and
+/// why: told apart from a reader that failed so the log names the reason.
 struct WindowServerRefused: Error, CustomStringConvertible {
     let session: FrontScreen.Session
     let question: ScreenQuestion
-    var description: String { "the window server in \(session) would not answer '\(question.rawValue)'" }
+    let why: String
+    var description: String { "'\(question.rawValue)' could not be read in \(session): \(why)" }
 }
 
 /// Where the cursor is and where the displays are, as the daemon answers them.
 protocol ScreenSource: Sendable {
     func cursor() throws -> (x: Double, y: Double)
-    func displays() throws -> [CGRect]
+    func layout() throws -> DisplayLayout
 }
 
 /// This executable, run as `--read-screen-in <audit session>`: a child in the session in
@@ -229,21 +231,25 @@ final class ChildReader: FrontScreen.Reader {
         return (fields[0], fields[1])
     }
 
-    func displays() throws -> [CGRect] {
-        let line = try ask(.displays)
-        return try line.split(separator: ";").map { frame in
-            guard let fields = Self.numbers(frame), fields.count == 4 else { throw Failed(session: session, what: "answered '\(line)'") }
-            return CGRect(x: fields[0], y: fields[1], width: fields[2], height: fields[3])
+    /// The child's numbers read as the record they are, by `DisplayLayout(record:)`, so the
+    /// record has one reading wherever it is read. [LAW:one-source-of-truth]
+    func layout() throws -> DisplayLayout {
+        let line = try ask(.layout)
+        guard let numbers = Self.numbers(line) else { throw Failed(session: session, what: "answered '\(line)'") }
+        do {
+            return try DisplayLayout(record: numbers)
+        } catch {
+            throw Failed(session: session, what: "answered '\(line)': \(error)")
         }
     }
 
-    /// `question` sent as its line, and the line answering it: `WindowServerRefused` when
-    /// the child says the window server would not answer.
+    /// `question` sent as its line, and the line answering it: `WindowServerRefused`, with
+    /// the child's why, when the child says it could not read it.
     private func ask(_ question: ScreenQuestion) throws -> String {
         let line = question.rawValue + "\n"
         guard Darwin.write(requests, line, line.utf8.count) == line.utf8.count else { throw Failed(session: session, what: "could not be asked: errno \(errno)") }
         let answer = try answerLine(within: patience, to: "answer")
-        guard answer != refusedAnswer else { throw WindowServerRefused(session: session, question: question) }
+        guard !answer.hasPrefix(refusedAnswer) else { throw WindowServerRefused(session: session, question: question, why: String(answer.dropFirst(refusedAnswer.count))) }
         return answer
     }
 

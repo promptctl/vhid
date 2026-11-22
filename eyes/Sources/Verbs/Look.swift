@@ -1,9 +1,11 @@
 import AppKit
 import ArgumentParser
 import CoreGraphics
-import Seeing
+import DisplayReading
 import Grants
 import Pixels
+import ScreenSpace
+import Seeing
 import Telemetry
 import Tree
 
@@ -65,7 +67,7 @@ extension SourceKind: ExpressibleByArgument {
         switch self {
         case .tree: TreeReader(granted: Self.granted)
         case .pixels: PixelReader(granted: Self.granted, hit: TreeReader.hit)
-        case .merged: MergedReader(TreeReader(granted: Self.granted), PixelReader(granted: Self.granted, hit: TreeReader.hit), locate: { try $0.bounds() })
+        case .merged: MergedReader(TreeReader(granted: Self.granted), PixelReader(granted: Self.granted, hit: TreeReader.hit), locate: { try $0.bounds(on: $1) })
         }
     }
 
@@ -113,8 +115,9 @@ public struct Where: ParsableArguments {
         _ = try Self.place(display: display, window: window, page: page, rect: rect, app: app, as: .flag)
     }
 
-    @MainActor var region: Region {
-        get async throws { try await Self.place(display: display, window: window, page: page, rect: rect, app: app, as: .flag).region() }
+    /// Where these arguments look, found on `screen`.
+    @MainActor func located(on screen: Screen) async throws -> Located {
+        try await Self.place(display: display, window: window, page: page, rect: rect, app: app, as: .flag).located(on: screen, desk: screen.desk)
     }
 
     /// The one place a region is spelled from its five arguments, for the verbs and the
@@ -155,10 +158,12 @@ public struct Where: ParsableArguments {
         typealias Desks = @Sendable @MainActor () async throws -> Desk
         static let live: Desks = { try await Desk.now() }
 
-        @MainActor func region(pages: Pages = tree, desk: Desks = live) async throws -> Region {
+        /// The place on `screen`, with the layout it was found on: an app on the desk it was
+        /// chosen on, anything else on a layout the screen reads as it is found.
+        @MainActor func located(on screen: Screen, desk: Desks) async throws -> Located {
             switch self {
-            case .region(let region): region
-            case .page(let id): try await Self.page(id, pages: pages)
+            case .region(let region): Located(region: region, layout: try screen.layouts())
+            case .page(let id): Located(region: try await Self.page(id, pages: screen.pages), layout: try screen.layouts())
             case .front: try await Self.front(desk, "in_front") { try Front.choose(on: $0) }
             case .app(let name): try await Self.front(desk, "named") { try Front.named(name, on: $0) }
             }
@@ -166,10 +171,11 @@ public struct Where: ParsableArguments {
 
         /// [LAW:nothing-unseen] Choosing the app is a decision of its own, before any look
         /// starts: which app, how it was chosen, on which display, and which app it passed over.
-        @MainActor private static func front(_ desks: Desks, _ chosen: String, by rule: (Desk) throws -> Front) async throws -> Region {
+        @MainActor private static func front(_ desks: Desks, _ chosen: String, by rule: (Desk) throws -> Front) async throws -> Located {
             try await Telemetry.unit("front") {
                 Telemetry.note(.chosen, .string(chosen))
-                let front = try rule(try await desks())
+                let desk = try await desks()
+                let front = try rule(desk)
                 Telemetry.note(.frontApp, front.app.name.map(JSON.string))
                 Telemetry.note(.frontPid, .int(Int(front.app.pid)))
                 Telemetry.note(.display, .int(Int(front.display)))
@@ -177,7 +183,7 @@ public struct Where: ParsableArguments {
                 // How many processes were matched as the agent's own app: zero means none
                 // could be passed over or kept out, whatever is in front.
                 Telemetry.count(.ownPids, front.own.pids.count)
-                return .front(front)
+                return Located(region: .front(front), layout: desk.layout)
             }
         }
 
@@ -202,9 +208,15 @@ public struct Where: ParsableArguments {
     }
 
     private static func parsedRect(_ spelled: String, as s: Spelling) throws -> ScreenRect {
-        guard let rect = ScreenRect(spelled: spelled) else { throw ValidationError("\(s("rect")) wants \(ScreenRect.spelling) - got \(spelled)") }
-        return rect
+        do { return try ScreenRect(spelled: spelled) } catch { throw ValidationError("\(s("rect")) is \(error)") }
     }
+}
+
+/// A place found on the screen: the region a look reads, and the layout it was found on,
+/// which the look's first read reads on. [LAW:one-source-of-truth]
+struct Located: Sendable {
+    let region: Region
+    let layout: DisplayLayout
 }
 
 /// What `find` and `read` print. Pure, so the sentences a caller trusts are tested.
@@ -240,7 +252,8 @@ enum Report {
             reach(s.reach),
             reading.outcome.misses.isEmpty ? nil : "nearest follow",
         ]
-        return clauses.compactMap { $0 }.joined(separator: "; ") + ". Each row's point is its centre and its box holds it, x,y,width,height, in vhid click coordinates."
+        return clauses.compactMap { $0 }.joined(separator: "; ")
+            + ". Each row's box is the part of it a display shows, x,y,width,height, and its point the whole point a click presses it at, in that box, in vhid click coordinates."
     }
 
     /// What checking the boxes did, when it did anything: a box cut is a row whose frame the
@@ -258,11 +271,12 @@ enum Report {
         switch why {
         case .unanswered: "unanswered"
         case .elsewhere: "its point on something else"
+        case .unshown: "pressed in a part under a point a side"
         case .overTime: "out of time"
         }
     }
 
-    /// One run per row: the centre a click lands on, the box around the run, the text,
+    /// One run per row: the point a click presses it at, the part of it a display shows, the text,
     /// and what it is - the role the tree gave it, or `pixels` for text only the pixels
     /// reader saw, which has none - then what else its element says in words, each after the
     /// attribute that says it: a "+" button's `description Add`. The nearest rows add, before those,
@@ -276,10 +290,12 @@ enum Report {
 
     /// The columns every row has in the same place - `then`, a near miss's distance, among
     /// them - before the element's other words, however many it says.
+    /// Both as the pressing rule placed them: the box lies on one display, a point a side or
+    /// more, and the point is in it, so `vhid click` given the point presses it exactly and
+    /// given the box lands inside it, as a person's clicks scatter on a button.
+    /// [LAW:one-source-of-truth]
     private static func row(_ found: Found, then: [String] = []) -> String {
-        let at = clickPoint(found.frame.centre)
-        // The point as every point is spelled, which a frame too large or not finite cannot trap.
-        return (["\(ScreenPoint(x: at.x, y: at.y))", "\(box(found.frame, holding: at))", spelled(found.text.value), found.source.role?.rawValue ?? "pixels"]
+        (["\(found.press)", "\(found.part)", spelled(found.text.value), found.source.role?.rawValue ?? "pixels"]
             + then + found.source.also.map { "\($0.attribute.rawValue) \(spelled($0.text.value))" }).joined(separator: "\t")
     }
 
@@ -303,15 +319,6 @@ enum Report {
         return line
     }
 
-    /// The whole point a click is sent to: the frame's centre, rounded.
-    private static func clickPoint(_ p: ScreenPoint) -> CGPoint { CGPoint(x: p.x.rounded(), y: p.y.rounded()) }
-
-    /// The frame grown to cover the cell of the point printed beside it. The rounded point
-    /// can fall past the frame's right or bottom edge, which half-open containment counts as
-    /// outside, so the point is covered by construction rather than by luck of the rounding.
-    private static func box(_ frame: ScreenRect, holding at: CGPoint) -> ScreenRect {
-        ScreenRect(frame.cgRect.union(CGRect(origin: at, size: CGSize(width: 1, height: 1))))
-    }
 
     private static func wanted(_ match: Match) -> String {
         switch match {
@@ -434,18 +441,18 @@ private extension Outcome {
 
 /// Reads with the chosen reader and prints. The one place the verbs meet the screen.
 @MainActor
-func look(_ query: Query, source: SourceKind, wait: Wait? = nil) async throws {
-    print(try await Report.text(query, source: source, wait: wait, reading: Screen.live.read))
+func look(_ query: Query, on layout: DisplayLayout, source: SourceKind, wait: Wait? = nil) async throws {
+    print(try await Report.text(query, source: source, wait: wait, on: layout, from: .live))
 }
 
 extension Report {
     /// A query's reading as the text the verbs print and the MCP tools answer: one read, or
     /// with a wait, the read the wait ended on, its scope line led by how the wait went.
     /// [LAW:one-source-of-truth]
-    static func text(
-        _ query: Query, source: SourceKind, wait: Wait? = nil,
-        reading read: @Sendable (SourceKind, Query) async throws -> Judged
-    ) async throws -> String {
+    ///
+    /// The first read is on `layout`, the one the query's place was found on; each read of
+    /// a wait after it on one `screen` reads for it.
+    static func text(_ query: Query, source: SourceKind, wait: Wait? = nil, on layout: DisplayLayout, from screen: Screen) async throws -> String {
         // [LAW:nothing-unseen] One event per look, from the one path every verb and tool
         // reads through: which reader, what it read, and how it ended.
         try await Telemetry.unit("reading", result: { $0.result }) {
@@ -458,9 +465,9 @@ extension Report {
             Telemetry.count(.boxMilliseconds, 0)
             // The boxes' checks timed apart from the read, wherever they run - after a read,
             // or at the end of a wait.
-            func counted(_ query: Query) async throws -> Judged {
+            func counted(_ query: Query, _ layout: DisplayLayout) async throws -> Judged {
                 Telemetry.tally(.reads)
-                let judged = try await read(source, query)
+                let judged = try await screen.read(source, query, layout)
                 return Judged(judged.reading) { _, deadline in
                     let start = ContinuousClock.now
                     defer { Telemetry.tally(.boxMilliseconds, by: Int((ContinuousClock.now - start) / .milliseconds(1))) }
@@ -468,13 +475,13 @@ extension Report {
                 }
             }
             guard let wait else {
-                let reading = try await counted(query).pressed()
+                let reading = try await counted(query, layout).pressed()
                 Self.count(reading, query)
                 return (text: lines(reading, query: query, source: source).joined(separator: "\n"),
                         result: reading.outcome.said)
             }
             Telemetry.note(.until, .string(wait.until.rawValue))
-            let waited = try await waiting(for: wait, on: query, read: counted)
+            let waited = try await waiting(for: wait, on: query, from: layout, layouts: screen.layouts, read: counted)
             Self.count(waited.reading, query)
             let said = lines(waited.reading, query: query, source: source)
             return (text: ([waitedClause(waited, wait) + said[0]] + said.dropFirst()).joined(separator: "\n"),
@@ -567,6 +574,6 @@ extension Desk {
             Desk.Running(app: Front.App(pid: $0.processIdentifier, name: $0.localizedName), regular: $0.activationPolicy == .regular)
         }
         return Desk(frontmost: frontmost, own: Front.Passed(holder: holder, among: apps), running: running,
-                    listing: try Geometry.onScreen(), displays: try Geometry.displays())
+                    listing: try Geometry.onScreen(), layout: try DisplayLayout.read(), describe: Geometry.describe)
     }
 }

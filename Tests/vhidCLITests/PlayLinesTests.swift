@@ -19,13 +19,23 @@ import Testing
     }
 
     @Test func aFinishedPlayPrintsALinePerReportAndThenADoneLine() throws {
-        let played = Played(startReports: 4, reports: [Self.report(1_000, 1_050, 1_090), Self.report(2_000, 2_500, 2_600, line: 4)])
+        let played = Played(startReports: 4, reports: [Self.report(1_000, 1_050, 1_090), Self.report(2_000, 2_500, 2_600, line: 4)], layout: .kept)
         let lines = try PlayCommand.lines(of: .finished(played))
         #expect(lines == [
             #"{"report":{"acked_us":1090,"index":0,"line":2,"scheduled_us":1000,"sent_us":1050}}"#,
             #"{"report":{"acked_us":2600,"index":1,"line":4,"scheduled_us":2000,"sent_us":2500}}"#,
-            #"{"done":{"late_us":{"max":500,"p50":50,"p90":500,"p99":500},"reports":2,"start_reports":4}}"#,
+            #"{"done":{"late_us":{"max":500,"p50":50,"p90":500,"p99":500},"layout":"kept","reports":2,"start_reports":4}}"#,
         ])
+    }
+
+    /// A layout that could not be read after the play is said on the done line with why,
+    /// and one that changed is said as changed.
+    @Test func theDoneLineSaysWhatBecameOfTheLayout() throws {
+        let report = [Self.report(1_000, 1_000, 1_000)]
+        #expect(try PlayCommand.done(Played(startReports: 0, reports: report, layout: .unread("the daemon is gone")))
+            == #"{"done":{"late_us":{"max":0,"p50":0,"p90":0,"p99":0},"layout":"unread","layout_unread":"the daemon is gone","reports":1,"start_reports":0}}"#)
+        #expect(try PlayCommand.done(Played(startReports: 0, reports: report, layout: .changed))
+            == #"{"done":{"late_us":{"max":0,"p50":0,"p90":0,"p99":0},"layout":"changed","reports":1,"start_reports":0}}"#)
     }
 
     /// The command's own discussion promises it: "A play that stops releases every button,

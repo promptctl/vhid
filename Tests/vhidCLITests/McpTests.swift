@@ -146,7 +146,7 @@ import Testing
 
     /// A box is read as eyes prints it, and refused by name when it is not one.
     @Test func aBoxIsReadAsEyesPrintsIt() async {
-        #expect(await Self.refusal(Tools.click, ["box": "10,20,0,40"])?.hasPrefix("box is \"10,20,0,40\"") == true)
+        #expect(await Self.refusal(Tools.click, ["box": "10,20,-1,40"])?.hasPrefix("box is \"10,20,-1,40\"") == true)
         #expect(await Self.refusal(Tools.scroll, ["box": ["x": 1, "y": 2]])?.hasPrefix("box is ") == true)
         // Read, and so past every argument's refusal to the devices, which are nobody's here.
         for tool in [Tools.click, Tools.move, Tools.scroll] {

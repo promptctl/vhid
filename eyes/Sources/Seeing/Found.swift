@@ -1,4 +1,4 @@
-import CoreGraphics
+import ScreenSpace
 
 /// A string with something in it other than blank space.
 ///
@@ -38,28 +38,71 @@ public struct Word: Sendable, Hashable {
     }
 }
 
-/// One piece of text on screen and where it is, as the words it is made of.
+/// One piece of text on screen, as the words it is made of, and where a click presses it.
 ///
 /// Words and not one rectangle, because a reader's run is not always one thing: measured,
 /// Vision reads a menu bar's "Shell Edit View Session" as a single run, and the centre of
 /// that run is on no menu at all. Carrying where each word sits is what lets a match be
 /// narrowed to the stretch that matched, so a found point lands on what was asked for.
 /// Never empty, for the reason `Matches` is not. [LAW:types-are-the-program]
+///
+/// Placed once, by the one pressing rule, from its words within its bound - the region cut
+/// by every list viewport and web page above it - on the active displays. The bound goes
+/// with the row, so every way to place its words again places them within it: a row half
+/// under its list's edge stays pressed in the part a person sees, however it is narrowed,
+/// cut or split. No constructor places words without a bound. [LAW:single-enforcer]
 public struct Found: Sendable, Hashable {
     public let first: Word
     public let rest: [Word]
     public let source: Source
+    /// Where the row is pressed: its bound, the part of it a display shows, and the point.
+    public let placed: Placed<Shown>
 
-    /// One run the reader places as a whole - what the accessibility tree reports.
-    public init(text: Text, frame: ScreenRect, source: Source) {
-        self.init(first: Word(text: text, frame: frame), rest: [], source: source)
-    }
-
-    public init(first: Word, rest: [Word], source: Source) {
+    private init(first: Word, rest: [Word], source: Source, placed: Placed<Shown>) {
         self.first = first
         self.rest = rest
         self.source = source
-        self.frame = ScreenRect(rest.reduce(first.frame.cgRect) { $0.union($1.frame.cgRect) })
+        self.placed = placed
+    }
+
+    /// `first` and `rest`, placed from the box holding them all, within `bound` on `displays`.
+    public init(first: Word, rest: [Word], source: Source, within bound: ScreenRect, on displays: Displays) throws(Unshown) {
+        var held = first.frame
+        for word in rest {
+            do { held = try held.union(word.frame) } catch { throw .notABox(error) }
+        }
+        let placed: Placed<Shown>
+        do { placed = try displays.place(held, within: bound) } catch { throw .unplaced(error) }
+        self.init(first: first, rest: rest, source: source, placed: placed)
+    }
+
+    /// One run placed as a whole, from its own frame.
+    public init(text: Text, frame: ScreenRect, source: Source, within bound: ScreenRect, on displays: Displays) throws(Unshown) {
+        try self.init(first: Word(text: text, frame: frame), rest: [], source: source, within: bound, on: displays)
+    }
+
+    /// One run already placed as a whole - what the accessibility tree reports, whose frame
+    /// is placed before its text is read. Its word's frame is the box `placed` was placed
+    /// from, so the two cannot disagree. [LAW:one-source-of-truth]
+    public init(text: Text, source: Source, placed: Placed<Shown>) {
+        self.init(first: Word(text: text, frame: placed.value.box), rest: [], source: source, placed: placed)
+    }
+
+    /// Other words of `row` - a stretch narrowed to, pieces joined, a merge's split - placed
+    /// as `row` is: within its bound, on its displays.
+    public init(first: Word, rest: [Word], source: Source, placedAs row: Found) throws(Unshown) {
+        try self.init(first: first, rest: rest, source: source, within: row.bound, on: row.placed.displays)
+    }
+
+    /// The row cut to `box`, the part of it a click presses what it names, placed within its
+    /// bound on its displays.
+    public func cut(to box: ScreenRect) throws(Unplaced) -> Found {
+        Found(first: first, rest: rest, source: source, placed: try placed.displays.place(box, within: bound))
+    }
+
+    /// The row as `source` says it was seen, where it was placed.
+    public func seen(by source: Source) -> Found {
+        Found(first: first, rest: rest, source: source, placed: placed)
     }
 
     public var words: [Word] { [first] + rest }
@@ -67,11 +110,43 @@ public struct Found: Sendable, Hashable {
     /// The words read as one line, derived so it cannot disagree with them.
     public var text: Text { Text(joining: words.map(\.text)) }
 
-    /// Global screen coordinates, top-left origin, points. Its centre is a click target
-    /// with no conversion. Computed from the words once, in the init - the words cannot
-    /// change after it, so it cannot disagree with them, and merging and sorting read it
-    /// many times. [LAW:one-source-of-truth]
-    public let frame: ScreenRect
+    /// What the row is drawn within, which every placing of its words again keeps to.
+    public var bound: ScreenRect { placed.value.bound }
+
+    /// The part of the row one display shows: what a reading orders, compares and prints as
+    /// the row's box.
+    public var part: ScreenRect { placed.value.part }
+
+    /// The whole point in `part` a click presses the row at.
+    public var press: ScreenPoint { placed.value.press }
+}
+
+/// Why a row's words were not placed: together they make no box, or no display shows a
+/// part of them a point a side within their bound. Counted by `reason`: text read, not placed.
+public enum Unshown: Error, Hashable, CustomStringConvertible {
+    case notABox(NotABox)
+    case unplaced(Unplaced)
+
+    public var description: String {
+        switch self {
+        case .notABox(let why): "the words together make no box: \(why)"
+        case .unplaced(let why): "\(why)"
+        }
+    }
+
+    /// The reason a reading counts the words by.
+    public var reason: Exclusion.Reason {
+        switch self {
+        case .notABox: .notABox
+        case .unplaced: .unshown
+        }
+    }
+}
+
+/// An element or a run as something a reading can hold, or why it cannot be.
+public enum Candidate: Sendable, Hashable {
+    case found(Found)
+    case excluded(Exclusion.Reason)
 }
 
 /// Which reader found it, carrying what only that reader can know.
@@ -83,7 +158,9 @@ public struct Found: Sendable, Hashable {
 public enum Source: Sendable, Hashable {
     /// Read from the accessibility tree, which names what kind of element it was, and what
     /// else the element says in words besides the row's text: a "+" button's description "Add".
-    case tree(role: Role, also: [Words])
+    /// The element's frame, as it claimed it, goes with the row apart from where the row is
+    /// placed: the press check finds the element again by it.
+    case tree(role: Role, frame: ScreenRect, also: [Words])
     /// Recognised from pixels, which know nothing of elements and answer with how sure
     /// the recogniser was.
     case pixels(confidence: Confidence)
@@ -93,18 +170,22 @@ public enum Source: Sendable, Hashable {
 
     /// The element's role, when a reader that knows roles saw it: what tells a page's
     /// button from a browser bookmark of the same name, or a field from its label.
-    public var role: Role? {
+    public var role: Role? { element?.role }
+
+    /// The element the tree read it from, by its role and the frame it claimed, when a
+    /// reader that reads elements saw it.
+    public var element: (role: Role, frame: ScreenRect)? {
         switch self {
-        case .tree(let role, _): role
+        case .tree(let role, let frame, _): (role, frame)
         case .pixels: nil
-        case .merged(let a, let b): a.role ?? b.role
+        case .merged(let a, let b): a.element ?? b.element
         }
     }
 
     /// What else the element says in words, when a reader that reads elements saw it.
     public var also: [Words] {
         switch self {
-        case .tree(_, let also): also
+        case .tree(_, _, let also): also
         case .pixels: []
         case .merged(let a, let b): a.role == nil ? b.also : a.also
         }

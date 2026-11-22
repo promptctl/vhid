@@ -1,4 +1,6 @@
 import CoreGraphics
+import ScreenSpace
+import ScreenSpaceTesting
 import Testing
 @testable import Seeing
 
@@ -10,21 +12,6 @@ import Testing
 /// reported on this machine, and the transient ones were produced by setting
 /// `NSWindow.Level` and reading the layer back.
 @Suite struct WindowTests {
-    /// A display list the window server would not give is said, at either of the two asks,
-    /// and never read as no display active; no display active is an empty list.
-    @Test func aDisplayListNotGivenIsSaidAndNoneActiveIsEmpty() throws {
-        for failing in [0, 1] {
-            var asks = 0
-            let refused: Geometry.DisplayList = { _, _, count in
-                defer { asks += 1 }
-                count?.pointee = 0
-                return asks == failing ? .cannotComplete : .success
-            }
-            #expect(throws: CannotReadDisplays(error: .cannotComplete)) { try Geometry.displays(list: refused) }
-        }
-        #expect(try Geometry.displays { _, _, count in count?.pointee = 0; return .success }.isEmpty)
-    }
-
     private func entry(
         id: UInt32 = 1,
         owner: String = "Safari",
@@ -48,7 +35,7 @@ import Testing
     @Test func anApplicationWindowKeepsItsOwnerAndItsBounds() {
         let listing = Geometry.listing(from: [entry(id: 7, owner: "Xcode", x: 14, y: 47, width: 1400, height: 900)])
         #expect(listing.windows == [
-            Window(id: 7, owner: "Xcode", pid: 400, frame: ScreenRect(x: 14, y: 47, width: 1400, height: 900), layer: 0),
+            Window(id: 7, owner: "Xcode", pid: 400, frame: ScreenRect.at(14, 47, 1400, 900), layer: 0),
         ])
         #expect(listing.excluded.isEmpty)
     }

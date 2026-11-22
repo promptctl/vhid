@@ -1,3 +1,5 @@
+import ScreenSpace
+import ScreenSpaceTesting
 import TestClock
 import Testing
 @testable import Seeing
@@ -6,11 +8,11 @@ import Testing
 /// is a false "gone", so most of what is here is absence: when it may be believed, and
 /// when a read that could not see must end the wait instead. [LAW:no-silent-failure]
 @Suite struct WaitTests {
-    static let region = ScreenRect(x: 0, y: 0, width: 800, height: 600)
+    static let region = ScreenRect.at(0, 0, 800, 600)
 
     static let present = Reading(
-        outcome: .matched(Matches([Found(text: Text("Save")!, frame: ScreenRect(x: 10, y: 10, width: 40, height: 20),
-                                         source: .pixels(confidence: Confidence(1)!))])!),
+        outcome: .matched(Matches([try! Found(text: Text("Save")!, frame: .at(10, 10, 40, 20),
+                                              source: .pixels(confidence: Confidence(1)!), within: region, on: .vast)])!),
         scope: Scope(region: region, examined: 1, reach: .whole))
     static let absent = Reading(outcome: .nearest([]), scope: Scope(region: region, examined: 0, reach: .whole))
     /// Nothing matched, but the read stopped short: not an absence.
@@ -26,10 +28,12 @@ import Testing
         private var left: [Reading?]
         private(set) var reads = 0
         private(set) var asked: [Query] = []
+        private(set) var layouts: [DisplayLayout] = []
         init(_ script: [Reading?]) { left = script }
-        func read(_ query: Query) throws -> Judged {
+        func read(_ query: Query, _ layout: DisplayLayout) throws -> Judged {
             reads += 1
             asked.append(query)
+            layouts.append(layout)
             let next = left.count > 1 ? left.removeFirst() : left[0]
             guard let next else { throw Blind() }
             return .standing(next)
@@ -37,7 +41,7 @@ import Testing
     }
 
     private func wait(_ until: Until, _ seconds: Double = 5, _ script: Script) async throws -> Waited {
-        try await waiting(for: Wait(until: until, seconds: seconds)!, on: Self.query, every: .milliseconds(1), clock: ManualClock()) { try script.read($0) }
+        try await waiting(for: Wait(until: until, seconds: seconds)!, on: Self.query, from: .single, every: .milliseconds(1), clock: ManualClock(), layouts: { .vast }) { try script.read($0, $1) }
     }
 
     @Test func presentSettlesOnTheReadThatMatches() async throws {
@@ -55,8 +59,8 @@ import Testing
         let pressed = Pressed()
         let marked = Reading(outcome: Self.present.outcome, scope: Scope(region: Self.region, examined: 1, reach: .whole, boxes: Boxes(narrowed: 1)))
         let script = Script([Self.present, Self.present, Self.absent])
-        let waited = try await waiting(for: Wait(until: .absent, seconds: 5)!, on: Self.query, every: .milliseconds(1), clock: ManualClock()) { query in
-            Judged(try script.read(query).reading) { reading, _ in pressed.readings.append(reading); return marked }
+        let waited = try await waiting(for: Wait(until: .absent, seconds: 5)!, on: Self.query, from: .single, every: .milliseconds(1), clock: ManualClock(), layouts: { .vast }) { query, layout in
+            Judged(try script.read(query, layout).reading) { reading, _ in pressed.readings.append(reading); return marked }
         }
         #expect(waited.reads == 4)
         #expect(pressed.readings == [Self.absent])
@@ -69,8 +73,8 @@ import Testing
         final class Given: @unchecked Sendable { var deadline: ContinuousClock.Instant? }
         let given = Given()
         let script = Script([Self.present])
-        _ = try await waiting(for: Wait(until: .absent, seconds: 0.05)!, on: Self.query, every: .milliseconds(1), clock: ManualClock()) { query in
-            Judged(try script.read(query).reading) { reading, deadline in given.deadline = deadline; return reading }
+        _ = try await waiting(for: Wait(until: .absent, seconds: 0.05)!, on: Self.query, from: .single, every: .milliseconds(1), clock: ManualClock(), layouts: { .vast }) { query, layout in
+            Judged(try script.read(query, layout).reading) { reading, deadline in given.deadline = deadline; return reading }
         }
         #expect(given.deadline.map { $0 <= .now + .milliseconds(50) } == true)
     }
@@ -115,6 +119,16 @@ import Testing
         #expect(script.asked.dropFirst().allSatisfy { $0 == Query(match: .contains("Save"), region: .rect(Self.region)) })
     }
 
+    /// The first read is on the layout the place was found on; every read after it is on
+    /// the layout as it is then, so a display that sleeps mid-wait is read as asleep.
+    @Test func eachReadAfterTheFirstIsOnTheLayoutReadForIt() async throws {
+        let script = Script([Self.present, Self.present, Self.absent])
+        _ = try await wait(.absent, 5, script)
+        #expect(script.layouts.first == .single)
+        #expect(script.layouts.count == 4)
+        #expect(script.layouts.dropFirst().allSatisfy { $0 == .vast })
+    }
+
     /// A page is held to its rectangle as a window is, so a closed tab is the text gone;
     /// and every read asks the whole question, `near` and the limit too, so the one beside
     /// Beta is still the one answered once the region is pinned.
@@ -122,7 +136,7 @@ import Testing
         let query = Query(match: .contains("Remove"), region: .page(window: 219, frame: Self.region), limit: Limit(1)!,
                           near: .contains("Beta"))
         let script = Script([Self.present, Self.absent])
-        _ = try await waiting(for: Wait(until: .absent, seconds: 5)!, on: query, every: .milliseconds(1), clock: ManualClock()) { try script.read($0) }
+        _ = try await waiting(for: Wait(until: .absent, seconds: 5)!, on: query, from: .single, every: .milliseconds(1), clock: ManualClock(), layouts: { .vast }) { try script.read($0, $1) }
         #expect(script.asked.first == query)
         #expect(script.asked.dropFirst().allSatisfy {
             $0 == Query(match: .contains("Remove"), region: .rect(Self.region), limit: Limit(1)!, near: .contains("Beta"))
@@ -142,7 +156,7 @@ import Testing
     @Test func aDisplayIsReadByItsIdEveryTime() async throws {
         let query = Query(match: .contains("Save"), region: .display(3))
         let script = Script([Self.present, Self.absent])
-        _ = try await waiting(for: Wait(until: .absent, seconds: 5)!, on: query, every: .milliseconds(1), clock: ManualClock()) { try script.read($0) }
+        _ = try await waiting(for: Wait(until: .absent, seconds: 5)!, on: query, from: .single, every: .milliseconds(1), clock: ManualClock(), layouts: { .vast }) { try script.read($0, $1) }
         #expect(script.asked.allSatisfy { $0 == query })
     }
 

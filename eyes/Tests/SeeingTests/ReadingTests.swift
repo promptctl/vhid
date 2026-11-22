@@ -1,4 +1,6 @@
 import CoreGraphics
+import ScreenSpace
+import ScreenSpaceTesting
 import Testing
 @testable import Seeing
 
@@ -8,18 +10,14 @@ import Testing
 /// "nothing matched" acts on it; a caller told that by a reader which saw nothing acts on
 /// a lie. [LAW:no-silent-failure]
 @Suite struct ReadingTests {
-    static let region = ScreenRect(x: 0, y: 0, width: 1512, height: 982)
+    static let region = ScreenRect.at(0, 0, 1512, 982)
 
     private func reading(outcome: Outcome, examined: Int, reach: Reach) -> Reading {
         Reading(outcome: outcome, scope: Scope(region: Self.region, examined: examined, reach: reach))
     }
 
     private func found(_ text: String) -> Found {
-        Found(
-            text: Text(text)!,
-            frame: ScreenRect(x: 10, y: 20, width: 30, height: 40),
-            source: .pixels(confidence: Confidence(0.9)!)
-        )
+        try! Found(text: Text(text)!, frame: .at(10, 20, 30, 40), source: .pixels(confidence: Confidence(0.9)!), within: Self.region, on: .vast)
     }
 
     /// The whole point: a reader that got through the region and examined something, and
@@ -108,7 +106,7 @@ import Testing
     /// A role exists exactly when the tree found it. There is no spelling of a recognised
     /// run that carries a role, or a tree element that carries a confidence.
     @Test func onlyTheTreeNamesARole() {
-        #expect(Source.tree(role: Role(rawValue: "AXButton"), also: []).kind == .tree)
+        #expect(Source.tree(role: Role(rawValue: "AXButton"), frame: .at(0, 0, 10, 10), also: []).kind == .tree)
         #expect(Source.pixels(confidence: Confidence(0.5)!).kind == .pixels)
     }
 
@@ -185,7 +183,7 @@ import Testing
     /// whose check found nothing to cut keeps the very value it had, and each row's hit
     /// tests and reason it went unchecked are summed.
     @Test func pressingChecksEveryPrintedRowAndCountsWhatItFound() {
-        let cut = ScreenRect(x: 12, y: 22, width: 20, height: 30)
+        let cut = ScreenRect.at(12, 22, 20, 30)
         let press: (Found) -> Checked = {
             switch $0.text.value { case "Allow": Checked(.narrowed(cut), calls: 9); case "Deny": Checked(.unchecked(.overTime), calls: 0)
             default: Checked(.kept, calls: 5) }
@@ -193,14 +191,39 @@ import Testing
         let near = reading(outcome: .nearest([Near(found: found("Allow"), distance: 1), Near(found: found("Deny"), distance: 2),
                                               Near(found: found("Help"), distance: 3)]), examined: 3, reach: .whole).pressing(press)
         guard case .nearest(let rows) = near.outcome else { Issue.record("\(near)"); return }
-        #expect(rows.map(\.found.frame) == [cut, found("Deny").frame, found("Help").frame])
+        #expect(rows.map(\.found.part) == [cut, found("Deny").part, found("Help").part])
         #expect(rows.map(\.distance) == [1, 2, 3])
         #expect(rows[2].found == found("Help"))
         #expect(near.scope.boxes == Boxes(narrowed: 1, unchecked: [.overTime: 1], calls: 14))
-        #expect(near.scope.boxes.unchecked == [.unanswered: 0, .elsewhere: 0, .overTime: 1])
+        #expect(near.scope.boxes.unchecked == [.unanswered: 0, .elsewhere: 0, .unshown: 0, .overTime: 1])
         let matched = reading(outcome: .matched(Matches([found("Allow")])!), examined: 1, reach: .whole).pressing(press)
-        #expect(matched.outcome == .matched(Matches([Found(text: Text("Allow")!, frame: cut, source: found("Allow").source)])!))
+        #expect(matched.outcome == .matched(Matches([try! found("Allow").cut(to: cut)])!))
         #expect(matched.scope.boxes == Boxes(narrowed: 1, calls: 9))
+    }
+
+    /// A row half under its list's bottom edge, its element claiming the whole frame: the
+    /// check's cut reaches past the edge, and the row stays within its bound - its box the
+    /// drawn part, its point inside it.
+    @Test func thePressChecksCutKeepsARowWithinItsBound() throws {
+        let list = ScreenRect.at(0, 0, 400, 100)
+        let row = try Found(text: Text("Inbox")!, frame: .at(10, 80, 200, 40), source: .pixels(confidence: Confidence(0.9)!),
+                            within: list, on: .vast)
+        let pressed = reading(outcome: .matched(Matches([row])!), examined: 1, reach: .whole)
+            .pressing { _ in Checked(.narrowed(.at(20, 85, 100, 30)), calls: 1) }
+        guard case .matched(let m) = pressed.outcome else { Issue.record("\(pressed)"); return }
+        #expect(m.first.part == .at(20, 85, 100, 15))
+        #expect(list.contains(m.first.press))
+    }
+
+    /// A cut no display shows a point a side of within the row's bound leaves the row as it
+    /// was placed, counted unchecked as unshown - never a row placed outside what it is drawn
+    /// within, nor a hit test blamed that landed where it should.
+    @Test func aCutOutsideTheBoundLeavesTheRowAsPlaced() throws {
+        let row = found("Allow")
+        let pressed = reading(outcome: .matched(Matches([row])!), examined: 1, reach: .whole)
+            .pressing { _ in Checked(.narrowed(.at(2000, 2000, 10, 10)), calls: 1) }
+        #expect(pressed.outcome == .matched(Matches([row])!))
+        #expect(pressed.scope.boxes.unchecked == [.unanswered: 0, .elsewhere: 0, .unshown: 1, .overTime: 0])
     }
 
     /// A reader that did not stop read the region whole unless something it set aside went

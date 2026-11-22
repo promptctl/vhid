@@ -2,6 +2,7 @@ import struct EyesVerbs.ArgumentRefused
 import Input
 import MCP
 import Pointing
+import ScreenSpace
 import enum Seeing.SourceKind
 import enum Seeing.Until
 
@@ -147,26 +148,30 @@ extension Parameter where Taken == Gesture {
 }
 
 extension Parameter where Taken == ScreenRect {
-    /// A box as eyes prints it, read by `ScreenRect(spelled:)`, as the command line reads
-    /// one. [LAW:single-enforcer]
+    /// A box as a reading prints it, read by `ScreenRect(spelled:)`, as the command line
+    /// reads one, and refused in its words. [LAW:single-enforcer]
     static func box(_ name: String, _ expected: String) -> Self {
-        Self(name: name, expected: expected, schema: ["type": "string"], absent: nil) { $0.stringValue.flatMap(ScreenRect.init(spelled:)) }
+        Self(name: name, expected: expected, schema: ["type": "string"], absent: nil) {
+            try $0.stringValue.map { spelled throws(Misspelled) in try ScreenRect(spelled: spelled) }
+        }
     }
 }
 
-extension Parameter where Taken == Target {
+extension Parameter where Taken == Target.Asked {
     /// A place as a value of its own, for a tool that takes two: a point as an object,
-    /// `{"x": …, "y": …}`, or a box as a string, `"x,y,width,height"`.
+    /// `{"x": …, "y": …}`, or a place as a reading prints it, `"x,y"` a point and
+    /// `"x,y,width,height"` a box, read by `Target.Asked(spelled:)` as the command line reads
+    /// one. [LAW:single-enforcer]
     static func place(_ name: String, _ expected: String) -> Self {
-        Self(name: name, expected: expected + ": a point as {\"x\": …, \"y\": …}, or a box to press a point inside as \"x,y,width,height\", the box eyes prints beside each point, in " + Help.place,
+        Self(name: name, expected: expected + ": a point as {\"x\": …, \"y\": …} or \"x,y\", or a box to press a point inside as \"x,y,width,height\", the point and the box a reading prints beside each run, in " + Help.place,
              schema: ["anyOf": [["type": "object", "properties": ["x": ["type": "number"], "y": ["type": "number"]],
                                  "required": ["x", "y"], "additionalProperties": false],
                                 ["type": "string"]]],
              absent: nil) {
-            if let box = $0.stringValue { return ScreenRect(spelled: box).map(Target.box) }
+            if let spelled = $0.stringValue { return try Target.Asked(spelled: spelled) }
             guard let object = $0.objectValue, Set(object.keys) == ["x", "y"],
                   let x = object["x"]?.number, let y = object["y"]?.number else { return nil }
-            return ScreenPoint(x: x, y: y).map(Target.point)
+            return .point(try ScreenPoint(x: x, y: y))
         }
     }
 }

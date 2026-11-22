@@ -4,6 +4,9 @@ import Keystrokes
 import Pointing
 import Synchronization
 import TestClock
+import ScreenSpace
+import ScreenSpaceTesting
+import InputTesting
 
 /// A keyboard that records what it was asked to do and refuses after a given number of
 /// calls, so a run can be stopped at any point inside a character.
@@ -147,7 +150,7 @@ final class FakeMouse: Mouse {
         try state.withLock {
             try record(&$0, "move \(delta.x.value) \(delta.y.value)")
             let gain = Self.gain(of: delta, stuck: $0.stuck)
-            $0.position = ScreenPoint(x: $0.position.x + Double(delta.x.value) * gain, y: $0.position.y + Double(delta.y.value) * gain)!
+            $0.position = ScreenPoint.at($0.position.x + Double(delta.x.value) * gain, $0.position.y + Double(delta.y.value) * gain)
         }
     }
 
@@ -165,7 +168,7 @@ final class FakeMouse: Mouse {
     var pointer: Pointer { pointer(on: ManualClock()) }
 
     /// That pointer timed on `clock`, for a test that reads the time back.
-    func pointer(on clock: ManualClock) -> Pointer { Pointer(mouse: self, cursor: cursor, displays: { .vast }, clock: clock, randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in }) }
+    func pointer(on clock: ManualClock) -> Pointer { Pointer(mouse: self, cursor: cursor, clock: clock, randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in }) }
 
     /// A keyboard beside this mouse, posting into the same log under the same `refused`, so
     /// a run over both devices reads back as one sequence and can be refused at any report
@@ -255,15 +258,11 @@ final class SteadyGainMouse: Mouse {
     func move(by delta: Move) throws {
         state.withLock {
             $0.log.append("move \(delta.x.value) \(delta.y.value)")
-            $0.position = ScreenPoint(x: $0.position.x + Double(delta.x.value) * gain, y: $0.position.y + Double(delta.y.value) * gain)!
+            $0.position = ScreenPoint.at($0.position.x + Double(delta.x.value) * gain, $0.position.y + Double(delta.y.value) * gain)
         }
     }
 
-    var pointer: Pointer { Pointer(mouse: self, cursor: { self.position }, displays: { .vast }, clock: ManualClock(), randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in }) }
+    var pointer: Pointer { Pointer(mouse: self, cursor: { self.position }, clock: ManualClock(), randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in }) }
 }
 
-extension Displays {
-    /// A screen whose edges are further than any test's path goes, for tests that are not
-    /// about the edges.
-    static let vast = Displays(frames: [CGRect(x: -100_000, y: -100_000, width: 200_000, height: 200_000)])!
-}
+

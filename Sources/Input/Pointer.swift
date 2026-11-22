@@ -1,5 +1,6 @@
 import Foundation
 import Pointing
+import ScreenSpace
 
 /// How many times a click clicks. At least one, because a click that does not click is a
 /// move and there is already a move. [LAW:parse-dont-validate]
@@ -55,9 +56,6 @@ public struct Pointer: Sendable {
     public let mouse: any Mouse
     /// Where the cursor is now, in the same coordinates as the targets.
     public let cursor: @Sendable () async throws -> ScreenPoint
-    /// Where the displays are, read at the start of every move, so a path is kept on the
-    /// layout as it is then.
-    public let displays: @Sendable () async throws -> Displays
 
     /// The most motion reports one move may take. Each halves the remaining distance or
     /// better once the gain is known, so a screen's width takes a handful; the cap is for
@@ -96,11 +94,10 @@ public struct Pointer: Sendable {
     /// How often a moving pointer reports: every 8 ms, a 125 Hz USB mouse's rate.
     public static let tick: Duration = .milliseconds(8)
 
-    public init<C: Clock>(mouse: any Mouse, cursor: @escaping @Sendable () async throws -> ScreenPoint, displays: @escaping @Sendable () async throws -> Displays,
+    public init<C: Clock>(mouse: any Mouse, cursor: @escaping @Sendable () async throws -> ScreenPoint,
                           clock: C, randomness: RandomSource, hand: Hand, traced: @escaping @Sendable (Traced) -> Void) where C.Duration == Duration {
         self.mouse = mouse
         self.cursor = cursor
-        self.displays = displays
         timeline = Timeline(clock)
         self.randomness = randomness
         self.hand = hand
@@ -218,7 +215,7 @@ public struct Pointer: Sendable {
 
     /// Moves the cursor to a point aimed at inside `target` as a person's hand would, and lands
     /// it there as `home` does: along a `Trajectory` drawn from `randomness` and kept on
-    /// `displays`, a report every `tick`, each aimed
+    /// the displays `target` was placed on, a report every `tick`, each aimed
     /// at where the trajectory is at that tick's deadline from where the cursor was read and
     /// the reports it has not yet shown. The deadlines are counted from the start, so a late
     /// report is followed by a larger one rather than pushing the rest of the path back.
@@ -233,15 +230,14 @@ public struct Pointer: Sendable {
     @discardableResult
     public func move(to target: Target) async throws -> Moved {
         let start = try await cursor()
-        let displays = try await displays()
-        let trajectory = randomness.draw { Trajectory(from: start, toward: target, within: displays, drawing: &$0) }
+        let trajectory = try randomness.draw { generator throws(NotAPlace) in try Trajectory(from: start, toward: target, drawing: &generator) }
         let began = timeline.now()
         var tracking = Tracking(at: trajectory.start)
         let ticks = Int((trajectory.duration / Self.tick).rounded(.up))
         var steered = 0, closing = 0
         var landed: ScreenPoint?
         var moved: Moved {
-            Moved(from: trajectory.start, aimed: trajectory.target, toward: trajectory.toward, planned: trajectory.duration, structure: trajectory.structure, bow: trajectory.bow, halfway: trajectory.halfway, displays: displays, kept: trajectory.kept,
+            Moved(from: trajectory.start, aimed: trajectory.target, toward: trajectory.toward, planned: trajectory.duration, structure: trajectory.structure, bow: trajectory.bow, halfway: trajectory.halfway, displays: target.displays, kept: trajectory.kept,
                   steered: steered, closing: closing, lost: tracking.lost, landed: landed)
         }
         defer { traced(.moved(moved)) }
@@ -263,7 +259,7 @@ public struct Pointer: Sendable {
         // Counted as each report is paced, which is just before it goes out, so a move the
         // closing loop threw out of still says how far it got.
         do {
-            landed = try await home(on: trajectory.target) {
+            landed = try await home(on: trajectory.target, toward: target) {
                 closing += 1
                 slot += Self.tick
                 try await timeline.sleep(slot)
@@ -280,12 +276,13 @@ public struct Pointer: Sendable {
     /// cursor shows them, and answers with how many reports it took. `vhid play` homes this
     /// way before a click; the verbs reach it through `move`.
     @discardableResult
-    public func home(on target: ScreenPoint) async throws -> Int {
-        try await home(on: target) {}.reports
+    public func home(on target: Placed<ScreenPoint>) async throws -> Int {
+        try await home(on: target.value, toward: .point(target)) {}.reports
     }
 
-    /// The closed loop, waiting on `pace` before each report: how many reports it sent, and
-    /// where the cursor was read when it stopped.
+    /// The closed loop onto `aim`, a point drawn for `target` or the point it is, waiting on
+    /// `pace` before each report: how many reports it sent, and where the cursor was read
+    /// when it stopped.
     ///
     /// Within half a point on each axis where the device can do that, and otherwise as
     /// near as one count of its motion puts it: a mouse whose smallest report moves three
@@ -312,19 +309,19 @@ public struct Pointer: Sendable {
     /// decide this with, and what happened is exactly the right thing.
     /// `aMoveEndsBesideTheTargetRatherThanOscillatingPastIt` holds it over four gains and
     /// six remainders. [LAW:verifiable-goals]
-    func home(on target: ScreenPoint, pace: () async throws -> Void) async throws -> (reports: Int, at: ScreenPoint) {
+    func home(on aim: ScreenPoint, toward target: Target, pace: () async throws -> Void) async throws -> (reports: Int, at: ScreenPoint) {
         var at = try await cursor()
         var gain = Gain.assumed
         var stalls = 0
         for reports in 0..<Self.rounds {
             try Task.checkCancellation()
-            let step = Self.step(from: at, to: target, gain: gain)
+            let step = Self.step(from: at, to: aim, gain: gain)
             guard step != .none else { return (reports, at) }
             try await pace()
             try await mouse.move(by: step)
             let landed = try await settled(from: at)
             gain = Self.gain(after: step, from: at, to: landed, previous: gain)
-            let nearer = landed.distance(to: target) < at.distance(to: target)
+            let nearer = landed.distance(to: aim) < at.distance(to: aim)
             // `landed != at` is what tells the two apart, and it is the whole difference
             // between a device that cannot do better and a cursor that will not go. One
             // count that moved the cursor and did not help is the end of the approach;
@@ -333,10 +330,10 @@ public struct Pointer: Sendable {
             // arrival it never made. [LAW:no-silent-failure]
             if !nearer, Self.isSmallest(step), landed != at { return (reports + 1, landed) }
             stalls = nearer ? 0 : stalls + 1
-            guard stalls < Self.stalls else { throw WouldNotReach(target: .point(target), aimed: target, cursor: landed, reports: reports + 1) }
+            guard stalls < Self.stalls else { throw WouldNotReach(target: target, aimed: aim, cursor: landed, reports: reports + 1) }
             at = landed
         }
-        throw WouldNotReach(target: .point(target), aimed: target, cursor: at, reports: Self.rounds)
+        throw WouldNotReach(target: target, aimed: aim, cursor: at, reports: Self.rounds)
     }
 
     /// The cursor once it has left `before`, or wherever it is when the settle time is up.
@@ -504,21 +501,17 @@ public struct WouldNotReach: Error, CustomStringConvertible {
     }
 }
 
+/// The cursor was read, and what came back is not a place.
 public struct CursorUnreadable: Error, CustomStringConvertible {
-    public init() {}
+    public let read: NotAPlace
 
-    public var description: String { "the window server would not say where the cursor is" }
+    public init(_ read: NotAPlace) {
+        self.read = read
+    }
+
+    public var description: String { "the cursor was read as \(read)" }
 }
 
-/// The window server listed no display a cursor could be on: none at all, or one with no
-/// area.
-public struct DisplaysUnreadable: Error, CustomStringConvertible {
-    public let frames: [CGRect]
-
-    public init(frames: [CGRect]) { self.frames = frames }
-
-    public var description: String { "the window server listed no displays a path could be kept on: \(frames)" }
-}
 
 /// A pointing run that stopped: vhidd went quiet, the caller cancelled it, or the
 /// cursor would not go where it was sent. What stopped it is the cause; whether the

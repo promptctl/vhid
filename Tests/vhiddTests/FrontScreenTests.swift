@@ -1,5 +1,7 @@
 import Foundation
 import OwnThread
+import ScreenSpace
+import ScreenSpaceTesting
 import Testing
 @testable import vhidd
 
@@ -17,9 +19,9 @@ import Testing
             if fails { throw FrontScreen.NobodyInFront() }
             return (Double(session.audit), 1)
         }
-        func displays() throws -> [CGRect] {
-            log.add("displays in \(session.audit)")
-            return [CGRect(x: 0, y: 0, width: Double(session.audit), height: 1)]
+        func layout() throws -> DisplayLayout {
+            log.add("layout in \(session.audit)")
+            return .at([.at(0, 0, Double(session.audit), 1)])
         }
         func stop() { log.add("stop \(session.audit)") }
     }
@@ -34,13 +36,13 @@ import Testing
     private let bmf = FrontScreen.Session(audit: 100003, user: "bmf")
     private let loginWindow = FrontScreen.Session(audit: 100120, user: "root")
 
-    /// The displays are asked of the same child as the cursor: one reader per session.
-    @Test func theDisplaysAreReadByTheFrontSessionsChild() throws {
+    /// The layout is asked of the same child as the cursor: one reader per session.
+    @Test func theLayoutIsReadByTheFrontSessionsChild() throws {
         let log = Log()
         let screen = FrontScreen(front: { bmf }, start: { log.add("start \($0.audit)"); return Reader($0, log) }, failed: log.add)
         #expect(try screen.cursor() == (100003, 1))
-        #expect(try screen.displays() == [CGRect(x: 0, y: 0, width: 100003, height: 1)])
-        #expect(log.all == ["start 100003", "read in 100003", "displays in 100003"])
+        #expect(try screen.layout() == .at([.at(0, 0, 100003, 1)]))
+        #expect(log.all == ["start 100003", "read in 100003", "layout in 100003"])
     }
 
     @Test func aSessionComingToTheFrontIsReadByAChildOfItsOwn() throws {
@@ -119,26 +121,27 @@ import Testing
         #expect(try reader.cursor() == (12.5, 40))
     }
 
-    /// Each question goes as its own line, and the answer to `displays` is every display's
-    /// rectangle; an answer that is not one is the reader failing, saying what it heard.
+    /// Each question goes as its own line, and the answer to `layout` is the layout's record;
+    /// an answer that is not one is the reader failing, saying what it heard and why.
     @Test func aChildAnswersEachQuestionByName() throws {
         let reader = try child("""
-        echo joined c0de; while read q; do case $q in cursor) echo '12.5 40';; displays) echo '0 0 1920 1080;1920 -200 1280 800';; *) echo nonsense;; esac; done
+        echo joined c0de; while read q; do case $q in cursor) echo '12.5 40';; layout) echo '1 0 0 1920 1080 1 2 1920 -200 1280 800 0';; *) echo nonsense;; esac; done
         """)
         defer { reader.stop() }
-        #expect(try reader.displays() == [CGRect(x: 0, y: 0, width: 1920, height: 1080), CGRect(x: 1920, y: -200, width: 1280, height: 800)])
+        #expect(try reader.layout() == .at([.at(0, 0, 1920, 1080), .at(1920, -200, 1280, 800)], asleep: [1]))
         #expect(try reader.cursor() == (12.5, 40))
-        let garbled = try child("echo joined c0de; while read _; do echo '0 0 1920'; done")
+        let garbled = try child("echo joined c0de; while read _; do echo '1 0 0 1920'; done")
         defer { garbled.stop() }
-        #expect { try garbled.displays() } throws: { "\($0)".contains("answered '0 0 1920'") }
+        #expect { try garbled.layout() } throws: { "\($0)".contains("answered '1 0 0 1920': the display layout record is not one this build reads") }
     }
 
-    /// `refused` is the window server declining, whichever question it answers.
-    @Test func aChildSaysTheWindowServerRefused() throws {
-        let reader = try child("echo joined c0de; while read _; do echo refused; done")
+    /// `refused` and why is the child unable to read what it was asked, whichever question it
+    /// answers, and the why reaches the refusal.
+    @Test func aChildSaysWhyItCouldNotRead() throws {
+        let reader = try child("echo joined c0de; while read q; do echo \"refused $q went wrong\"; done")
         defer { reader.stop() }
-        #expect { try reader.displays() } throws: { ($0 as? WindowServerRefused)?.question == .displays }
-        #expect { try reader.cursor() } throws: { ($0 as? WindowServerRefused)?.question == .cursor }
+        #expect { try reader.layout() } throws: { ($0 as? WindowServerRefused).map { $0.question == .layout && $0.why == "layout went wrong" } == true }
+        #expect { try reader.cursor() } throws: { ($0 as? WindowServerRefused).map { $0.question == .cursor && $0.why == "cursor went wrong" } == true }
     }
 
     @Test func aChildThatCouldNotJoinSaysWhy() {
@@ -222,14 +225,14 @@ import Testing
         #expect(holder.pid(on: 1) == nil)
     }
 
-    /// The displays are answered the same way, four numbers each.
-    @Test func aSeatReadsTheDisplaysWithoutTheDevices() {
+    /// The layout is answered the same way, as its record.
+    @Test func aSeatReadsTheLayoutWithoutTheDevices() {
         let holder = Holder()
-        let seat = Seat(ObjectIdentifier(NSObject()), pid: 41, holder: holder, readiness: Readiness(driver: { .running }),
-                        screen: FixedScreen(frames: [CGRect(x: 0, y: 0, width: 1920, height: 1080), CGRect(x: -1280, y: 0, width: 1280, height: 800)]))
+        let layout = DisplayLayout.at([.at(0, 0, 1920, 1080), .at(-1280, 0, 1280, 800)], asleep: [1])
+        let seat = Seat(ObjectIdentifier(NSObject()), pid: 41, holder: holder, readiness: Readiness(driver: { .running }), screen: FixedScreen(displays: layout))
         var answer: ([NSNumber], Error?)?
-        seat.displays { answer = ($0, $1) }
-        #expect(answer?.0.map(\.doubleValue) == [0, 0, 1920, 1080, -1280, 0, 1280, 800] && answer?.1 == nil)
+        seat.layout { answer = ($0, $1) }
+        #expect(answer?.0.map(\.doubleValue) == layout.record && answer?.1 == nil)
         #expect(holder.pid(on: 1) == nil)
     }
 }

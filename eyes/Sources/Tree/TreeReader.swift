@@ -1,6 +1,7 @@
 import ApplicationServices
-import Seeing
 import Grants
+import ScreenSpace
+import Seeing
 
 /// Reads the screen through the accessibility tree: every on-screen window in the region,
 /// walked element by element, each element that says something reported at its own
@@ -36,11 +37,11 @@ public struct TreeReader: Reader {
 
     public init(granted: @escaping Gate) { self.granted = granted }
 
-    public func look(_ query: Query) async throws -> Candidates {
+    public func look(_ query: Query, on layout: DisplayLayout) async throws -> Candidates {
         // [LAW:no-silent-failure] Asked first: without the grant, every read fails, and a
         // walk that counted them as unanswered would report a looked-at, empty screen.
         guard try await granted(Self.grant) else { throw TreeError.noGrant }
-        let region = try query.region.bounds()
+        let region = try query.region.bounds(on: layout)
         let listing = try Geometry.onScreen()
         // Started before the owners are settled and the windows matched: both are reads too.
         let clock = ContinuousClock()
@@ -52,6 +53,7 @@ public struct TreeReader: Reader {
         let walked = try walk(
             from: roots,
             unwalked: unwalked,
+            on: layout.active,
             within: Self.bounds,
             elapsed: { clock.now - start },
             read: Self.node
@@ -152,13 +154,13 @@ public struct TreeReader: Reader {
                                  of: window, as: [.structure, .structure, .structure, .structure])
             guard case .answered(let position) = reads[0], case .answered(let size) = reads[1],
                   reads[2].answer.flatMap({ $0 as? Bool }) != true,
-                  let frame = frame(position, size) else { continue }
+                  case .answered(.box(let frame)) = frame(position, size) else { continue }
             windows.append((window, frame))
             for child in elements(reads[3].answer ?? nil) {
                 let sheet = try read([kAXRoleAttribute, kAXPositionAttribute, kAXSizeAttribute], of: child, as: [.structure, .structure, .structure])
                 guard sheet[0].answer.flatMap({ $0 as? String }) == kAXSheetRole,
                       case .answered(let position) = sheet[1], case .answered(let size) = sheet[2],
-                      let frame = Self.frame(position, size) else { continue }
+                      case .answered(.box(let frame)) = Self.frame(position, size) else { continue }
                 windows.append((child, frame))
             }
         }
@@ -199,10 +201,11 @@ public struct TreeReader: Reader {
         let names = [kAXRoleAttribute, kAXPositionAttribute, kAXSizeAttribute, kAXParentAttribute]
         let reads = try read(names, of: element, as: [.structure, .structure, .structure, .structure])
         guard case .answered(let role) = reads[0], case .answered(let position) = reads[1],
-              case .answered(let size) = reads[2], case .answered(let parent) = reads[3]
+              case .answered(let size) = reads[2], case .answered(let parent) = reads[3],
+              case .answered(let frame) = frame(position, size)
         else { return .unanswered }
         return .answered(Lineage(role: Role(rawValue: role as? String ?? kAXUnknownRole),
-                                 frame: frame(position, size),
+                                 frame: frame,
                                  parent: parent.flatMap(Self.element).map(bounded)))
     }
 
@@ -249,8 +252,8 @@ public struct TreeReader: Reader {
     /// One element: every attribute in one round trip, each outcome decided by `Answer`.
     static func node(_ element: AXUIElement) throws(TreeError) -> Node<AXUIElement> {
         let reads = try read(attributes, of: element, as: parts)
-        let frame: Heard<ScreenRect?> = switch (reads[4], reads[5]) {
-        case (.answered(let position), .answered(let size)): .answered(Self.frame(position, size))
+        let frame: Heard<Frame> = switch (reads[4], reads[5]) {
+        case (.answered(let position), .answered(let size)): Self.frame(position, size)
         default: .unanswered
         }
         return Node(
@@ -291,12 +294,15 @@ public struct TreeReader: Reader {
         return AXValueGetValue(value as! AXValue, .axError, &error) ? error : nil
     }
 
-    /// Nil as well for a frame that is no place - NaN or infinite - which an app can claim.
+    /// An element's frame, decided once: none without a position or a size, a box, or
+    /// numbers an app claimed that make no box - NaN, an infinity, a side under zero -
+    /// refused by name for every rule after it to count. A position or a size that is no
+    /// geometry value of its type is an answer that says nothing, so unanswered.
     /// [LAW:parse-dont-validate]
-    static func frame(_ position: CFTypeRef?, _ size: CFTypeRef?) -> ScreenRect? {
-        unboxed(position, as: .cgPoint, CGPoint.zero).flatMap { origin in
-            unboxed(size, as: .cgSize, CGSize.zero).map { ScreenRect(CGRect(origin: origin, size: $0)) }
-        }.flatMap { [$0.x, $0.y, $0.width, $0.height].allSatisfy(\.isFinite) ? $0 : nil }
+    static func frame(_ position: CFTypeRef?, _ size: CFTypeRef?) -> Heard<Frame> {
+        guard let position, let size else { return .answered(.none) }
+        guard let origin = unboxed(position, as: .cgPoint, CGPoint.zero), let extent = unboxed(size, as: .cgSize, CGSize.zero) else { return .unanswered }
+        do { return .answered(.box(try ScreenRect(CGRect(origin: origin, size: extent)))) } catch { return .answered(.refused(error)) }
     }
 
     private static func bounded(_ element: AXUIElement) -> AXUIElement {
@@ -308,8 +314,8 @@ public struct TreeReader: Reader {
     /// type asked for. A CoreFoundation value admits no cast check, so its type id is the
     /// check - an app answering with something else is refused, not trapped on.
     /// [LAW:parse-dont-validate]
-    private static func unboxed<T: BitwiseCopyable>(_ value: CFTypeRef?, as type: AXValueType, _ empty: T) -> T? {
-        guard let value, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+    private static func unboxed<T: BitwiseCopyable>(_ value: CFTypeRef, as type: AXValueType, _ empty: T) -> T? {
+        guard CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
         var unboxed = empty
         return AXValueGetValue(value as! AXValue, type, &unboxed) ? unboxed : nil
     }

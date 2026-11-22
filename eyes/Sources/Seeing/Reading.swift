@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import ScreenSpace
 
 /// The most findings one reading may return, which is always at least one.
 ///
@@ -293,8 +294,15 @@ public struct Exclusion: Sendable, Hashable {
         /// No text on it at all.
         case wordless
         /// Zero-sized, offscreen, outside the region asked for, or outside what holds it - a
-        /// row scrolled out of its list.
+        /// row scrolled out of its list: no display shows any of it a point a side there.
         case unplaced
+        /// Its frame is numbers an app claimed that make no box - not finite, a side under
+        /// zero, or a far edge past what a Double holds - so where it is, and what it shows,
+        /// is unknown.
+        case notABox = "not_a_box"
+        /// Text read and not placed: words whose stretch, narrowed to or split off, no
+        /// display shows a point a side of within what the row is drawn in.
+        case unshown
         /// An area holding other elements - a window, a group, a list - whose text names the
         /// area. Its centre is on whatever sits there, not on the words.
         case area
@@ -334,7 +342,7 @@ public struct Exclusion: Sendable, Hashable {
         /// [LAW:single-enforcer] Every reader's reach is decided here.
         public var leavesUnread: Bool {
             switch self {
-            case .unanswered, .unwalked, .overlaid, .roleUnknown: true
+            case .unanswered, .unwalked, .overlaid, .roleUnknown, .notABox, .unshown: true
             case .wordless, .unplaced, .area, .covered, .duplicate, .ranked, .outside, .otherRole: false
             }
         }
@@ -414,6 +422,11 @@ public extension Reading {
     /// The same reading with every row it prints - matches and near misses alike - put
     /// through `press`, and the boxes' counts it reports. The one way a reader's
     /// `pressing` rewrites rows, so no row printed escapes it. [LAW:single-enforcer]
+    ///
+    /// A cut row is placed again within its own bound, by the one pressing rule. A cut no
+    /// display shows a point a side of - a control pressed only along a line through its
+    /// middle - leaves the row as placed, its point not proven to press what it names, and
+    /// counted unchecked as `unshown`. [LAW:no-silent-failure]
     func pressing(_ press: (Found) throws -> Checked) rethrows -> Reading {
         var narrowed = scope.boxes.narrowed, unchecked = scope.boxes.unchecked, calls = scope.boxes.calls
         func pressed(_ found: Found) throws -> Found {
@@ -421,7 +434,15 @@ public extension Reading {
             calls += checked.calls
             switch checked.pressed {
             case .kept: return found
-            case .narrowed(let frame): narrowed += 1; return Found(text: found.text, frame: frame, source: found.source)
+            case .narrowed(let box):
+                do {
+                    let cut = try found.cut(to: box)
+                    narrowed += 1
+                    return cut
+                } catch {
+                    unchecked[.unshown, default: 0] += 1
+                    return found
+                }
             case .unchecked(let why): unchecked[why, default: 0] += 1; return found
             }
         }
@@ -457,15 +478,14 @@ public extension Reading {
     }
 }
 
-extension Array where Element == Exclusion {
-    /// One entry per reason, in the order reasons first appear, with no zero counts.
-    var summed: [Exclusion] {
-        var order: [Exclusion.Reason] = []
-        var counts: [Exclusion.Reason: Int] = [:]
-        for e in self where e.count > 0 {
-            if counts[e.reason] == nil { order.append(e.reason) }
-            counts[e.reason, default: 0] += e.count
-        }
-        return order.map { Exclusion(reason: $0, count: counts[$0]!) }
+public extension Array where Element == Exclusion {
+    /// Counts by reason, one entry a reason counted, in the order `Exclusion.Reason` lists
+    /// them. [LAW:single-enforcer] The one order every reader and a merge report in, so one
+    /// screen always reports the same way.
+    init(counts: [Exclusion.Reason: Int]) {
+        self = Exclusion.Reason.allCases.compactMap { why in counts[why].flatMap { $0 > 0 ? Exclusion(reason: why, count: $0) : nil } }
     }
+
+    /// One entry per reason, summed.
+    var summed: [Exclusion] { [Exclusion](counts: Dictionary(map { ($0.reason, $0.count) }, uniquingKeysWith: +)) }
 }

@@ -78,14 +78,18 @@ build from this tree. `vhid service` prints which. Coordinates are screen points
 left of or above it has negative ones, which follow `--` after every option:
 `vhid click --button left -- -100 -40`.
 
-`click`, `move`, `scroll` and `drag` take each place as a point, two numbers `x y`, or as a
-box, one word `x,y,width,height`: the box `look` prints beside each point. A point is
-pressed where it is. In a box, the pointer lands on a point drawn inside it, spread about
-the centre as a person's clicks spread on a button and never within 2 points of its edge
-(a side too narrow for that is aimed at its centre, and one under a point is refused),
-and the move there takes as long as Fitts' law says a hand's would to a target that size.
-The MCP tools take `box` in place of `x` and `y`, and `drag`'s `from` and `to` take the
-box as a string. [design/human.md](design/human.md#where-a-click-lands) has the model.
+`click`, `move`, `scroll` and `drag` take each place as a point, two numbers `x y` or one
+word `x,y`, or as a box, one word `x,y,width,height`: the point and the box `look` prints
+for each run. The displays are read once when the verb starts, sleeping ones included, and
+each place is pressed by one rule. A point is pressed where it is. A box is pressed in the
+largest part of it one display shows, at least a point a side, where the pointer lands on
+a point drawn inside that part, spread about the centre as a person's clicks spread on a
+button and never within 2 points of its edge (a side too narrow for that is aimed at its
+centre), and the move there takes as long as Fitts' law says a hand's would to a target
+that size. A point or a box no display shows is refused, saying it is on no display and
+listing the displays. The MCP tools take `box` in place of `x` and `y`, and `drag`'s
+`from` and `to` take a point or a box as a string.
+[design/human.md](design/human.md#where-a-click-lands) has the model.
 
 ## What each run leaves behind
 
@@ -125,9 +129,10 @@ A verb that opens the devices records `attributes.seed`, the hex seed every poin
 it makes and every key it times is drawn from, and `attributes.paths` has one entry for each such move, in order,
 the move a failed verb stopped in included: `from` is where the cursor was when it began,
 `aimed` the point it aimed at, `x` and `y`, drawn inside the box from there when it was
-given one, `box` that box as `x,y,width,height` (absent
+given one, `box` the part of it a display shows, which the point was drawn inside, as
+`x,y,width,height`, and `bound` the box as given (both absent
 for a point), `fitts_width` the target width its time was
-read from (the box's smaller side, or 20 for a point), `landed` where the cursor was read
+read from (the part's smaller side, or 20 for a point), `landed` where the cursor was read
 when it landed, absent for a move that stopped first, `planned_ms` is how long its trajectory was
 drawn to take, `structure` how it was built (`direct`, `undershoot`, `overshoot` or
 `two_corrections`), `bow` its drawn curve as a fraction of the distance, away from the
@@ -157,6 +162,18 @@ holds them for the session in front. `attributes.keys_late_ms` is how far behind
 its drawn timing `type`'s or `press`'s last report went out: slow acknowledgements and late
 wakes move every key after them rather than shorten a hold. It is 0 for a run that sent
 no keys, and absent for a verb that never typed.
+
+A finished `play` records `attributes.layout`, as its done line says it: `kept` when the
+displays, read again once its last report was out, have the same frames in the same order
+as the ones the script was placed on, whichever are asleep, `changed` when they do not, and
+`unread` when they could not be read, with `attributes.layout_unread` saying why. `vhid record` records `attributes.ending`, how the
+recording ended (`stop` for Control-C, `end` for `SIGTERM`, `tap_off` when macOS turned
+the tap off, `hour`, `devices_lost` when vhid's devices came back and could not be told
+apart again, or `layout_lost` when the displays changed and could not be read), and
+`attributes.left_out`, what it left out by reason, zeros included: `unmapped_keys`, key
+presses with no HID usage, fn among them; `off_display`, the moves to a point no display
+holds; `unlocated`, the moves the tap gave to a point that is not a place on the screen;
+and `layout_changes`, how many times the displays came to be laid out otherwise. `attributes.vhid_at_edge` counts the times vhid's own motion ended on a screen edge while recording, after which the points written may be off.
 
 With `OTEL_EXPORTER_OTLP_ENDPOINT` set, the record goes to that OpenTelemetry collector
 instead, as an OTLP/HTTP JSON log on `/v1/logs`, and the file is not written.

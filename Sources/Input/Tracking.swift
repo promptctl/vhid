@@ -1,5 +1,6 @@
 import Foundation
 import Pointing
+import ScreenSpace
 
 /// What steering a trajectory knows between ticks: where the cursor was last read, the
 /// reports sent that it has not yet shown, and the acceleration curve learned from those it

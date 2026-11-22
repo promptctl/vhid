@@ -5,24 +5,27 @@ import Synchronization
 import TestClock
 import Testing
 @testable import Input
+import ScreenSpace
+import ScreenSpaceTesting
+import InputTesting
 
 /// The trajectory model of `docs/design/human.md`, on fixed seeds: how long a move takes,
 /// the shape of its path, and the draws behind both. Seconds of work over a thousand seeds,
 /// which would hold `make test`'s one-thread pool, hence its own thread.
 @Suite(.ownThread) struct TrajectoryTests {
-    static let start = ScreenPoint(x: 100, y: 300)!
-    static let across = ScreenPoint(x: 840, y: 300)!
+    static let start = ScreenPoint.at(100, 300)
+    static let across = ScreenPoint.at(840, 300)
 
     static func trajectory(seed: UInt64, from start: ScreenPoint = start, to target: ScreenPoint = across) -> Trajectory {
         var generator = SeededGenerator(seed: seed)
-        return Trajectory(from: start, toward: .point(target), within: .vast, drawing: &generator)
+        return try! Trajectory(from: start, toward: .point(target), drawing: &generator)
     }
 
     /// MT = 50 ms + 150 ms × log2(D/20 + 1), times the pace drawn after the aim: about
     /// 0.84 s across 740 points before the pace.
-    @Test func aMoveTakesFittsTimeTimesItsDrawnPace() {
+    @Test func aMoveTakesFittsTimeTimesItsDrawnPace() throws {
         var generator = SeededGenerator(seed: 7)
-        _ = Target.point(Self.across).aim(from: Self.start, drawing: &generator)
+        _ = try Target.point(Self.across).aim(from: Self.start, drawing: &generator)
         let pace = Trajectory.pace.draw(using: &generator)
         let fitts = Duration.milliseconds(50) + .milliseconds(150) * log2(740.0 / 20 + 1)
         #expect(Self.trajectory(seed: 7).duration == fitts * pace)
@@ -30,7 +33,7 @@ import Testing
     }
 
     /// The pace is cut to 0.7–1.3, and two seeds give two times for one distance.
-    @Test func thePaceVariesWithinItsBounds() {
+    @Test func thePaceVariesWithinItsBounds() throws {
         let fitts = Duration.milliseconds(50) + .milliseconds(150) * log2(740.0 / 20 + 1)
         let paces = (0 ..< 500).map { Self.trajectory(seed: $0).duration / fitts }
         #expect(paces.allSatisfy { (0.7 ... 1.3).contains($0) })
@@ -38,8 +41,8 @@ import Testing
     }
 
     /// A move under a point long takes no time: it is all the closing loop's.
-    @Test func aMoveUnderAPointTakesNoTime() {
-        let near = Self.trajectory(seed: 1, to: ScreenPoint(x: 100.8, y: 300.4)!)
+    @Test func aMoveUnderAPointTakesNoTime() throws {
+        let near = Self.trajectory(seed: 1, to: ScreenPoint.at(100.8, 300.4))
         #expect(near.duration == .zero)
         #expect(near.point(after: .zero) == (100.8, 300.4))
         #expect(Self.trajectory(seed: 1, to: Self.start).duration == .zero)
@@ -50,7 +53,7 @@ import Testing
     /// correction that leaves 25–80% of the miss on either side; off the line by at most 4%
     /// of D; each stroke from where the last ended, the last onto the target exactly. All
     /// four come up, at about their shares.
-    @Test func eachStructureEndsItsMainMovementWhereTheNoteSays() {
+    @Test func eachStructureEndsItsMainMovementWhereTheNoteSays() throws {
         var seen: [Trajectory.Structure: Int] = [:]
         var sides = Set<Bool>()
         for seed in UInt64(0) ..< 1000 {
@@ -89,7 +92,7 @@ import Testing
     /// their bounds of the line, every millisecond over 200 seeds of every structure: 6% and
     /// 4% of D and 1.6 points across it, and no further back than the start or on than the
     /// furthest overshoot.
-    @Test func thePathStaysWithinItsBounds() {
+    @Test func thePathStaysWithinItsBounds() throws {
         var structures = Set<Trajectory.Structure>()
         for seed in UInt64(0) ..< 200 {
             let path = Self.trajectory(seed: seed)
@@ -106,12 +109,12 @@ import Testing
     /// angle to the forearm, on the side the draw's sign gives: away from the elbow, so a
     /// move right or left bulges up, or for the few drawn below zero slightly toward it. One
     /// along the forearm hardly bows at all. Corrections are straight.
-    @Test func theBowFollowsTheForearm() {
-        let centre = ScreenPoint(x: 2000, y: 2000)!
+    @Test func theBowFollowsTheForearm() throws {
+        let centre = ScreenPoint.at(2000, 2000)
         let forearm = Trajectory.forearm
         for degrees in stride(from: 0.0, to: 360, by: 15) {
             let angle = degrees * .pi / 180
-            let end = ScreenPoint(x: centre.x + 740 * cos(angle), y: centre.y + 740 * sin(angle))!
+            let end = ScreenPoint.at(centre.x + 740 * cos(angle), centre.y + 740 * sin(angle))
             for seed in UInt64(0) ..< 40 {
                 let path = Self.trajectory(seed: seed, from: centre, to: end)
                 let main = path.strokes[0]
@@ -127,7 +130,7 @@ import Testing
                 if degrees == 0 || degrees == 180 { #expect(bulge.1 * path.bow <= 0, "\(degrees)° seed \(seed): \(bulge)") }
             }
         }
-        let along = Self.trajectory(seed: 1, from: centre, to: ScreenPoint(x: centre.x + 740 * forearm.x, y: centre.y + 740 * forearm.y)!)
+        let along = Self.trajectory(seed: 1, from: centre, to: ScreenPoint.at(centre.x + 740 * forearm.x, centre.y + 740 * forearm.y))
         #expect(abs(along.strokes[0].bow) < 0.01 * 740 * 0.05)
     }
 
@@ -135,7 +138,7 @@ import Testing
     /// before its drawn halfway, so it slows down for longer than it speeds up, by more in
     /// some moves than others; and the whole move is fastest before half its time is gone.
     /// Sampled a millisecond apart, on seeds of every structure.
-    @Test func everyStrokeSlowsDownForLongerThanItSpeedsUp() {
+    @Test func everyStrokeSlowsDownForLongerThanItSpeedsUp() throws {
         var structures = Set<Trajectory.Structure>()
         var peaks: [Double] = []
         for seed in UInt64(0) ..< 40 {
@@ -164,7 +167,7 @@ import Testing
     /// The tremor shakes the path across its line by no more than its amplitude, 0.4–1.6
     /// points, at 7–13 Hz; not at all at either end, so the path starts where the cursor is
     /// and ends on the target; and visibly through the slow strokes after the main one.
-    @Test func theTremorShakesThePathOnlyInTheMiddle() {
+    @Test func theTremorShakesThePathOnlyInTheMiddle() throws {
         var shown = 0
         for seed in UInt64(0) ..< 100 {
             let path = Self.trajectory(seed: seed)
@@ -188,13 +191,13 @@ import Testing
     /// A hundred moves drawn in one stream, the sample of `docs/design/human.md`, "The path",
     /// are not built from the same parts: some run with no bow a person could see, a few bow
     /// toward the elbow, and the whole move's speed peaks at a spread of shares of its time.
-    @Test func aHundredMovesAreNotBuiltFromTheSameParts() {
+    @Test func aHundredMovesAreNotBuiltFromTheSameParts() throws {
         var generator = SeededGenerator(seed: 1)
-        let box = Target.box(ScreenRect(x: 820, y: 596, width: 83, height: 26)!)
-        let start = ScreenPoint(x: 120, y: 250)!
+        let box = Target.box(ScreenRect.at(820, 596, 83, 26))
+        let start = ScreenPoint.at(120, 250)
         var bows: [Double] = [], peaks: [Double] = []
         for _ in 0 ..< 100 {
-            let path = Trajectory(from: start, toward: box, within: .vast, drawing: &generator)
+            let path = try Trajectory(from: start, toward: box, drawing: &generator)
             // The bow is signed away from the elbow, which for this move down and right is up and right of its line.
             bows.append(-path.strokes[0].bow)
             let ms = Int(path.duration / .milliseconds(1))
@@ -210,14 +213,14 @@ import Testing
     }
 
     /// One seed, one movement.
-    @Test func oneSeedDrawsOneMovement() {
+    @Test func oneSeedDrawsOneMovement() throws {
         #expect(Self.trajectory(seed: 42) == Self.trajectory(seed: 42))
         #expect(Self.trajectory(seed: 42) != Self.trajectory(seed: 43))
     }
 
     /// A truncated normal is redrawn, never clamped: nothing lands on a bound, and the
     /// draws keep the distribution's mean.
-    @Test func aTruncatedNormalRedrawsRatherThanClamps() {
+    @Test func aTruncatedNormalRedrawsRatherThanClamps() throws {
         var generator = SeededGenerator(seed: 9)
         let normal = Normal(250, 80, within: 120 ... 500)
         let draws = (0 ..< 10_000).map { _ in normal.draw(using: &generator) }
@@ -232,13 +235,13 @@ import Testing
 /// everything. Over 200 seeds each, seconds of work that would hold `make test`'s one-thread
 /// pool, hence its own thread.
 @Suite(.ownThread) struct TrajectoryOnTheDisplaysTests {
-    static let screen = Displays(frames: [CGRect(x: 0, y: 0, width: 1920, height: 1080)])!
+    static let screen = DisplayLayout.single.online
     /// Ten points above the bottom edge, where an auto-hidden Dock waits, and across it.
-    static let alongTheEdge = (ScreenPoint(x: 100, y: 1070)!, ScreenPoint(x: 1800, y: 1070)!)
+    static let alongTheEdge = (ScreenPoint.at(100, 1070), ScreenPoint.at(1800, 1070))
 
     static func trajectory(seed: UInt64, from start: ScreenPoint, to target: ScreenPoint, within displays: Displays = screen) -> Trajectory {
         var generator = SeededGenerator(seed: seed)
-        return Trajectory(from: start, toward: .point(target), within: displays, drawing: &generator)
+        return try! Trajectory(from: start, toward: .point(target, on: displays), drawing: &generator)
     }
 
     /// Every millisecond of every path along the bottom edge: its strokes no lower than the
@@ -246,7 +249,7 @@ import Testing
     /// tremor no more than its amplitude below them, on the screen. A bow away from the
     /// elbow bulges up and away from the edge, so every such path keeps all of it, whatever
     /// its aim beside the line kept.
-    @Test func aPathAlongAnEdgeNeverRunsIntoIt() {
+    @Test func aPathAlongAnEdgeNeverRunsIntoIt() throws {
         var kept: [Trajectory.Kept] = []
         var highest = 1070.0
         for seed in UInt64(0) ..< 200 {
@@ -268,10 +271,10 @@ import Testing
     /// up into it and nine in ten such paths keep only part of it, while one drawn toward
     /// the elbow bulges down and keeps it whole; the cut takes the bow alone, and the paths that aim below
     /// the line, about half, keep that aim and every overshoot along it whole.
-    @Test func aPathAlongTheMenuBarCutsItsBowAlone() {
+    @Test func aPathAlongTheMenuBarCutsItsBowAlone() throws {
         var kept: [Trajectory.Kept] = []
         for seed in UInt64(0) ..< 200 {
-            let path = Self.trajectory(seed: seed, from: ScreenPoint(x: 100, y: 12)!, to: ScreenPoint(x: 900, y: 12)!)
+            let path = Self.trajectory(seed: seed, from: ScreenPoint.at(100, 12), to: ScreenPoint.at(900, 12))
             for ms in 0 ... Int(path.duration / .milliseconds(1)) {
                 #expect(path.unshaken(after: .milliseconds(ms)).y >= 11.95, "seed \(seed) at \(ms) ms")
             }
@@ -287,10 +290,10 @@ import Testing
     /// and every one is cut where it ends. A bow away from the elbow, bulging up and left, is
     /// cut only where the main movement ends on the target, at its depth, or a correction
     /// carries it past: nine in ten of those that stop short keep all of their curve.
-    @Test func aPathUpToTheMenuBarCutsItsOvershootNotItsBow() {
+    @Test func aPathUpToTheMenuBarCutsItsOvershootNotItsBow() throws {
         var overshoots = 0, short = 0, bowed = 0
         for seed in UInt64(0) ..< 200 {
-            let path = Self.trajectory(seed: seed, from: ScreenPoint(x: 400, y: 600)!, to: ScreenPoint(x: 900, y: 12)!)
+            let path = Self.trajectory(seed: seed, from: ScreenPoint.at(400, 600), to: ScreenPoint.at(900, 12))
             for ms in 0 ... Int(path.duration / .milliseconds(1)) {
                 #expect(path.unshaken(after: .milliseconds(ms)).y >= 11.95, "seed \(seed) at \(ms) ms")
             }
@@ -305,10 +308,10 @@ import Testing
 
     /// A path the drawn deviation would carry into a corner keeps less of it and is still on
     /// the screen: a target ten points from both edges, approached along the diagonal.
-    @Test func aPathIntoACornerStaysOffIt() {
+    @Test func aPathIntoACornerStaysOffIt() throws {
         var kept: [Trajectory.Kept] = []
         for seed in UInt64(0) ..< 200 {
-            let path = Self.trajectory(seed: seed, from: ScreenPoint(x: 900, y: 500)!, to: ScreenPoint(x: 1910, y: 1070)!)
+            let path = Self.trajectory(seed: seed, from: ScreenPoint.at(900, 500), to: ScreenPoint.at(1910, 1070))
             for ms in 0 ... Int(path.duration / .milliseconds(1)) {
                 let unshaken = path.unshaken(after: .milliseconds(ms))
                 #expect(unshaken.x <= 1910.05 && unshaken.y <= 1070.05, "seed \(seed) at \(ms) ms: \(unshaken)")
@@ -321,13 +324,16 @@ import Testing
 
     /// Far from every edge, and across the seam between two displays side by side, the whole
     /// drawn path is kept: the same path as on a screen with no edges near.
-    @Test func aPathFarFromTheEdgesKeepsItsWholeBow() {
-        let pair = Displays(frames: [CGRect(x: 0, y: 0, width: 1920, height: 1080), CGRect(x: 1920, y: 0, width: 1920, height: 1080)])!
+    @Test func aPathFarFromTheEdgesKeepsItsWholeBow() throws {
+        let pair = DisplayLayout.at([.at(0, 0, 1920, 1080), .at(1920, 0, 1920, 1080)]).online
         for seed in UInt64(0) ..< 200 {
             let across = Self.trajectory(seed: seed, from: TrajectoryTests.start, to: TrajectoryTests.across)
-            #expect(across == TrajectoryTests.trajectory(seed: seed), "seed \(seed)")
+            // The same path as on the vast layout: its strokes and timing, the displays
+            // aside, which differ by construction.
+            let unbounded = TrajectoryTests.trajectory(seed: seed)
+            #expect(across.strokes == unbounded.strokes && across.duration == unbounded.duration, "seed \(seed)")
             #expect(across.kept == Trajectory.Kept(ends: 1, bow: 1))
-            let seam = Self.trajectory(seed: seed, from: ScreenPoint(x: 1000, y: 540)!, to: ScreenPoint(x: 2800, y: 540)!, within: pair)
+            let seam = Self.trajectory(seed: seed, from: ScreenPoint.at(1000, 540), to: ScreenPoint.at(2800, 540), within: pair)
             #expect(seam.kept == Trajectory.Kept(ends: 1, bow: 1), "seed \(seed)")
         }
     }
@@ -339,9 +345,9 @@ import Testing
         let (start, target) = Self.alongTheEdge
         let mouse = CurvedMouse(at: start, lateEvery: 0)
         let trace = SteeringTheTrajectoryTests.Trace(), clock = ManualClock()
-        let pointer = Pointer(mouse: mouse, cursor: { trace.read(mouse.cursor(), at: clock.now.offset) }, displays: { Self.screen },
+        let pointer = Pointer(mouse: mouse, cursor: { trace.read(mouse.cursor(), at: clock.now.offset) },
                               clock: clock, randomness: RandomSource(seed: seed), hand: .macOSDefault, traced: { _ in })
-        try await pointer.move(to: .point(target))
+        try await pointer.move(to: .point(target, on: Self.screen))
         #expect(trace.all.allSatisfy { $0.point.y < 1075 }, "lowest \(trace.all.map(\.point.y).max()!)")
         #expect(abs(mouse.position.x - target.x) <= 0.5 && abs(mouse.position.y - target.y) <= 0.5)
     }
@@ -360,10 +366,10 @@ import Testing
         }
     }
 
-    static let start = ScreenPoint(x: 100, y: 300)!
-    static let target = ScreenPoint(x: 840.4, y: 300)!
+    static let start = ScreenPoint.at(100, 300)
+    static let target = ScreenPoint.at(840.4, 300)
     /// Moves to steer: across the screen, back, up a diagonal, and a short hop.
-    static let moves = [(start, target), (target, start), (ScreenPoint(x: 900, y: 700)!, ScreenPoint(x: 300.5, y: 120)!), (start, ScreenPoint(x: 160, y: 330)!)]
+    static let moves = [(start, target), (target, start), (ScreenPoint.at(900, 700), ScreenPoint.at(300.5, 120)), (start, ScreenPoint.at(160, 330))]
 
     /// One move of `moves` on `seed`, over a curved mouse whose cursor shows every report
     /// in time: what the move answered, the trajectory it was drawn, the cursor as each
@@ -372,7 +378,7 @@ import Testing
         let (start, target) = moves[move]
         let mouse = CurvedMouse(at: start, lateEvery: 0)
         let clock = ManualClock(), trace = Trace()
-        let pointer = Pointer(mouse: mouse, cursor: { trace.read(mouse.cursor(), at: clock.now.offset) }, displays: { .vast }, clock: clock, randomness: RandomSource(seed: seed), hand: .macOSDefault, traced: { _ in })
+        let pointer = Pointer(mouse: mouse, cursor: { trace.read(mouse.cursor(), at: clock.now.offset) }, clock: clock, randomness: RandomSource(seed: seed), hand: .macOSDefault, traced: { _ in })
         let moved = try await pointer.move(to: .point(target))
         let path = TrajectoryTests.trajectory(seed: seed, from: start, to: target)
         let ticks = Int((path.duration / Pointer.tick).rounded(.up))
@@ -424,7 +430,7 @@ import Testing
     @Test(arguments: 1 ... 10)
     func reportsTheCursorHasNotShownAreNotSentAgain(seed: UInt64) async throws {
         let mouse = CurvedMouse(at: Self.start, lateEvery: 4)
-        let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor() }, displays: { .vast }, clock: ManualClock(), randomness: RandomSource(seed: seed), hand: .macOSDefault, traced: { _ in })
+        let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor() }, clock: ManualClock(), randomness: RandomSource(seed: seed), hand: .macOSDefault, traced: { _ in })
         _ = try await pointer.move(to: .point(Self.target))
         let path = TrajectoryTests.trajectory(seed: seed, from: Self.start, to: Self.target)
         let farthest = (0 ... Int(path.duration / .milliseconds(1))).map { path.point(after: .milliseconds($0)).x }.max()!
@@ -445,7 +451,7 @@ import Testing
     @Test func everyMoveIsTraced() async throws {
         final class Traced: Sendable { let moves = Mutex<[Pointer.Moved]>([]) }
         let mouse = CurvedMouse(at: Self.start, lateEvery: 0), traced = Traced()
-        let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor() }, displays: { .vast }, clock: ManualClock(), randomness: RandomSource(seed: 1),
+        let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor() }, clock: ManualClock(), randomness: RandomSource(seed: 1),
                               hand: .macOSDefault, traced: { if case .moved(let move) = $0 { traced.moves.withLock { $0.append(move) } } })
         let drag = try await pointer.drag(from: .point(Self.target), to: .point(Self.start), button: .left)
         #expect(traced.moves.withLock { $0 } == [drag.approach, drag.carry])
@@ -459,7 +465,7 @@ import Testing
         final class Traced: Sendable { let moves = Mutex<[Pointer.Moved]>([]) }
         let mouse = FakeMouse(at: Self.start), traced = Traced()
         mouse.stuck = true
-        let pointer = Pointer(mouse: mouse, cursor: mouse.cursor, displays: { .vast }, clock: ManualClock(), randomness: RandomSource(seed: 1),
+        let pointer = Pointer(mouse: mouse, cursor: mouse.cursor, clock: ManualClock(), randomness: RandomSource(seed: 1),
                               hand: .macOSDefault, traced: { if case .moved(let move) = $0 { traced.moves.withLock { $0.append(move) } } })
         let stop = try await #require(throws: WouldNotReach.self) { try await pointer.move(to: .point(Self.target)) }
         let moved = try #require(traced.moves.withLock { $0.first })
@@ -470,18 +476,18 @@ import Testing
 
     /// The match: a change is put on the oldest unseen reports whose expected motion sums
     /// nearest it, the gain is learned from those, and the rest stay unseen.
-    @Test func aChangeIsMatchedToTheOldestUnseenReports() {
+    @Test func aChangeIsMatchedToTheOldestUnseenReports() throws {
         var tracking = Tracking(at: Self.start)
         tracking.sent(Move(x: Count(clamping: 4), y: .zero), on: 1)
         tracking.sent(Move(x: Count(clamping: 6), y: .zero), on: 2)
         // At gain one the two were expected to carry 4 and 10 together; the cursor moved 5,
         // nearer the first alone.
-        tracking.saw(ScreenPoint(x: 105, y: 300)!, on: 2)
+        tracking.saw(ScreenPoint.at(105, 300), on: 2)
         #expect(tracking.unseen.map(\.counts) == [Move(x: Count(clamping: 6), y: .zero)])
         #expect(tracking.curve == [Steering.Sample(counts: 4, perCount: 1.25)])
         #expect(tracking.expected == (112.5, 300))
         // A report that has shown nothing for longer than the closed loop waits moved nothing.
-        tracking.saw(ScreenPoint(x: 105, y: 300)!, on: 2 + Tracking.patience + 1)
+        tracking.saw(ScreenPoint.at(105, 300), on: 2 + Tracking.patience + 1)
         #expect(tracking.unseen.isEmpty)
         #expect(tracking.lost == 1)
         // And so does one still unshown when the move gives up waiting.
@@ -498,7 +504,7 @@ import Testing
         tracking.sent(Move(x: Count(clamping: 4), y: .zero), on: 1)
         tracking.sent(Move(x: .zero, y: Count(clamping: 3)), on: 2)
         // 0.8 of (4, 3): nearer both together than the first alone.
-        tracking.saw(ScreenPoint(x: 103.2, y: 302.4)!, on: 2)
+        tracking.saw(ScreenPoint.at(103.2, 302.4), on: 2)
         #expect(tracking.unseen.isEmpty)
         let sample = try #require(tracking.curve.first)
         #expect(tracking.curve.count == 1)
@@ -528,7 +534,7 @@ final class CurvedMouse: Mouse {
     }
 
     /// Where the cursor really is, late reports included.
-    var position: ScreenPoint { state.withLock { ScreenPoint(x: $0.shown.x + $0.pending.x, y: $0.shown.y + $0.pending.y)! } }
+    var position: ScreenPoint { state.withLock { ScreenPoint.at($0.shown.x + $0.pending.x, $0.shown.y + $0.pending.y) } }
     /// The furthest right it has really been.
     var farthest: Double { state.withLock { $0.farthest } }
 
@@ -536,7 +542,7 @@ final class CurvedMouse: Mouse {
     func cursor() -> ScreenPoint {
         state.withLock {
             let shown = $0.shown
-            $0.shown = ScreenPoint(x: shown.x + $0.pending.x, y: shown.y + $0.pending.y)!
+            $0.shown = ScreenPoint.at(shown.x + $0.pending.x, shown.y + $0.pending.y)
             $0.pending = (0, 0)
             return shown
         }
@@ -555,7 +561,7 @@ final class CurvedMouse: Mouse {
             if lateEvery > 0, $0.reports % lateEvery == 0 {
                 $0.pending = ($0.pending.x + motion.x, $0.pending.y + motion.y)
             } else {
-                $0.shown = ScreenPoint(x: $0.shown.x + motion.x, y: $0.shown.y + motion.y)!
+                $0.shown = ScreenPoint.at($0.shown.x + motion.x, $0.shown.y + motion.y)
             }
             $0.farthest = max($0.farthest, $0.shown.x + $0.pending.x)
         }

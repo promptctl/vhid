@@ -81,7 +81,7 @@ without conversion:
 | step | tool | what it answers |
 |---|---|---|
 | what is in front | `look` | each display's id and bounds, negative left of or above the main display; each window's owner and bounds, and the frontmost application; the text read in front |
-| where the text is | `look` `{"text": "Save", "display": 3}` | the point to click, the box around the run, then the run it read: `-700,604	-724,596,48,17	Save	AXButton` on a display left of the main one |
+| where the text is | `look` `{"text": "Save", "display": 3}` | the point to click, the box around the run, then the run it read: `-700,605	-724,596,48,17	Save	AXButton` on a display left of the main one |
 | press it | `click` `{"box": "-724,596,48,17"}`, or `{"x": -700, "y": 604}` | where it clicked, or the reason it could not |
 | what changed | `look` again | the run gone, or still there, with a scope line saying where it looked |
 

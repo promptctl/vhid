@@ -1,3 +1,5 @@
+import ScreenSpace
+
 /// Which way a wait expects the query's outcome to go.
 public enum Until: String, Sendable, Hashable, CaseIterable {
     /// Something matched.
@@ -93,7 +95,9 @@ public let waitInterval: Duration = .milliseconds(100)
 /// error: a reader that could not look has not seen the text go. [LAW:no-silent-failure]
 ///
 /// Every read after the first asks the same question of the region the first one
-/// resolved, as `Region.pinned` holds it. Each read is judged and its boxes left unchecked:
+/// resolved, as `Region.pinned` holds it. The first reads on `layout`, the one its place was
+/// found on; each after it on a layout `layouts` reads for it, so a display that sleeps or
+/// moves during a wait is read as it is then. Each read is judged and its boxes left unchecked:
 /// whether text is there does not turn on them, and only the reading the wait ends on is
 /// printed, so only its boxes are checked, in what is left of the timeout.
 ///
@@ -102,17 +106,18 @@ public let waitInterval: Duration = .milliseconds(100)
 /// one of its own, so the timeout and the pause between reads are one clock's.
 /// [LAW:no-ambient-temporal-coupling]
 public func waiting<C: Clock<Duration>>(
-    for wait: Wait, on query: Query, every interval: Duration = waitInterval, clock: C = ContinuousClock(),
-    read: (Query) async throws -> Judged
+    for wait: Wait, on query: Query, from layout: DisplayLayout, every interval: Duration = waitInterval, clock: C = ContinuousClock(),
+    layouts: () throws -> DisplayLayout, read: (Query, DisplayLayout) async throws -> Judged
 ) async throws -> Waited {
     let start = clock.now
     func elapsed() -> Duration { start.duration(to: clock.now) }
     var reads = 0
     var inARow = 0
     var asked = query
+    var layout = layout
     while true {
         let began = elapsed()
-        let judged = try await read(asked)
+        let judged = try await read(asked, layout)
         let reading = judged.reading
         reads += 1
         asked = query.on(query.region.pinned(to: reading.scope.region))
@@ -134,5 +139,6 @@ public func waiting<C: Clock<Duration>>(
             return Waited(reading: try await judged.pressed(until: .now + min(hitTesting, left)), reads: reads, took: elapsed(), settled: settled)
         }
         try await clock.sleep(for: interval)
+        layout = try layouts()
     }
 }

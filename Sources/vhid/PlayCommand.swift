@@ -1,6 +1,8 @@
 import ArgumentParser
 import Foundation
 import Input
+import ScreenSpace
+import Telemetry
 
 /// Replays a script of keyboard and mouse acts at fixed times, and says when each report
 /// went out.
@@ -33,13 +35,31 @@ struct PlayCommand: AsyncParsableCommand {
     }
 
     /// A script's text as what the player sends, refused whole or not at all.
-    static func schedule(_ text: String) throws -> Schedule {
+    static func schedule(_ text: String) throws -> Schedule<ScreenPoint> {
         try Schedule(Play.parse(text))
     }
 
-    /// The verb itself, over devices from anywhere. [LAW:decomposition]
-    static func play(_ schedule: Schedule, with devices: Devices) async throws -> Played {
-        try await Player(pointer: devices.pointer, keyboard: devices.keyboard, wall: epochMicroseconds, lead: lead).play(schedule)
+    /// The verb itself, over devices from anywhere: the schedule placed on one read of the
+    /// layout's online displays, refused at the line of the first point none shows, and
+    /// played. [LAW:decomposition]
+    static func play(_ schedule: Schedule<ScreenPoint>, with devices: Devices) async throws -> Played {
+        let placed = try schedule.placed(on: try await devices.layout().online)
+        let played: Played
+        do {
+            played = try await Player(pointer: devices.pointer, keyboard: devices.keyboard, wall: epochMicroseconds, layout: devices.layout, lead: lead).play(placed)
+        } catch let stopped as PlayStopped {
+            note(stopped.layout)
+            throw stopped
+        }
+        note(played.layout)
+        return played
+    }
+
+    /// The layout a placed play ended on, finished or stopped: so the record has it whenever
+    /// a play was placed, and its absence means nothing was. [LAW:nothing-unseen]
+    private static func note(_ layout: Played.Layout) {
+        Telemetry.note(.layout, .string(layout.word))
+        Telemetry.note(.layoutUnread, layout.unread.map(JSON.string))
     }
 
     /// What a play left behind: the reports that went out, and - only when it finished -
@@ -50,16 +70,6 @@ struct PlayCommand: AsyncParsableCommand {
     /// arms did the printing, which is why nothing could check it without a daemon and a
     /// stoppage to provoke. Here it is a property of the value: a stopped play carries no
     /// `Played`, so there is no done line to be made and no path that makes one.
-    ///
-    /// **`finished` holds a play that sent something, and the type system is what says
-    /// so.** `Played`'s initialiser is internal to `Input`, so the only one this target
-    /// can hold is one `Player.play` returned, and a `Schedule` carries at least one report by
-    /// construction - which is the precondition `Lateness` documents and relies on. There
-    /// is therefore no guard here against an empty finished play: it cannot be spelled
-    /// from outside `Input`, and a guard would have to invent a meaning for a done line
-    /// with no lateness in it. [LAW:no-defensive-null-guards] [LAW:comments-carry-meaning]
-    /// A test reaching through `@testable import Input` can of course build one, and that
-    /// is the test stepping outside the guarantee rather than the guarantee being weak.
     enum Ending {
         case finished(Played)
         case stopped([Played.Report])
@@ -93,8 +103,13 @@ struct PlayCommand: AsyncParsableCommand {
     /// The line that says a play finished, and the whole of what the tool answers: a
     /// recorded minute is thousands of report lines, which a tool's caller reads into its
     /// context and a harness reads from the command line instead.
+    ///
+    /// It says whether the layout still pressed as it did when the script was placed on it:
+    /// `kept`, `changed`, or `unread` with `layout_unread` saying why. A play whose every
+    /// report was a step of no distance sent none, and has no `late_us`.
     static func done(_ played: Played) throws -> String {
-        try line(DoneLine(done: .init(reports: played.reports.count, startReports: played.startReports, lateUs: played.lateness)))
+        try line(DoneLine(done: .init(reports: played.reports.count, startReports: played.startReports, lateUs: played.lateness,
+                                      layout: played.layout.word, layoutUnread: played.layout.unread)))
     }
 
     /// How early each report is woken for. `Player` sleeps until this much before the
@@ -163,7 +178,9 @@ struct PlayCommand: AsyncParsableCommand {
         struct Done: Encodable {
             let reports: Int
             let startReports: Int
-            let lateUs: Lateness
+            let lateUs: Lateness?
+            let layout: String
+            let layoutUnread: String?
         }
     }
 }

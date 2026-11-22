@@ -1,4 +1,6 @@
 import Foundation
+import ScreenSpace
+import ScreenSpaceTesting
 @testable import vhidd
 
 extension Readiness {
@@ -33,7 +35,7 @@ final class RecordingDevices: NSObject, ServedDevices, @unchecked Sendable {
 /// never read it.
 struct FixedScreen: ScreenSource {
     var at = (x: 12.5, y: 40.0)
-    var frames = [CGRect(x: 0, y: 0, width: 1920, height: 1080)]
+    var displays = DisplayLayout.single
     func cursor() throws -> (x: Double, y: Double) { at }
-    func displays() throws -> [CGRect] { frames }
+    func layout() throws -> DisplayLayout { displays }
 }

@@ -1,6 +1,8 @@
 import ArgumentParser
-import Seeing
+import DisplayReading
 import Foundation
+import ScreenSpace
+import Seeing
 
 /// Where the displays are, which a caller needs before it can name one to read or aim a
 /// click at one left of or above the main display, where every coordinate is negative.
@@ -14,7 +16,7 @@ public struct Displays: AsyncParsableCommand {
     )
 
     public func run() async throws {
-        print(Self.report(try Geometry.displays()))
+        print(Self.report(Geometry.displays(in: try DisplayLayout.read(), describe: Geometry.describe)))
     }
 
     /// The scope line and a row per display: what the verb prints and what the MCP tool
