@@ -18,7 +18,7 @@ import Testing
         /// Admitted, and answers with this holder.
         case holder(Int32?)
         /// Nobody holds them, and a release a client was owed failed.
-        case leftHeld
+        case stuck
         /// Refuses the connection, as the daemon refuses a signature it does not admit.
         case refuseTheConnection
         /// Admitted, and never answers.
@@ -48,7 +48,7 @@ import Testing
         func holding(reply: @escaping (NSNumber?, Bool, Error?) -> Void) {
             switch answer {
             case .holder(let pid): reply(pid.map { NSNumber(value: $0) }, false, nil)
-            case .leftHeld: reply(nil, true, nil)
+            case .stuck: reply(nil, true, nil)
             case .fail: reply(nil, false, NSError(domain: "fake", code: 7, userInfo: [NSLocalizedDescriptionKey: "refused by the fake"]))
             case .devicesDown: reply(nil, false, NSError(domain: Installation.refusalDomain, code: Installation.devicesDownCode, userInfo: [NSLocalizedDescriptionKey: "devices not up: the driver is not activated"]))
             case .never, .refuseTheConnection: lock.lock(); withheld.append(reply); lock.unlock(); reached.open()
@@ -79,13 +79,13 @@ import Testing
     ///
     /// On a test clock nothing moves, so a reading answered is never a silence however
     /// slowly the far end answers.
-    private func reading(_ answer: Answer, invalidated: Bool = false, by deadline: Deadline = .within(.seconds(5), on: ManualClock().timeline)) -> DaemonReading {
+    private func reading(_ answer: Answer, invalidated: Bool = false, by deadline: Deadline = .within(.seconds(5), on: Clock(ManualClock()))) -> DaemonReading {
         let far = FarEnd(answer)
         let listener = NSXPCListener.anonymous()
         listener.delegate = far
         listener.resume()
         if invalidated { listener.invalidate() }
-        let helper = { HelperConnection(connection: NSXPCConnection(listenerEndpoint: listener.endpoint), service: "ai.promptctl.vhid.tests.far", timeline: deadline.timeline, replyTimeout: .seconds(5)) }
+        let helper = { HelperConnection(connection: NSXPCConnection(listenerEndpoint: listener.endpoint), service: "ai.promptctl.vhid.tests.far", clock: deadline.clock, replyTimeout: .seconds(5)) }
         let read = DaemonProbe.reading(by: deadline, helper)
         withExtendedLifetime((far, listener)) {}
         return read
@@ -99,9 +99,9 @@ import Testing
         #expect(reading(.holder(41)) == .answered(.client(pid: 41)))
     }
 
-    /// Devices a client left held are not free: the reading says so.
-    @Test func aDaemonLeftHeldSaysSo() {
-        #expect(reading(.leftHeld) == .answered(.leftHeld))
+    /// Devices with keys or buttons stuck are not free: the reading says so.
+    @Test func aDaemonWithKeysStuckSaysSo() {
+        #expect(reading(.stuck) == .answered(.stuck))
     }
 
     /// A refused connection is the signature, told apart from a service nobody holds.
@@ -118,10 +118,10 @@ import Testing
         let clock = ManualClock(), far = FarEnd(.never), listener = NSXPCListener.anonymous(), ended = Latch()
         listener.delegate = far
         listener.resume()
-        let deadline = Deadline.within(.milliseconds(200), on: clock.timeline)
+        let deadline = Deadline.within(.milliseconds(200), on: Clock(clock))
         nonisolated(unsafe) var read: DaemonReading?
         Thread.detachNewThread {
-            read = DaemonProbe.reading(by: deadline) { HelperConnection(connection: NSXPCConnection(listenerEndpoint: listener.endpoint), service: "ai.promptctl.vhid.tests.far", timeline: clock.timeline, replyTimeout: .seconds(5)) }
+            read = DaemonProbe.reading(by: deadline) { HelperConnection(connection: NSXPCConnection(listenerEndpoint: listener.endpoint), service: "ai.promptctl.vhid.tests.far", clock: Clock(clock), replyTimeout: .seconds(5)) }
             ended.open()
         }
         far.reached.wait("the status call to reach the far end")
@@ -136,13 +136,13 @@ import Testing
     /// daemon's log for an answer it was never asked for.
     @Test func aReadingWhoseLimitHasPassedAsksNothing() {
         let clock = ManualClock()
-        let deadline = Deadline.within(.seconds(30), on: clock.timeline)
+        let deadline = Deadline.within(.seconds(30), on: Clock(clock))
         clock.advance(by: .seconds(31))
         let read = DaemonProbe.reading(by: deadline) {
             Issue.record("a connection was made")
-            return HelperConnection(connection: NSXPCConnection(machServiceName: "ai.promptctl.vhid.tests.nobody"), service: "ai.promptctl.vhid.tests.nobody", timeline: clock.timeline, replyTimeout: .seconds(5))
+            return HelperConnection(connection: NSXPCConnection(machServiceName: "ai.promptctl.vhid.tests.nobody"), service: "ai.promptctl.vhid.tests.nobody", clock: Clock(clock), replyTimeout: .seconds(5))
         }
-        #expect(read == .unasked(Deadline.Passed(limit: .seconds(30), spent: .seconds(31))))
+        #expect(read == .unasked(Deadline.Exceeded(limit: .seconds(30), spent: .seconds(31))))
     }
 
     /// A daemon listening without its devices is read by its code, carrying why.
@@ -166,10 +166,10 @@ import Testing
         refusing.resume(); answering.resume()
         let endpoints = [refusing.endpoint, answering.endpoint]
         var asked = 0
-        let timeline = ManualClock().timeline
-        let read = DaemonProbe.reading(by: .within(.seconds(5), on: timeline)) {
+        let clock = Clock(ManualClock())
+        let read = DaemonProbe.reading(by: .within(.seconds(5), on: clock)) {
             defer { asked += 1 }
-            return HelperConnection(connection: NSXPCConnection(listenerEndpoint: endpoints[asked]), service: "ai.promptctl.vhid.tests.far", timeline: timeline, replyTimeout: .seconds(5))
+            return HelperConnection(connection: NSXPCConnection(listenerEndpoint: endpoints[asked]), service: "ai.promptctl.vhid.tests.far", clock: clock, replyTimeout: .seconds(5))
         }
         #expect(read == .answered(.nobody))
         withExtendedLifetime((refusing, answering, no, yes)) {}

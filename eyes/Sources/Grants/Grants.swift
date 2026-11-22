@@ -193,14 +193,14 @@ public struct GrantReading: Sendable, Equatable {
     /// apart from how long any gate waited on it. [LAW:nothing-unseen]
     /// Throws `GrantReadingFailure`, or `CancellationError` when the reading was withdrawn,
     /// which is a cancellation, recorded and passed on as one.
-    public static func taken(by reader: URL, _ arguments: [String], within limit: Duration = .seconds(10), on timeline: Timeline) async throws -> GrantReading {
-        try await Telemetry.unit("grant_child") { try await child(reader, arguments, within: limit, on: timeline) }
+    public static func taken(by reader: URL, _ arguments: [String], within limit: Duration = .seconds(10), on clock: Clock) async throws -> GrantReading {
+        try await Telemetry.unit("grant_child") { try await child(reader, arguments, within: limit, on: clock) }
     }
 
-    private static func child(_ reader: URL, _ arguments: [String], within limit: Duration, on timeline: Timeline) async throws -> GrantReading {
+    private static func child(_ reader: URL, _ arguments: [String], within limit: Duration, on clock: Clock) async throws -> GrantReading {
         // The child's records, if it makes any, belong under this reading's span.
         let command = Command(reader.path, arguments, environment: Telemetry.childEnvironment())
-        let ran = try await reading(within: limit, on: timeline) { deadline, stop in Result { try command.run(by: deadline, or: stop) } }
+        let ran = try await reading(within: limit, on: clock) { deadline, stop in Result { try command.run(by: deadline, or: stop) } }
         let output: Command.Output
         do { output = try ran.get() } catch { throw GrantReadingFailure("\(error)") }
         guard case .exited(let status) = output.ending, [0, GrantReading.lacking].contains(status) else {

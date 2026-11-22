@@ -26,7 +26,7 @@ public final class HelperConnection: @unchecked Sendable {
     private let replyTimeout: Duration
     /// What every reply is waited for on, and what a client over this connection times its
     /// reports on. [LAW:one-source-of-truth]
-    public let timeline: Timeline
+    public let clock: Clock
     /// The Mach service dialled, which every failure names: installations run side by
     /// side, and "the helper" does not say which one did not answer.
     private let service: String
@@ -139,17 +139,17 @@ public final class HelperConnection: @unchecked Sendable {
     /// `installation` says whose daemon this reaches. It has no default: installations run
     /// side by side, and a connection that guessed would type through another copy's
     /// keyboard. [LAW:no-silent-failure]
-    public convenience init(installation: Installation, timeline: Timeline, replyTimeout: Duration = HelperConnection.replyTimeout) {
+    public convenience init(installation: Installation, clock: Clock, replyTimeout: Duration = HelperConnection.replyTimeout) {
         self.init(connection: NSXPCConnection(machServiceName: installation.service, options: .privileged), service: installation.service,
-                  timeline: timeline, replyTimeout: replyTimeout)
+                  clock: clock, replyTimeout: replyTimeout)
     }
 
     /// Over a connection someone else made, which is how a test puts a service of its own
     /// on the far end. [LAW:decomposition]
-    init(connection: NSXPCConnection, service: String, timeline: Timeline, replyTimeout: Duration) {
+    init(connection: NSXPCConnection, service: String, clock: Clock, replyTimeout: Duration) {
         self.connection = connection
         self.service = service
-        self.timeline = timeline
+        self.clock = clock
         self.replyTimeout = replyTimeout
         connection.remoteObjectInterface = .helper()
         connection.resume()
@@ -203,8 +203,8 @@ public final class HelperConnection: @unchecked Sendable {
     /// a `leave` after it still has nothing to hand back. [LAW:dataflow-not-control-flow]
     public func holding(by deadline: Deadline) throws -> Holding {
         try exchange(by: deadline) { service, reply in
-            service.holding { pid, leftHeld, error in
-                reply(error.map { .failed($0) } ?? .answered(pid.map { .client(pid: $0.int32Value) } ?? (leftHeld ? .leftHeld : .nobody)))
+            service.holding { pid, stuck, error in
+                reply(error.map { .failed($0) } ?? .answered(pid.map { .client(pid: $0.int32Value) } ?? (stuck ? .stuck : .nobody)))
             }
         }
     }
@@ -284,7 +284,7 @@ public final class HelperConnection: @unchecked Sendable {
         history.lock()
         hasSpoken = true
         history.unlock()
-        let deadline = Deadline.within(replyTimeout, on: timeline)
+        let deadline = Deadline.within(replyTimeout, on: clock)
         let outcome = Result { () throws -> Void in
             do {
                 try exchange(by: deadline) { service, reply in body(service, deadline.at.nanoseconds) { error in reply(error.map { .failed($0) } ?? .answered(())) } }
@@ -320,7 +320,7 @@ public final class HelperConnection: @unchecked Sendable {
         if let gaveUp { throw Unreachable(service: service, cause: .abandoned(gaveUp)) }
         // Not asked at all once its asker's limit has passed, so a reading that ran out
         // before it was asked says so and is never taken for a daemon that did not answer.
-        guard !deadline.passed else { throw deadline.refusal }
+        guard !deadline.expired else { throw deadline.exceeded }
         let outcome = Outcome<Answer>()
         let proxy = connection.remoteObjectProxyWithErrorHandler { error in
             let failed = error as NSError

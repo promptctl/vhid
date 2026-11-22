@@ -55,7 +55,7 @@ public final class Gate: Sendable {
 /// A value under a lock, changed by the code under test and waited on by the test until it
 /// says what the test is waiting for: no poll and no sleep, and a wait that never ends is a
 /// recorded hang after `hangGuard`.
-public final class Watched<Value>: @unchecked Sendable {
+public final class Monitor<Value>: @unchecked Sendable {
     private let condition = NSCondition()
     private var value: Value
 
@@ -91,8 +91,8 @@ public final class Watched<Value>: @unchecked Sendable {
 
 /// A call that blocks until the test moves its clock or lets a fake go, run on a thread of
 /// its own, as the code under test is run in the product, and waited for once the test has.
-public final class Pending<T>: Sendable {
-    private let ended = Watched<Result<T, any Error>?>(nil)
+public final class Future<T>: Sendable {
+    private let ended = Monitor<Result<T, any Error>?>(nil)
 
     public init(_ call: @escaping @Sendable () throws -> T) {
         Thread.detachNewThread { [ended] in

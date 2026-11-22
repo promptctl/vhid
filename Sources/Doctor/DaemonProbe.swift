@@ -12,7 +12,7 @@ import Time
 public enum DaemonProbe {
     /// What this installation's daemon says, asked now and answered by `deadline`.
     public static func reading(of installation: Installation, by deadline: Deadline) -> DaemonReading {
-        reading(by: deadline) { HelperConnection(installation: installation, timeline: deadline.timeline) }
+        reading(by: deadline) { HelperConnection(installation: installation, clock: deadline.clock) }
     }
 
     /// What `holding` calls over fresh connections from `connect` came back as.
@@ -31,7 +31,7 @@ public enum DaemonProbe {
     /// [LAW:no-ambient-temporal-coupling] A deadline the rows before this one spent dials
     /// nothing: the daemon is not asked, and no connection is made to not ask it on.
     private static func asked(_ connect: () -> HelperConnection, by deadline: Deadline) -> DaemonReading {
-        guard !deadline.passed else { return .unasked(deadline.refusal) }
+        guard !deadline.expired else { return .unasked(deadline.exceeded) }
         do {
             return .answered(try connect().holding(by: deadline))
         } catch {
@@ -52,7 +52,7 @@ public enum DaemonProbe {
     /// A failure that is not the connection's is the daemon's own refusal, shown in the
     /// daemon's words.
     static func reading(failure error: any Error) -> DaemonReading {
-        if let passed = error as? Deadline.Passed { return .unasked(passed) }
+        if let exceeded = error as? Deadline.Exceeded { return .unasked(exceeded) }
         if let refused = error as? HelperConnection.Refused {
             return refused.domain == Installation.refusalDomain && refused.code == Installation.devicesDownCode
                 ? .devicesDown(reason: refused.reason)

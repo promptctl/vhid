@@ -28,7 +28,7 @@ import Testing
 
     private func serve(requiring requirement: String? = nil, releasing: Released = Released(keyboard: nil, mouse: nil)) throws -> Served {
         let (devices, clock) = (RecordingDevices(releasing: releasing), ManualClock())
-        let delegate = Listener(readiness: .serving(devices), callers: try CallerIdentity(requirement: try requirement ?? OwnProcess.requirement()), screen: FixedScreen(), timeline: clock.timeline)
+        let delegate = Listener(readiness: .serving(devices), callers: try CallerIdentity(requirement: try requirement ?? OwnProcess.requirement()), screen: FixedScreen(), clock: Clock(clock))
         let listener = NSXPCListener.anonymous()
         listener.delegate = delegate
         listener.resume()
@@ -39,7 +39,7 @@ import Testing
     /// going away does.
     private func client(of served: Served) -> (helper: HelperConnection, connection: NSXPCConnection) {
         let connection = NSXPCConnection(listenerEndpoint: served.listener.endpoint)
-        return (HelperConnection(connection: connection, service: "ai.promptctl.vhid.tests.far", timeline: served.clock.timeline, replyTimeout: .seconds(5)), connection)
+        return (HelperConnection(connection: connection, service: "ai.promptctl.vhid.tests.far", clock: Clock(served.clock), replyTimeout: .seconds(5)), connection)
     }
 
     /// Whether a fresh client pressing `usage` was served. A client refused as busy hears
@@ -115,12 +115,12 @@ import Testing
     @Test func holdingAnswersTheHolderWithoutTakingTheDevices() throws {
         let served = try serve()
         let asker = client(of: served).helper
-        #expect(try asker.holding(by: .within(.seconds(5), on: asker.timeline)) == .nobody)
+        #expect(try asker.holding(by: .within(.seconds(5), on: asker.clock)) == .nobody)
 
         let first = client(of: served)
         let keyboard = first.helper.keyboard
         try keyboard.down(.leftShift)
-        #expect(try asker.holding(by: .within(.seconds(5), on: asker.timeline)) == .client(pid: getpid()))
+        #expect(try asker.holding(by: .within(.seconds(5), on: asker.clock)) == .client(pid: getpid()))
 
         try keyboard.down(.space)
         #expect(try isServed(served, pressing: .tab) == false)
@@ -139,23 +139,23 @@ import Testing
         let refused = #expect(throws: HelperConnection.Refused.self) { try keyboard.down(.tab) }
         #expect(refused?.domain == Installation.refusalDomain)
         #expect(refused?.reason == "\(Seat.Ended())")
-        #expect(try leaver.holding(by: .within(.seconds(5), on: leaver.timeline)) == .nobody)
+        #expect(try leaver.holding(by: .within(.seconds(5), on: leaver.clock)) == .nobody)
         #expect(served.devices.done == ["down 225", "a client left"])
         withExtendedLifetime((served, first)) {}
     }
 
     /// A client whose keys vhidd could not release hears it when it leaves, in vhidd's
-    /// words, and the next to ask reads the devices as left held: not free, though nobody
+    /// words, and the next to ask reads the devices as stuck: not free, though nobody
     /// holds them.
-    @Test func aClientWhoseReleaseFailedHearsItAndTheDevicesReadLeftHeld() throws {
+    @Test func aClientWhoseReleaseFailedHearsItAndTheDevicesReadStuck() throws {
         let failed = Released(keyboard: "the driver did not answer", mouse: nil)
         let served = try serve(releasing: failed)
         let first = client(of: served)
         try first.helper.keyboard.down(.leftShift)
         let refused = #expect(throws: HelperConnection.Refused.self) { try first.helper.leave() }
-        #expect(refused?.reason == "\(LeftHeld(released: failed))")
+        #expect(refused?.reason == "\(Stuck(released: failed))")
         let asker = client(of: served).helper
-        #expect(try asker.holding(by: .within(.seconds(5), on: asker.timeline)) == .leftHeld)
+        #expect(try asker.holding(by: .within(.seconds(5), on: asker.clock)) == .stuck)
         withExtendedLifetime((served, first)) {}
     }
 
@@ -165,7 +165,7 @@ import Testing
     @Test func aCallerOutsideTheRequirementHearsAnInterruptedConnection() throws {
         let served = try serve(requiring: #"identifier "ai.promptctl.vhid.tests.nobody""#)
         let asker = client(of: served).helper
-        let refused = #expect(throws: HelperConnection.Unreachable.self) { try asker.holding(by: .within(.seconds(5), on: asker.timeline)) }
+        let refused = #expect(throws: HelperConnection.Unreachable.self) { try asker.holding(by: .within(.seconds(5), on: asker.clock)) }
         guard case .connection(let domain, let code, _) = refused?.cause else {
             Issue.record("refused for another cause: \(String(describing: refused))")
             return

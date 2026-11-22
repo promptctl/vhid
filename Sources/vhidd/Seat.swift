@@ -25,7 +25,7 @@ final class Seat: NSObject, HelperService, @unchecked Sendable {
     private let holder: Holder
     private let readiness: Readiness
     private let screen: any ScreenSource
-    private let timeline: Timeline
+    private let clock: Clock
     /// Whether this seat has ended, and the attempt whose devices it holds. Devices lost and
     /// brought up again hold nothing this client set down, so a seat that held the lost
     /// ones ends rather than carrying on as if its keys were still down.
@@ -34,13 +34,13 @@ final class Seat: NSObject, HelperService, @unchecked Sendable {
     /// after `end` has freed them.
     private let state = Mutex<(ended: Bool, heldOn: Int?)>((false, nil))
 
-    init(_ connection: ObjectIdentifier, pid: pid_t, holder: Holder, readiness: Readiness, screen: any ScreenSource, timeline: Timeline) {
+    init(_ connection: ObjectIdentifier, pid: pid_t, holder: Holder, readiness: Readiness, screen: any ScreenSource, clock: Clock) {
         self.connection = connection
         self.screen = screen
         self.pid = pid
         self.holder = holder
         self.readiness = readiness
-        self.timeline = timeline
+        self.clock = clock
     }
 
     /// [LAW:dataflow-not-control-flow] Every request is served the same way: the client's
@@ -54,7 +54,7 @@ final class Seat: NSObject, HelperService, @unchecked Sendable {
     /// carries, made before any lock is acquired: vhidd sets no timeout of its own for a
     /// request, and the wait for the devices' lock counts against the client's.
     private func serve(by instant: UInt64, _ reply: (Error?) -> Void, _ asked: () throws -> DeviceCommand) {
-        let deadline = Deadline.at(Instant(nanoseconds: instant), on: timeline)
+        let deadline = Deadline.at(Instant(nanoseconds: instant), on: clock)
         do {
             let command = try asked()
             let up = try readiness.devices()
@@ -95,7 +95,7 @@ final class Seat: NSObject, HelperService, @unchecked Sendable {
     /// with the release's failure when it had one.
     func leave(reply: @escaping (Error?) -> Void) {
         let released = end(because: "a client left")
-        reply(released.flatMap { $0.failed ? refusal(LeftHeld(released: $0)) : nil })
+        reply(released.flatMap { $0.failed ? refusal(Stuck(released: $0)) : nil })
     }
 
     /// Ends this seat: no request after this is served, and the devices, if this seat holds
@@ -128,7 +128,7 @@ final class Seat: NSObject, HelperService, @unchecked Sendable {
         do {
             let up = try readiness.devices()
             let pid = holder.pid(on: up.attempt)
-            reply(pid.map { NSNumber(value: $0) }, pid == nil && up.devices.leftHeld, nil)
+            reply(pid.map { NSNumber(value: $0) }, pid == nil && up.devices.isStuck, nil)
         } catch {
             reply(nil, false, refusal(error))
         }

@@ -5,6 +5,7 @@ import ScreenSpaceTesting
 import Seeing
 import Testing
 @testable import Pixels
+import Time
 
 /// Cutting a region into pieces for Vision and putting the runs back together.
 @Suite struct PixelReaderTests {
@@ -117,7 +118,7 @@ import Testing
     /// Accessibility: a front look by pixels without it is refused naming that grant, before
     /// any capture, rather than read with every run set aside as unknown.
     @Test @MainActor func aFrontLookWithoutAccessibilityIsRefusedNamingIt() async {
-        let reader = PixelReader(granted: { $0 == PixelReader.grant }, hit: { _ in .unanswered }, timeline: ManualClock().timeline)
+        let reader = PixelReader(granted: { $0 == PixelReader.grant }, hit: { _ in .unanswered }, clock: Clock(ManualClock()))
         let front = Front(app: Front.App(pid: 300, name: "System Settings"), display: 1, own: Front.Passed(pids: [80], name: "iTerm2"), passedOver: nil)
         await #expect {
             _ = try await reader.look(Query(match: nil, region: .front(front)), on: .single)
@@ -198,7 +199,7 @@ import Testing
 @Suite struct PixelGateTests {
     @MainActor @Test func aWithheldGrantRefusesBeforeLooking() async {
         let asked = Asked()
-        let reader = PixelReader(granted: { await asked.add($0); return false }, hit: { _ in Issue.record("hit test asked"); return .unanswered }, timeline: ManualClock().timeline)
+        let reader = PixelReader(granted: { await asked.add($0); return false }, hit: { _ in Issue.record("hit test asked"); return .unanswered }, clock: Clock(ManualClock()))
         await #expect { try await reader.look(Query(match: .contains("Save"), region: .display(1)), on: .single) } throws: {
             ($0 as? PixelsError)?.missingGrant == true
         }

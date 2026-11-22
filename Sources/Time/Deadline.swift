@@ -11,60 +11,60 @@ public struct Deadline: Sendable, CustomStringConvertible {
     /// What the request was given where it entered.
     public let limit: Duration
     public let at: Instant
-    public let timeline: Timeline
+    public let clock: Clock
 
     /// Over `limit` from now.
-    public static func within(_ limit: Duration, on timeline: Timeline) -> Deadline {
-        Deadline(limit: limit, at: timeline.now() + limit, timeline: timeline)
+    public static func within(_ limit: Duration, on clock: Clock) -> Deadline {
+        Deadline(limit: limit, at: clock.now() + limit, clock: clock)
     }
 
     /// Over at `at`, an instant a caller made somewhere else: a client's deadline, as vhidd
     /// receives it. The limit is what was left of it on arrival.
-    public static func at(_ at: Instant, on timeline: Timeline) -> Deadline {
-        Deadline(limit: max(.zero, at - timeline.now()), at: at, timeline: timeline)
+    public static func at(_ at: Instant, on clock: Clock) -> Deadline {
+        Deadline(limit: max(.zero, at - clock.now()), at: at, clock: clock)
     }
 
     /// This deadline, or `limit` from now where that is sooner: for a wait under the request
     /// that has a limit of its own, as a reply has, and is still over when the request is.
     public func capped(_ limit: Duration) -> Deadline {
-        let soonest = min(at, timeline.now() + limit)
-        return Deadline(limit: min(self.limit, soonest - (at - self.limit)), at: soonest, timeline: timeline)
+        let soonest = min(at, clock.now() + limit)
+        return Deadline(limit: min(self.limit, soonest - (at - self.limit)), at: soonest, clock: clock)
     }
 
     /// What is left of the limit, none once it has passed.
-    public var left: Duration { max(.zero, at - timeline.now()) }
-    public var passed: Bool { timeline.now() >= at }
+    public var remaining: Duration { max(.zero, at - clock.now()) }
+    public var expired: Bool { clock.now() >= at }
     /// When the request entered.
     public var entered: Instant { at - limit }
     /// How long since the request entered.
-    public var spent: Duration { timeline.now() - entered }
+    public var spent: Duration { clock.now() - entered }
 
     /// Waits on `condition`, which the caller holds locked, until it is signalled or this
     /// passes, and answers whether any of the limit is left. A caller loops on what it is
-    /// waiting for and asks this again; a test timeline that moves wakes it.
+    /// waiting for and asks this again; a test clock that moves wakes it.
     public func wait(on condition: NSCondition) -> Bool {
-        guard !passed else { return false }
-        timeline.block(until: at, waking: { condition.lock(); condition.broadcast(); condition.unlock() }) { span in
+        guard !expired else { return false }
+        clock.block(until: at, waking: { condition.lock(); condition.broadcast(); condition.unlock() }) { span in
             condition.wait(until: Date(timeIntervalSinceNow: span.seconds))
         }
-        return !passed
+        return !expired
     }
 
     /// One system wait toward this deadline - a `kevent`, a `poll`, a semaphore - that
     /// `wake` ends early. `sleep` is handed the real span it may block for, in whichever
     /// unit it takes, and answers whether it was woken before the span ran out.
     public func block(waking wake: @escaping @Sendable () -> Void, _ sleep: (Duration) -> Bool) {
-        timeline.block(until: at, waking: wake, sleep)
+        clock.block(until: at, waking: wake, sleep)
     }
 
     /// A request refused because its limit had passed before it could start: while it waited
     /// for a lock, a queue or a thread.
-    public var refusal: Passed { Passed(limit: limit, spent: spent) }
+    public var exceeded: Exceeded { Exceeded(limit: limit, spent: spent) }
 
-    public var description: String { "\(limit), \(left) left" }
+    public var description: String { "\(limit), \(remaining) left" }
 
     /// The request's limit passed while it waited, and it was let go before it ran anything.
-    public struct Passed: Error, Hashable, CustomStringConvertible {
+    public struct Exceeded: Error, Hashable, CustomStringConvertible {
         public let limit: Duration
         public let spent: Duration
 

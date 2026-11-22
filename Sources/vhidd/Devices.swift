@@ -24,7 +24,7 @@ protocol ServedDevices: AnyObject, Sendable {
     func release(because reason: String, when owed: () -> Bool, then after: () -> Void) -> Released?
     /// Whether a release failed and none has succeeded since: keys or buttons a client
     /// left down that the devices are still releasing.
-    var leftHeld: Bool { get }
+    var isStuck: Bool { get }
     /// Lets go of what has been held too long, if the devices are free this moment: a
     /// client's keys past the limit, or, while `holding` says nobody holds the devices,
     /// whatever a failed release left. Nil when nothing was due.
@@ -51,11 +51,11 @@ struct Released: Equatable, CustomStringConvertible {
     }
 }
 
-/// A release that failed, as the client that left is told it: the devices are left held,
+/// A release that failed, as the client that left is told it: keys or buttons are stuck,
 /// and vhidd goes on releasing them.
-struct LeftHeld: Error, CustomStringConvertible {
+struct Stuck: Error, CustomStringConvertible {
     let released: Released
-    var description: String { "the devices are left held: \(released); vhidd releases them again while nobody holds them" }
+    var description: String { "keys or buttons are stuck: \(released); vhidd releases them again while nobody holds the devices" }
 }
 
 /// What a sweep let go of.
@@ -63,7 +63,7 @@ enum Swept: Equatable {
     /// Keys a client held past the limit with no report, and whose client it was.
     case keysPastLimit(KeysLetGo, by: pid_t?)
     /// What a failed release left down, released again while nobody held the devices.
-    case leftHeld(Released)
+    case stuck(Released)
 }
 
 /// Keys the deadline released, the limit they were held past, and the reason the release
@@ -143,23 +143,23 @@ final class Devices: ServedDevices, @unchecked Sendable {
     static let releaseLimit: Duration = .seconds(2)
 
     private let limit: Duration
-    private let timeline: Timeline
+    private let clock: Clock
     /// When a client last asked for a report of either device, or a release last failed;
     /// under `device`.
     private var lastReport: Instant
     /// Whether the last release failed: read by `holding` from any thread, so under its own
     /// lock, and written only under `device`.
-    private let owed = Mutex(false)
+    private let stuck = Mutex(false)
 
-    init(keyboard: any HeldKeyboard, mouse: any HeldMouse, timeline: Timeline, limit: Duration = keyLimit) {
+    init(keyboard: any HeldKeyboard, mouse: any HeldMouse, clock: Clock, limit: Duration = keyLimit) {
         self.keyboard = keyboard
         self.mouse = mouse
         self.limit = limit
-        self.timeline = timeline
-        self.lastReport = timeline.now()
+        self.clock = clock
+        self.lastReport = clock.now()
     }
 
-    var leftHeld: Bool { owed.withLock { $0 } }
+    var isStuck: Bool { stuck.withLock { $0 } }
 
     /// [LAW:dataflow-not-control-flow] Every command is performed the same way - acquire the
     /// lock by the deadline, acquire the devices, do the one thing, answer with what
@@ -170,8 +170,8 @@ final class Devices: ServedDevices, @unchecked Sendable {
             try acquire()
             // Both ends: a report the driver took seconds to answer is the client being
             // active throughout, not idle.
-            lastReport = timeline.now()
-            defer { lastReport = timeline.now() }
+            lastReport = clock.now()
+            defer { lastReport = clock.now() }
             switch command {
             case .down(let usage): try keyboard.down(usage, by: deadline)
             case .releaseKeys: try keyboard.releaseAll(by: deadline)
@@ -185,7 +185,7 @@ final class Devices: ServedDevices, @unchecked Sendable {
         }
     }
 
-    /// Releases everything the client that just went away had left held, on both devices.
+    /// Releases everything the client that just went away had held down, on both devices.
     ///
     /// [LAW:single-enforcer] A client that crashes mid-character leaves a key down, and a
     /// key the driver believes is down is one macOS repeats into whatever comes forward
@@ -197,8 +197,8 @@ final class Devices: ServedDevices, @unchecked Sendable {
     /// Taken whoever is ahead, because a release refused would leave a key down; its
     /// deadline is made here, as it is asked.
     func release(because reason: String, when owed: () -> Bool, then after: () -> Void) -> Released? {
-        let deadline = Deadline.within(Self.releaseLimit, on: timeline)
-        return device.releasing {
+        let deadline = Deadline.within(Self.releaseLimit, on: clock)
+        return device.withLock {
             guard owed() else { return nil }
             defer { after() }
             return releaseBoth(because: reason, by: deadline)
@@ -210,17 +210,17 @@ final class Devices: ServedDevices, @unchecked Sendable {
     /// four times a second, and log each one. Only while the lock is free: the sweep waits
     /// behind no request. The tick is where its deadline is made.
     func sweep(holding: () -> pid_t?) -> Swept? {
-        let deadline = Deadline.within(Self.releaseLimit, on: timeline)
-        return device.whenFree { () -> Swept? in
-            guard timeline.now() - lastReport >= limit else { return nil }
+        let deadline = Deadline.within(Self.releaseLimit, on: clock)
+        return device.withLockIfAvailable { () -> Swept? in
+            guard clock.now() - lastReport >= limit else { return nil }
             let pid = holding()
             // [LAW:single-enforcer] What a failed release left is released here, while
             // nobody holds the devices, and never as part of another client's request.
-            if pid == nil, leftHeld { return .leftHeld(releaseBoth(because: "releasing what a client left held", by: deadline)) }
+            if pid == nil, isStuck { return .stuck(releaseBoth(because: "releasing keys or buttons a client left stuck", by: deadline)) }
             let held = keyboard.keysDown
             guard !held.isEmpty else { return nil }
             let failure = failure { try keyboard.releaseAll(by: deadline) }
-            if failure != nil { lastReport = timeline.now() }
+            if failure != nil { lastReport = clock.now() }
             return .keysPastLimit(KeysLetGo(usages: held.sorted().map(\.rawValue), limit: limit, failure: failure), by: pid)
         } ?? nil
     }
@@ -232,8 +232,8 @@ final class Devices: ServedDevices, @unchecked Sendable {
         let released = Released(keyboard: failure { try keyboard.releaseAll(by: deadline) }, mouse: failure { try mouse.releaseAll(by: deadline) })
         log(released.keyboard.map { "\(reason), and the keyboard would not release: \($0)" } ?? "\(reason); every key is up")
         log(released.mouse.map { "\(reason), and the mouse would not release: \($0)" } ?? "\(reason); every button is up")
-        owed.withLock { $0 = released.failed }
-        if released.failed { lastReport = timeline.now() }
+        stuck.withLock { $0 = released.failed }
+        if released.failed { lastReport = clock.now() }
         return released
     }
 
@@ -276,7 +276,7 @@ func refusal(_ error: any Error) -> NSError {
     case is Readiness.Refused: Installation.devicesDownCode
     case is Holder.Busy, is Seat.Ended, is Seat.Lost: Installation.seatRefusedCode
     case let unanswered as Unanswered: unanswered.mayHaveReachedTheDriver ? Installation.outcomeUnknownCode : 1
-    case is Deadline.Passed, is NotOnTheDevice, is TooManyKeys, is LeftHeld: 1
+    case is Deadline.Exceeded, is NotOnTheDevice, is TooManyKeys, is Stuck: 1
     default: Installation.outcomeUnknownCode
     }
     return NSError(domain: Installation.refusalDomain, code: code, userInfo: [NSLocalizedDescriptionKey: "\(error)"])

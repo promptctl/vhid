@@ -14,17 +14,17 @@ final class Listener: NSObject, NSXPCListenerDelegate {
     private let readiness: Readiness
     private let callers: CallerIdentity
     private let screen: any ScreenSource
-    private let timeline: Timeline
+    private let clock: Clock
     private let holder = Holder()
     /// Checks for keys held past the limit a few times a second, on a queue of its own: a
     /// tick that found the pool full would leave a key held as long as the pool stayed so.
     private let sweep = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "vhidd.sweep"))
 
-    init(readiness: Readiness, callers: CallerIdentity, screen: any ScreenSource, timeline: Timeline) {
+    init(readiness: Readiness, callers: CallerIdentity, screen: any ScreenSource, clock: Clock) {
         self.readiness = readiness
         self.screen = screen
         self.callers = callers
-        self.timeline = timeline
+        self.clock = clock
         super.init()
         sweep.schedule(deadline: .now(), repeating: .milliseconds(250), leeway: .milliseconds(100))
         sweep.setEventHandler { [readiness, holder] in vhidd.sweep(readiness, holder).map(log) }
@@ -41,7 +41,7 @@ final class Listener: NSObject, NSXPCListenerDelegate {
         }
         let id = ObjectIdentifier(connection)
         connection.exportedInterface = .helper()
-        let seat = Seat(id, pid: connection.processIdentifier, holder: holder, readiness: readiness, screen: screen, timeline: timeline)
+        let seat = Seat(id, pid: connection.processIdentifier, holder: holder, readiness: readiness, screen: screen, clock: clock)
         connection.exportedObject = seat
         // Both, and not one: an interrupted connection ends invalid, a closed one ends
         // interrupted, and a client killed mid-burst can take either path. The release is
@@ -71,7 +71,7 @@ final class Listener: NSObject, NSXPCListenerDelegate {
 ///
 /// The holder is read under the devices' lock, as a client's request acquires the devices,
 /// so the pid
-/// named is the one whose keys these were. A release of what was left held says its own
+/// named is the one whose keys these were. A release of what was left stuck says its own
 /// outcome as it is made, so it adds no line here.
 func sweep(_ readiness: Readiness, _ holder: Holder) -> String? {
     guard let up = readiness.up else { return nil }
@@ -80,7 +80,7 @@ func sweep(_ readiness: Readiness, _ holder: Holder) -> String? {
         let keys = letGo.usages.map { String(format: "0x%02X", $0) }.joined(separator: ", ")
         return "\(pid.map { "pid \($0)" } ?? "no client") held \(keys) past \(letGo.limit) with no report; "
             + (letGo.failure.map { "the keyboard would not release: \($0)" } ?? "released")
-    case .leftHeld, nil:
+    case .stuck, nil:
         return nil
     }
 }

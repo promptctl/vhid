@@ -17,7 +17,7 @@ import Testing
     @Test func aStoppedReadingReadsTheDriverAndTheJobAsCancelled() throws {
         let stop = Command.Stop()
         stop.pull()
-        let readiness = Readiness.read(for: try #require(Installation(service: "ai.promptctl.vhid.tests.nobody")), by: .within(Command.limit, on: ManualClock().timeline), or: stop)
+        let readiness = Readiness.read(for: try #require(Installation(service: "ai.promptctl.vhid.tests.nobody")), by: .within(Command.limit, on: Clock(ManualClock())), or: stop)
         let rows = Dictionary(uniqueKeysWithValues: readiness.requirements.map { ($0.row, $0.reads) })
         #expect(rows[.driverExtension] == "could not be read: \(CancellationError())")
         #expect(rows[.launchdJob] == "could not be read: \(CancellationError())")

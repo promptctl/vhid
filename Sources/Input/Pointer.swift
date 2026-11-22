@@ -40,7 +40,7 @@ public struct Clicks: RawRepresentable, Hashable, Codable, Sendable {
 /// on, never a sleep after a report.
 ///
 /// **That loop is how a move ends, not how it travels.** A verb's move first follows a
-/// person's trajectory, a report every `tick` on `timeline`, and only the last fraction of a
+/// person's trajectory, a report every `tick` on `clock`, and only the last fraction of a
 /// point is `home`'s. The ticks are the hand's pace, not a wait for the cursor: each is
 /// aimed from where the cursor was read. `docs/design/human.md`.
 ///
@@ -75,7 +75,7 @@ public struct Pointer: Sendable {
     /// a report, a scroll's rests, calibration's bursts and a play's deadlines - so a test
     /// runs all of it on one clock of its own. [LAW:effects-at-boundaries]
     /// [LAW:one-source-of-truth] One pointer, one clock.
-    public let timeline: Timeline
+    public let clock: Clock
     /// What every move's trajectory and every pause is drawn from.
     public let randomness: RandomSource
     /// How long the hand waits around a press, by kind of wait.
@@ -96,10 +96,10 @@ public struct Pointer: Sendable {
     public static let tick: Duration = .milliseconds(8)
 
     public init(mouse: any Mouse, cursor: @escaping @Sendable () async throws -> ScreenPoint,
-                timeline: Timeline, randomness: RandomSource, hand: Hand, traced: @escaping @Sendable (Traced) -> Void) {
+                clock: Clock, randomness: RandomSource, hand: Hand, traced: @escaping @Sendable (Traced) -> Void) {
         self.mouse = mouse
         self.cursor = cursor
-        self.timeline = timeline
+        self.clock = clock
         self.randomness = randomness
         self.hand = hand
         self.traced = traced
@@ -232,7 +232,7 @@ public struct Pointer: Sendable {
     public func move(to target: Target) async throws -> Moved {
         let start = try await cursor()
         let trajectory = try randomness.draw { generator throws(NotAPlace) in try Trajectory(from: start, toward: target, drawing: &generator) }
-        let began = timeline.now()
+        let began = clock.now()
         var tracking = Tracking(at: trajectory.start)
         let ticks = Int((trajectory.duration / Self.tick).rounded(.up))
         var steered = 0, closing = 0
@@ -244,7 +244,7 @@ public struct Pointer: Sendable {
         defer { traced(.moved(moved)) }
         for tick in stride(from: 1, through: ticks, by: 1) {
             try Task.checkCancellation()
-            try await timeline.sleep(until: began + Self.tick * tick)
+            try await clock.sleep(until: began + Self.tick * tick)
             tracking.saw(try await cursor(), on: tick)
             let report = tracking.report(toward: trajectory.point(after: Self.tick * tick))
             // A tick whose share of the path is under half a count sends nothing, as a
@@ -263,7 +263,7 @@ public struct Pointer: Sendable {
             landed = try await home(on: trajectory.target, toward: target) {
                 closing += 1
                 slot += Self.tick
-                try await timeline.sleep(until: slot)
+                try await clock.sleep(until: slot)
             }.at
         } catch let stop as WouldNotReach {
             // The move's reports, not the closing loop's alone: what the error says the move
@@ -342,15 +342,15 @@ public struct Pointer: Sendable {
         try await settle { $0 != before }
     }
 
-    /// The cursor, read every millisecond on `timeline` until `shown` says it shows what
+    /// The cursor, read every millisecond on `clock` until `shown` says it shows what
     /// was sent or `settle` is up, whichever is first. The one wait on the window server
     /// applying a report. [LAW:single-enforcer]
     private func settle(until shown: (ScreenPoint) -> Bool) async throws -> ScreenPoint {
-        let deadline = timeline.now() + Self.settle
+        let deadline = clock.now() + Self.settle
         while true {
             let now = try await cursor()
-            if shown(now) || timeline.now() >= deadline { return now }
-            try await timeline.sleep(until: timeline.now() + .milliseconds(1))
+            if shown(now) || clock.now() >= deadline { return now }
+            try await clock.sleep(until: clock.now() + .milliseconds(1))
         }
     }
 
@@ -358,7 +358,7 @@ public struct Pointer: Sendable {
     /// ends, with the time it slept.
     func pause(_ kind: Hand.Wait) async throws {
         let length = Duration.milliseconds(randomness.draw { hand.spread(of: kind).draw(using: &$0) })
-        try await timeline.pause(until: timeline.now() + length) { traced(.paused(Pause(kind: .hand(kind), length: $0))) }
+        try await clock.pause(until: clock.now() + length) { traced(.paused(Pause(kind: .hand(kind), length: $0))) }
     }
 
     /// Moves to a point aimed at inside `target`, rests on it, and clicks `button` there `times` times, each click a

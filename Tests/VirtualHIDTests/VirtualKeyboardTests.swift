@@ -30,11 +30,11 @@ private func daemon(leavingUnanswered unanswered: @escaping @Sendable ([UInt8]) 
 
 /// A keyboard over `fake`, its waits on `clock`.
 private func keyboard(on fake: FakeDaemon, _ clock: ManualClock) throws -> VirtualKeyboard {
-    VirtualKeyboard(daemon: try DaemonConnection(fileDescriptor: fake.clientDescriptor, timeline: clock.timeline))
+    VirtualKeyboard(daemon: try DaemonConnection(fileDescriptor: fake.clientDescriptor, clock: Clock(clock)))
 }
 
 /// A deadline nothing in the test reaches, on a clock nothing moves.
-private func unhurried(_ clock: ManualClock) -> Deadline { .within(.seconds(2), on: clock.timeline) }
+private func unhurried(_ clock: ManualClock) -> Deadline { .within(.seconds(2), on: Clock(clock)) }
 
 /// The reports the device actually put on the wire, in order.
 private func reports(_ fake: FakeDaemon) -> [[UInt8]] {
@@ -70,7 +70,7 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
     @Test func startWaitsForTheDaemonsWordAndReturnsWhenItComes() throws {
         let fake = FakeDaemon(), clock = ManualClock()
         let device = try keyboard(on: fake, clock)
-        let starting = Pending { try device.start(by: .within(.seconds(5), on: clock.timeline)) }
+        let starting = Future { try device.start(by: .within(.seconds(5), on: Clock(clock))) }
         fake.awaitRequests(1)
         // The answer has been read, and the start is waiting for the word.
         try fake.settle()
@@ -120,7 +120,7 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
         }
         let clock = ManualClock()
         let device = try keyboard(on: fake, clock)
-        let starting = Pending { try device.start(by: .within(.milliseconds(300), on: clock.timeline)) }
+        let starting = Future { try device.start(by: .within(.milliseconds(300), on: Clock(clock))) }
         fake.awaitRequests(1)
         try fake.settle()
         clock.advance(by: .milliseconds(300))
@@ -256,9 +256,9 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
         let fake = FakeDaemon(handling: daemonThatComesUp), clock = ManualClock()
         let device = try keyboard(on: fake, clock)
         try device.down(.leftShift, by: unhurried(clock))
-        let late = Deadline.within(.milliseconds(10), on: clock.timeline)
+        let late = Deadline.within(.milliseconds(10), on: Clock(clock))
         clock.advance(by: .milliseconds(10))
-        #expect(throws: Unanswered(reach: .unsent, cause: .deadline(Deadline.Passed(limit: .milliseconds(10), spent: .milliseconds(10))))) { try device.down(Usage(rawValue: 0x04), by: late) }
+        #expect(throws: Unanswered(reach: .unsent, cause: .deadline(Deadline.Exceeded(limit: .milliseconds(10), spent: .milliseconds(10))))) { try device.down(Usage(rawValue: 0x04), by: late) }
         #expect(device.keysDown == [.leftShift])
         try device.down(Usage(rawValue: 0x05), by: unhurried(clock))
         #expect(reports(fake) == [report(modifiers: 0x02), report(modifiers: 0x02, [0x05])])
@@ -295,7 +295,7 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
     /// what it may be holding: after a release that went unanswered, a press holds only
     /// the key pressed, where one built from the record would press shift again.
     @Test func theNextReportIsWhatWasLastAskedNotWhatMayBeHeld() throws {
-        let unanswered = Watched(true)
+        let unanswered = Monitor(true)
         let fake = daemon(leavingUnanswered: { releasing($0) && unanswered.current })
         let clock = ManualClock()
         let device = try keyboard(on: fake, clock)
@@ -390,7 +390,7 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
     /// A hold that went unanswered leaves nothing acknowledged, so its retry posts: the
     /// driver may hold the set or the one before it, and only a report says which.
     @Test func theRetryOfAHoldThatWentUnansweredPosts() throws {
-        let unanswered = Watched(false)
+        let unanswered = Monitor(false)
         let fake = daemon(leavingUnanswered: { _ in unanswered.current })
         let clock = ManualClock()
         let device = try keyboard(on: fake, clock)

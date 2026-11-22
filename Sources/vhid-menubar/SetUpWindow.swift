@@ -55,14 +55,14 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
     private static let width: CGFloat = 540
 
     /// What a request's commands are timed on.
-    private let timeline: Timeline
+    private let clock: Clock
     /// Where a request is made, off the main thread: a queue of its own, which dispatch gives
     /// a thread whenever it has work, not the bounded pool behind `DispatchQueue.global()`.
     private let requests = DispatchQueue(label: "SetUpWindow.requests", qos: .userInitiated)
 
-    init(installation: Installation, timeline: Timeline, readNow: @escaping @MainActor () -> Void) {
+    init(installation: Installation, clock: Clock, readNow: @escaping @MainActor () -> Void) {
         self.readNow = readNow
-        self.timeline = timeline
+        self.clock = clock
         log = Logger(subsystem: installation.service, category: "setup")
     }
 
@@ -179,9 +179,9 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
     /// seconds of it landing. [LAW:one-source-of-truth]
     private func request(_ ask: Requirement.Ask, for requirement: Requirement) {
         failure = nil
-        let log = log, timeline = timeline
+        let log = log, clock = clock
         // The limit is counted from the press, so a request still queued when it passes is not made.
-        let deadline = Deadline.within(Command.limit, on: timeline)
+        let deadline = Deadline.within(Command.limit, on: clock)
         requests.async {
             let started = Result { try Self.perform(ask, by: deadline, log: log) }
             DispatchQueue.main.async { MainActor.assumeIsolated { [weak self] in self?.requested(ask, for: requirement, started) } }

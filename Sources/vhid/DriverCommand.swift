@@ -42,7 +42,7 @@ extension DriverCommand {
         )
 
         func run() async throws {
-            let read = try await reading(within: Command.limit, on: Vhid.timeline) { deadline, stop in Result { try DriverProbe.facts(by: deadline, or: stop) } }
+            let read = try await reading(within: Command.limit, on: Vhid.clock) { deadline, stop in Result { try DriverProbe.facts(by: deadline, or: stop) } }
             // A machine that could not be read never becomes a verdict about the driver.
             // The word still goes to stdout, because a caller reading this command's
             // output deserves a word rather than an empty string interpolated into its
@@ -73,7 +73,7 @@ extension DriverCommand {
         )
 
         func run() async throws {
-            let read = try await reading(within: Command.limit, on: Vhid.timeline) { deadline, stop in Result { try DriverProbe.registration(by: deadline, or: stop) } }
+            let read = try await reading(within: Command.limit, on: Vhid.clock) { deadline, stop in Result { try DriverProbe.registration(by: deadline, or: stop) } }
             do {
                 print(try read.get().rawValue)
             } catch {
@@ -142,7 +142,7 @@ extension DriverCommand {
 
         func run() async throws {
             let packageID = packageID
-            let read = try await reading(within: Command.limit, on: Vhid.timeline) { deadline, stop in Result { try DriverProbe.receiptVersion(of: packageID, by: deadline, or: stop) } }
+            let read = try await reading(within: Command.limit, on: Vhid.clock) { deadline, stop in Result { try DriverProbe.receiptVersion(of: packageID, by: deadline, or: stop) } }
             do {
                 // The empty line is deliberate: a caller reading this into a variable gets
                 // an empty string for "no receipt" and never an unterminated stream.

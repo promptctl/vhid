@@ -47,13 +47,13 @@ import Time
     /// A reading is the child's printed line; a child that fails or prints nonsense is said.
     @Test func aReadingIsTakenFromAChildProcess() async throws {
         let echo = URL(fileURLWithPath: "/bin/echo")
-        #expect(try await GrantReading.taken(by: echo, ["screenRecording=false accessibility=true"], on: ManualClock().timeline)
+        #expect(try await GrantReading.taken(by: echo, ["screenRecording=false accessibility=true"], on: Clock(ManualClock()))
             == GrantReading { $0 == .accessibility })
         await #expect(throws: GrantReadingFailure("unreadable grants line \"nonsense\"")) {
-            try await GrantReading.taken(by: echo, ["nonsense"], on: ManualClock().timeline)
+            try await GrantReading.taken(by: echo, ["nonsense"], on: Clock(ManualClock()))
         }
         await #expect(throws: GrantReadingFailure("/usr/bin/false exited 1")) {
-            try await GrantReading.taken(by: URL(fileURLWithPath: "/usr/bin/false"), [], on: ManualClock().timeline)
+            try await GrantReading.taken(by: URL(fileURLWithPath: "/usr/bin/false"), [], on: Clock(ManualClock()))
         }
     }
 
@@ -63,7 +63,7 @@ import Time
     func aChildStillRunningAtTheLimitIsGivenUpOn(script: String) async throws {
         let clock = ManualClock(), started = try Fifo()
         let reading = Task {
-            try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/sh"), ["-c", "echo > \"$0\"; \(script)", started.path], within: .milliseconds(200), on: clock.timeline)
+            try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/sh"), ["-c", "echo > \"$0\"; \(script)", started.path], within: .milliseconds(200), on: Clock(clock))
         }
         try #require(started.said() != nil)
         clock.advance(by: .milliseconds(200))
@@ -81,7 +81,7 @@ import Time
         let started = try Fifo()
         let reading = Task {
             try await Telemetry.$export.withValue(events.export) {
-                try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/sh"), ["-c", "echo > \"$0\"; exec sleep 5", started.path], on: ManualClock().timeline)
+                try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/sh"), ["-c", "echo > \"$0\"; exec sleep 5", started.path], on: Clock(ManualClock()))
             }
         }
         try #require(started.said() != nil)
@@ -97,7 +97,7 @@ import Time
         #expect(GrantReading { _ in true }.exitStatus == 0)
         #expect(lacking.exitStatus == GrantReading.lacking)
         let sh = URL(fileURLWithPath: "/bin/sh")
-        #expect(try await GrantReading.taken(by: sh, ["-c", "echo \(lacking.line); exit \(GrantReading.lacking)"], on: ManualClock().timeline) == lacking)
+        #expect(try await GrantReading.taken(by: sh, ["-c", "echo \(lacking.line); exit \(GrantReading.lacking)"], on: Clock(ManualClock())) == lacking)
     }
 
     /// The child reads nothing of this process's stdin, and a child that says more than a
@@ -105,9 +105,9 @@ import Time
     @Test func theChildNeitherSharesStdinNorStallsOnAFullPipe() async throws {
         let sh = URL(fileURLWithPath: "/bin/sh")
         await #expect(throws: GrantReadingFailure("unreadable grants line \"\"")) {
-            try await GrantReading.taken(by: sh, ["-c", "cat"], on: ManualClock().timeline)
+            try await GrantReading.taken(by: sh, ["-c", "cat"], on: Clock(ManualClock()))
         }
-        #expect(try await GrantReading.taken(by: sh, ["-c", "head -c 200000 /dev/zero >&2; echo screenRecording=true accessibility=true"], on: ManualClock().timeline)
+        #expect(try await GrantReading.taken(by: sh, ["-c", "head -c 200000 /dev/zero >&2; echo screenRecording=true accessibility=true"], on: Clock(ManualClock()))
             == GrantReading { _ in true })
     }
 }
@@ -234,8 +234,8 @@ struct GrantMappingTests {
 @Test func eachChildReadingIsAnEvent() async throws {
     let events = Collected()
     try await Telemetry.$export.withValue(events.export) {
-        _ = try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/echo"), ["screenRecording=true accessibility=true"], on: ManualClock().timeline)
-        _ = try? await GrantReading.taken(by: URL(fileURLWithPath: "/usr/bin/false"), [], on: ManualClock().timeline)
+        _ = try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/echo"), ["screenRecording=true accessibility=true"], on: Clock(ManualClock()))
+        _ = try? await GrantReading.taken(by: URL(fileURLWithPath: "/usr/bin/false"), [], on: Clock(ManualClock()))
     }
     #expect(events.all.map(\.event) == ["grant_child", "grant_child"])
     #expect(events.all.map(\.outcome) == [.ok, .failed])

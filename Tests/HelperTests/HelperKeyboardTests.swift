@@ -132,7 +132,7 @@ import Time
         listener.delegate = service
         listener.resume()
         let connection = NSXPCConnection(listenerEndpoint: listener.endpoint)
-        return (HelperConnection(connection: connection, service: "ai.promptctl.vhid.tests.far", timeline: clock.timeline, replyTimeout: replyTimeout), FarEnd(listener: listener, service: service))
+        return (HelperConnection(connection: connection, service: "ai.promptctl.vhid.tests.far", clock: Clock(clock), replyTimeout: replyTimeout), FarEnd(listener: listener, service: service))
     }
 
     @Test func anAcknowledgedKeyGoesDownAndTheCallReturns() throws {
@@ -200,7 +200,7 @@ import Time
     /// and that name is gone, so a mismatched pair fails at the lookup.
     @Test func holdingAnswersTheHolderAndLeavesTheConnectionUnspoken() throws {
         let (helper, far) = helper(.acknowledge)
-        #expect(try helper.holding(by: .within(.seconds(5), on: ManualClock().timeline)) == .client(pid: 41))
+        #expect(try helper.holding(by: .within(.seconds(5), on: Clock(ManualClock()))) == .client(pid: 41))
         try helper.leave()
         #expect(far.service.pointed == ["holding"])
         #expect(protocol_getMethodDescription(HelperService.self, NSSelectorFromString("statusWithReply:"), true, true).name == nil)
@@ -226,7 +226,7 @@ import Time
 
     @Test func theCursorIsReadAndLeavesTheConnectionUnspoken() throws {
         let (helper, far) = helper(.acknowledge)
-        #expect(try helper.cursor(by: .within(.seconds(5), on: ManualClock().timeline)) == (812.5, 400))
+        #expect(try helper.cursor(by: .within(.seconds(5), on: Clock(ManualClock()))) == (812.5, 400))
         try helper.leave()
         #expect(far.service.pointed == ["cursor"])
     }
@@ -239,7 +239,7 @@ import Time
     /// connection unspoken.
     @Test func theLayoutCrossesTheWireAsItself() throws {
         let (helper, far) = helper(.acknowledge)
-        #expect(try helper.layout(by: .within(.seconds(5), on: ManualClock().timeline)) == Self.layout)
+        #expect(try helper.layout(by: .within(.seconds(5), on: Clock(ManualClock()))) == Self.layout)
         try helper.leave()
         #expect(far.service.pointed == ["layout"])
     }
@@ -277,13 +277,13 @@ import Time
     @Test func theLastFailureIsBothHalvesOrNeither() throws {
         let at = Date(timeIntervalSince1970: 1_790_000_000)
         let (both, bothFar) = helper(.acknowledge, failure: ("the keyboard would not release", at))
-        #expect(try both.lastFailure(by: .within(.seconds(5), on: ManualClock().timeline)) == DaemonFailure(text: "the keyboard would not release", at: at))
+        #expect(try both.lastFailure(by: .within(.seconds(5), on: Clock(ManualClock()))) == DaemonFailure(text: "the keyboard would not release", at: at))
 
         let (neither, neitherFar) = helper(.acknowledge)
-        #expect(try neither.lastFailure(by: .within(.seconds(5), on: ManualClock().timeline)) == nil)
+        #expect(try neither.lastFailure(by: .within(.seconds(5), on: Clock(ManualClock()))) == nil)
 
         let (half, halfFar) = helper(.acknowledge, failure: ("a text with no time", nil))
-        let garbled = #expect(throws: HelperConnection.Unreachable.self) { try half.lastFailure(by: .within(.seconds(5), on: ManualClock().timeline)) }
+        let garbled = #expect(throws: HelperConnection.Unreachable.self) { try half.lastFailure(by: .within(.seconds(5), on: Clock(ManualClock()))) }
         #expect(garbled?.cause == .notAHelper)
         withExtendedLifetime((bothFar, neitherFar, halfFar)) {}
     }

@@ -19,11 +19,11 @@ import Time
 
 /// A mouse over `fake`, its waits on `clock`.
 private func mouse(on fake: FakeDaemon, _ clock: ManualClock) throws -> VirtualPointing {
-    VirtualPointing(daemon: try DaemonConnection(fileDescriptor: fake.clientDescriptor, timeline: clock.timeline))
+    VirtualPointing(daemon: try DaemonConnection(fileDescriptor: fake.clientDescriptor, clock: Clock(clock)))
 }
 
 /// A deadline nothing in the test reaches, on a clock nothing moves.
-private func unhurried(_ clock: ManualClock) -> Deadline { .within(.seconds(2), on: clock.timeline) }
+private func unhurried(_ clock: ManualClock) -> Deadline { .within(.seconds(2), on: Clock(clock)) }
 
 /// The pointing reports the device actually put on the wire, in order.
 private func pointingReports(_ fake: FakeDaemon) -> [[UInt8]] {
@@ -51,7 +51,7 @@ private func pointingReports(_ fake: FakeDaemon) -> [[UInt8]] {
         }
         let clock = ManualClock()
         let device = try mouse(on: fake, clock)
-        let starting = Pending { try device.start(by: .within(.milliseconds(200), on: clock.timeline)) }
+        let starting = Future { try device.start(by: .within(.milliseconds(200), on: Clock(clock))) }
         fake.awaitRequests(1)
         try fake.settle()
         clock.advance(by: .milliseconds(200))

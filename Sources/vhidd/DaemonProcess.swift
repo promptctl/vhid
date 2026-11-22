@@ -76,21 +76,21 @@ enum DaemonProcess {
         var say: (Said) -> Void
     }
 
-    /// The effects done for real, on `timeline`. The daemon outlives any one connection on
+    /// The effects done for real, on `clock`. The daemon outlives any one connection on
     /// purpose, and only `stop` ends it.
-    static func real(on timeline: Timeline) -> Effects<HID> {
+    static func real(on clock: Clock) -> Effects<HID> {
         Effects(
             connect: { whenLost in
-                let daemon = try DaemonConnection(timeline: timeline, whenLost: whenLost)
+                let daemon = try DaemonConnection(clock: clock, whenLost: whenLost)
                 return HID(keyboard: VirtualKeyboard(daemon: daemon), mouse: VirtualPointing(daemon: daemon))
             },
             // [LAW:no-ambient-temporal-coupling] Each device's deadline is made as it is
             // asked to come up, so the mouse is not charged for the keyboard's second.
             bringUp: { hid, limit in
-                Startups(keyboard: try hid.keyboard.start(by: .within(limit, on: timeline)), mouse: try hid.mouse.start(by: .within(limit, on: timeline)))
+                Startups(keyboard: try hid.keyboard.start(by: .within(limit, on: clock)), mouse: try hid.mouse.start(by: .within(limit, on: clock)))
             },
             launch: { try spawn(executable, [], stdio: [:]) },
-            terminate: { end($0, on: timeline) },
+            terminate: { end($0, on: clock) },
             say: {
                 switch $0 {
                 case .happened(let what): log(what)
@@ -103,11 +103,11 @@ enum DaemonProcess {
     /// Stops a daemon this process started and reaps it, so it is gone - not a zombie, and
     /// not a dying daemon the next attempt connects to as somebody else's - when this
     /// returns. SIGTERM first, and SIGKILL for one still there after two seconds.
-    private static func end(_ pid: pid_t, on timeline: Timeline) {
+    private static func end(_ pid: pid_t, on clock: Clock) {
         kill(pid, SIGTERM)
         for _ in 0..<20 {
             if waitpid(pid, nil, WNOHANG) != 0 { return }
-            timeline.pause(for: .milliseconds(100))
+            clock.pause(for: .milliseconds(100))
         }
         kill(pid, SIGKILL)
         waitpid(pid, nil, 0)
@@ -161,7 +161,7 @@ extension DaemonProcess.Effects {
             do {
                 return (try connect { whenLost($0, origin) }, origin)
             } catch let unreachable as DaemonError {
-                guard !deadline.passed else { stop(origin); throw unreachable }
+                guard !deadline.expired else { stop(origin); throw unreachable }
                 try pause(.milliseconds(100))
             }
         }
@@ -303,12 +303,12 @@ extension DaemonProcess.Effects {
     /// driver is read where each attempt ends, at its failure or at the loss of what it
     /// brought up, and a reading of it not on is what the waits from then are for: the
     /// driver is read every `look` of them until it reads on or the devices come up. Any
-    /// other wait is taken whole and reads nothing. A wait ends by `timeline`, so the time
+    /// other wait is taken whole and reads nothing. A wait ends by `clock`, so the time
     /// its readings take is part of it: the next attempt starts no later than the wait the
     /// log gave and one reading.
     ///
     /// Each attempt's deadline is made as it starts, `limit` from then, and its redials
-    /// wait on `timeline`. A wait between attempts is `pause`.
+    /// wait on `clock`. A wait between attempts is `pause`.
     ///
     /// Returns only by `pause` throwing, which the daemon's never does.
     func keepUp(
@@ -318,7 +318,7 @@ extension DaemonProcess.Effects {
         readiness: Readiness,
         serve: (DaemonProcess.Reached<Device>) -> any ServedDevices,
         driver: () -> DriverState?,
-        on timeline: Timeline,
+        on clock: Clock,
         pause: (Duration) throws -> Void
     ) rethrows -> Never {
         var failures = 0
@@ -330,15 +330,15 @@ extension DaemonProcess.Effects {
         while true {
             let attempt = readiness.begin()
             do {
-                let reached = try reach(by: .within(limit, on: timeline), pausing: timeline.pause) { lost, _ in _ = readiness.lost(lost, in: attempt) }
+                let reached = try reach(by: .within(limit, on: clock), pausing: clock.pause) { lost, _ in _ = readiness.lost(lost, in: attempt) }
                 readiness.up(serve(reached))
                 say(.happened("serving"))
                 // Devices that came up did so on a driver that is on, whatever it read
                 // before them: a loss of these is not that driver turning on.
                 off = nil
-                let since = timeline.now()
+                let since = clock.now()
                 let why = readiness.whileUp()
-                failures = timeline.now() - since >= backoff.most ? 1 : failures + 1
+                failures = clock.now() - since >= backoff.most ? 1 : failures + 1
                 // Said before the stop, which waits on a daemon that takes its time to end.
                 say(.failed("the devices went down (\(why))"))
                 // Lost, so whatever the daemon held for vhidd went with the connection; a
@@ -357,7 +357,7 @@ extension DaemonProcess.Effects {
             say(.happened("bringing the devices up again in \(wait)"))
             // [LAW:dataflow-not-control-flow] Every wait is waited out the same way: one
             // with nothing to look for is a single look as long as itself, finding nothing.
-            if let on = try waitOut(wait, lookingEvery: off == nil ? wait : look, now: timeline.now, pause: pause, for: { off.flatMap { TurnedOn(from: $0, to: driver()) } }) {
+            if let on = try waitOut(wait, lookingEvery: off == nil ? wait : look, now: clock.now, pause: pause, for: { off.flatMap { TurnedOn(from: $0, to: driver()) } }) {
                 say(.happened("\(on.found), \(on.after) into a wait of \(wait); bringing the devices up now"))
                 failures = 0
                 off = nil

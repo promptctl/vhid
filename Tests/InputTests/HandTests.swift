@@ -7,6 +7,7 @@ import Testing
 import ScreenSpace
 import ScreenSpaceTesting
 import InputTesting
+import Time
 
 /// The pauses a pointer makes around its presses, on a fake clock: a rest before the
 /// button goes down, the button held, the clicks of a double click a gap apart, and the
@@ -33,7 +34,7 @@ import InputTesting
         func scroll(by delta: Scroll) throws { try mouse.scroll(by: delta); logged("notch") }
 
         func pointer(hand: Hand = .macOSDefault, seed: UInt64 = 1) -> Pointer {
-            Pointer(mouse: self, cursor: mouse.cursor, timeline: clock.timeline, randomness: RandomSource(seed: seed), hand: hand,
+            Pointer(mouse: self, cursor: mouse.cursor, clock: Clock(clock), randomness: RandomSource(seed: seed), hand: hand,
                     traced: { [self] in if case .paused(let pause) = $0 { self.state.withLock { $0.pauses.append(pause) } } })
         }
     }

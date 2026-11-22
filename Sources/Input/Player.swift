@@ -206,7 +206,7 @@ public extension Schedule where Point == ScreenPoint {
 /// sent late: dropping it would change the input the replay exists to hold fixed, and
 /// the lateness is recorded instead.
 ///
-/// The clock is the pointer's `timeline` and the wall is taken as a value, so the schedule
+/// The clock is the pointer's `clock` and the wall is taken as a value, so the schedule
 /// runs against a clock a test moves by hand. [LAW:effects-at-boundaries]
 /// [LAW:one-source-of-truth] The deadlines and the pointer's own waits are on one clock.
 public struct Player {
@@ -236,7 +236,7 @@ public struct Player {
     }
 
     public func play(_ play: Schedule<Placed<ScreenPoint>>, isolation: isolated (any Actor)? = #isolation) async throws -> Played {
-        let timeline = pointer.timeline
+        let clock = pointer.clock
         var went: [Played.Report] = []
         var reached = 0
         // The act being waited on or played, which a stop names.
@@ -253,7 +253,7 @@ public struct Player {
                 // Read back: the loop stops beside a point it cannot land on.
                 course = Course(steering: steering, interval: calibration.interval, at: try await pointer.cursor())
             }
-            let started = timeline.now()
+            let started = clock.now()
             let epoch = wall()
             let at = { (offset: Duration) in epoch + offset.microseconds }
             // How far the closed loops so far have pushed the script back. Timing is kept
@@ -269,9 +269,9 @@ public struct Player {
                 // the next report. A deadline already inside the lead sleeps not at all,
                 // since even a sleep that returns at once returns late.
                 // [LAW:single-enforcer]
-                while timeline.now() < wake {
+                while clock.now() < wake {
                     try Task.checkCancellation()
-                    try await timeline.sleep(until: min(wake, timeline.now() + Self.slice))
+                    try await clock.sleep(until: min(wake, clock.now() + Self.slice))
                 }
                 // The watch that follows the sleep. It asks the same question the sleep
                 // did, because `lead` is the caller's to choose and nothing caps it: a long
@@ -289,18 +289,18 @@ public struct Player {
                 // [LAW:dataflow-not-control-flow] A real clock advances between two reads
                 // separated by a yield, so this costs it nothing; if one ever did not, the
                 // report lands where it would have landed with no lead at all.
-                var watched = timeline.now()
-                while timeline.now() < deadline {
+                var watched = clock.now()
+                while clock.now() < deadline {
                     try Task.checkCancellation()
                     await Task.yield()
-                    guard timeline.now() != watched else {
-                        try await timeline.sleep(until: deadline)
+                    guard clock.now() != watched else {
+                        try await clock.sleep(until: deadline)
                         break
                     }
-                    watched = timeline.now()
+                    watched = clock.now()
                 }
                 try Task.checkCancellation()
-                let sent = timeline.now() - started
+                let sent = clock.now() - started
                 // Counted before the post: one that throws may still have reached the driver.
                 reached = index + 1
                 // How many device reports this act sent: an at line sends what its step
@@ -310,9 +310,9 @@ public struct Player {
                 switch event.report {
                 case .steer(let point):
                     let current = try steered(course)
-                    let began = timeline.now()
+                    let began = clock.now()
                     try await pointer.home(on: point)
-                    delay += timeline.now() - began
+                    delay += clock.now() - began
                     course = Course(steering: current.steering, interval: current.interval, at: try await pointer.cursor())
                 case .at(let point):
                     let current = try steered(course)
@@ -320,7 +320,7 @@ public struct Player {
                     // A step longer than one report is paced as the table was measured, so
                     // macOS accelerates each report as the table says.
                     for (number, move) in moves.enumerated() {
-                        if number > 0 { try await timeline.sleep(until: timeline.now() + current.interval) }
+                        if number > 0 { try await clock.sleep(until: clock.now() + current.interval) }
                         try await pointer.mouse.move(by: move)
                     }
                     sentReports = moves.count
@@ -330,7 +330,7 @@ public struct Player {
                 case .move(let delta): try await pointer.mouse.move(by: delta)
                 case .wheel(let delta): try await pointer.mouse.scroll(by: delta)
                 }
-                let played = Played.Report(line: event.line, scheduled: at(due), sent: at(sent), acked: at(timeline.now() - started))
+                let played = Played.Report(line: event.line, scheduled: at(due), sent: at(sent), acked: at(clock.now() - started))
                 went += event.report.isReport && sentReports > 0 ? [played] : []
             }
             return Played(startReports: reports, reports: went, layout: await after(play))

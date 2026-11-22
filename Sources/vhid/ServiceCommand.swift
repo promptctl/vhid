@@ -50,7 +50,7 @@ extension ServiceCommand {
 
         func run() async throws {
             let installation = try service.installation()
-            let standing = try await reading(within: Command.limit, on: Vhid.timeline) { deadline, stop in Result { try LaunchdProbe.standing(of: installation, by: deadline, or: stop) } }
+            let standing = try await reading(within: Command.limit, on: Vhid.clock) { deadline, stop in Result { try LaunchdProbe.standing(of: installation, by: deadline, or: stop) } }
             do {
                 print(try standing.get().rawValue)
             } catch {

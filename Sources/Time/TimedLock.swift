@@ -14,12 +14,12 @@ public final class TimedLock: @unchecked Sendable {
 
     public init() {}
 
-    /// Runs `body` holding the lock, or throws `Deadline.Passed` when the deadline passes
+    /// Runs `body` holding the lock, or throws `Deadline.Exceeded` when the deadline passes
     /// first - already passed on arrival, or passed while it waited - having run nothing.
     public func withLock<T>(by deadline: Deadline, _ body: () throws -> T) throws -> T {
         condition.lock()
         while true {
-            guard !deadline.passed else { condition.unlock(); throw deadline.refusal }
+            guard !deadline.expired else { condition.unlock(); throw deadline.exceeded }
             guard held else { break }
             _ = deadline.wait(on: condition)
         }
@@ -32,7 +32,7 @@ public final class TimedLock: @unchecked Sendable {
     /// Runs `body` holding the lock, however long the wait for it. Only for a release: the
     /// letting go of what is held has to happen whoever is ahead of it, and refusing it would
     /// leave a key down.
-    public func releasing<T>(_ body: () throws -> T) rethrows -> T {
+    public func withLock<T>(_ body: () throws -> T) rethrows -> T {
         condition.lock()
         while held { condition.wait() }
         held = true
@@ -43,7 +43,7 @@ public final class TimedLock: @unchecked Sendable {
 
     /// Runs `body` holding the lock if nobody holds it now, and runs nothing otherwise: for
     /// the sweep, which never waits behind a client's request.
-    public func whenFree<T>(_ body: () throws -> T) rethrows -> T? {
+    public func withLockIfAvailable<T>(_ body: () throws -> T) rethrows -> T? {
         condition.lock()
         guard !held else { condition.unlock(); return nil }
         held = true

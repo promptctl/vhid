@@ -11,11 +11,11 @@ struct TimedLockTests {
     @Test func aWaiterWhoseLimitPassesBehindTheLockRunsNothing() async {
         let clock = ManualClock(), lock = TimedLock(), holding = Gate(), refused = Latch()
         let ran = Ran()
-        let deadline = Deadline.within(.seconds(1), on: clock.timeline)
-        Thread.detachNewThread { lock.whenFree { holding.arrive() } }
+        let deadline = Deadline.within(.seconds(1), on: Clock(clock))
+        Thread.detachNewThread { lock.withLockIfAvailable { holding.arrive() } }
         holding.arrived.wait()
         Thread.detachNewThread {
-            #expect(throws: Deadline.Passed.self) { try lock.withLock(by: deadline) { ran.mark() } }
+            #expect(throws: Deadline.Exceeded.self) { try lock.withLock(by: deadline) { ran.mark() } }
             refused.open()
         }
         // The waiter is behind the lock; the clock moving past its limit wakes it there.
@@ -28,8 +28,8 @@ struct TimedLockTests {
 
     @Test func aWaiterWhoseLimitHoldsRunsWhenTheLockIsLetGo() async {
         let clock = ManualClock(), lock = TimedLock(), holding = Gate(), served = Latch()
-        let deadline = Deadline.within(.seconds(1), on: clock.timeline)
-        Thread.detachNewThread { lock.whenFree { holding.arrive() } }
+        let deadline = Deadline.within(.seconds(1), on: Clock(clock))
+        Thread.detachNewThread { lock.withLockIfAvailable { holding.arrive() } }
         holding.arrived.wait()
         Thread.detachNewThread {
             #expect(throws: Never.self) { try lock.withLock(by: deadline) {} }
@@ -42,26 +42,26 @@ struct TimedLockTests {
 
     @Test func aRequestThatArrivesPastItsLimitIsRefusedAtAFreeLock() {
         let clock = ManualClock(), lock = TimedLock()
-        let deadline = Deadline.within(.seconds(1), on: clock.timeline)
+        let deadline = Deadline.within(.seconds(1), on: Clock(clock))
         clock.advance(by: .seconds(2))
-        #expect(throws: Deadline.Passed(limit: .seconds(1), spent: .seconds(2))) { try lock.withLock(by: deadline) {} }
+        #expect(throws: Deadline.Exceeded(limit: .seconds(1), spent: .seconds(2))) { try lock.withLock(by: deadline) {} }
     }
 
     @Test func theSweepRunsNothingWhileTheLockIsHeld() {
         let lock = TimedLock(), holding = Gate(), letGo = Latch()
-        Thread.detachNewThread { lock.whenFree { holding.arrive() }; letGo.open() }
+        Thread.detachNewThread { lock.withLockIfAvailable { holding.arrive() }; letGo.open() }
         holding.arrived.wait()
-        #expect(lock.whenFree { true } == nil)
+        #expect(lock.withLockIfAvailable { true } == nil)
         holding.open()
         letGo.wait()
-        #expect(lock.whenFree { true } == true)
+        #expect(lock.withLockIfAvailable { true } == true)
     }
 
     @Test func aDeadlineFromTheWireKeepsItsInstant() {
         let clock = ManualClock()
-        let sent = Deadline.within(.seconds(5), on: clock.timeline)
+        let sent = Deadline.within(.seconds(5), on: Clock(clock))
         clock.advance(by: .seconds(2))
-        let received = Deadline.at(Instant(nanoseconds: sent.at.nanoseconds), on: clock.timeline)
+        let received = Deadline.at(Instant(nanoseconds: sent.at.nanoseconds), on: Clock(clock))
         #expect(received.at == sent.at)
         #expect(received.limit == .seconds(3))
     }

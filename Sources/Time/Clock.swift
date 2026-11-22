@@ -36,15 +36,15 @@ public struct Instant: Comparable, Hashable, Sendable, CustomStringConvertible {
 ///
 /// [LAW:one-source-of-truth] A process has one, made in `main` - `suspending`, the real one
 /// - or by a test from its one test clock, and handed to every component that measures or
-/// waits. None of them names a `Clock` or reads a global `now`, so the one test clock
+/// waits. None of them makes a `ContinuousClock` or reads a global `now`, so the one test clock
 /// reaches every wait in the process, the blocking ones included: a component with a clock
 /// of its own would need a fake of its own, and its tests would run in real time.
-public struct Timeline: Sendable {
+public struct Clock: Sendable {
     public let now: @Sendable () -> Instant
     private let sleeper: @Sendable (Instant) async throws -> Void
     private let blocker: @Sendable (_ until: Instant, _ wake: @escaping @Sendable () -> Void, _ sleep: (Duration) -> Bool) -> Void
 
-    /// A timeline of the three effects, for a test clock to make. [LAW:effects-at-boundaries]
+    /// A clock of the three effects, for a test clock to make. [LAW:effects-at-boundaries]
     /// Behind an SPI, so making one is something only a test clock says it does.
     ///
     /// `block` runs one blocking wait toward `until`. It hands `sleep` the real span the
@@ -63,9 +63,9 @@ public struct Timeline: Sendable {
 
     /// The Mac's own uptime clock. A blocking wait blocks until its instant, and nothing
     /// but what it waits on wakes it sooner.
-    public static let suspending: Timeline = {
+    public static let suspending: Clock = {
         @Sendable func now() -> Instant { Instant(nanoseconds: clock_gettime_nsec_np(CLOCK_UPTIME_RAW)) }
-        return Timeline(
+        return Clock(
             now: now,
             sleep: { try await SuspendingClock().sleep(for: $0 - now(), tolerance: .zero) },
             block: { until, _, sleep in _ = sleep(max(.zero, until - now())) }
@@ -76,8 +76,8 @@ public struct Timeline: Sendable {
         try await sleeper(instant)
     }
 
-    /// Blocks the calling thread for `span` of this timeline: a pause between attempts,
-    /// which a test timeline ends when it is moved past its end.
+    /// Blocks the calling thread for `span` of this clock: a pause between attempts,
+    /// which a test clock ends when it is moved past its end.
     public func pause(for span: Duration) {
         let condition = NSCondition(), over = Deadline.within(span, on: self)
         condition.lock(); defer { condition.unlock() }

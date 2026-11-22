@@ -27,7 +27,7 @@ import Time
     }
 
     /// A deadline that never passes, on a clock nothing moves.
-    static var unhurried: Deadline { .within(.seconds(30), on: ManualClock().timeline) }
+    static var unhurried: Deadline { .within(.seconds(30), on: Clock(ManualClock())) }
 
     /// Both orders, because the promise is that the order does not matter. Written the
     /// other way - stderr first - the child fills stderr and stops, and a reader that
@@ -84,8 +84,8 @@ import Time
     @Sendable static func open() throws -> Int { try FileManager.default.contentsOfDirectory(atPath: "/dev/fd").count }
 
     /// Runs `command` by `deadline` on a thread of its own, as a reading is taken.
-    static func running(_ command: Command, by deadline: Deadline, or stop: Command.Stop = .never) -> Pending<Command.Output> {
-        Pending { try command.run(by: deadline, or: stop) }
+    static func running(_ command: Command, by deadline: Deadline, or stop: Command.Stop = .never) -> Future<Command.Output> {
+        Future { try command.run(by: deadline, or: stop) }
     }
 
     /// A command that never ends is given up on at its limit and said by name, with the
@@ -94,7 +94,7 @@ import Time
     @Test func aCommandThatNeverEndsIsStoppedAtItsLimitAndNamed() throws {
         let clock = ManualClock(), running = try Fifo()
         let command = Command("/bin/sh", "-c", "echo $$ > \(running.path); exec sleep 600")
-        let ended = Self.running(command, by: .within(.milliseconds(500), on: clock.timeline))
+        let ended = Self.running(command, by: .within(.milliseconds(500), on: Clock(clock)))
         let pid = try #require(running.said().flatMap { pid_t($0) })
         clock.advance(by: .milliseconds(500))
         let overran = try #require(#expect(throws: Command.Overran.self) { try ended.get() })
@@ -113,7 +113,7 @@ import Time
     /// reading that waited for the stream instead would answer, never given up on.
     @Test func aStreamHeldOpenPastTheChildsExitIsGivenUpOnAtTheLimit() throws {
         let clock = ManualClock(), started = try Fifo()
-        let ended = Self.running(Command("/bin/sh", "-c", "sleep 600 & echo > \(started.path); exit 0"), by: .within(.milliseconds(500), on: clock.timeline))
+        let ended = Self.running(Command("/bin/sh", "-c", "sleep 600 & echo > \(started.path); exit 0"), by: .within(.milliseconds(500), on: Clock(clock)))
         try #require(started.said() != nil)
         clock.advance(by: .milliseconds(500))
         #expect(throws: Command.Overran.self) { try ended.get() }
@@ -125,7 +125,7 @@ import Time
     /// and the limit.
     @Test func commandsRunByOneDeadlineShareItsLimit() throws {
         let clock = ManualClock(), running = try Fifo()
-        let deadline = Deadline.within(.seconds(3), on: clock.timeline)
+        let deadline = Deadline.within(.seconds(3), on: Clock(clock))
         #expect(try Command("/usr/bin/true").run(by: deadline, or: .never).status == 0)
         clock.advance(by: .seconds(1))
         let ended = Self.running(Command("/bin/sh", "-c", "echo > \(running.path); exec sleep 600"), by: deadline)
@@ -142,7 +142,7 @@ import Time
         let marker = FileManager.default.temporaryDirectory.appending(path: "vhid-started-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: marker) }
         let clock = ManualClock()
-        let deadline = Deadline.within(.seconds(1), on: clock.timeline)
+        let deadline = Deadline.within(.seconds(1), on: Clock(clock))
         clock.advance(by: .milliseconds(1500))
         let unstarted = try #require(#expect(throws: Command.Unstarted.self) { try Command("/usr/bin/touch", marker.path).run(by: deadline, or: .never) })
         #expect(unstarted == Command.Unstarted(command: "touch \(marker.path)", limit: .seconds(1), spent: .milliseconds(1500)))
@@ -163,7 +163,7 @@ import Time
         let clock = ManualClock(), started = try Fifo(), go = try Fifo(), wrote = try Fifo()
         let outliving = "(trap '' PIPE; read _ < \(go.path); /bin/echo x 2>/dev/null; out=$?; /bin/echo x >&2 2>/dev/null; echo \"$out $?\" > \(wrote.path)) &"
         let command = Command("/bin/sh", "-c", "\(outliving) echo > \(started.path); \(ending)")
-        let running = Self.running(command, by: .within(.seconds(1), on: clock.timeline))
+        let running = Self.running(command, by: .within(.seconds(1), on: Clock(clock)))
         try #require(started.said() != nil)
         clock.advance(by: .seconds(1))
         #expect(throws: Command.Overran.self) { try running.get() }
@@ -203,7 +203,7 @@ import Time
         let clock = ManualClock(), queue = DispatchQueue(label: "CommandTests.held"), held = Gate()
         queue.async { held.arrive() }
         held.arrived.wait()
-        let deadline = Deadline.within(.seconds(1), on: clock.timeline)
+        let deadline = Deadline.within(.seconds(1), on: Clock(clock))
         let read = Task {
             try await reading(by: deadline, on: queue) { deadline, stop in Result { try Command("/usr/bin/true").run(by: deadline, or: stop) } }
         }

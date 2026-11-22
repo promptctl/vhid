@@ -402,10 +402,10 @@ public extension Requirement {
             The daemon's log for the same moment:
                 \(daemonLog(installation, last: "10m"))
             """
-        case .unasked(let passed):
+        case .unasked(let exceeded):
             """
-            The daemon was not asked: the reading's limit of \(passed.limit) had passed
-            \(passed.spent.milliseconds) ms in, on the rows above: run doctor again.
+            The daemon was not asked: the reading's limit of \(exceeded.limit) had passed
+            \(exceeded.spent.milliseconds) ms in, on the rows above: run doctor again.
             """
         }
     }
@@ -467,7 +467,7 @@ public extension Requirement {
         return switch reading {
         case .answered(.nobody): Requirement(row: .devices, reads: reads, step: nil)
         case .answered(.client(let holder)): Requirement(row: .devices, reads: reads, step: heldStep(holder))
-        case .answered(.leftHeld): Requirement(row: .devices, reads: reads, step: leftHeldStep)
+        case .answered(.stuck): Requirement(row: .devices, reads: reads, step: stuckStep)
         // The daemon refused to say, and it refused on the signature: that row is what
         // stands in the way, not the daemon's.
         case .refusedThisVhid: Requirement(row: .devices, reads: reads, waitsOn: .signature)
@@ -479,7 +479,7 @@ public extension Requirement {
         switch reading {
         case .answered(.nobody): "free"
         case .answered(.client(let holder)): "held by pid \(holder)"
-        case .answered(.leftHeld): "left held"
+        case .answered(.stuck): "keys or buttons stuck"
         case .devicesDown: "not up"
         case .refusedThisVhid, .unreachable, .silent, .failed, .unasked: "not asked"
         }
@@ -487,7 +487,7 @@ public extension Requirement {
 
     /// Not free: what a client left down stays down until vhidd's own release of it lands,
     /// and a verb from here would act with it held.
-    private static let leftHeldStep = """
+    private static let stuckStep = """
         a client that went left keys or buttons down that vhidd could not
         release, and vhidd releases them again while nobody holds the devices.
         If this stays, the driver is not answering: see vhidd's log for why.

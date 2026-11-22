@@ -15,10 +15,10 @@ import Time
 
     /// Every daemon reading, one of each.
     static let daemonReadings: [DaemonReading] = [
-        .answered(.nobody), .answered(.client(pid: 4242)), .answered(.leftHeld), .refusedThisVhid,
+        .answered(.nobody), .answered(.client(pid: 4242)), .answered(.stuck), .refusedThisVhid,
         .unreachable(reason: "NSCocoaErrorDomain 4099"), .silent(reason: "no answer in 5 seconds"),
         .failed(reason: "something new"), .devicesDown(reason: "devices not up: the driver is not activated"),
-        .unasked(Deadline.Passed(limit: .seconds(30), spent: .milliseconds(30_004))),
+        .unasked(Deadline.Exceeded(limit: .seconds(30), spent: .milliseconds(30_004))),
     ]
 
     // MARK: - the driver extension
@@ -145,7 +145,7 @@ import Time
             let step = try #require(Requirement.daemon(reading, installation: Self.installation).step)
             let said = switch reading {
             case .devicesDown(let reason), .unreachable(let reason), .silent(let reason), .failed(let reason): reason
-            case .unasked(let passed): "\(passed.limit) had passed"
+            case .unasked(let exceeded): "\(exceeded.limit) had passed"
             case .answered, .refusedThisVhid: ""
             }
             #expect(step.contains(said), "\(reading)")
@@ -215,9 +215,9 @@ import Time
 
     /// Devices a client left down and vhidd could not release are not free, though nobody
     /// holds them: a verb from here would act with them down.
-    @Test func devicesLeftHeldReadSoAndAreNotFree() throws {
-        let row = Requirement.devices(.answered(.leftHeld))
-        #expect(row.reads == "left held")
+    @Test func stuckDevicesReadSoAndAreNotFree() throws {
+        let row = Requirement.devices(.answered(.stuck))
+        #expect(row.reads == "keys or buttons stuck")
         #expect(!row.met)
         #expect(try #require(row.step).contains("vhidd's log"))
     }

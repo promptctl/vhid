@@ -15,10 +15,10 @@ import Time
 
     /// The instant a request's client stops waiting, as the wire carries it: never reached,
     /// since nothing here moves the clock.
-    private var by: UInt64 { Deadline.within(.seconds(5), on: clock.timeline).at.nanoseconds }
+    private var by: UInt64 { Deadline.within(.seconds(5), on: Clock(clock)).at.nanoseconds }
 
     private func seat(_ connection: NSObject? = nil, pid: pid_t = 41, holder: Holder = Holder(), readiness: Readiness) -> Seat {
-        Seat(ObjectIdentifier(connection ?? one), pid: pid, holder: holder, readiness: readiness, screen: FixedScreen(), timeline: clock.timeline)
+        Seat(ObjectIdentifier(connection ?? one), pid: pid, holder: holder, readiness: readiness, screen: FixedScreen(), clock: Clock(clock))
     }
 
     /// The crash the ending exists for: the client's connection goes while a request of its
@@ -111,7 +111,7 @@ import Time
     }
 
     /// A client whose release failed is told so when it leaves, and the devices it left
-    /// read as left held - not free - until a release lands.
+    /// read as stuck - not free - until a release lands.
     @Test func aLeaveWhoseReleaseFailedSaysSoAndLeavesTheDevicesHeld() {
         let failed = Released(keyboard: "the driver did not answer", mouse: nil)
         let (holder, devices) = (Holder(), RecordingDevices(releasing: failed))
@@ -119,10 +119,10 @@ import Time
         seat.down(usage: 4, by: by) { #expect($0 == nil) }
         var refused: NSError?
         seat.leave { refused = $0 as NSError? }
-        #expect(refused?.localizedDescription == "\(LeftHeld(released: failed))")
+        #expect(refused?.localizedDescription == "\(Stuck(released: failed))")
         #expect(holder.pid(on: 1) == nil)
         var answer: (NSNumber?, Bool)?
-        seat.holding { pid, leftHeld, _ in answer = (pid, leftHeld) }
+        seat.holding { pid, stuck, _ in answer = (pid, stuck) }
         #expect(answer?.0 == nil)
         #expect(answer?.1 == true)
     }

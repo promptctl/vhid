@@ -76,8 +76,8 @@ public final class VirtualKeyboard: Sendable {
     /// away. Every call after that throws the same failure, so a caller that presses keys
     /// and stops can leave the default; a process holding the device open across silences
     /// is the one that needs to hear, because nothing it does in between would tell it.
-    public convenience init(timeline: Timeline, whenLost: @escaping @Sendable (DaemonError) -> Void = { _ in }) throws {
-        self.init(daemon: try DaemonConnection(timeline: timeline, whenLost: whenLost))
+    public convenience init(clock: Clock, whenLost: @escaping @Sendable (DaemonError) -> Void = { _ in }) throws {
+        self.init(daemon: try DaemonConnection(clock: clock, whenLost: whenLost))
     }
 
     /// Over a connection the mouse may share, for the reason `VirtualPointing` gives.

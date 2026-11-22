@@ -24,7 +24,7 @@ import Time
 /// owner, and asking is queuing a request for the one thread that writes and waiting to be
 /// told the answer arrived. [LAW:no-ambient-temporal-coupling]
 ///
-/// **Every wait is on the process's timeline**: the heartbeat, the patience, a stalled
+/// **Every wait is on the process's clock**: the heartbeat, the patience, a stalled
 /// write and every request's wait for its answer, so a test that moves its clock wakes each
 /// of them and none waits out a real span.
 ///
@@ -91,7 +91,7 @@ public final class DaemonConnection: Sendable {
     /// had said held. Every later request throws the
     /// same failure, so a caller that only ever asks can leave it be; a process that
     /// holds the connection open across long silences is the one that needs to hear.
-    public convenience init(timeline: Timeline, whenLost: @escaping @Sendable (DaemonError) -> Void = { _ in }) throws {
+    public convenience init(clock: Clock, whenLost: @escaping @Sendable (DaemonError) -> Void = { _ in }) throws {
         guard FileManager.default.fileExists(atPath: Self.socketPath) else { throw DaemonError.noSocket(path: Self.socketPath) }
         let descriptor = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
         guard descriptor >= 0 else { throw DaemonError.socket("socket", errno) }
@@ -99,7 +99,7 @@ public final class DaemonConnection: Sendable {
         // failure that is really this side's own ordering. The descriptor has no owner
         // yet, so a refused connection closes it here and nowhere else.
         do { try Self.connect(descriptor) } catch { close(descriptor); throw error }
-        try self.init(fileDescriptor: descriptor, timeline: timeline, whenLost: whenLost)
+        try self.init(fileDescriptor: descriptor, clock: clock, whenLost: whenLost)
     }
 
     /// A connection over a descriptor someone else opened. This is the seam that makes
@@ -112,10 +112,10 @@ public final class DaemonConnection: Sendable {
     /// heartbeat go out, or a silence be noticed, at an interval of its own. `readingEnded`
     /// is told when the reading thread has ended, so a test can say nothing was reported by
     /// then, rather than by a sleep it hopes was long enough.
-    init(fileDescriptor: Int32, timeline: Timeline, heartbeatEvery interval: Duration = DaemonConnection.heartbeatInterval, patience: Duration = DaemonConnection.patience, whenLost: @escaping @Sendable (DaemonError) -> Void = { _ in }, readingEnded: @escaping @Sendable () -> Void = {}) throws {
+    init(fileDescriptor: Int32, clock: Clock, heartbeatEvery interval: Duration = DaemonConnection.heartbeatInterval, patience: Duration = DaemonConnection.patience, whenLost: @escaping @Sendable (DaemonError) -> Void = { _ in }, readingEnded: @escaping @Sendable () -> Void = {}) throws {
         // The link owns the descriptor from this line, so an initializer that throws past
         // it still closes exactly once, when the link goes.
-        link = Link(socket: fileDescriptor, timeline: timeline, heartbeatEvery: interval, patience: patience, whenLost: whenLost, readingEnded: readingEnded)
+        link = Link(socket: fileDescriptor, clock: clock, heartbeatEvery: interval, patience: patience, whenLost: whenLost, readingEnded: readingEnded)
         try refuseSIGPIPE(fileDescriptor)
         try neverBlock(fileDescriptor)
         link.start()
@@ -213,7 +213,7 @@ public final class DaemonConnection: Sendable {
 /// ends its wait by its own deadline.
 private final class Link: @unchecked Sendable {
     private let socket: Int32
-    private let timeline: Timeline
+    private let clock: Clock
     private let heartbeatInterval: Duration
     private let patience: Duration
     private let whenLost: @Sendable (DaemonError) -> Void
@@ -257,14 +257,14 @@ private final class Link: @unchecked Sendable {
     /// as the daemon's doing.
     private var hungUp = false
 
-    init(socket: Int32, timeline: Timeline, heartbeatEvery interval: Duration, patience: Duration, whenLost: @escaping @Sendable (DaemonError) -> Void, readingEnded: @escaping @Sendable () -> Void) {
+    init(socket: Int32, clock: Clock, heartbeatEvery interval: Duration, patience: Duration, whenLost: @escaping @Sendable (DaemonError) -> Void, readingEnded: @escaping @Sendable () -> Void) {
         self.socket = socket
-        self.timeline = timeline
+        self.clock = clock
         heartbeatInterval = interval
         self.patience = patience
         self.whenLost = whenLost
         self.readingEnded = readingEnded
-        lastHeard = timeline.now()
+        lastHeard = clock.now()
         heartbeatDue = lastHeard + interval
     }
 
@@ -292,7 +292,7 @@ private final class Link: @unchecked Sendable {
     func ask(_ body: [UInt8], by deadline: Deadline) throws(Unanswered) -> Instant {
         guarded.lock(); defer { guarded.unlock() }
         if let failure { throw Unanswered(reach: .unsent, cause: .connection(failure)) }
-        guard !deadline.passed else { throw Unanswered(reach: .unsent, cause: .deadline(deadline.refusal)) }
+        guard !deadline.expired else { throw Unanswered(reach: .unsent, cause: .deadline(deadline.exceeded)) }
         let id = nextRequestID
         nextRequestID += 1
         requests[id] = .waiting(.unsent)
@@ -309,7 +309,7 @@ private final class Link: @unchecked Sendable {
                 return at
             case .waiting(let reach):
                 if let failure { throw Unanswered(reach: reach, cause: .connection(failure)) }
-                if deadline.passed { throw Unanswered(reach: reach, cause: .deadline(deadline.refusal)) }
+                if deadline.expired { throw Unanswered(reach: reach, cause: .deadline(deadline.exceeded)) }
             }
             _ = deadline.wait(on: guarded)
         }
@@ -323,7 +323,7 @@ private final class Link: @unchecked Sendable {
         while true {
             if self.status[status] == true { return }
             if let failure { throw failure }
-            guard !deadline.passed else { throw .notReady(awaiting: status, said: self.status) }
+            guard !deadline.expired else { throw .notReady(awaiting: status, said: self.status) }
             _ = deadline.wait(on: guarded)
         }
     }
@@ -364,7 +364,7 @@ private final class Link: @unchecked Sendable {
         let queue = try watching(EVFILT_READ)
         while true {
             let readable = try ready(queue, by: min(heartbeatDue, lastHeard + patience))
-            if timeline.now() >= heartbeatDue {
+            if clock.now() >= heartbeatDue {
                 guarded.lock()
                 enqueue(.control(.heartbeat, payload: []))
                 guarded.unlock()
@@ -373,7 +373,7 @@ private final class Link: @unchecked Sendable {
             if readable {
                 try handle(try readFrame(queue))
             }
-            guard timeline.now() < lastHeard + patience else { throw DaemonError.silent }
+            guard clock.now() < lastHeard + patience else { throw DaemonError.silent }
         }
     }
 
@@ -401,7 +401,7 @@ private final class Link: @unchecked Sendable {
             guard !outbox.isEmpty else { guarded.wait(); continue }
             let next = outbox.removeFirst()
             guard let request = next.request else { return next }
-            guard requests[request.id] == .waiting(.unsent), !request.deadline.passed else { continue }
+            guard requests[request.id] == .waiting(.unsent), !request.deadline.expired else { continue }
             requests[request.id] = .waiting(.writing)
             return next
         }
@@ -424,7 +424,7 @@ private final class Link: @unchecked Sendable {
         case .response(let id, let payload):
             try record(payload)
             // Only a request still waited on: an answer to a forgotten one records nothing.
-            if requests[id] != nil { requests[id] = .answered(timeline.now()) }
+            if requests[id] != nil { requests[id] = .answered(clock.now()) }
         }
         guarded.broadcast()
     }
@@ -507,7 +507,7 @@ private final class Link: @unchecked Sendable {
     private func write(_ bytes: [UInt8], on queue: EventQueue) throws(DaemonError) {
         var offset = 0
         while offset < bytes.count {
-            guard try ready(queue, by: timeline.now() + patience) else { throw DaemonError.silent }
+            guard try ready(queue, by: clock.now() + patience) else { throw DaemonError.silent }
             let written = uninterrupted { bytes[offset...].withUnsafeBytes { Darwin.write(socket, $0.baseAddress, $0.count) } }
             // Room reported and gone again before the call: back to waiting for it.
             if written < 0, errno == EAGAIN { continue }
@@ -527,7 +527,7 @@ private final class Link: @unchecked Sendable {
             if got < 0, errno == EAGAIN { continue }
             guard got > 0 else { throw got == 0 ? DaemonError.closed : DaemonError.socket("read", errno) }
             offset += got
-            lastHeard = timeline.now()
+            lastHeard = clock.now()
         }
         return bytes
     }
@@ -549,7 +549,7 @@ private final class Link: @unchecked Sendable {
     /// have one reading, and a test that moves its clock wakes it. [LAW:single-enforcer]
     private func ready(_ queue: EventQueue, by instant: Instant) throws(DaemonError) -> Bool {
         do {
-            return try !queue.events(by: .at(instant, on: timeline), atMost: 1).isEmpty
+            return try !queue.events(by: .at(instant, on: clock), atMost: 1).isEmpty
         } catch {
             throw .socket(error.call, error.code)
         }

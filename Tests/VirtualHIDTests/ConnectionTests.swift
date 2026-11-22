@@ -16,13 +16,13 @@ import Time
 /// never for how slowly the Mac ran the test.
 @Suite(.ownThread) struct ConnectionTests {
     /// A deadline nothing in the test reaches, on a clock nothing moves.
-    static func unhurried(_ clock: ManualClock) -> Deadline { .within(.seconds(2), on: clock.timeline) }
+    static func unhurried(_ clock: ManualClock) -> Deadline { .within(.seconds(2), on: Clock(clock)) }
 
     /// A heartbeat goes out on its own, with nobody asking anything, once its interval has
     /// passed. [LAW:behavior-not-structure]
     @Test func aHeartbeatGoesOutWhileNothingIsBeingAsked() throws {
         let fake = FakeDaemon(), clock = ManualClock()
-        let connection = try DaemonConnection(fileDescriptor: fake.clientDescriptor, timeline: clock.timeline, heartbeatEvery: .milliseconds(20))
+        let connection = try DaemonConnection(fileDescriptor: fake.clientDescriptor, clock: Clock(clock), heartbeatEvery: .milliseconds(20))
         clock.advance(by: .milliseconds(20))
         #expect(fake.awaitFrame(.control(.heartbeat, payload: [])))
         withExtendedLifetime(connection) {}
@@ -32,7 +32,7 @@ import Time
     /// reading does not wait for a request to happen inside of.
     @Test func aStatusPushedBetweenRequestsIsRecordedAndAnswered() throws {
         let fake = FakeDaemon(), clock = ManualClock()
-        let connection = try DaemonConnection(fileDescriptor: fake.clientDescriptor, timeline: clock.timeline)
+        let connection = try DaemonConnection(fileDescriptor: fake.clientDescriptor, clock: Clock(clock))
         let id = try fake.push([(.keyboardReady, true)])
         #expect(throws: Never.self) { try connection.wait(for: .keyboardReady, by: Self.unhurried(clock)) }
         #expect(fake.awaitFrame(.response(id: id, payload: [])))
@@ -44,7 +44,7 @@ import Time
     @Test func theDaemonHangingUpIsToldOnceAndRefusesEveryLaterRequestUnsent() throws {
         let fake = FakeDaemon(), clock = ManualClock()
         let lost = Lost()
-        let device = VirtualKeyboard(daemon: try DaemonConnection(fileDescriptor: fake.clientDescriptor, timeline: clock.timeline, whenLost: lost.record))
+        let device = VirtualKeyboard(daemon: try DaemonConnection(fileDescriptor: fake.clientDescriptor, clock: Clock(clock), whenLost: lost.record))
         fake.hangUp()
         #expect(lost.await() == .closed)
         let refused = Unanswered(reach: .unsent, cause: .connection(.closed))
@@ -66,7 +66,7 @@ import Time
     @Test func aWriteThatFailsIsTheLossToldOnceAndThrownFromTheRequestBeingWritten() throws {
         let fake = FakeDaemon(), clock = ManualClock()
         let lost = Lost()
-        let connection = try DaemonConnection(fileDescriptor: fake.clientDescriptor, timeline: clock.timeline, whenLost: lost.record)
+        let connection = try DaemonConnection(fileDescriptor: fake.clientDescriptor, clock: Clock(clock), whenLost: lost.record)
         #expect(shutdown(fake.clientDescriptor, SHUT_WR) == 0)
         let failed = DaemonError.socket("write", EPIPE)
         #expect(throws: Unanswered(reach: .writing, cause: .connection(failed))) { try connection.request(.keyboardInitialize, by: Self.unhurried(clock)) }
@@ -81,7 +81,7 @@ import Time
     @Test func aDaemonThatSaysNothingForThePatienceIsLost() throws {
         let fake = FakeDaemon(), clock = ManualClock()
         let lost = Lost()
-        let connection = try DaemonConnection(fileDescriptor: fake.clientDescriptor, timeline: clock.timeline, patience: .milliseconds(100), whenLost: lost.record)
+        let connection = try DaemonConnection(fileDescriptor: fake.clientDescriptor, clock: Clock(clock), patience: .milliseconds(100), whenLost: lost.record)
         clock.advance(by: .milliseconds(100))
         #expect(lost.await() == .silent)
         withExtendedLifetime(connection) {}
@@ -93,7 +93,7 @@ import Time
         let fake = FakeDaemon(), clock = ManualClock()
         let lost = Lost()
         let began = clock.now
-        let connection = try DaemonConnection(fileDescriptor: fake.clientDescriptor, timeline: clock.timeline, heartbeatEvery: .seconds(60), patience: .milliseconds(100), whenLost: lost.record)
+        let connection = try DaemonConnection(fileDescriptor: fake.clientDescriptor, clock: Clock(clock), heartbeatEvery: .seconds(60), patience: .milliseconds(100), whenLost: lost.record)
         clock.advance(by: .milliseconds(50))
         try fake.sendRaw([0, 0])
         // The wait for the rest is a patience after the bytes came, and moves with each
@@ -117,7 +117,7 @@ import Time
             }
         }
         let clock = ManualClock(), lost = Lost()
-        let connection = try DaemonConnection(fileDescriptor: fake.clientDescriptor, timeline: clock.timeline, whenLost: lost.record)
+        let connection = try DaemonConnection(fileDescriptor: fake.clientDescriptor, clock: Clock(clock), whenLost: lost.record)
         let failed = try #require(#expect(throws: Unanswered.self) { try connection.request(.keyboardInitialize, by: Self.unhurried(clock)) })
         #expect(failed.cause == .connection(.driverVersionMismatched))
         #expect(failed.mayHaveReachedTheDriver)
@@ -134,7 +134,7 @@ import Time
     @Test func theDriverGoingAwayUnderAnOpenConnectionIsTheLossAndNoReportIsSentAfterIt() throws {
         let fake = FakeDaemon(), clock = ManualClock()
         let lost = Lost()
-        let daemon = try DaemonConnection(fileDescriptor: fake.clientDescriptor, timeline: clock.timeline, whenLost: lost.record)
+        let daemon = try DaemonConnection(fileDescriptor: fake.clientDescriptor, clock: Clock(clock), whenLost: lost.record)
         let keyboard = VirtualKeyboard(daemon: daemon)
         let mouse = VirtualPointing(daemon: daemon)
         try fake.push(Self.said(connected: true, keyboard: true, pointing: true))
@@ -158,7 +158,7 @@ import Time
     @Test func theDriverComingBackDoesNotReviveTheConnectionThatLostIt() throws {
         let fake = FakeDaemon(), clock = ManualClock()
         let lost = Lost()
-        let keyboard = VirtualKeyboard(daemon: try DaemonConnection(fileDescriptor: fake.clientDescriptor, timeline: clock.timeline, whenLost: lost.record))
+        let keyboard = VirtualKeyboard(daemon: try DaemonConnection(fileDescriptor: fake.clientDescriptor, clock: Clock(clock), whenLost: lost.record))
         try fake.push(Self.said(connected: true, keyboard: true, pointing: true))
         try keyboard.start(by: Self.unhurried(clock))
         try fake.push(Self.said(connected: true, keyboard: false, pointing: true))
@@ -175,7 +175,7 @@ import Time
     @Test func aLossThisSideDeclaresEndsTheStreamForTheDaemon() throws {
         let fake = FakeDaemon(), clock = ManualClock()
         let lost = Lost()
-        let daemon = try DaemonConnection(fileDescriptor: fake.clientDescriptor, timeline: clock.timeline, whenLost: lost.record)
+        let daemon = try DaemonConnection(fileDescriptor: fake.clientDescriptor, clock: Clock(clock), whenLost: lost.record)
         try fake.push(Self.said(connected: true, keyboard: true, pointing: true))
         try daemon.wait(for: .pointingReady, by: Self.unhurried(clock))
         try fake.push(Self.said(connected: true, keyboard: false, pointing: true))
@@ -202,7 +202,7 @@ import Time
             try frames.forEach { try daemon.push($0) }
         }
         let clock = ManualClock(), lost = Lost()
-        let daemon = try DaemonConnection(fileDescriptor: fake.clientDescriptor, timeline: clock.timeline, whenLost: lost.record)
+        let daemon = try DaemonConnection(fileDescriptor: fake.clientDescriptor, clock: Clock(clock), whenLost: lost.record)
         let keyboard = VirtualKeyboard(daemon: daemon)
         let mouse = VirtualPointing(daemon: daemon)
         try keyboard.start(by: Self.unhurried(clock))
@@ -225,7 +225,7 @@ import Time
             try daemon.send(.response(id: id, payload: []))
         }
         let clock = ManualClock()
-        let connection = try DaemonConnection(fileDescriptor: fake.clientDescriptor, timeline: clock.timeline)
+        let connection = try DaemonConnection(fileDescriptor: fake.clientDescriptor, clock: Clock(clock))
         #expect(try givenUpOn(fake, clock, atRequest: 1) { try connection.request(.keyboardInitialize, by: $0) } == silent())
         let forgotten = try #require(fake.received.compactMap { if case .request(let id, _) = $0 { id } else { nil } }.first)
         try fake.send(.response(id: forgotten, payload: []))
@@ -235,10 +235,10 @@ import Time
     /// A request whose deadline had passed when it was asked writes nothing.
     @Test func aRequestAskedAfterItsDeadlineWritesNothing() throws {
         let fake = FakeDaemon(), clock = ManualClock()
-        let connection = try DaemonConnection(fileDescriptor: fake.clientDescriptor, timeline: clock.timeline)
-        let late = Deadline.within(.seconds(1), on: clock.timeline)
+        let connection = try DaemonConnection(fileDescriptor: fake.clientDescriptor, clock: Clock(clock))
+        let late = Deadline.within(.seconds(1), on: Clock(clock))
         clock.advance(by: .seconds(1))
-        #expect(throws: Unanswered(reach: .unsent, cause: .deadline(Deadline.Passed(limit: .seconds(1), spent: .seconds(1))))) { try connection.request(.keyboardReset, by: late) }
+        #expect(throws: Unanswered(reach: .unsent, cause: .deadline(Deadline.Exceeded(limit: .seconds(1), spent: .seconds(1))))) { try connection.request(.keyboardReset, by: late) }
         try fake.settle()
         #expect(fake.requestPayloads.isEmpty)
     }
@@ -261,14 +261,14 @@ import Time
         defer { stopped.open() }
         try fake.limitSendSpace(to: 8192)
         let clock = ManualClock(), lost = Lost()
-        let connection = try DaemonConnection(fileDescriptor: fake.clientDescriptor, timeline: clock.timeline, heartbeatEvery: .seconds(60), patience: .seconds(1), whenLost: lost.record)
-        let first = Pending { try connection.request(.keyboardInitialize, by: .within(.seconds(10), on: clock.timeline)) }
+        let connection = try DaemonConnection(fileDescriptor: fake.clientDescriptor, clock: Clock(clock), heartbeatEvery: .seconds(60), patience: .seconds(1), whenLost: lost.record)
+        let first = Future { try connection.request(.keyboardInitialize, by: .within(.seconds(10), on: Clock(clock))) }
         stopped.arrived.wait("the fake to read the first request and stop")
         clock.awaitBlocked(2)
 
         let largest = [UInt8](repeating: 0, count: Frame.largestBody - 12)
-        func asking() -> Pending<Instant> {
-            Pending { try connection.request(.postKeyboardInputReport, largest, by: .within(.milliseconds(50), on: clock.timeline)) }
+        func asking() -> Future<Instant> {
+            Future { try connection.request(.postKeyboardInputReport, largest, by: .within(.milliseconds(50), on: Clock(clock))) }
         }
         let fits = asking()
         clock.awaitBlocked(3)
@@ -279,10 +279,10 @@ import Time
         clock.awaitBlocked(6)
 
         clock.advance(by: .milliseconds(50))
-        let passed = Deadline.Passed(limit: .milliseconds(50), spent: .milliseconds(50))
-        #expect(throws: Unanswered(reach: .written, cause: .deadline(passed))) { try fits.get() }
-        #expect(throws: Unanswered(reach: .writing, cause: .deadline(passed))) { try stalls.get() }
-        #expect(throws: Unanswered(reach: .unsent, cause: .deadline(passed))) { try behind.get() }
+        let exceeded = Deadline.Exceeded(limit: .milliseconds(50), spent: .milliseconds(50))
+        #expect(throws: Unanswered(reach: .written, cause: .deadline(exceeded))) { try fits.get() }
+        #expect(throws: Unanswered(reach: .writing, cause: .deadline(exceeded))) { try stalls.get() }
+        #expect(throws: Unanswered(reach: .unsent, cause: .deadline(exceeded))) { try behind.get() }
         #expect(lost.count == 0)
 
         clock.advance(by: .seconds(1))
@@ -298,7 +298,7 @@ import Time
         let fake = FakeDaemon(), clock = ManualClock()
         let lost = Lost(), ended = Latch()
         do {
-            let connection = try DaemonConnection(fileDescriptor: fake.clientDescriptor, timeline: clock.timeline, whenLost: lost.record, readingEnded: ended.open)
+            let connection = try DaemonConnection(fileDescriptor: fake.clientDescriptor, clock: Clock(clock), whenLost: lost.record, readingEnded: ended.open)
             withExtendedLifetime(connection) {}
         }
         try #require(ended.wait("the reading thread to end"))
@@ -308,7 +308,7 @@ import Time
 
 /// What `whenLost` was told, readable from the test's thread.
 private final class Lost: Sendable {
-    private let errors = Watched<[DaemonError]>([])
+    private let errors = Monitor<[DaemonError]>([])
 
     @Sendable func record(_ error: DaemonError) {
         errors.withLock { $0.append(error) }

@@ -4,6 +4,7 @@ import ScreenSpace
 import ScreenSpaceTesting
 import TestClock
 import Testing
+import Time
 @testable import vhidd
 
 /// The screen is read by a child in the session in front, and a session that comes to the
@@ -219,7 +220,7 @@ import Testing
     /// The seat answers the read without taking the devices, and while they are down.
     @Test func aSeatReadsTheCursorWithoutTheDevices() {
         let holder = Holder()
-        let seat = Seat(ObjectIdentifier(NSObject()), pid: 41, holder: holder, readiness: Readiness(driver: { .running }), screen: FixedScreen(at: (7, 9)), timeline: ManualClock().timeline)
+        let seat = Seat(ObjectIdentifier(NSObject()), pid: 41, holder: holder, readiness: Readiness(driver: { .running }), screen: FixedScreen(at: (7, 9)), clock: Clock(ManualClock()))
         var answer: (Double, Double, Error?)?
         seat.cursor { answer = ($0, $1, $2) }
         #expect(answer?.0 == 7 && answer?.1 == 9 && answer?.2 == nil)
@@ -230,7 +231,7 @@ import Testing
     @Test func aSeatReadsTheLayoutWithoutTheDevices() {
         let holder = Holder()
         let layout = DisplayLayout.at([.at(0, 0, 1920, 1080), .at(-1280, 0, 1280, 800)], asleep: [1])
-        let seat = Seat(ObjectIdentifier(NSObject()), pid: 41, holder: holder, readiness: Readiness(driver: { .running }), screen: FixedScreen(displays: layout), timeline: ManualClock().timeline)
+        let seat = Seat(ObjectIdentifier(NSObject()), pid: 41, holder: holder, readiness: Readiness(driver: { .running }), screen: FixedScreen(displays: layout), clock: Clock(ManualClock()))
         var answer: ([NSNumber], Error?)?
         seat.layout { answer = ($0, $1) }
         #expect(answer?.0.map(\.doubleValue) == layout.record && answer?.1 == nil)

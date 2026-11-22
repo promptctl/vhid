@@ -175,7 +175,7 @@ import VirtualHID
     @Test func aDriverReadThatNeverReturnsStillAnswersTheRefusedClient() throws {
         let clock = ManualClock(), running = try Fifo(), ended = Latch()
         let readiness = Readiness(driver: {
-            _ = try Command("/bin/sh", "-c", "echo > \(running.path); exec sleep 600").run(by: .within(.milliseconds(200), on: clock.timeline), or: .never)
+            _ = try Command("/bin/sh", "-c", "echo > \(running.path); exec sleep 600").run(by: .within(.milliseconds(200), on: Clock(clock)), or: .never)
             return .running
         })
         _ = readiness.begin()

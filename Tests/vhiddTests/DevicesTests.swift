@@ -95,12 +95,12 @@ import Time
 
     private func devices(_ keyboard: RecordingKeyboard = RecordingKeyboard(), _ mouse: RecordingMouse = RecordingMouse()) -> (Devices, ManualClock) {
         let clock = ManualClock()
-        return (Devices(keyboard: keyboard, mouse: mouse, timeline: clock.timeline, limit: .seconds(2)), clock)
+        return (Devices(keyboard: keyboard, mouse: mouse, clock: Clock(clock), limit: .seconds(2)), clock)
     }
 
     /// A command with no seat to acquire the devices, by a deadline five seconds off.
     private func perform(_ command: DeviceCommand, on devices: Devices, _ clock: ManualClock) throws {
-        try devices.perform(command, by: .within(.seconds(5), on: clock.timeline)) {}
+        try devices.perform(command, by: .within(.seconds(5), on: Clock(clock))) {}
     }
 
     /// What the device can carry reaches it as asked.
@@ -129,13 +129,13 @@ import Time
         let gate = Gate()
         let keyboard = RecordingKeyboard(gate: gate)
         let (devices, clock) = devices(keyboard)
-        let ahead = Pending { try devices.perform(.down(.a), by: .within(.seconds(5), on: clock.timeline)) {} }
+        let ahead = Future { try devices.perform(.down(.a), by: .within(.seconds(5), on: Clock(clock))) {} }
         try #require(gate.arrived.wait("the first request to hold the lock"))
         let acquired = Mutex(false)
-        let late = Pending { try devices.perform(.down(.b), by: .within(.seconds(1), on: clock.timeline)) { acquired.withLock { $0 = true } } }
+        let late = Future { try devices.perform(.down(.b), by: .within(.seconds(1), on: Clock(clock))) { acquired.withLock { $0 = true } } }
         clock.awaitBlocked(1)
         clock.advance(by: .seconds(1))
-        #expect(throws: Deadline.Passed.self) { try late.get() }
+        #expect(throws: Deadline.Exceeded.self) { try late.get() }
         gate.open()
         try ahead.get()
         #expect(!acquired.withLock { $0 })
@@ -147,22 +147,22 @@ import Time
     @Test func aCommandTheSeatRefusesSendsNothing() {
         let keyboard = RecordingKeyboard()
         let (devices, clock) = devices(keyboard)
-        #expect(throws: Holder.Busy.self) { try devices.perform(.down(.a), by: .within(.seconds(5), on: clock.timeline)) { throw Holder.Busy(pid: 41) } }
+        #expect(throws: Holder.Busy.self) { try devices.perform(.down(.a), by: .within(.seconds(5), on: Clock(clock))) { throw Holder.Busy(pid: 41) } }
         #expect(keyboard.log.isEmpty)
     }
 
     /// A release lets go of both devices, the mouse whatever the keyboard said, and says
-    /// which would not; until a release lands the devices read as left held.
+    /// which would not; until a release lands the devices read as stuck.
     @Test func aReleaseReleasesBothDevicesWhateverTheKeyboardAnswers() {
         let (keyboard, mouse) = (RecordingKeyboard(refusesRelease: true), RecordingMouse())
         let (devices, _) = devices(keyboard, mouse)
         #expect(devices.releaseEverything(because: "the client went away") == Released(keyboard: "\(Refused())", mouse: nil))
         #expect(keyboard.log == ["up"])
         #expect(mouse.log == ["up"])
-        #expect(devices.leftHeld)
+        #expect(devices.isStuck)
         keyboard.refusesRelease.withLock { $0 = false }
         #expect(devices.releaseEverything(because: "vhidd is stopping") == Released(keyboard: nil, mouse: nil))
-        #expect(!devices.leftHeld)
+        #expect(!devices.isStuck)
     }
 
     /// A release a seat no longer owes - its hold freed by a lost bring-up, say - releases
@@ -186,10 +186,10 @@ import Time
         clock.advance(by: .milliseconds(1999))
         #expect(devices.sweep(holding: { nil }) == nil)
         clock.advance(by: .milliseconds(1))
-        if case .leftHeld = devices.sweep(holding: { 41 }) { Issue.record("re-released under a client that holds the devices") }
-        #expect(devices.leftHeld)
-        #expect(devices.sweep(holding: { nil }) == .leftHeld(Released(keyboard: nil, mouse: nil)))
-        #expect(!devices.leftHeld)
+        if case .stuck = devices.sweep(holding: { 41 }) { Issue.record("re-released under a client that holds the devices") }
+        #expect(devices.isStuck)
+        #expect(devices.sweep(holding: { nil }) == .stuck(Released(keyboard: nil, mouse: nil)))
+        #expect(!devices.isStuck)
     }
 
     /// A key left down with no keyboard report after it is released once the limit passes,
@@ -295,7 +295,7 @@ import Time
         // Kept alive, so the two identifiers cannot share a freed address.
         let (first, second) = (NSObject(), NSObject())
         let attempt = try readiness.devices().attempt
-        try devices.perform(.down(.a), by: .within(.seconds(5), on: clock.timeline)) { try holder.acquire(for: ObjectIdentifier(first), by: 4242, on: attempt) }
+        try devices.perform(.down(.a), by: .within(.seconds(5), on: Clock(clock))) { try holder.acquire(for: ObjectIdentifier(first), by: 4242, on: attempt) }
         clock.advance(by: .seconds(3))
         #expect(sweep(readiness, holder) == "pid 4242 held 0x04 past 2.0 seconds with no report; released")
         #expect(holder.pid(on: attempt) == 4242)
@@ -309,8 +309,8 @@ import Time
         let (keyboard, mouse) = (RecordingKeyboard(), RecordingMouse())
         let (devices, clock) = devices(keyboard, mouse)
         let client = NSObject()
-        let seat = Seat(ObjectIdentifier(client), pid: 41, holder: Holder(), readiness: .serving(devices), screen: FixedScreen(), timeline: clock.timeline)
-        let by = Deadline.within(.seconds(5), on: clock.timeline).at.nanoseconds
+        let seat = Seat(ObjectIdentifier(client), pid: 41, holder: Holder(), readiness: .serving(devices), screen: FixedScreen(), clock: Clock(clock))
+        let by = Deadline.within(.seconds(5), on: Clock(clock)).at.nanoseconds
         seat.hold(usages: [0xE1, 0x04], by: by) { #expect($0 == nil) }
         seat.holdButtons(1, by: by) { #expect($0 == nil) }
         #expect(seat.end(because: "a client went away") == Released(keyboard: nil, mouse: nil))

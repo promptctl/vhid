@@ -22,8 +22,8 @@ import Time
 ///
 /// [LAW:nothing-unseen] A cancelled reading's record names the commands the cancel
 /// ended: what a person who pressed Control-C was waiting on.
-public func reading<T: Sendable>(within limit: Duration, on timeline: Timeline, _ read: @escaping @Sendable (Deadline, Command.Stop) -> T) async throws(CancellationError) -> T {
-    try await reading(by: .within(limit, on: timeline), on: DispatchQueue(label: "ChildProcess.reading"), read)
+public func reading<T: Sendable>(within limit: Duration, on clock: Clock, _ read: @escaping @Sendable (Deadline, Command.Stop) -> T) async throws(CancellationError) -> T {
+    try await reading(by: .within(limit, on: clock), on: DispatchQueue(label: "ChildProcess.reading"), read)
 }
 
 /// The reading by a deadline already made, on `queue`, which a test holds to show the wait

@@ -1,7 +1,7 @@
 import Foundation
 
 /// A kqueue whose every wait is one blocking wait toward a deadline, ended by what it
-/// watches, by a trigger of the waiter's own, or by a move of the timeline.
+/// watches, by a trigger of the waiter's own, or by a move of the clock.
 ///
 /// [LAW:one-type-per-behavior] Every thread in vhid that waits on descriptors - a command's
 /// streams and exit, the daemon link's socket - waits this one way, so a test that moves
@@ -9,14 +9,14 @@ import Foundation
 public final class EventQueue: Sendable {
     private let descriptor: Int32
 
-    /// The user event a move of the timeline triggers, which a wait takes as a reason to
+    /// The user event a move of the clock triggers, which a wait takes as a reason to
     /// look at its deadline again and never hands back as an event.
-    private static let timelineMoved: UInt = .max
+    private static let clockMoved: UInt = .max
 
     public init() throws(Failed) {
         descriptor = kqueue()
         guard descriptor >= 0 else { throw Failed(call: "kqueue", code: errno) }
-        do { try watch(Self.timelineMoved, EVFILT_USER, EV_ADD | EV_CLEAR) } catch { close(descriptor); throw error }
+        do { try watch(Self.clockMoved, EVFILT_USER, EV_ADD | EV_CLEAR) } catch { close(descriptor); throw error }
     }
 
     deinit { close(descriptor) }
@@ -40,7 +40,7 @@ public final class EventQueue: Sendable {
     public func events(by deadline: Deadline, atMost count: Int) throws(Failed) -> [kevent] {
         var events = Array(repeating: kevent(), count: count + 1)
         while true {
-            let passed = deadline.passed
+            let expired = deadline.expired
             var ready: Int32 = 0
             var failure: Int32 = 0
             func look(_ span: Duration) {
@@ -48,18 +48,18 @@ public final class EventQueue: Sendable {
                 ready = kevent(descriptor, nil, 0, &events, Int32(events.count), &patience)
                 failure = errno
             }
-            if passed {
+            if expired {
                 look(.zero)
             } else {
-                deadline.block(waking: { [self] in trigger(Self.timelineMoved) }) { span in
+                deadline.block(waking: { [self] in trigger(Self.clockMoved) }) { span in
                     look(span)
                     return ready != 0
                 }
             }
             if ready < 0, failure == EINTR { continue }
             guard ready >= 0 else { throw Failed(call: "kevent", code: failure) }
-            let heard = events.prefix(Int(ready)).filter { !($0.filter == Int16(EVFILT_USER) && $0.ident == Self.timelineMoved) }
-            if !heard.isEmpty || passed { return Array(heard) }
+            let heard = events.prefix(Int(ready)).filter { !($0.filter == Int16(EVFILT_USER) && $0.ident == Self.clockMoved) }
+            if !heard.isEmpty || expired { return Array(heard) }
         }
     }
 

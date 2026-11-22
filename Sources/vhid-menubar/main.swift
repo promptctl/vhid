@@ -21,7 +21,7 @@ import MenuBar
 let installation = Installation.thisBuild
 
 /// The one clock this process measures and waits on. [LAW:one-source-of-truth]
-let timeline = Timeline.suspending
+let clock = Clock.suspending
 
 /// How often the menu is read again. Often enough that stopping the daemon shows within a
 /// breath; each reading is doctor's - two short subprocesses and a status call - and the
@@ -34,7 +34,7 @@ final class Item: NSObject {
     /// One menu for the item's life, its items replaced on each reading, so a reading that
     /// lands while it is open updates it rather than swapping it out from under a click.
     private let menu = NSMenu()
-    private let setUp = SetUpWindow(installation: installation, timeline: timeline, readNow: readNow)
+    private let setUp = SetUpWindow(installation: installation, clock: clock, readNow: readNow)
 
     /// Shown from launch until the first reading lands, which a silent daemon delays by
     /// doctor's whole deadline: an item with no image has no width and is not there at all.
@@ -110,13 +110,13 @@ final class Item: NSObject {
 /// failure. In that order, because doctor's status call may be what starts the daemon.
 /// The failure's deadline is short: a daemon that just answered doctor answers at once,
 /// and one that did not has already cost doctor's full deadline. [LAW:effects-at-boundaries]
-func read(_ installation: Installation, on timeline: Timeline) -> (Glance, Readiness) {
+func read(_ installation: Installation, on clock: Clock) -> (Glance, Readiness) {
     // [LAW:no-ambient-temporal-coupling] One deadline for the whole reading, made as it is
     // asked, so the menu is drawn within the limit however long the reading waited to start.
-    let deadline = Deadline.within(Command.limit, on: timeline)
+    let deadline = Deadline.within(Command.limit, on: clock)
     // Nobody stops a menu's reading: it is read to its end, and the next one waits for it.
     let readiness = Readiness.read(for: installation, by: deadline, or: .never)
-    let lastFailure = Result { try HelperConnection(installation: installation, timeline: timeline, replyTimeout: .seconds(1)).lastFailure(by: deadline) }
+    let lastFailure = Result { try HelperConnection(installation: installation, clock: clock, replyTimeout: .seconds(1)).lastFailure(by: deadline) }
     return (Glance(installation: installation, readiness: readiness, lastFailure: lastFailure, readAt: Date()), readiness)
 }
 
@@ -135,7 +135,7 @@ let item = Item()
 /// `@Sendable`: written here, in top-level code, it would otherwise be the main actor's,
 /// and run on this queue it traps.
 let readAndShow: @Sendable () -> Void = { [installation, item] in
-    let (glance, readiness) = read(installation, on: timeline)
+    let (glance, readiness) = read(installation, on: clock)
     DispatchQueue.main.async { MainActor.assumeIsolated { item.show(glance, readiness) } }
 }
 

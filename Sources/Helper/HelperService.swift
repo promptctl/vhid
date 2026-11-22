@@ -104,13 +104,13 @@ import Foundation
 /// daemon while another client holds the devices, and takes nothing from it. A second
 /// client's first command is what is refused as busy. [LAW:single-enforcer]
 @objc public protocol HelperService: DeviceService {
-    /// Releases every key and button this client left held, and frees the devices for the
+    /// Releases every key and button this client held down, and frees the devices for the
     /// next client. Every device command after it on this connection is refused. Answered with
-    /// the release's failure when it had one: the devices are then left held, and vhidd
+    /// the release's failure when it had one: keys or buttons are then stuck, and vhidd
     /// releases them again on its own while nobody holds them.
     func leave(reply: @escaping (Error?) -> Void)
 
-    /// Who holds the devices: a pid, or nil and whether a client that went left them held
+    /// Who holds the devices: a pid, or nil and whether keys or buttons a client left are stuck
     /// - a release that failed, which vhidd is still making. Acquires nothing and sends no
     /// report, so asking it is never a command to the devices.
     ///
@@ -172,7 +172,7 @@ public enum Holding: Sendable, Hashable {
     case client(pid: Int32)
     /// Nobody holds them, and a client that went left keys or buttons down that its
     /// release could not lift; vhidd is releasing them again.
-    case leftHeld
+    case stuck
 
     /// The pid of the client holding them, if one does.
     public var pid: Int32? {

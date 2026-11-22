@@ -26,12 +26,12 @@ public struct PixelReader: Reader {
     /// has and this package links nothing to ask, handed in by whoever built both.
     private let hit: @MainActor @Sendable (ScreenPoint) -> Heard<Int32>
     /// What the capture is timed on.
-    private let timeline: Timeline
+    private let clock: Clock
 
-    public init(granted: @escaping Gate, hit: @escaping @MainActor @Sendable (ScreenPoint) -> Heard<Int32>, timeline: Timeline) {
+    public init(granted: @escaping Gate, hit: @escaping @MainActor @Sendable (ScreenPoint) -> Heard<Int32>, clock: Clock) {
         self.granted = granted
         self.hit = hit
-        self.timeline = timeline
+        self.clock = clock
     }
 
     /// A recognised run's box is where its text is drawn, and nothing this reader can ask
@@ -50,7 +50,7 @@ public struct PixelReader: Reader {
         let region = try Self.resolve(query.region, on: layout)
         let listing = try Geometry.onScreen()
         let owners = query.region.owners(in: listing, hit: hit)
-        let image = try await Self.capture(region, on: timeline)
+        let image = try await Self.capture(region, on: clock)
         // Every run is examined, and one with no words in it, a box Vision gave that is no
         // box, or words no display shows is counted by why.
         // One piece after another, never at once: measured, recognising the pieces in a
@@ -194,14 +194,14 @@ public struct PixelReader: Reader {
     /// Run as every command is, to `Command.limit` or until the look is withdrawn, and over
     /// either way only once the child is collected: the file is removed after nothing can
     /// still be writing it. [LAW:single-enforcer] [LAW:no-ambient-temporal-coupling]
-    nonisolated static func capture(_ region: ScreenRect, on timeline: Timeline) async throws -> CGImage {
+    nonisolated static func capture(_ region: ScreenRect, on clock: Clock) async throws -> CGImage {
         let path = FileManager.default.temporaryDirectory
             .appendingPathComponent("eyes-\(UUID().uuidString).png")
         defer { try? FileManager.default.removeItem(at: path) }
 
         let r = region.cgRect
         let command = Command("/usr/sbin/screencapture", ["-x", "-t", "png", "-R\(Int(r.minX)),\(Int(r.minY)),\(Int(r.width)),\(Int(r.height))", path.path])
-        let output = try await reading(within: Command.limit, on: timeline) { deadline, stop in Result { try command.run(by: deadline, or: stop) } }.get()
+        let output = try await reading(within: Command.limit, on: clock) { deadline, stop in Result { try command.run(by: deadline, or: stop) } }.get()
 
         guard let source = CGImageSourceCreateWithURL(path as CFURL, nil),
               // Decoded now, not on first use: the image is lazy by default, and the file

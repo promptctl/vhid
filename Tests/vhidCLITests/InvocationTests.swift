@@ -33,13 +33,13 @@ import InputTesting
         listener.delegate = service
         listener.resume()
         defer { listener.invalidate() }
-        let helper = HelperConnection(connection: NSXPCConnection(listenerEndpoint: listener.endpoint), service: UnreachableTests.far, timeline: ManualClock().timeline, replyTimeout: .seconds(5))
+        let helper = HelperConnection(connection: NSXPCConnection(listenerEndpoint: listener.endpoint), service: UnreachableTests.far, clock: Clock(ManualClock()), replyTimeout: .seconds(5))
         return try await Devices.using(helper, body)
     }
 
     private static func scroll(vertical: Int, horizontal: Int, clock: ManualClock = ManualClock(), on devices: Devices) async throws -> String {
         try await ScrollCommand.scroll(at: .point(at), vertical: vertical, horizontal: horizontal, holding: .none,
-                                       with: Pointer(mouse: devices.mouse, cursor: { at }, timeline: clock.timeline, randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: devices.trail.traced), devices.keyboard)
+                                       with: Pointer(mouse: devices.mouse, cursor: { at }, clock: Clock(clock), randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: devices.trail.traced), devices.keyboard)
     }
 
     private static func only(_ collected: Collected) throws -> [String: Any] {
@@ -124,7 +124,7 @@ import InputTesting
         _ = try await Self.mcp("type", into: collected) {
             try await Self.against { devices in
                 try await TypeCommand.type("Ab", on: VerbTests.us, into: .anywhere,
-                                           with: Typist(keyboard: devices.keyboard, timeline: ManualClock().timeline, randomness: RandomSource(seed: 1), traced: devices.trail.typed),
+                                           with: Typist(keyboard: devices.keyboard, clock: Clock(ManualClock()), randomness: RandomSource(seed: 1), traced: devices.trail.typed),
                                            front: { nil })
             }
         }
@@ -148,7 +148,7 @@ import InputTesting
         _ = try await Self.mcp("type", into: collected) {
             try await Self.against { devices in
                 try await TypeCommand.type(text, on: VerbTests.us, into: .anywhere,
-                                           with: Typist(keyboard: devices.keyboard, timeline: ManualClock().timeline, randomness: RandomSource(seed: 1), traced: devices.trail.typed),
+                                           with: Typist(keyboard: devices.keyboard, clock: Clock(ManualClock()), randomness: RandomSource(seed: 1), traced: devices.trail.typed),
                                            front: { nil })
             }
         }
@@ -544,12 +544,12 @@ import InputTesting
     /// The command's limit is on a test clock nothing moves, so a verb that ends at all was
     /// ended by the cancel; the child says it is running through a `Fifo`.
     @Test(.ownThread) func aReadingCancelledMidCommandIsRecordedAsCancelledAndLeavesNoChild() async throws {
-        let running = try Fifo(), timeline = ManualClock().timeline
+        let running = try Fifo(), clock = Clock(ManualClock())
         let collected = Collected()
         let begun = ContinuousClock.now
         let verb = Task {
             try await Self.cli("driver state", into: collected) {
-                try await reading(within: Command.limit, on: timeline) { deadline, stop in
+                try await reading(within: Command.limit, on: clock) { deadline, stop in
                     Result { try Command("/bin/sh", "-c", "echo $$ > \(running.path); exec sleep 600").run(by: deadline, or: stop) }
                 }
             }

@@ -5,6 +5,7 @@ import Testing
 import ScreenSpace
 import ScreenSpaceTesting
 import InputTesting
+import Time
 
 /// Where a click lands, `docs/design/human.md`: a point exactly, and a box at a point drawn
 /// inside it and clear of its edge, spread about its centre and held to the line the hand
@@ -152,7 +153,7 @@ import InputTesting
     @Test func aClickGivenABoxLandsWhereItAimedInsideTheBox() async throws {
         for seed in UInt64(0) ..< 5 {
             let mouse = CurvedMouse(at: Self.start, lateEvery: 0)
-            let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor() }, timeline: ManualClock().timeline,
+            let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor() }, clock: Clock(ManualClock()),
                                   randomness: RandomSource(seed: seed), hand: .macOSDefault, traced: { _ in })
             let click = try await pointer.click(at: .box(Self.button), button: .left, times: .single)
             let aimed = click.moved.aimed

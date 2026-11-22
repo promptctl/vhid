@@ -20,7 +20,7 @@ public struct Unanswered: Error, Equatable, CustomStringConvertible {
 
     public enum Cause: Equatable, Sendable {
         /// Its deadline passed.
-        case deadline(Deadline.Passed)
+        case deadline(Deadline.Exceeded)
         /// The connection ended.
         case connection(DaemonError)
     }
@@ -41,12 +41,12 @@ public struct Unanswered: Error, Equatable, CustomStringConvertible {
         switch (reach, cause) {
         case (.unsent, .connection(let lost)):
             "\(lost), and the request was not sent"
-        case (.unsent, .deadline(let passed)):
-            "the request was not sent: its limit of \(passed.limit) had passed while it waited in the write queue for the driver's daemon's socket"
-        case (.writing, .deadline(let passed)):
-            "the driver's daemon had not taken the whole request when its limit of \(passed.limit) passed; the rest is still going, and the driver may yet act on it"
-        case (.written, .deadline(let passed)):
-            "the driver's daemon did not answer within the limit of \(passed.limit); the driver may have acted on the request"
+        case (.unsent, .deadline(let exceeded)):
+            "the request was not sent: its limit of \(exceeded.limit) had passed while it waited in the write queue for the driver's daemon's socket"
+        case (.writing, .deadline(let exceeded)):
+            "the driver's daemon had not taken the whole request when its limit of \(exceeded.limit) passed; the rest is still going, and the driver may yet act on it"
+        case (.written, .deadline(let exceeded)):
+            "the driver's daemon did not answer within the limit of \(exceeded.limit); the driver may have acted on the request"
         case (_, .connection(let lost)):
             "\(lost) before answering; the driver may have acted on the request"
         }

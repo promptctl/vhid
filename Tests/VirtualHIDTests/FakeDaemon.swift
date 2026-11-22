@@ -19,10 +19,10 @@ final class FakeDaemon: @unchecked Sendable {
 
     private let descriptor: Int32
     /// Every frame the client has sent, and whether it has hung up: what a test waits on.
-    private let heard = Watched<(frames: [Frame], clientGone: Bool)>(([], false))
+    private let heard = Monitor<(frames: [Frame], clientGone: Bool)>(([], false))
     /// Frames go out whole: the fake's own thread answers while a test pushes from its own.
     private let sending = NSLock()
-    private let pushID = Watched<UInt64>(10_000)
+    private let pushID = Monitor<UInt64>(10_000)
 
     /// `handling` runs on the daemon's own thread for every frame the client sends, after
     /// the frame is heard. The default answers each request with an empty response, which
@@ -185,8 +185,8 @@ func requestSent(_ payload: [UInt8]) -> (version: UInt16, request: UInt8, bytes:
 /// not answer it: once the fake has `request` requests and the client has written the last
 /// of them whole, the clock is moved past the limit.
 func givenUpOn(_ fake: FakeDaemon, _ clock: ManualClock, atRequest request: Int, limit: Duration = .milliseconds(200), _ call: @escaping @Sendable (Deadline) throws -> Void) throws -> Unanswered? {
-    let deadline = Deadline.within(limit, on: clock.timeline)
-    let calling = Pending { try call(deadline) }
+    let deadline = Deadline.within(limit, on: Clock(clock))
+    let calling = Future { try call(deadline) }
     fake.awaitRequests(request)
     try fake.settle()
     clock.advance(by: limit)
@@ -200,5 +200,5 @@ func givenUpOn(_ fake: FakeDaemon, _ clock: ManualClock, atRequest request: Int,
 
 /// What a request given up on by `givenUpOn` threw, written whole and its limit passed.
 func silent(_ limit: Duration = .milliseconds(200)) -> Unanswered {
-    Unanswered(reach: .written, cause: .deadline(Deadline.Passed(limit: limit, spent: limit)))
+    Unanswered(reach: .written, cause: .deadline(Deadline.Exceeded(limit: limit, spent: limit)))
 }

@@ -18,18 +18,18 @@ extension Readiness {
 }
 
 /// Devices that record every command they perform and every release they owe, in one log a test
-/// can wait on. Every release ends as `releasing` says: done, or left held.
+/// can wait on. Every release ends as `releasing` says: done, or stuck.
 final class RecordingDevices: ServedDevices, @unchecked Sendable {
-    private let log = Watched<[String]>([])
+    private let log = Monitor<[String]>([])
     private let releasing: Released
-    private let owed = Watched(false)
+    private let stuck = Monitor(false)
 
     init(releasing: Released = Released(keyboard: nil, mouse: nil)) {
         self.releasing = releasing
     }
 
     var done: [String] { log.current }
-    var leftHeld: Bool { owed.current }
+    var isStuck: Bool { stuck.current }
 
     /// Waits until the log reads `expected`, which a release on a connection's own queue
     /// reaches only once what it frees is free.
@@ -48,7 +48,7 @@ final class RecordingDevices: ServedDevices, @unchecked Sendable {
     func release(because reason: String, when owed: () -> Bool, then after: () -> Void) -> Released? {
         log.withLock { log in
             guard owed() else { return nil }
-            self.owed.withLock { $0 = releasing.failed }
+            stuck.withLock { $0 = releasing.failed }
             after()
             log.append(reason)
             return releasing

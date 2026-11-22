@@ -72,7 +72,7 @@ public enum DaemonReading: Sendable, Hashable {
     case failed(reason: String)
     /// The reading's limit had passed before the daemon could be asked, spent by what was
     /// read before it, so it was not asked. Says nothing of the daemon. [LAW:no-silent-failure]
-    case unasked(Deadline.Passed)
+    case unasked(Deadline.Exceeded)
 
     /// Whether a daemon is known to have started, and so to have had its chance to file
     /// Keyboard Setup Assistant's answer - which it does first, before it reaches the

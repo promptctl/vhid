@@ -170,8 +170,8 @@ public struct Command: Sendable {
     /// returns or throws, not a descriptor and not a pid to collect.
     public func run(by deadline: Deadline, or stop: Stop) throws -> Output {
         if stop.pulled { throw CancellationError() }
-        guard !deadline.passed else { throw Unstarted(command: said, limit: deadline.limit, spent: deadline.spent) }
-        let started = deadline.timeline.now()
+        guard !deadline.expired else { throw Unstarted(command: said, limit: deadline.limit, spent: deadline.spent) }
+        let started = deadline.clock.now()
         // Nothing to read: a reading takes no input, and under an MCP server this process's
         // own stdin is the client's JSON-RPC stream, which a child must not take from.
         let nothing = open("/dev/null", O_RDONLY)
@@ -212,7 +212,7 @@ public struct Command: Sendable {
         case .ended(let carried):
             streams = carried
         case .overran:
-            throw Overran(command: said, ran: .milliseconds((deadline.timeline.now() - started).milliseconds), limit: deadline.limit)
+            throw Overran(command: said, ran: .milliseconds((deadline.clock.now() - started).milliseconds), limit: deadline.limit)
         case .stopped:
             throw CancellationError()
         }
@@ -271,7 +271,7 @@ public struct Command: Sendable {
         var carried: [Int32: [UInt8]] = [:]
         var buffer = [UInt8](repeating: 0, count: 65536)
         while !(exited && open.isEmpty) {
-            guard !deadline.passed else { return .overran }
+            guard !deadline.expired else { return .overran }
             let events: [kevent]
             do { events = try queue.events(by: deadline, atMost: streams.count + 2) } catch { throw unheard("could not be watched", error.code) }
             for event in events {
