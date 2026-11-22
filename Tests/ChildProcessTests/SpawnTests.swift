@@ -16,13 +16,15 @@ import Testing
     /// so it is asked of one more that nothing names: SIGUSR1, which this process has no
     /// use for, where an ignored SIGINT would take ^C from whoever is running the tests.
     ///
-    /// The signal is ignored by the whole test process while the child is started, as
-    /// SIGTERM is by vhidd for good, and put back after: the disposition is the process's,
-    /// and there is no other way to be the parent this is a promise about.
-    @Test(arguments: [SIGTERM, SIGUSR1]) func aChildOfAProcessThatIgnoresASignalIsEndedByIt(number: Int32) throws {
-        let before = signal(number, SIG_IGN)
-        defer { signal(number, before) }
-        #expect(try Self.ending(of: "kill -\(number) $$; exit 0") == .signalled(number))
+    /// The signal is ignored by the whole process while the child is started, as SIGTERM
+    /// is by vhidd for good: the disposition is the process's, and there is no other way
+    /// to be the parent this is a promise about. So in a process of its own, where no
+    /// child another test starts can inherit it.
+    @Test(arguments: [SIGTERM, SIGUSR1]) func aChildOfAProcessThatIgnoresASignalIsEndedByIt(number: Int32) async {
+        await #expect(processExitsWith: .success) { [number] () async throws in
+            signal(number, SIG_IGN)
+            #expect(try Self.ending(of: "kill -\(number) $$; exit 0") == .signalled(number))
+        }
     }
 
     /// A thread dispatch runs a queue on blocks SIGTERM, and vhidd starts children from
@@ -42,19 +44,23 @@ import Testing
     /// though it was opened to be inherited: a pipe whose writing end this process has
     /// closed has ended, while a child that would have held that end is still running.
     /// Asked of the pipe and not of the child, because a shell has descriptors of its own
-    /// and a number it finds open need not be one it was handed. Asked with a limit: a
-    /// read would wait on a child that held the end for as long as the child ran.
-    @Test func aChildHoldsNoDescriptorItWasNotGiven() throws {
-        var ends: [Int32] = [0, 0]
-        try #require(pipe(&ends) == 0)
-        defer { close(ends[0]) }
-        #expect(fcntl(ends[1], F_GETFD) & FD_CLOEXEC == 0)
-        let pid = try spawn("/bin/sleep", ["600"], stdio: [:])
-        defer { kill(pid, SIGKILL); _ = try? collect(pid) }
-        close(ends[1])
-        var ended = pollfd(fd: ends[0], events: Int16(POLLIN), revents: 0)
-        #expect(poll(&ended, 1, 5000) == 1)
-        #expect(ended.revents & Int16(POLLHUP) != 0)
+    /// and a number it finds open need not be one it was handed. In a process of its own,
+    /// because an inheritable pipe is held by every child any test starts while it is
+    /// open; there, only a child that held it keeps the wait from ending, and the alarm
+    /// ends that wait.
+    @Test func aChildHoldsNoDescriptorItWasNotGiven() async {
+        await #expect(processExitsWith: .success) {
+            alarm(UInt32(hangGuard.components.seconds))
+            var ends: [Int32] = [0, 0]
+            try #require(pipe(&ends) == 0)
+            #expect(fcntl(ends[1], F_GETFD) & FD_CLOEXEC == 0)
+            let pid = try spawn("/bin/sleep", ["3600"], stdio: [:])
+            defer { kill(pid, SIGKILL); _ = try? collect(pid) }
+            close(ends[1])
+            var ended = pollfd(fd: ends[0], events: Int16(POLLIN), revents: 0)
+            #expect(poll(&ended, 1, -1) == 1)
+            #expect(ended.revents & Int16(POLLHUP) != 0)
+        }
     }
 
     @Test func aChildThatCannotBeStartedIsSaidByNameWithWhy() {

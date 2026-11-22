@@ -3,6 +3,7 @@ import Helper
 import Keystrokes
 import Pointing
 import Synchronization
+import TestClock
 import Testing
 @testable import vhidd
 

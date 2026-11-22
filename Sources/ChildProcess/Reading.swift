@@ -6,9 +6,13 @@ import Telemetry
 /// withdrawn call over MCP. What the reading waits on besides commands, as doctor waits on
 /// the daemon's status reply, is not ended: its own timeout bounds it.
 ///
-/// On a dispatch thread and not on the cooperative pool, whose few threads the MCP
-/// server's transport runs on too - the same move `DeviceQueue` makes for the device
-/// calls. [LAW:no-ambient-temporal-coupling]
+/// On a queue of its own, as `DeviceQueue` runs the device calls: off the cooperative
+/// pool, whose few threads the MCP server's transport runs on too, and off the pool
+/// behind `DispatchQueue.global()`, which starts no thread while this process keeps a
+/// thread busy for each core. Every limit a reading runs to is made once the reading
+/// starts, so a reading that waited for a thread would wait past its limit: on CI one
+/// given 200 ms waited 14 s behind the suites that were using every core. A queue made
+/// for the one reading is given a thread at once. [LAW:no-ambient-temporal-coupling]
 ///
 /// [LAW:single-enforcer] The one place a cancel becomes a pulled `Command.Stop`, which
 /// ends the command running - stopped and collected, as one given up on at its limit is -
@@ -23,7 +27,7 @@ public func reading<T: Sendable>(_ read: @escaping @Sendable (Command.Stop) -> T
     let stop = Command.Stop()
     let taken = await withTaskCancellationHandler {
         await withCheckedContinuation { reading in
-            DispatchQueue.global().async { reading.resume(returning: read(stop)) }
+            DispatchQueue(label: "ChildProcess.reading").async { reading.resume(returning: read(stop)) }
         }
     } onCancel: {
         stop.pull()

@@ -116,7 +116,7 @@ let package = Package(
         .target(name: "VirtualHID", dependencies: ["DriverExtension", "Keystrokes", "Pointing"]),
         // The wire protocol against a fake daemon on the other end of a socketpair, so
         // the framing is proven without root and without the driver.
-        .testTarget(name: "VirtualHIDTests", dependencies: ["VirtualHID", "DriverExtension", "Keystrokes", "Pointing", "OwnThread"]),
+        .testTarget(name: "VirtualHIDTests", dependencies: ["VirtualHID", "DriverExtension", "Keystrokes", "Pointing", "OwnThread", "TestClock"]),
         // What crosses the privilege boundary, and the client's side of it. It links the
         // vocabularies - the keys, the pointing and the screen space - and nothing else: not
         // the layout's reading, which happens in the session in front and not across the
@@ -216,15 +216,15 @@ let package = Package(
         // target cannot link another. No product names it, so nothing shipped carries it.
         .target(name: "OwnThread", path: "Tests/OwnThread"),
         .testTarget(name: "OwnThreadTests", dependencies: ["OwnThread"]),
-        // A clock that moves only when a test moves it or something sleeps on it, so a
-        // verb that rests between reports is tested without waiting. A target of its own
-        // for OwnThread's reason: InputTests, vhidCLITests and SeeingTests all sleep on it.
+        // Clocks that move only when a test moves them or something sleeps on them, so
+        // what rests or gives up is tested without waiting. A target of its own for
+        // OwnThread's reason: five test targets move one.
         .target(name: "TestClock", path: "Tests/TestClock"),
         // The authorization boundary of a root keystroke service, checked against the
         // test process's own identity and audit token: real code signing, no root.
         .testTarget(
             name: "vhiddTests",
-            dependencies: ["vhidd", "Helper", "VirtualHID", "DriverExtension", "ChildProcess", "Keystrokes", "Pointing", "Signals", "Installations", "ScreenSpace", "ScreenSpaceTesting", "OwnThread"]
+            dependencies: ["vhidd", "Helper", "VirtualHID", "DriverExtension", "ChildProcess", "Keystrokes", "Pointing", "Signals", "Installations", "ScreenSpace", "ScreenSpaceTesting", "OwnThread", "TestClock"]
         ),
 
         // eyes: the screen read, so input can be aimed - what is in front, where text is -

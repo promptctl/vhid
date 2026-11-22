@@ -1,6 +1,7 @@
 import DriverExtension
 import Foundation
 import OwnThread
+import TestClock
 import Testing
 import VirtualHID
 @testable import vhidd

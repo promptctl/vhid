@@ -83,6 +83,16 @@ public struct Command: Sendable {
         public static func within(_ limit: Duration, or stop: Stop) -> Deadline {
             Deadline(limit: limit, at: .now + limit, stop: stop)
         }
+
+        /// [LAW:single-enforcer] The one check of whether `command` may start: not once the
+        /// stop is pulled, nor once the limit has run out. A command like `open` or `pkill`
+        /// acts as it starts, so one past either has to be refused before it is spawned,
+        /// not given up on after. A pull or a limit that lands after this is heard by
+        /// `hear`.
+        fileprivate func admit(_ command: String) throws {
+            try stop.admit()
+            guard SuspendingClock.now < at else { throw Overran(command: command, ran: nil, limit: limit) }
+        }
     }
 
     /// What ends a reading before its deadline, pulled from whichever thread hears the
@@ -156,13 +166,18 @@ public struct Command: Sendable {
     ///
     /// `ran` is how long this command had, to the millisecond, beside the limit of the
     /// reading it was run for: the command a reading's limit ends on is the one running
-    /// then, and may have had a moment of it where one before it had the rest.
+    /// then, and may have had a moment of it where one before it had the rest. None for a
+    /// command that found the limit run out when it came to start, which was never started:
+    /// a fact of its own, and not a run too short to measure. [LAW:types-are-the-program]
     public struct Overran: Error, CustomStringConvertible, Equatable {
         public let command: String
-        public let ran: Duration
+        public let ran: Duration?
         public let limit: Duration
 
-        public var description: String { "`\(command)` had not ended \(ran) after it was started, at the limit of \(limit), and was given up on" }
+        public var description: String {
+            guard let ran else { return "`\(command)` was not started: the limit of \(limit) had run out before it" }
+            return "`\(command)` had not ended \(ran) after it was started, at the limit of \(limit), and was given up on"
+        }
     }
 
     /// A command this Mac would not let be heard to its end: no pipe for it, no watch on
@@ -185,12 +200,12 @@ public struct Command: Sendable {
     /// Runs the command to its end, or to `deadline`, where it is given up on and thrown as
     /// `Overran`, or to the deadline's stop, where it is thrown as a `CancellationError`.
     /// [LAW:types-are-the-program] The deadline is not optional, so nothing this program
-    /// runs can hold its caller for good.
+    /// runs can hold its caller past it, save the kernel finishing a kill (below).
     ///
     /// The child is this call's from `spawn` to `collect`: nothing of it is left once this
     /// returns or throws, not a descriptor and not a pid to collect.
     public func run(by deadline: Deadline) throws -> Output {
-        try deadline.stop.admit()
+        try deadline.admit(said)
         let started = SuspendingClock.now
         // Nothing to read: a reading takes no input, and under an MCP server this process's
         // own stdin is the client's JSON-RPC stream, which a child must not take from.
@@ -220,10 +235,14 @@ public struct Command: Sendable {
         // child's exit is let go of here and goes on being held there. SIGKILL, because a
         // tool that is stuck may not be answering SIGTERM, and with no look at whether the
         // child still runs: the pid is this call's until the line below collects it, so
-        // the signal reaches the child or, where it has ended, nothing. The wait after it
-        // has no limit of its own: it is for the kernel to end a child that has been
-        // killed, and one given up on would be a pid nobody collects.
+        // the signal reaches the child or, where it has ended, nothing.
         // [LAW:dataflow-not-control-flow]
+        // [LAW:no-ambient-temporal-coupling] exception: the wait after the kill has no
+        // limit of its own. SIGKILL cannot be caught or ignored; the one thing that holds
+        // it off is a child inside a kernel call that cannot be interrupted (a hung network
+        // file system's read), and the kernel ends the child when that call returns. So
+        // the wait is the kernel's, not the child's, and a child given up on here would be
+        // a pid nobody collects.
         kill(pid, SIGKILL)
         let ending: Ending
         do throws(Uncollected) { ending = try collect(pid) } catch { throw unheard("could not be collected", error.code) }
