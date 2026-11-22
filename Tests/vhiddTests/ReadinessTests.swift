@@ -171,7 +171,7 @@ import VirtualHID
 @Suite(.ownThread) struct StuckDriverReadTests {
     @Test(.timeLimit(.minutes(1))) func aDriverReadThatNeverReturnsStillAnswersTheRefusedClient() throws {
         let readiness = Readiness(driver: {
-            _ = try Command("/bin/sleep", "600").run(by: .within(.milliseconds(200), or: .never))
+            _ = try Command("/bin/sleep", "600").run(by: .within(.milliseconds(200)))
             return .running
         })
         _ = readiness.begin()

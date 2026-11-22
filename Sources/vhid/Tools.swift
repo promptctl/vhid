@@ -230,7 +230,7 @@ enum Tools {
     /// the call, so it comes back as what the verb prints, whose first line says it.
     static func doctor(grants: @escaping @Sendable () async throws -> String = { try await GrantsVerb.answer() }) -> VerbTool {
         VerbTool(Help.doctor, readOnly: true, []) { _, installation in
-            DoctorCommand.doctor(try await reading { Readiness.read(for: installation, stoppedBy: $0) },
+            DoctorCommand.doctor(try await reading(within: Command.limit) { Readiness.read(for: installation, by: $0) },
                                  grants: try await DoctorCommand.grants(grants))
         }
     }

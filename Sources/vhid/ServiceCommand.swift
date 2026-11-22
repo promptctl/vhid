@@ -49,7 +49,7 @@ extension ServiceCommand {
 
         func run() async throws {
             let installation = try service.installation()
-            let standing = try await reading { stop in Result { try LaunchdProbe.standing(of: installation, by: .within(Command.limit, or: stop)) } }
+            let standing = try await reading(within: Command.limit) { deadline in Result { try LaunchdProbe.standing(of: installation, by: deadline) } }
             do {
                 print(try standing.get().rawValue)
             } catch {

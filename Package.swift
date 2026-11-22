@@ -86,7 +86,7 @@ let package = Package(
         .target(name: "ChildProcess", dependencies: ["Telemetry"]),
         // Against /bin/sh as the child: what it was left holding, and what a signal does
         // to it under a parent that ignores that signal.
-        .testTarget(name: "ChildProcessTests", dependencies: ["ChildProcess", "OwnThread"]),
+        .testTarget(name: "ChildProcessTests", dependencies: ["ChildProcess", "OwnThread", "Waiting"]),
         // Where the Karabiner-DriverKit-VirtualHIDDevice driver extension stands on this
         // Mac, and the four readings that answer is derived from. It links ChildProcess
         // for the commands those readings run and nothing else, so the CLI, the daemon and
@@ -206,7 +206,7 @@ let package = Package(
         .testTarget(
             name: "vhidCLITests",
             dependencies: [
-                "vhid", "Input", "Helper", "Installations", "Keystrokes", "Pointing", "Doctor", "DriverExtension", "Version", "OwnThread", "TestClock", "Signals",
+                "vhid", "Input", "Helper", "Installations", "Keystrokes", "Pointing", "Doctor", "DriverExtension", "Version", "OwnThread", "TestClock", "Signals", "Waiting",
                 "Telemetry", "TelemetryTesting", "Turns", "Seeing", "EyesVerbs", "ScreenSpace", "ScreenSpaceTesting", "InputTesting",
                 .product(name: "MCP", package: "swift-sdk"),
             ]
@@ -265,7 +265,7 @@ let package = Package(
         // The libSystem calls tccd's attribution rests on, which the SDK has no header for:
         // a header of its own, so they are linked and type-checked, not looked up.
         .target(name: "Responsibility", path: "eyes/Sources/Responsibility"),
-        .testTarget(name: "GrantsTests", dependencies: ["Grants", "Seeing", "Telemetry", "TelemetryTesting", "OwnThread"], path: "eyes/Tests/GrantsTests"),
+        .testTarget(name: "GrantsTests", dependencies: ["Grants", "Seeing", "Telemetry", "TelemetryTesting", "OwnThread", "Waiting"], path: "eyes/Tests/GrantsTests"),
         // One piece of work at a time, for what serves one: the daemon, and Vision. It links
         // neither half, so each half's gate is the same rule.
         .target(name: "Turns", path: "eyes/Sources/Turns"),

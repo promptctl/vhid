@@ -25,8 +25,8 @@ struct RecordCommand: AsyncParsableCommand {
         // refusal, and a first word that is not one, come after it.
         let installation = try service.installation()
         let holder = try HelperConnection(installation: installation).status()
-        let (system, session) = try await reading { stop in
-            Result { (try Self.services(in: "system", stoppedBy: stop), try Self.services(in: "gui/\(getuid())", stoppedBy: stop)) }
+        let (system, session) = try await reading(within: Command.limit) { deadline in
+            Result { (try Self.services(in: "system", by: deadline), try Self.services(in: "gui/\(getuid())", by: deadline)) }
         }.get()
         try Self.refusal(holder: holder, system: system, session: session).map { throw $0 }
         // A stop that came before the app did launches none, and one that came while it
@@ -35,7 +35,7 @@ struct RecordCommand: AsyncParsableCommand {
         try Task.checkCancellation()
         let listener = try TieListener()
         let (bundle, socket) = (try Self.app(), listener.path)
-        try await reading { stop in Result { try Self.launch(app: bundle, socket: socket, stoppedBy: stop) } }.get()
+        try await reading(within: Command.limit) { deadline in Result { try Self.launch(app: bundle, socket: socket, by: deadline) } }.get()
         let app = try listener.accept(within: .seconds(10))
         switch try app.receive(FromApp.self) {
         case .recording?:
@@ -86,8 +86,8 @@ struct RecordCommand: AsyncParsableCommand {
     }
 
     /// The labels `launchctl print <domain>` lists under services. [LAW:effects-at-boundaries]
-    static func services(in domain: String, stoppedBy stop: Command.Stop) throws -> [String] {
-        let printed = try Command("/bin/launchctl", "print", domain).run(by: .within(Command.limit, or: stop))
+    static func services(in domain: String, by deadline: Command.Deadline) throws -> [String] {
+        let printed = try Command("/bin/launchctl", "print", domain).run(by: deadline)
         guard printed.status == 0 else {
             throw DriverUnreadable.toolFailed(tool: "launchctl print \(domain)", status: printed.status, complaint: printed.merged)
         }
@@ -121,8 +121,8 @@ struct RecordCommand: AsyncParsableCommand {
 
     /// `open -n`, so every recording is a fresh instance with its own arguments, and `-g`,
     /// so the app never comes forward over what is being recorded.
-    static func launch(app: URL, socket: String, stoppedBy stop: Command.Stop) throws {
-        let opened = try Command("/usr/bin/open", "-n", "-g", app.path, "--args", socket, String(getpid())).run(by: .within(Command.limit, or: stop))
+    static func launch(app: URL, socket: String, by deadline: Command.Deadline) throws {
+        let opened = try Command("/usr/bin/open", "-n", "-g", app.path, "--args", socket, String(getpid())).run(by: deadline)
         guard opened.status == 0 else { throw TieFailure("open could not launch \(app.path): \(opened.merged)") }
     }
 }

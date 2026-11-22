@@ -9,11 +9,6 @@ import Installations
 /// devices from a client that holds them. What it came back as is read by a pure function
 /// beside it, which a test drives with every failure a connection can end in.
 public enum DaemonProbe {
-    /// What this installation's daemon says, asked now.
-    public static func reading(of installation: Installation, replyTimeout: Duration = HelperConnection.replyTimeout) -> DaemonReading {
-        reading { HelperConnection(installation: installation, replyTimeout: replyTimeout) }
-    }
-
     /// What status calls over fresh connections from `connect` came back as.
     ///
     /// A refused connection is asked about twice, on two connections. The client hears

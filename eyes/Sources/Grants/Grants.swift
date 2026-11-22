@@ -198,7 +198,7 @@ public struct GrantReading: Sendable, Equatable {
     private static func child(_ reader: URL, _ arguments: [String], within deadline: Duration) async throws -> GrantReading {
         // The child's records, if it makes any, belong under this reading's span.
         let command = Command(reader.path, arguments, environment: Telemetry.childEnvironment())
-        let ran = try await reading { stop in Result { try command.run(by: .within(deadline, or: stop)) } }
+        let ran = try await reading(within: deadline) { deadline in Result { try command.run(by: deadline) } }
         let output: Command.Output
         do { output = try ran.get() } catch { throw GrantReadingFailure("\(error)") }
         guard case .exited(let status) = output.ending, [0, GrantReading.lacking].contains(status) else {

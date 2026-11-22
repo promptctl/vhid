@@ -60,9 +60,10 @@ public struct Command: Sendable {
 
     /// When a reading is to be over, and the limit that put it there.
     ///
-    /// [LAW:no-ambient-temporal-coupling] One is made for a reading and handed to every
-    /// command the reading runs, so the limit is the reading's: each command is given what
-    /// the ones before it left, where a limit apiece would add up to several.
+    /// [LAW:no-ambient-temporal-coupling] One is made for a reading, at the call that asks
+    /// for it, and handed to every command the reading runs, so the limit is the caller's:
+    /// the time the reading waits for a thread is spent from it, and each command is given
+    /// what the ones before it left, where a limit apiece would add up to several.
     ///
     /// On the clock that stops with the Mac: a child does not run while the Mac sleeps, and
     /// a limit that counted the sleep would be past on waking for a tool that had run a
@@ -73,16 +74,19 @@ public struct Command: Sendable {
     public struct Deadline: Sendable {
         public let limit: Duration
         fileprivate let at: SuspendingClock.Instant
-        fileprivate let stop: Stop
+        /// [LAW:dataflow-not-control-flow] Every deadline has a stop of its own, and one
+        /// nobody pulls is the reading that runs to its end; no pull of one reaches another.
+        public let stop: Stop
 
-        /// Over `limit` from now, or at `stop`, whichever comes first.
-        /// [LAW:dataflow-not-control-flow] Every reading has a stop, and one nobody pulls
-        /// is the reading that runs to its end. [LAW:types-are-the-program] Not defaulted,
-        /// so a caller says which: a reading nobody can stop is never one that forgot to
-        /// take its stop.
-        public static func within(_ limit: Duration, or stop: Stop) -> Deadline {
-            Deadline(limit: limit, at: .now + limit, stop: stop)
+        /// Over `limit` from now, or at its stop, whichever comes first.
+        public static func within(_ limit: Duration) -> Deadline {
+            Deadline(limit: limit, at: .now + limit, stop: Stop())
         }
+
+        /// What is left of the limit now: none once it is spent. For a wait the reading
+        /// makes besides its commands, as doctor's status call is, so that wait is bounded
+        /// by the reading's limit too.
+        public var left: Duration { max(.zero, SuspendingClock.now.duration(to: at)) }
     }
 
     /// What ends a reading before its deadline, pulled from whichever thread hears the
@@ -97,11 +101,7 @@ public struct Command: Sendable {
         /// as it starts, by finding it pulled.
         private let state = Mutex<(pulled: Bool, waiting: [Int32: String], ended: [String])>((false, [:], []))
 
-        public init() {}
-
-        /// A stop nobody holds, for a reading that runs to its end: a fresh one each time,
-        /// so no pull of one reaches another.
-        public static var never: Stop { Stop() }
+        fileprivate init() {}
 
         /// Ends the reading.
         public func pull() {
@@ -165,6 +165,15 @@ public struct Command: Sendable {
         public var description: String { "`\(command)` had not ended \(ran) after it was started, at the limit of \(limit), and was given up on" }
     }
 
+    /// A command not started because its reading's limit was spent before it: nothing ran.
+    /// [LAW:types-are-the-program] Apart from `Overran`, whose `ran` is always a run.
+    public struct Unstarted: Error, CustomStringConvertible, Equatable {
+        public let command: String
+        public let limit: Duration
+
+        public var description: String { "`\(command)` was not started: the limit of \(limit) was spent before it" }
+    }
+
     /// A command this Mac would not let be heard to its end: no pipe for it, no watch on
     /// it, or no status from it.
     public struct Unheard: Error, CustomStringConvertible, Equatable {
@@ -184,6 +193,7 @@ public struct Command: Sendable {
 
     /// Runs the command to its end, or to `deadline`, where it is given up on and thrown as
     /// `Overran`, or to the deadline's stop, where it is thrown as a `CancellationError`.
+    /// A deadline already spent starts nothing, and is thrown as `Unstarted`.
     /// [LAW:types-are-the-program] The deadline is not optional, so nothing this program
     /// runs can hold its caller for good.
     ///
@@ -191,6 +201,7 @@ public struct Command: Sendable {
     /// returns or throws, not a descriptor and not a pid to collect.
     public func run(by deadline: Deadline) throws -> Output {
         try deadline.stop.admit()
+        guard deadline.left > .zero else { throw Unstarted(command: said, limit: deadline.limit) }
         let started = SuspendingClock.now
         // Nothing to read: a reading takes no input, and under an MCP server this process's
         // own stdin is the client's JSON-RPC stream, which a child must not take from.
