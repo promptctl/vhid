@@ -3,6 +3,7 @@ import Installations
 import Keystrokes
 import OwnThread
 import Testing
+import Waiting
 @testable import Helper
 @testable import vhidd
 
@@ -18,7 +19,7 @@ import Testing
         private let lock = NSLock()
         private var usages: [UInt16] = []
         private var reasons: [String] = []
-        private let released = DispatchSemaphore(value: 0)
+        private let released = Latch<Bool>()
 
         var asked: [UInt16] {
             lock.lock(); defer { lock.unlock() }
@@ -46,14 +47,13 @@ import Testing
         func releaseKeysHeldPastLimit() -> KeysLetGo? { nil }
         func releaseEverything(because reason: String) {
             lock.lock(); reasons.append(reason); lock.unlock()
-            released.signal()
+            released.open()
         }
 
-        /// Blocks until the release or ten seconds. Ten because the bound only ends a hang:
-        /// at two, CI missed the release on both attempts of run 36336822361
-        /// (vhid-ci-flake-80e).
-        func awaitRelease() -> Bool {
-            released.wait(timeout: .now() + .seconds(10)) == .success
+        /// Blocks until the release. At a bound of two seconds CI missed it on both
+        /// attempts of run 36336822361 (vhid-ci-flake-80e); only the hang guard ends it now.
+        func awaitRelease() throws(Hung) {
+            try released.waitOpen("the devices to be released")
         }
     }
 
@@ -78,7 +78,7 @@ import Testing
     /// going away does.
     private func client(of served: Served) -> (helper: HelperConnection, connection: NSXPCConnection) {
         let connection = NSXPCConnection(listenerEndpoint: served.listener.endpoint)
-        return (HelperConnection(connection: connection, service: "ai.promptctl.vhid.tests.far", replyTimeout: .seconds(20)), connection)
+        return (HelperConnection(connection: connection, service: "ai.promptctl.vhid.tests.far", replyTimeout: hangGuard), connection)
     }
 
     /// Whether a fresh client pressing `usage` was served. A client refused as busy hears
@@ -108,8 +108,7 @@ import Testing
     /// The first client going away releases everything, and the devices are then another
     /// client's. The release comes before the devices are let go, and the test can see
     /// only the first of the two, so the next client's admission is asked for, a beat apart,
-    /// until it comes or ten seconds have passed - each ask itself bounded by the client's
-    /// own reply timeout.
+    /// until it comes or the hang guard has passed.
     @Test func aClientGoingAwayReleasesEverythingAndFreesTheDevices() async throws {
         let served = try serve()
         let first = client(of: served)
@@ -117,16 +116,16 @@ import Testing
         try keyboard.down(.leftShift)
         let left = ContinuousClock.now
         first.connection.invalidate()
-        let released = served.devices.awaitRelease()
+        let released = Result { () throws(Hung) in try served.devices.awaitRelease() }
         // How long the release took and why, printed whether or not it passes: on CI this
         // test has run for six seconds, and which of that is the release is the question
         // vhid-ci-flake-80e is open on. [LAW:nothing-unseen]
         let seen = "release after \(ContinuousClock.now - left), because \(served.devices.releasedBecause)"
         print("ListenerTests: \(seen)")
-        #expect(released, "\(seen)")
+        try released.get()
         #expect(served.devices.releasedBecause.first == "a client went away", "\(seen)")
 
-        let deadline = ContinuousClock.now + .seconds(10)
+        let deadline = ContinuousClock.now + hangGuard
         var next = try admitted(served, pressing: .space)
         while !next, ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(50))

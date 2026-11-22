@@ -3,6 +3,7 @@ import OwnThread
 import ScreenSpace
 import ScreenSpaceTesting
 import Testing
+import Waiting
 @testable import vhidd
 
 /// The screen is read by a child in the session in front, and a session that comes to the
@@ -99,10 +100,10 @@ import Testing
         #expect(throws: FrontScreen.Unnamed.self) { try FrontScreen.frontSession([["kCGSSessionOnConsoleKey": true]]) }
     }
 
-    /// Long enough that no runner is slow enough to reach it: the limit on what a test does
-    /// not test, there so a child that hangs fails the test and does not hang the run.
-    /// [LAW:no-ambient-temporal-coupling] a test's verdict does not turn on how fast `sh` is.
-    private static let unhurried: Duration = .seconds(30)
+    /// The limit on what a test does not test: the hang guard, there so a child that hangs
+    /// fails the test and does not hang the run. [LAW:no-ambient-temporal-coupling] A test's
+    /// verdict does not turn on how fast `sh` is.
+    private static let unhurried = hangGuard
 
     /// The build the daemon is, in every test that starts a child.
     private let build = Build(cdhash: "c0de")
@@ -162,13 +163,12 @@ import Testing
         #expect(throws: ChildReader.AnotherBuild.self) { try child("echo joined; while read _; do echo '12.5 40'; done") }
     }
 
-    @Test func aChildThatNeverSaysItJoinedIsGivenUpOnAndEnded() {
-        let began = ContinuousClock.now
+    /// Returning at all means the child was ended and reaped: `stop` waits for it, and it
+    /// ignores SIGTERM and sleeps past the time limit.
+    @Test(.timeLimit(.minutes(2))) func aChildThatNeverSaysItJoinedIsGivenUpOnAndEnded() {
         #expect {
-            try child("trap '' TERM; sleep 30", joinWithin: .milliseconds(300))
+            try child("trap '' TERM; exec sleep 3600", joinWithin: .milliseconds(300))
         } throws: { "\($0)".contains("did not say it joined within 0.3 seconds") }
-        // Returning at all means the child was reaped: `stop` waits for it.
-        #expect(began.duration(to: .now) < .seconds(2))
     }
 
     @Test func aChildThatHasEndedFailsTheReadAndNotTheDaemon() throws {
@@ -193,20 +193,16 @@ import Testing
     }
 
     /// Stopping returns only once the child is reaped, even one that ignores SIGTERM and
-    /// never reads its stdin.
-    @Test func stoppingEndsEvenAChildThatWillNotListen() throws {
-        let reader = try child("trap '' TERM; exec 0<&-; echo joined c0de; sleep 30")
-        let began = ContinuousClock.now
+    /// never reads its stdin: it sleeps past the time limit, so returning at all is ending it.
+    @Test(.timeLimit(.minutes(2))) func stoppingEndsEvenAChildThatWillNotListen() throws {
+        let reader = try child("trap '' TERM; exec 0<&-; echo joined c0de; exec sleep 3600")
         reader.stop()
-        #expect(began.duration(to: .now) < .seconds(2))
     }
 
-    @Test func aChildThatDoesNotAnswerIsGivenUpOnInTime() throws {
-        let reader = try child("echo joined c0de; sleep 30", patience: .milliseconds(300))
+    @Test(.timeLimit(.minutes(2))) func aChildThatDoesNotAnswerIsGivenUpOnInTime() throws {
+        let reader = try child("echo joined c0de; exec sleep 3600", patience: .milliseconds(300))
         defer { reader.stop() }
-        let began = ContinuousClock.now
         #expect { try reader.cursor() } throws: { "\($0)".contains("did not answer within 0.3 seconds") }
-        #expect(began.duration(to: .now) < .seconds(2))
     }
 
     @Test func theReaderFlagIsReadOnlyWithASession() {

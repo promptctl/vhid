@@ -273,11 +273,11 @@ import InputTesting
     /// The answer goes out before the record does, and the record still lands once the
     /// outbox the process drains at exit is drained.
     @Test func anMcpCallIsAnsweredWithoutWaitingOnItsRecord() async throws {
-        let answered = Mutex(false), sawAnswer = Mutex<Bool?>(nil)
+        let answered = Latch<Bool>(), sawAnswer = Mutex<Bool?>(nil)
         let outbox = Outbox(Edge(collector: .init(endpoint: .base("http://c:4318")),
                                  file: FileManager.default.temporaryDirectory.appending(path: "vhid-tests-\(UUID().uuidString)/events.jsonl"),
                                  deliver: { _ in
-                                     while !answered.withLock({ $0 }) { try await Task.sleep(for: .milliseconds(5)) }
+                                     try await answered.opened("the call to be answered")
                                      sawAnswer.withLock { $0 = true }
                                  }))
         let click = VerbTool(Help.click, []) { _, _ in "clicked" }
@@ -289,7 +289,7 @@ import InputTesting
             }
         }
         _ = await stdio.firstSent()
-        answered.withLock { $0 = true }
+        answered.open()
         stdio.feed([.end])
         try await session.value
         await outbox.drained()
@@ -414,7 +414,7 @@ import InputTesting
     /// A session stopped from outside - Control-C or SIGTERM, which cancel the task serving
     /// it - withdraws the call it is running, whose record says it was cancelled and what
     /// it had sent, and ends once that record is out.
-    @Test func aSessionStoppedFromOutsideRecordsItsRunningCallAsCancelled() async throws {
+    @Test(.timeLimit(.minutes(2))) func aSessionStoppedFromOutsideRecordsItsRunningCallAsCancelled() async throws {
         let (began, begin) = AsyncStream<Void>.makeStream()
         let waiting = VerbTool(Help.click, []) { _, _ in
             Telemetry.tally(.mouseReports)
@@ -434,14 +434,9 @@ import InputTesting
         // As the command line's watch does: the signal is taken, then the session cancelled.
         _ = signals.take(SIGTERM)
         session.cancel()
-        let ended = await withTaskGroup(of: Result<Void, any Error>?.self) { race in
-            race.addTask { await session.result }
-            race.addTask { try? await Task.sleep(for: .seconds(10)); return nil }
-            defer { race.cancelAll() }
-            return await race.next() ?? nil
-        }
-        let ending = try #require(ended, "the session is still serving after its task was cancelled")
-        #expect(throws: CancellationError.self) { try ending.get() }
+        // A session still serving after its task was cancelled is a hang, which the time
+        // limit names.
+        await #expect(throws: CancellationError.self) { try await session.value }
         let record = try Self.only(collected)
         #expect(record["event"] as? String == "click")
         #expect(record["outcome"] as? String == "cancelled")
@@ -505,9 +500,10 @@ import InputTesting
             if process.isRunning { process.terminate() }
             try? FileManager.default.removeItem(at: home)
         }
-        // A server that never answers is ended, which ends the read below at end of file.
+        // A server that never answers is ended at the hang guard, which ends the read below
+        // at end of file.
         let watchdog = Task {
-            try await Task.sleep(for: .seconds(10))
+            try await Task.sleep(for: hangGuard)
             process.terminate()
         }
         defer { watchdog.cancel() }

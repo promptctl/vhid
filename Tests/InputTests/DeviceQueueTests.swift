@@ -4,6 +4,7 @@ import Pointing
 import Synchronization
 import Testing
 import Input
+import Waiting
 
 /// What reached the devices, in the order it arrived.
 private final class Journal: Sendable {
@@ -21,21 +22,23 @@ private final class BlockingKeyPress: KeyPress {
 
     private let journal: Journal
     private let acknowledged = DispatchSemaphore(value: 0)
-    private let held = Mutex(false)
+    private let held = Latch<Bool>()
 
     init(journal: Journal) { self.journal = journal }
 
-    /// Whether a key-down is holding its thread right now.
-    var blocking: Bool { held.withLock { $0 } }
+    /// Waits until a key-down is holding its thread.
+    func blocking() async throws(Hung) {
+        try await held.value(for: "a key-down to hold its thread") { $0 }
+    }
 
     func acknowledge() { acknowledged.signal() }
 
-    /// Bounded, so a key-down made where it should not be fails the test rather than
-    /// holding the suite: the deadline is past any the test itself waits for.
+    /// Bounded by the hang guard, so a key-down made where it should not be fails the test
+    /// rather than holding the suite.
     func down(_ usage: Usage) throws {
-        held.withLock { $0 = true }
-        defer { held.withLock { $0 = false } }
-        guard acknowledged.wait(timeout: .now() + .seconds(30)) == .success else { throw Unacknowledged() }
+        held.update { $0 = true }
+        defer { held.update { $0 = false } }
+        guard acknowledged.wait(timeout: .now() + .seconds(Int(hangGuard.components.seconds))) == .success else { throw Unacknowledged() }
         journal.record("down \(usage.rawValue)")
     }
 
@@ -67,7 +70,7 @@ private struct JournalPointing: PointingDevice {
         let device = BlockingKeyPress(journal: journal)
         let keyboard = QueuedKeyboard(keyboard: device, queue: DeviceQueue())
         let pressed = Task { try await keyboard.down(Usage(rawValue: 0x04)) }
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { device.blocking })
+        try await device.blocking()
         device.acknowledge()
         try await pressed.value
         #expect(journal.log == ["down 4"])
@@ -88,13 +91,13 @@ private struct JournalPointing: PointingDevice {
         let keyboard = QueuedKeyboard(keyboard: device, queue: queue)
         let mouse = QueuedMouse(pointing: JournalPointing(journal: journal), queue: queue)
         let pressed = Task { try await keyboard.down(Usage(rawValue: 0x04)) }
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { device.blocking })
-        var asked = false
+        try await device.blocking()
+        let asked = Latch<Bool>()
         let moved = Task {
-            asked = true
+            asked.open()
             try await mouse.move(by: Move(x: Count(clamping: 3), y: Count(clamping: 4)))
         }
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { asked })
+        try await asked.opened("the move to be asked for")
         device.acknowledge()
         try await pressed.value
         try await moved.value

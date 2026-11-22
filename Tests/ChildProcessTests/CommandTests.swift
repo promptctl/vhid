@@ -26,14 +26,14 @@ import Waiting
     /// takes stdout to completion first waits for an end the child can no longer reach.
     @Test(.timeLimit(.minutes(1)), arguments: [["e", "o"], ["o", "e"]])
     func bothStreamsComeBackWholeWhicheverIsWrittenFirst(order: [String]) throws {
-        let output = try Command("/bin/sh", "-c", order.map(Self.fill).joined(separator: "; ")).run(by: .within(.seconds(30)))
+        let output = try Command("/bin/sh", "-c", order.map(Self.fill).joined(separator: "; ")).run(by: .within(hangGuard))
         #expect(output.status == 0)
         #expect(output.stdout == String(repeating: "o", count: Self.size))
         #expect(output.stderr == String(repeating: "e", count: Self.size))
     }
 
     @Test func theStatusAndBothStreamsSurviveAFailingCommand() throws {
-        let output = try Command("/bin/sh", "-c", "echo out; echo err >&2; exit 3").run(by: .within(.seconds(30)))
+        let output = try Command("/bin/sh", "-c", "echo out; echo err >&2; exit 3").run(by: .within(hangGuard))
         #expect(output.status == 3)
         #expect(output.stdout == "out\n")
         #expect(output.stderr == "err\n")
@@ -43,7 +43,7 @@ import Waiting
     /// A command a signal ended has that signal for its status, as one that exited has what
     /// it exited with.
     @Test func theStatusOfACommandEndedByASignalIsTheSignal() throws {
-        #expect(try Command("/bin/sh", "-c", "kill -KILL $$").run(by: .within(.seconds(30))).status == SIGKILL)
+        #expect(try Command("/bin/sh", "-c", "kill -KILL $$").run(by: .within(hangGuard)).status == SIGKILL)
     }
 
     /// A command that has returned holds nothing open, on a thread that never drains a
@@ -51,17 +51,21 @@ import Waiting
     /// from a thread that never returns, and four commands a probe each leaving two
     /// descriptors behind would be the whole table within the minute.
     ///
-    /// The count is the process's, and other tests open descriptors of their own while
-    /// this runs, so what is checked is that it did not grow by the 200 that 100 leaking
-    /// runs leave.
-    @Test(.timeLimit(.minutes(2))) func aCommandThatHasReturnedHoldsNoDescriptorOpen() throws {
-        let (ran, grew) = try onAThreadOfItsOwn {
-            let before = try Self.descriptors()
-            let ran = (0..<100).count { _ in (try? Command("/usr/bin/true").run(by: .within(.seconds(30))))?.status == 0 }
-            return (ran, try Self.descriptors() - before)
+    /// The count is the process's, so it is taken in a process of its own, where no other
+    /// test opens anything: what is checked is that it did not grow by the 200 that 100
+    /// leaking runs leave.
+    @Test(.timeLimit(.minutes(2))) func aCommandThatHasReturnedHoldsNoDescriptorOpen() async {
+        await #expect(processExitsWith: .success) {
+            let (ran, grew) = try onAThreadOfItsOwn {
+                let before = try Self.descriptors()
+                let ran = (0..<100).count { _ in (try? Command("/usr/bin/true").run(by: .within(hangGuard)))?.status == 0 }
+                return (ran, try Self.descriptors() - before)
+            }
+            guard ran == 100, grew < 100 else {
+                FileHandle.standardError.write(Data("\(ran) of 100 ran, and the descriptors grew by \(grew)\n".utf8))
+                exit(1)
+            }
         }
-        #expect(ran == 100)
-        #expect(grew < 100)
     }
 
     /// A command that never ends is given up on at its limit and said by name, with the
@@ -157,20 +161,27 @@ import Waiting
     /// overrunning: a child that never ends, whose streams end when it is stopped, and one
     /// that has ended and left its streams open in something it started, where giving up is
     /// all that lets go of them. That one holds them for as long as the hang guard.
+    ///
+    /// In a process of its own: the count is of every descriptor the process holds, and in
+    /// the test process another test's open would be counted as this one's leak.
     @Test(.timeLimit(.minutes(2)), arguments: [
         ("exec sleep 3600", Duration.milliseconds(20), 50),
         ("sleep \(hangGuard.components.seconds) & exit 0", Duration.milliseconds(300), 10),
     ])
-    func aCommandGivenUpOnHoldsNoDescriptorOpen(script: String, limit: Duration, runs: Int) throws {
-        let (overran, grew) = try onAThreadOfItsOwn {
-            let before = try Self.descriptors()
-            let overran = (0..<runs).count { _ in
-                do { _ = try Command("/bin/sh", "-c", script).run(by: .within(limit)); return false } catch { return error is Command.Overran }
+    func aCommandGivenUpOnHoldsNoDescriptorOpen(script: String, limit: Duration, runs: Int) async {
+        await #expect(processExitsWith: .success) { [script, limit, runs] in
+            let (overran, grew) = try onAThreadOfItsOwn {
+                let before = try Self.descriptors()
+                let overran = (0..<runs).count { _ in
+                    do { _ = try Command("/bin/sh", "-c", script).run(by: .within(limit)); return false } catch { return error is Command.Overran }
+                }
+                return (overran, try Self.descriptors() - before)
             }
-            return (overran, try Self.descriptors() - before)
+            guard overran == runs, grew < runs else {
+                FileHandle.standardError.write(Data("\(overran) of \(runs) overran, and the descriptors grew by \(grew)\n".utf8))
+                exit(1)
+            }
         }
-        #expect(overran == runs)
-        #expect(grew < runs)
     }
 
     /// A stop stays pulled: no command a stopped reading runs after it is started, so a

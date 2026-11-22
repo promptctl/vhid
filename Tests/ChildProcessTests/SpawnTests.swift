@@ -2,6 +2,7 @@ import ChildProcess
 import Darwin
 import OwnThread
 import Testing
+import Waiting
 
 /// What `spawn` promises of a child: what a signal does to it, and what of this process's
 /// it holds. A suite of its own thread because each test waits for its child.
@@ -43,17 +44,19 @@ import Testing
     /// closed has ended, while a child that would have held that end is still running.
     /// Asked of the pipe and not of the child, because a shell has descriptors of its own
     /// and a number it finds open need not be one it was handed. Asked with a limit: a
-    /// read would wait on a child that held the end for as long as the child ran.
+    /// read would wait on a child that held the end for as long as the child ran. The limit is
+    /// the hang guard: another test's child, being started, holds the end until it has become
+    /// its program, however long a loaded runner takes to get it there.
     @Test func aChildHoldsNoDescriptorItWasNotGiven() throws {
         var ends: [Int32] = [0, 0]
         try #require(pipe(&ends) == 0)
         defer { close(ends[0]) }
         #expect(fcntl(ends[1], F_GETFD) & FD_CLOEXEC == 0)
-        let pid = try spawn("/bin/sleep", ["600"], stdio: [:])
+        let pid = try spawn("/bin/sleep", ["3600"], stdio: [:])
         defer { kill(pid, SIGKILL); _ = try? collect(pid) }
         close(ends[1])
         var ended = pollfd(fd: ends[0], events: Int16(POLLIN), revents: 0)
-        #expect(poll(&ended, 1, 5000) == 1)
+        #expect(poll(&ended, 1, Int32(hangGuard.components.seconds * 1_000)) == 1)
         #expect(ended.revents & Int16(POLLHUP) != 0)
     }
 

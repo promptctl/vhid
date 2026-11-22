@@ -1,6 +1,7 @@
 import Dispatch
 import OwnThread
 import Testing
+import Waiting
 
 /// Whether `ran` was signalled within `bound`, holding the calling thread until then.
 private func signalled(_ ran: DispatchSemaphore, within bound: DispatchTimeInterval) -> Bool {
@@ -11,19 +12,19 @@ private func signalled(_ ran: DispatchSemaphore, within bound: DispatchTimeInter
 @Suite(.ownThread) struct OwnThreadTests {
     /// A test that stands still until the pool has run something for it. Under
     /// `make test` the pool is one thread wide, so without the trait the task below has
-    /// nowhere to run while this waits on it. The bound only ends that hang as a failure.
-    @Test func aTestHoldingItsThreadLeavesThePoolFree() {
-        let ran = DispatchSemaphore(value: 0)
-        Task { ran.signal() }
-        #expect(signalled(ran, within: .seconds(10)), "the pool ran nothing while the test waited")
+    /// nowhere to run while this waits on it, and the wait is a hang.
+    @Test func aTestHoldingItsThreadLeavesThePoolFree() throws {
+        let ran = Latch<Bool>()
+        Task { ran.open() }
+        try ran.waitOpen("the pool to run a task while the test waited")
     }
 
     /// A child task is run where its parent is, off the pool, and the parent may be
     /// standing still waiting for it. The child is given a thread of its own as well.
-    @Test func aTestHoldingItsThreadLeavesItsChildrenFree() async {
-        let ran = DispatchSemaphore(value: 0)
-        async let child = ran.signal()
-        #expect(signalled(ran, within: .seconds(10)), "the child did not run while the test waited")
+    @Test func aTestHoldingItsThreadLeavesItsChildrenFree() async throws {
+        let ran = Latch<Bool>()
+        async let child: Void = ran.open()
+        try ran.waitOpen("the child to run while the test waited")
         _ = await child
     }
 }

@@ -4,6 +4,7 @@ import Logging
 import MCP
 import TelemetryTesting
 import Testing
+import Waiting
 @testable import vhid
 
 /// What the transport holds the session open for, driven through a stand-in for stdio.
@@ -46,7 +47,9 @@ import Testing
             session.cancel()
             _ = try? await session.value
         }
-        for _ in 0..<200 where held != nil { try await Task.sleep(for: .milliseconds(10)) }
+        // A release sends no word, so it is looked for, up to the hang guard: a transport
+        // still held then is one the relay will never let go.
+        for _ in 0..<Int(hangGuard / .milliseconds(10)) where held != nil { try await Task.sleep(for: .milliseconds(10)) }
         #expect(held == nil, "the relay is still waiting on the owed answer")
     }
 
@@ -154,7 +157,7 @@ import Testing
     /// started, still ends the session once it is over, and answers nothing. The SDK, had it
     /// read the cancel, would have answered nothing and left the session waiting for good,
     /// or ignored it and let the call run on unawaited.
-    @Test func aCallWithdrawnAsItIsAskedEndsTheSessionWithNoAnswer() async throws {
+    @Test(.timeLimit(.minutes(2))) func aCallWithdrawnAsItIsAskedEndsTheSessionWithNoAnswer() async throws {
         let waiting = VerbTool(Help.click, []) { _, _ in
             try await Task.sleep(for: .seconds(3600))
             return "clicked"
@@ -166,13 +169,8 @@ import Testing
             await server.waitUntilCompleted()
         }
         stdio.call(4, then: [.cancel(4), .end])
-        let ended = await withTaskGroup(of: Bool.self) { race in
-            race.addTask { _ = try? await session.value; return true }
-            race.addTask { try? await Task.sleep(for: .seconds(10)); return false }
-            defer { race.cancelAll() }
-            return await race.next() ?? false
-        }
-        #expect(ended, "the session is still waiting on a withdrawn call")
+        // A session still waiting on a withdrawn call is a hang, which the time limit names.
+        _ = try? await session.value
         #expect(stdio.sent.isEmpty, "a withdrawn call's answer was written: \(stdio.sent)")
     }
 }

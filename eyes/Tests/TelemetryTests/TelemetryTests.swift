@@ -86,7 +86,7 @@ import Testing
                 try? await Telemetry.unit("withdrawn") {
                     Telemetry.tally(.reads); Telemetry.tally(.reads)
                     started.continuation.finish()
-                    do { try await Task.sleep(for: .seconds(60)) } catch { throw Wrapped(cause: error) }
+                    do { try await Task.sleep(for: .seconds(3600)) } catch { throw Wrapped(cause: error) }
                 }
                 try? await Telemetry.unit("refused") { throw Refusal() }
             }

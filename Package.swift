@@ -140,7 +140,7 @@ let package = Package(
         // The pointer's loop against a fake screen with an acceleration curve of its own,
         // and the typist against a keyboard that can be made to fail at the third keystroke
         // of four: no device, no window server, no grant.
-        .testTarget(name: "InputTests", dependencies: ["Input", "InputTesting", "KeyboardLayouts", "Keystrokes", "OwnThread", "Pointing", "ScreenSpace", "ScreenSpaceTesting", "TestClock", "Telemetry", "Timeline"]),
+        .testTarget(name: "InputTests", dependencies: ["Input", "InputTesting", "KeyboardLayouts", "Keystrokes", "OwnThread", "Pointing", "ScreenSpace", "ScreenSpaceTesting", "TestClock", "Telemetry", "Timeline", "Waiting"]),
         // Targets placed as a verb places them, for the tests of the devices and of the
         // verbs over them. No product names it, so nothing shipped carries it.
         .target(name: "InputTesting", dependencies: ["Input", "ScreenSpace", "ScreenSpaceTesting"], path: "Tests/InputTesting"),
@@ -169,7 +169,7 @@ let package = Package(
         // app's watch on the command. It links nothing, so both ends speak one vocabulary
         // without either linking the other. [LAW:one-way-deps]
         .target(name: "RecordingTie"),
-        .testTarget(name: "RecordingTieTests", dependencies: ["RecordingTie", "ChildProcess", "OwnThread"]),
+        .testTarget(name: "RecordingTieTests", dependencies: ["RecordingTie", "ChildProcess", "OwnThread", "Waiting"]),
         // The tap app `vhid record` launches, shipped as a signed bundle so Input
         // Monitoring can be granted to it once. It reads the tap, the I/O Registry and,
         // through DisplayReading, the display layout every point it writes is placed on,
@@ -220,7 +220,7 @@ let package = Package(
         // its own because the suites that wait are in many test targets, and one test
         // target cannot link another. No product names it, so nothing shipped carries it.
         .target(name: "OwnThread", path: "Tests/OwnThread"),
-        .testTarget(name: "OwnThreadTests", dependencies: ["OwnThread"]),
+        .testTarget(name: "OwnThreadTests", dependencies: ["OwnThread", "Waiting"]),
         // How a test waits for what the code under test does: a latch over a state, a FIFO a
         // child says it started through, and the one bound past which a wait is a hang. A
         // target of its own for OwnThread's reason. No product names it.
