@@ -2,6 +2,7 @@ import ChildProcess
 import DriverExtension
 import Foundation
 import Synchronization
+import Timeline
 import VirtualHID
 
 /// Karabiner-VirtualHIDDevice-Daemon, the root process that holds the driver open, and
@@ -66,12 +67,18 @@ enum DaemonProcess {
         /// The devices on a connection to a daemon that is running, or `DaemonError` when
         /// none answers. `whenLost` is told when that connection ends underneath them.
         var connect: (_ whenLost: @escaping @Sendable (DaemonError) -> Void) throws -> Device
-        /// The devices brought up on their connection, each within the limit.
-        var bringUp: (Device, Duration) throws -> Startups
+        /// The devices brought up on their connection, each within what `left` says is
+        /// left of the attempt's limit when it starts.
+        var bringUp: (Device, _ left: () -> Duration) throws -> Startups
         /// The daemon started as this process's child.
         var launch: () throws -> pid_t
         var terminate: (pid_t) -> Void
         var say: (Said) -> Void
+        /// What every wait here is kept on: the time, and a pause of a given length.
+        /// [LAW:one-source-of-truth] One clock for the attempt's limit, the retries inside
+        /// it and the waits between attempts, so a test moves one by hand and none waits.
+        var now: () -> Duration
+        var pause: (Duration) throws -> Void
     }
 
     /// The effects done for real. The daemon outlives any one connection on purpose, and
@@ -82,7 +89,10 @@ enum DaemonProcess {
                 let daemon = try DaemonConnection(whenLost: whenLost)
                 return HID(keyboard: VirtualKeyboard(daemon: daemon), mouse: VirtualPointing(daemon: daemon))
             },
-            bringUp: { Startups(keyboard: try $0.keyboard.start(within: $1), mouse: try $0.mouse.start(within: $1)) },
+            bringUp: { hid, left in
+                let keyboard = try hid.keyboard.start(within: left())
+                return Startups(keyboard: keyboard, mouse: try hid.mouse.start(within: left()))
+            },
             launch: { try spawn(executable, [], stdio: [:]) },
             terminate: end,
             say: {
@@ -90,7 +100,9 @@ enum DaemonProcess {
                 case .happened(let what): log(what)
                 case .failed(let what): logFailure(what)
                 }
-            }
+            },
+            now: Timeline(ContinuousClock()).now,
+            pause: { Thread.sleep(forTimeInterval: Double($0.components.seconds) + Double($0.components.attoseconds) / 1e18) }
         )
     }
 
@@ -110,10 +122,10 @@ enum DaemonProcess {
 
 extension DaemonProcess.Effects {
     /// Brings the devices up: connects to the daemon, starting it when it is not there to
-    /// connect to, then starts each device on the connection. Each wait is given the whole
-    /// of `limit`: a socket that answers and a driver that reports a device ready are
-    /// different waits, so none is handed what another left.
-    /// [LAW:no-ambient-temporal-coupling]
+    /// connect to, then starts each device on the connection, all within `limit` of the
+    /// call. One end for every wait in it, each given what the waits before it left: a
+    /// limit handed whole to each of three waits is three limits, and the attempt's own is
+    /// then nobody's. [LAW:no-ambient-temporal-coupling]
     ///
     /// [LAW:single-enforcer] The one unit that can leave a daemon running that vhidd
     /// started, so it is the one that makes sure it does not: a daemon started here that
@@ -126,12 +138,13 @@ extension DaemonProcess.Effects {
     /// the reason every client is refused with. So `whenLost` hears nothing from the
     /// moment the stop is decided. [LAW:no-silent-failure]
     func reach(within limit: Duration, whenLost: @escaping @Sendable (DaemonError, DaemonProcess.Origin) -> Void) throws -> DaemonProcess.Reached<Device> {
+        let end = now() + limit
         let stopping = Mutex(false)
-        let (devices, origin) = try connection(by: .now + limit) { error, origin in
+        let (devices, origin) = try connection(by: end) { error, origin in
             if !stopping.withLock({ $0 }) { whenLost(error, origin) }
         }
         do {
-            return DaemonProcess.Reached(devices: devices, daemon: origin, startup: try bringUp(devices, limit))
+            return DaemonProcess.Reached(devices: devices, daemon: origin, startup: try bringUp(devices) { end - now() })
         } catch {
             stopping.withLock { $0 = true }
             stop(origin)
@@ -139,8 +152,10 @@ extension DaemonProcess.Effects {
         }
     }
 
-    /// A connection to the daemon and where the daemon came from.
-    private func connection(by deadline: ContinuousClock.Instant, whenLost: @escaping @Sendable (DaemonError, DaemonProcess.Origin) -> Void) throws -> (Device, DaemonProcess.Origin) {
+    /// A connection to the daemon and where the daemon came from. A daemon started here is
+    /// asked again every tenth of a second until `deadline`, and the last pause is only
+    /// what is left, so the asking ends at the deadline and not a pause past it.
+    private func connection(by deadline: Duration, whenLost: @escaping @Sendable (DaemonError, DaemonProcess.Origin) -> Void) throws -> (Device, DaemonProcess.Origin) {
         do {
             return (try connect { whenLost($0, .alreadyRunning) }, .alreadyRunning)
         } catch let unreachable as DaemonError {
@@ -153,8 +168,9 @@ extension DaemonProcess.Effects {
             do {
                 return (try connect { whenLost($0, origin) }, origin)
             } catch let unreachable as DaemonError {
-                guard ContinuousClock.now < deadline else { stop(origin); throw unreachable }
-                Thread.sleep(forTimeInterval: 0.1)
+                let left = deadline - now()
+                guard left > .zero else { stop(origin); throw unreachable }
+                try pause(min(.milliseconds(100), left))
             }
         }
     }
@@ -199,7 +215,7 @@ struct Backoff: Equatable {
 func waitOut<Found>(
     _ whole: Duration,
     lookingEvery look: Duration,
-    now: () -> ContinuousClock.Instant,
+    now: () -> Duration,
     pause: (Duration) throws -> Void,
     for find: () -> Found?
 ) rethrows -> (found: Found, after: Duration)? {
@@ -299,17 +315,15 @@ extension DaemonProcess.Effects {
     /// readings take is part of it: the next attempt starts no later than the wait the
     /// log gave and one reading.
     ///
-    /// Returns only by `pause` throwing, which the daemon's never does.
+    /// Returns only by `pause` throwing, which the real one never does.
     func keepUp(
         within limit: Duration,
         backoff: Backoff,
         lookingEvery look: Duration,
         readiness: Readiness,
         serve: (DaemonProcess.Reached<Device>) -> any ServedDevices,
-        driver: () -> DriverState?,
-        now: () -> ContinuousClock.Instant,
-        pause: (Duration) throws -> Void
-    ) rethrows -> Never {
+        driver: () -> DriverState?
+    ) throws -> Never {
         var failures = 0
         // The driver as it was last read not on, since the devices were last up: what a
         // wait is for. Kept across attempts, so a driver turned on while an attempt was

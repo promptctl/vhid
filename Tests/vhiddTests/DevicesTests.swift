@@ -3,7 +3,9 @@ import Helper
 import Keystrokes
 import Pointing
 import Synchronization
+import TestClock
 import Testing
+import Timeline
 @testable import vhidd
 
 /// The devices as vhidd serves them, over recording devices of the test's own: what
@@ -111,9 +113,9 @@ import Testing
         #expect(mouse.log == ["up"])
     }
 
-    private func timed(_ keyboard: RecordingKeyboard = RecordingKeyboard(), _ mouse: RecordingMouse = RecordingMouse()) -> (Devices, HandClock) {
-        let clock = HandClock()
-        return (Devices(keyboard: keyboard, mouse: mouse, limit: .seconds(2), now: { clock.now }), clock)
+    private func timed(_ keyboard: RecordingKeyboard = RecordingKeyboard(), _ mouse: RecordingMouse = RecordingMouse()) -> (Devices, ManualClock) {
+        let clock = ManualClock()
+        return (Devices(keyboard: keyboard, mouse: mouse, limit: .seconds(2), now: Timeline(clock).now), clock)
     }
 
     /// A key left down with no keyboard report after it is released once the limit passes,
@@ -123,12 +125,12 @@ import Testing
         let (devices, clock) = timed(keyboard)
         _ = answer { devices.down(usage: 0xE3, reply: $0) }
         _ = answer { devices.down(usage: 0x04, reply: $0) }
-        clock.advance(.milliseconds(1999))
+        clock.advance(by: .milliseconds(1999))
         #expect(devices.releaseKeysHeldPastLimit() == nil)
-        clock.advance(.milliseconds(1))
+        clock.advance(by: .milliseconds(1))
         #expect(devices.releaseKeysHeldPastLimit() == KeysLetGo(usages: [0x04, 0xE3], limit: .seconds(2), failure: nil))
         #expect(keyboard.log == ["down 227", "down 4", "up"])
-        clock.advance(.seconds(5))
+        clock.advance(by: .seconds(5))
         #expect(devices.releaseKeysHeldPastLimit() == nil)
     }
 
@@ -139,13 +141,13 @@ import Testing
         let (devices, clock) = timed(keyboard)
         for _ in 0..<20 {
             _ = answer { devices.down(usage: 0xE1, reply: $0) }
-            clock.advance(.milliseconds(900))
+            clock.advance(by: .milliseconds(900))
             #expect(devices.releaseKeysHeldPastLimit() == nil)
             _ = answer { devices.down(usage: 0x05, reply: $0) }
-            clock.advance(.milliseconds(900))
+            clock.advance(by: .milliseconds(900))
             #expect(devices.releaseKeysHeldPastLimit() == nil)
             _ = answer { devices.releaseAll(reply: $0) }
-            clock.advance(.seconds(10))
+            clock.advance(by: .seconds(10))
             #expect(devices.releaseKeysHeldPastLimit() == nil)
         }
         #expect(keyboard.log.count == 60)
@@ -156,7 +158,7 @@ import Testing
         let mouse = RecordingMouse()
         let (devices, clock) = timed(RecordingKeyboard(), mouse)
         _ = answer { devices.buttonDown(1, reply: $0) }
-        clock.advance(.seconds(30))
+        clock.advance(by: .seconds(30))
         #expect(devices.releaseKeysHeldPastLimit() == nil)
         #expect(mouse.log == ["down 1"])
     }
@@ -165,11 +167,11 @@ import Testing
     @Test func aRefusedReleaseIsReportedAndRetriedAfterTheLimit() {
         let (devices, clock) = timed(RecordingKeyboard(refusesRelease: true))
         _ = answer { devices.down(usage: 0x04, reply: $0) }
-        clock.advance(.seconds(2))
+        clock.advance(by: .seconds(2))
         #expect(devices.releaseKeysHeldPastLimit()?.failure != nil)
-        clock.advance(.milliseconds(250))
+        clock.advance(by: .milliseconds(250))
         #expect(devices.releaseKeysHeldPastLimit() == nil)
-        clock.advance(.milliseconds(1750))
+        clock.advance(by: .milliseconds(1750))
         #expect(devices.releaseKeysHeldPastLimit()?.usages == [0x04])
     }
 
@@ -178,7 +180,7 @@ import Testing
     @Test func aKeyWhoseRequestThrewIsStillReleased() {
         let (devices, clock) = timed(RecordingKeyboard(refusesDown: true))
         #expect(answer { devices.down(usage: 0x04, reply: $0) } != nil)
-        clock.advance(.seconds(2))
+        clock.advance(by: .seconds(2))
         #expect(devices.releaseKeysHeldPastLimit()?.usages == [0x04])
     }
 
@@ -189,7 +191,7 @@ import Testing
         _ = answer { devices.down(usage: 0xE2, reply: $0) }
         _ = answer { devices.buttonDown(1, reply: $0) }
         for _ in 0..<30 {
-            clock.advance(.milliseconds(200))
+            clock.advance(by: .milliseconds(200))
             _ = answer { devices.move(x: 5, y: 0, reply: $0) }
             #expect(devices.releaseKeysHeldPastLimit() == nil)
         }
@@ -202,11 +204,11 @@ import Testing
         let readiness = Readiness.serving(devices)
         let holder = Holder()
         // Kept alive, so the two identifiers cannot share a freed address.
-        let (first, second) = (HandClock(), HandClock())
+        let (first, second) = (ManualClock(), ManualClock())
         let client = ObjectIdentifier(first)
         let attempt = try readiness.devices().attempt
         try holder.serve(client, by: 4242, on: attempt) { devices.down(usage: 0x04) { _ in } }
-        clock.advance(.seconds(3))
+        clock.advance(by: .seconds(3))
         #expect(releaseKeysHeldPastLimit(readiness, holder) == "pid 4242 held 0x04 past 2.0 seconds with no report; released")
         #expect(holder.pid(on: attempt) == 4242)
         #expect(throws: Holder.Busy.self) { try holder.serve(ObjectIdentifier(second), by: 1, on: attempt) {} }
@@ -243,10 +245,10 @@ import Testing
         let (devices, clock) = timed(keyboard)
         for _ in 0..<5 {
             _ = answer { devices.hold(usages: [0xE1], reply: $0) }
-            clock.advance(.seconds(1))
+            clock.advance(by: .seconds(1))
             #expect(devices.releaseKeysHeldPastLimit() == nil)
         }
-        clock.advance(.seconds(1))
+        clock.advance(by: .seconds(1))
         #expect(devices.releaseKeysHeldPastLimit()?.usages == [0xE1])
     }
 

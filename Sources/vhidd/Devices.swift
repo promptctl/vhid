@@ -3,6 +3,7 @@ import Foundation
 import Helper
 import Keystrokes
 import Pointing
+import Timeline
 import VirtualHID
 
 /// The devices as the listener serves them: what a client is handed, and the release made
@@ -72,12 +73,12 @@ final class Devices: NSObject, ServedDevices, @unchecked Sendable {
     static let keyLimit = HeldKeys.silenceLimit
 
     private let limit: Duration
-    private let now: () -> ContinuousClock.Instant
+    private let now: () -> Duration
     /// When a client last asked for a report of either device; under `device`.
-    private var lastReport: ContinuousClock.Instant
+    private var lastReport: Duration
 
     init(keyboard: any HeldKeyboard, mouse: any PointingDevice, limit: Duration = keyLimit,
-         now: @escaping () -> ContinuousClock.Instant = { .now }) {
+         now: @escaping () -> Duration = Timeline(ContinuousClock()).now) {
         self.keyboard = keyboard
         self.mouse = mouse
         self.limit = limit

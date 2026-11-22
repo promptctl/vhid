@@ -183,7 +183,7 @@ let package = Package(
         // which reads the layout there - the root process itself reads none.
         .executableTarget(
             name: "vhidd",
-            dependencies: ["Helper", "VirtualHID", "DriverExtension", "ChildProcess", "Keystrokes", "Pointing", "Signals", "Installations", "ScreenSpace", "DisplayReading"]
+            dependencies: ["Helper", "VirtualHID", "DriverExtension", "ChildProcess", "Keystrokes", "Pointing", "Signals", "Installations", "ScreenSpace", "DisplayReading", "Timeline"]
         ),
         // The verbs, against the daemon over the helper connection - from a command line,
         // or as tools over MCP. It links Input for what the verbs mean and Helper for how
@@ -234,7 +234,7 @@ let package = Package(
         // test process's own identity and audit token: real code signing, no root.
         .testTarget(
             name: "vhiddTests",
-            dependencies: ["vhidd", "Helper", "VirtualHID", "DriverExtension", "ChildProcess", "Keystrokes", "Pointing", "Signals", "Installations", "ScreenSpace", "ScreenSpaceTesting", "OwnThread"]
+            dependencies: ["vhidd", "Helper", "VirtualHID", "DriverExtension", "ChildProcess", "Keystrokes", "Pointing", "Signals", "Installations", "ScreenSpace", "ScreenSpaceTesting", "OwnThread", "TestClock", "Timeline", "Waiting"]
         ),
 
         // eyes: the screen read, so input can be aimed - what is in front, where text is -

@@ -1,7 +1,9 @@
 import DriverExtension
 import Foundation
 import OwnThread
+import TestClock
 import Testing
+import Timeline
 import VirtualHID
 @testable import vhidd
 
@@ -19,8 +21,14 @@ import VirtualHID
         var bringUp: Result<DaemonProcess.Startups, DaemonError>
         var launched = 0
         var terminated: [pid_t] = []
+        /// What was left of the attempt's limit when the devices were brought up.
         var limitGiven: Duration?
         var lost: (@Sendable (DaemonError) -> Void)?
+        /// What the effects wait on, which only the test and the pauses move.
+        let clock = ManualClock()
+        /// How long each connect takes, on `clock`.
+        var connecting: Duration = .zero
+        var connects = 0
 
         init(connections: [Result<Device, DaemonError>], bringUp: Result<DaemonProcess.Startups, DaemonError> = .success(World.up)) {
             self.connections = connections
@@ -34,13 +42,15 @@ import VirtualHID
         var effects: DaemonProcess.Effects<Device> {
             DaemonProcess.Effects(
                 connect: { whenLost in
+                    self.connects += 1
+                    self.clock.advance(by: self.connecting)
                     let answer = self.connections.count > 1 ? self.connections.removeFirst() : self.connections[0]
                     let device = try answer.get()
                     self.lost = whenLost
                     return device
                 },
-                bringUp: { _, limit in
-                    self.limitGiven = limit
+                bringUp: { _, left in
+                    self.limitGiven = left()
                     return try self.bringUp.get()
                 },
                 launch: { self.launched += 1; return World.pid },
@@ -49,7 +59,9 @@ import VirtualHID
                     // A stopped daemon closes its connection on the way down.
                     self.lost?(.closed)
                 },
-                say: { _ in }
+                say: { _ in },
+                now: Timeline(clock).now,
+                pause: { self.clock.advance(by: $0) }
             )
         }
     }
@@ -96,19 +108,24 @@ import VirtualHID
         #expect(told.heard.first?.1 == .startedHere(World.pid))
     }
 
-    /// Connecting and bringing up wait on different things, so the devices are given the
-    /// whole limit however long the connection took of it.
-    @Test func bringingUpIsGivenTheWholeLimit() throws {
+    /// The attempt has one limit, counted from when it was asked for: the devices are given
+    /// what connecting left of it, not the whole of it again.
+    @Test func bringingUpIsGivenWhatConnectingLeftOfTheLimit() throws {
         let world = World(connections: [.failure(.noSocket(path: "nowhere")), .success(Device())])
+        world.connecting = .milliseconds(100)
         _ = try world.effects.reach(within: .milliseconds(300)) { _, _ in }
-        #expect(world.limitGiven == .milliseconds(300))
+        #expect(world.limitGiven == .milliseconds(100))
     }
 
-    /// A daemon started here that never answers is stopped before the failure leaves, and
-    /// the failure is the daemon's last refusal.
+    /// A daemon started here that never answers is asked every tenth of a second until the
+    /// limit, the last pause no longer than what was left, then stopped before the failure
+    /// leaves, and the failure is the daemon's last refusal.
     @Test func aStartedDaemonThatNeverAnswersIsStoppedAndTheRefusalThrown() throws {
         let world = World(connections: [.failure(.noSocket(path: "nowhere"))])
-        #expect(throws: DaemonError.noSocket(path: "nowhere")) { try world.effects.reach(within: .milliseconds(150)) { _, _ in } }
+        let began = world.clock.now
+        #expect(throws: DaemonError.noSocket(path: "nowhere")) { try world.effects.reach(within: .milliseconds(250)) { _, _ in } }
+        #expect(world.connects == 5)
+        #expect(began.duration(to: world.clock.now) == .milliseconds(250))
         #expect(world.launched == 1)
         #expect(world.terminated == [World.pid])
     }
@@ -158,10 +175,10 @@ import VirtualHID
         logged.terminate = { events.append("stop"); effects.terminate($0) }
         let readiness = Readiness(driver: { .running })
         var downWhileWaiting: [Bool] = []
-        let clock = HandClock()
+        let clock = world.clock
         #expect(throws: Stop.self) {
-            try logged.keepUp(within: .milliseconds(20), backoff: Backoff(first: .seconds(2), most: .seconds(5)), lookingEvery: .seconds(5), readiness: readiness, serve: { _ in RecordingDevices() }, driver: { nil }, now: { clock.now }) { wait in
-                clock.advance(wait)
+            try logged.keepUp(within: .zero, backoff: Backoff(first: .seconds(2), most: .seconds(5)), lookingEvery: .seconds(5), readiness: readiness, serve: { _ in RecordingDevices() }, driver: { nil }) { wait in
+                clock.advance(by: wait)
                 events.append("wait \(wait)")
                 downWhileWaiting.append((try? readiness.devices()) == nil)
                 if events.filter({ $0.hasPrefix("wait") }).count == 3 { throw Stop() }
@@ -181,15 +198,15 @@ import VirtualHID
         var served = 0
         var downWhileWaiting: [Bool] = []
         var waits: [Duration] = []
-        let clock = HandClock()
+        let clock = world.clock
         #expect(throws: Stop.self) {
             try world.effects.keepUp(within: .seconds(1), backoff: Backoff(first: .seconds(2), most: .seconds(60)), lookingEvery: .seconds(60), readiness: readiness, serve: { _ in
                 served += 1
-                let lose = world.lost!
-                DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(20)) { lose(.closed) }
+                // Lost as they are handed over, for the reason `lostEachTime` gives.
+                world.lost!(.closed)
                 return RecordingDevices()
-            }, driver: { nil }, now: { clock.now }) { wait in
-                clock.advance(wait)
+            }, driver: { nil }) { wait in
+                clock.advance(by: wait)
                 waits.append(wait)
                 downWhileWaiting.append((try? readiness.devices()) == nil)
                 if waits.count == 2 { throw Stop() }
@@ -216,19 +233,19 @@ import VirtualHID
     private func trace(in world: World, upTo pauses: Int = 1, backoff: Backoff = Backoff(first: .seconds(2), most: .seconds(60)), serve: @escaping () -> Void = {}, driver: @escaping (_ launched: Int, _ waited: Duration) -> DriverState? = { _, _ in nil }) -> [Step] {
         var steps: [Step] = []
         var paused = 0
-        let clock = HandClock()
-        let began = clock.now
+        let clock = world.clock
+        let began = clock.now.offset
         let effects = world.effects
         var traced = effects
         traced.launch = { steps.append(.launched); return try effects.launch() }
         traced.terminate = { steps.append(.stopped($0)); effects.terminate($0) }
         traced.say = { steps.append(.said($0)) }
         #expect(throws: Stop.self) {
-            try traced.keepUp(within: .milliseconds(20), backoff: backoff, lookingEvery: .seconds(2), readiness: Readiness(driver: { .running }), serve: { _ in
+            try traced.keepUp(within: .zero, backoff: backoff, lookingEvery: .seconds(2), readiness: Readiness(driver: { .running }), serve: { _ in
                 serve()
                 return RecordingDevices()
-            }, driver: { steps.append(.readTheDriver); return driver(world.launched, clock.now - began) }, now: { clock.now }) { wait in
-                clock.advance(wait)
+            }, driver: { steps.append(.readTheDriver); return driver(world.launched, clock.now.offset - began) }) { wait in
+                clock.advance(by: wait)
                 steps.append(.paused(wait))
                 paused += 1
                 if paused == pauses { throw Stop() }
@@ -313,14 +330,14 @@ import VirtualHID
     private func lostEachTime(_ pauses: Int, world: World, backoff: Backoff, driver: @escaping (_ served: Int, _ waited: Duration) -> DriverState?, before: @escaping (World) -> Void = { _ in }) -> [Duration] {
         var served = 0
         var waits: [Duration] = []
-        let clock = HandClock()
+        let clock = world.clock
         #expect(throws: Stop.self) {
             try world.effects.keepUp(within: .seconds(1), backoff: backoff, lookingEvery: .seconds(2), readiness: Readiness(driver: { .running }), serve: { _ in
                 served += 1
                 world.lost!(.closed)
                 return RecordingDevices()
-            }, driver: { driver(served, waits.reduce(.zero, +)) }, now: { clock.now }) { wait in
-                clock.advance(wait)
+            }, driver: { driver(served, waits.reduce(.zero, +)) }) { wait in
+                clock.advance(by: wait)
                 before(world)
                 waits.append(wait)
                 if waits.count == pauses { throw Stop() }
@@ -359,15 +376,15 @@ import VirtualHID
     }
 
     @Test func aWaitIsTakenALookAtATimeAndEndsWithWhatALookFinds() throws {
-        let clock = HandClock()
+        let clock = ManualClock()
         var pauses: [Duration] = []
-        let pause: (Duration) -> Void = { clock.advance($0); pauses.append($0) }
-        let whole = waitOut(.seconds(5), lookingEvery: .seconds(2), now: { clock.now }, pause: pause, for: { String?.none })
+        let pause: (Duration) -> Void = { clock.advance(by: $0); pauses.append($0) }
+        let whole = waitOut(.seconds(5), lookingEvery: .seconds(2), now: { clock.now.offset }, pause: pause, for: { String?.none })
         #expect(whole == nil)
         #expect(pauses == [.seconds(2), .seconds(2), .seconds(1)])
 
         pauses = []
-        let ended = try #require(waitOut(.seconds(60), lookingEvery: .seconds(2), now: { clock.now }, pause: pause, for: { pauses.count == 3 ? "found" : nil }))
+        let ended = try #require(waitOut(.seconds(60), lookingEvery: .seconds(2), now: { clock.now.offset }, pause: pause, for: { pauses.count == 3 ? "found" : nil }))
         #expect(ended.found == "found")
         #expect(ended.after == .seconds(6))
         #expect(pauses == [.seconds(2), .seconds(2), .seconds(2)])
@@ -377,17 +394,17 @@ import VirtualHID
     /// the pause before it, three of its five pauses fit, and the wait is over one look past
     /// its length at the latest. What a look finds is found that far in, its own time counted.
     @Test func theTimeALookTakesIsPartOfTheWait() throws {
-        let clock = HandClock()
+        let clock = ManualClock()
         var pauses: [Duration] = []
-        let pause: (Duration) -> Void = { clock.advance($0); pauses.append($0) }
-        let began = clock.now
-        let whole = waitOut(.seconds(10), lookingEvery: .seconds(2), now: { clock.now }, pause: pause, for: { clock.advance(.seconds(2)); return String?.none })
+        let pause: (Duration) -> Void = { clock.advance(by: $0); pauses.append($0) }
+        let began = clock.now.offset
+        let whole = waitOut(.seconds(10), lookingEvery: .seconds(2), now: { clock.now.offset }, pause: pause, for: { clock.advance(by: .seconds(2)); return String?.none })
         #expect(whole == nil)
         #expect(pauses == [.seconds(2), .seconds(2), .seconds(2)])
-        #expect(clock.now - began == .seconds(12))
+        #expect(clock.now.offset - began == .seconds(12))
 
         pauses = []
-        let ended = try #require(waitOut(.seconds(60), lookingEvery: .seconds(2), now: { clock.now }, pause: pause, for: { clock.advance(.seconds(2)); return pauses.count == 2 ? "found" : nil }))
+        let ended = try #require(waitOut(.seconds(60), lookingEvery: .seconds(2), now: { clock.now.offset }, pause: pause, for: { clock.advance(by: .seconds(2)); return pauses.count == 2 ? "found" : nil }))
         #expect(ended.after == .seconds(8))
     }
 
@@ -396,18 +413,18 @@ import VirtualHID
     /// attempt starts within that wait and one reading of it.
     @Test func aDriverThatIsSlowToReadDoesNotStretchTheWait() {
         let world = World(connections: [.failure(.noSocket(path: "nowhere"))])
-        let clock = HandClock()
+        let clock = world.clock
         let (wait, reading) = (Duration.seconds(10), Duration.seconds(2))
-        var launches: [ContinuousClock.Instant] = []
-        var waitBegan: ContinuousClock.Instant?
+        var launches: [Duration] = []
+        var waitBegan: Duration?
         let effects = world.effects
         var logged = effects
-        logged.launch = { launches.append(clock.now); return try effects.launch() }
+        logged.launch = { launches.append(clock.now.offset); return try effects.launch() }
         #expect(throws: Stop.self) {
-            try logged.keepUp(within: .milliseconds(20), backoff: Backoff(first: wait, most: wait), lookingEvery: .seconds(2), readiness: Readiness(driver: { .running }), serve: { _ in RecordingDevices() }, driver: { clock.advance(reading); return .awaitingApproval }, now: { clock.now }) { pause in
+            try logged.keepUp(within: .zero, backoff: Backoff(first: wait, most: wait), lookingEvery: .seconds(2), readiness: Readiness(driver: { .running }), serve: { _ in RecordingDevices() }, driver: { clock.advance(by: reading); return .awaitingApproval }) { pause in
                 if launches.count == 2 { throw Stop() }
-                waitBegan = waitBegan ?? clock.now
-                clock.advance(pause)
+                waitBegan = waitBegan ?? clock.now.offset
+                clock.advance(by: pause)
             }
         }
         #expect(launches.count == 2)
@@ -494,5 +511,15 @@ import VirtualHID
         let backoff = Backoff(first: .seconds(2), most: .seconds(60))
         #expect((1...7).map(backoff.after) == [.seconds(2), .seconds(4), .seconds(8), .seconds(16), .seconds(32), .seconds(60), .seconds(60)])
         #expect(backoff.after(10_000) == .seconds(60))
+    }
+}
+
+private extension DaemonProcess.Effects {
+    /// `keepUp` with every pause handed to `pausing`, which is how a test watches the waits
+    /// and ends the loop.
+    func keepUp(within limit: Duration, backoff: Backoff, lookingEvery look: Duration, readiness: Readiness, serve: (DaemonProcess.Reached<Device>) -> any ServedDevices, driver: () -> DriverState?, pausing: @escaping (Duration) throws -> Void) throws -> Never {
+        var paused = self
+        paused.pause = pausing
+        try paused.keepUp(within: limit, backoff: backoff, lookingEvery: look, readiness: readiness, serve: serve, driver: driver)
     }
 }

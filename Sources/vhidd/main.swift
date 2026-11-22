@@ -124,37 +124,43 @@ do {
         exit(0)
     }
 
+    // Ends only if the real pause throws, which it does not; if ever it did, the devices
+    // would no longer be kept up, which is the end of what this process is for.
+    // [LAW:no-silent-failure]
     Thread.detachNewThread {
-        children.tracking(DaemonProcess.real).keepUp(
-            within: .seconds(10),
-            backoff: Backoff(first: .seconds(2), most: .seconds(60)),
-            lookingEvery: .seconds(2),
-            readiness: readiness,
-            serve: { reached in
-                log("the keyboard is up: the driver's daemon answered in \(reached.startup.keyboard.answered), ready after \(reached.startup.keyboard.ready)")
-                log("the mouse is up: the driver's daemon answered in \(reached.startup.mouse.answered), ready after \(reached.startup.mouse.ready)")
-                let devices = Devices(keyboard: reached.devices.keyboard, mouse: reached.devices.mouse)
-                // Whatever the daemon was holding for its last occupant - a vhidd that
-                // exited while the daemon lived on, or a hand-run session - is up before
-                // any client is served: the devices are handed over only after.
-                // Unconditionally: the daemon's origin says who started it, not what it
-                // holds. [LAW:dataflow-not-control-flow] [LAW:no-ambient-temporal-coupling]
-                devices.releaseEverything(because: "starting")
-                return devices
-            },
-            // A driver that could not be read ends no wait, so the reason it could not is
-            // said here, where it would otherwise be lost. [LAW:no-silent-failure]
-            driver: {
-                do {
-                    return try driver()
-                } catch {
-                    log("could not read the driver extension: \(error)")
-                    return nil
+        do {
+            try children.tracking(DaemonProcess.real).keepUp(
+                within: .seconds(10),
+                backoff: Backoff(first: .seconds(2), most: .seconds(60)),
+                lookingEvery: .seconds(2),
+                readiness: readiness,
+                serve: { reached in
+                    log("the keyboard is up: the driver's daemon answered in \(reached.startup.keyboard.answered), ready after \(reached.startup.keyboard.ready)")
+                    log("the mouse is up: the driver's daemon answered in \(reached.startup.mouse.answered), ready after \(reached.startup.mouse.ready)")
+                    let devices = Devices(keyboard: reached.devices.keyboard, mouse: reached.devices.mouse)
+                    // Whatever the daemon was holding for its last occupant - a vhidd that
+                    // exited while the daemon lived on, or a hand-run session - is up before
+                    // any client is served: the devices are handed over only after.
+                    // Unconditionally: the daemon's origin says who started it, not what it
+                    // holds. [LAW:dataflow-not-control-flow] [LAW:no-ambient-temporal-coupling]
+                    devices.releaseEverything(because: "starting")
+                    return devices
+                },
+                // A driver that could not be read ends no wait, so the reason it could not is
+                // said here, where it would otherwise be lost. [LAW:no-silent-failure]
+                driver: {
+                    do {
+                        return try driver()
+                    } catch {
+                        log("could not read the driver extension: \(error)")
+                        return nil
+                    }
                 }
-            },
-            now: { .now },
-            pause: { Thread.sleep(forTimeInterval: Double($0.components.seconds) + Double($0.components.attoseconds) / 1e18) }
-        )
+            )
+        } catch {
+            log("stopped keeping the devices up: \(error)")
+            exit(1)
+        }
     }
 
     // Held so the delegate and the watch outlive this scope; `resume` retains neither
