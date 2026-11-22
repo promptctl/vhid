@@ -63,6 +63,12 @@ let package = Package(
         // key down on a device nothing is left to release. It links nothing.
         // [LAW:one-source-of-truth]
         .target(name: "Signals"),
+        // Time as a caller's limit and a verb's pacing: a timeline a test can hold, and the
+        // deadline a request is made with where it enters a process and every wait below it
+        // takes. It links nothing, so every target that waits takes the one deadline type.
+        // [LAW:one-source-of-truth]
+        .target(name: "Timeline"),
+        .testTarget(name: "TimelineTests", dependencies: ["Timeline", "TestClock"]),
         // The one screen space both halves speak: a point, a box, their spelling, the
         // display layout and the one rule for where on it a point or a box is pressed. It
         // links nothing of the package, so the devices and the readers share a space without
@@ -83,7 +89,7 @@ let package = Package(
         // grant reading alike, so every child is started, heard and stopped one way.
         // [LAW:single-enforcer] It links Telemetry, which links nothing, for the record of
         // what a stopped reading ended, so the screen half can stand on it. [LAW:one-way-deps]
-        .target(name: "ChildProcess", dependencies: ["Telemetry"]),
+        .target(name: "ChildProcess", dependencies: ["Timeline", "Telemetry"]),
         // Against /bin/sh as the child: what it was left holding, and what a signal does
         // to it under a parent that ignores that signal.
         .testTarget(name: "ChildProcessTests", dependencies: ["ChildProcess", "OwnThread"]),
@@ -113,7 +119,7 @@ let package = Package(
         // Everything about the two virtual devices and nothing about what is typed on
         // them: the pqrs daemon socket, the two report layouts, and the keys and buttons
         // each device is holding. [LAW:one-way-deps]
-        .target(name: "VirtualHID", dependencies: ["DriverExtension", "Keystrokes", "Pointing"]),
+        .target(name: "VirtualHID", dependencies: ["Timeline", "DriverExtension", "Keystrokes", "Pointing"]),
         // The wire protocol against a fake daemon on the other end of a socketpair, so
         // the framing is proven without root and without the driver.
         .testTarget(name: "VirtualHIDTests", dependencies: ["VirtualHID", "DriverExtension", "Keystrokes", "Pointing", "OwnThread"]),
@@ -122,7 +128,7 @@ let package = Package(
         // the layout's reading, which happens in the session in front and not across the
         // boundary, and not the device, because a client must never open one.
         // [LAW:one-way-deps]
-        .target(name: "Helper", dependencies: ["Installations", "Keystrokes", "Pointing", "ScreenSpace"]),
+        .target(name: "Helper", dependencies: ["Timeline", "Installations", "Keystrokes", "Pointing", "ScreenSpace"]),
         .testTarget(name: "HelperTests", dependencies: ["Helper", "Installations", "Keystrokes", "Pointing", "ScreenSpace", "ScreenSpaceTesting", "OwnThread"]),
         // What a caller asks the devices for, said in a caller's terms: text lowered to
         // keystrokes, a chord, a place on the screen to click. It links the two
@@ -131,11 +137,11 @@ let package = Package(
         // caller supplies a conformance. [LAW:one-way-deps] [LAW:effects-at-boundaries]
         // Telemetry for the cause chain its stops are read by, so a record and a caller tell
         // a withdrawn run from a failed one by one rule. [LAW:single-enforcer]
-        .target(name: "Input", dependencies: ["KeyboardLayouts", "Keystrokes", "Pointing", "ScreenSpace", "Telemetry"]),
+        .target(name: "Input", dependencies: ["Timeline", "KeyboardLayouts", "Keystrokes", "Pointing", "ScreenSpace", "Telemetry"]),
         // The pointer's loop against a fake screen with an acceleration curve of its own,
         // and the typist against a keyboard that can be made to fail at the third keystroke
         // of four: no device, no window server, no grant.
-        .testTarget(name: "InputTests", dependencies: ["Input", "InputTesting", "KeyboardLayouts", "Keystrokes", "OwnThread", "Pointing", "ScreenSpace", "ScreenSpaceTesting", "TestClock", "Telemetry"]),
+        .testTarget(name: "InputTests", dependencies: ["Timeline", "Input", "InputTesting", "KeyboardLayouts", "Keystrokes", "OwnThread", "Pointing", "ScreenSpace", "ScreenSpaceTesting", "TestClock", "Telemetry"]),
         // Targets placed as a verb places them, for the tests of the devices and of the
         // verbs over them. No product names it, so nothing shipped carries it.
         .target(name: "InputTesting", dependencies: ["Input", "ScreenSpace", "ScreenSpaceTesting"], path: "Tests/InputTesting"),
@@ -161,9 +167,9 @@ let package = Package(
         // and nothing that sends one. [LAW:one-way-deps]
         .executableTarget(name: "vhid-menubar", dependencies: ["MenuBar", "Doctor", "DriverExtension", "ChildProcess", "Helper", "Installations"]),
         // What `vhid record` and its tap app say over the socket between them, and the
-        // app's watch on the command. It links nothing, so both ends speak one vocabulary
+        // app's watch on the command. It links only Timeline, which links nothing, so both ends speak one vocabulary
         // without either linking the other. [LAW:one-way-deps]
-        .target(name: "RecordingTie"),
+        .target(name: "RecordingTie", dependencies: ["Timeline"]),
         .testTarget(name: "RecordingTieTests", dependencies: ["RecordingTie", "ChildProcess", "OwnThread"]),
         // The tap app `vhid record` launches, shipped as a signed bundle so Input
         // Monitoring can be granted to it once. It reads the tap, the I/O Registry and,
@@ -178,7 +184,7 @@ let package = Package(
         // which reads the layout there - the root process itself reads none.
         .executableTarget(
             name: "vhidd",
-            dependencies: ["Helper", "VirtualHID", "DriverExtension", "ChildProcess", "Keystrokes", "Pointing", "Signals", "Installations", "ScreenSpace", "DisplayReading"]
+            dependencies: ["Timeline", "Helper", "VirtualHID", "DriverExtension", "ChildProcess", "Keystrokes", "Pointing", "Signals", "Installations", "ScreenSpace", "DisplayReading"]
         ),
         // The verbs, against the daemon over the helper connection - from a command line,
         // or as tools over MCP. It links Input for what the verbs mean and Helper for how
@@ -193,7 +199,7 @@ let package = Package(
         .executableTarget(
             name: "vhid",
             dependencies: [
-                "Input", "Helper", "Installations", "KeyboardLayouts", "Keystrokes", "Pointing", "DriverExtension", "ChildProcess", "Doctor",
+                "Timeline", "Input", "Helper", "Installations", "KeyboardLayouts", "Keystrokes", "Pointing", "DriverExtension", "ChildProcess", "Doctor",
                 "Version", "RecordingTie", "Signals", "Telemetry", "Turns", "Seeing", "EyesVerbs", "Grants", "ScreenSpace",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "MCP", package: "swift-sdk"),
@@ -206,7 +212,7 @@ let package = Package(
         .testTarget(
             name: "vhidCLITests",
             dependencies: [
-                "vhid", "Input", "Helper", "Installations", "Keystrokes", "Pointing", "Doctor", "DriverExtension", "Version", "OwnThread", "TestClock", "Signals",
+                "Timeline", "vhid", "Input", "Helper", "Installations", "Keystrokes", "Pointing", "Doctor", "DriverExtension", "Version", "OwnThread", "TestClock", "Signals",
                 "Telemetry", "TelemetryTesting", "Turns", "Seeing", "EyesVerbs", "ScreenSpace", "ScreenSpaceTesting", "InputTesting",
                 .product(name: "MCP", package: "swift-sdk"),
             ]
@@ -220,6 +226,11 @@ let package = Package(
         // verb that rests between reports is tested without waiting. A target of its own
         // for OwnThread's reason: InputTests, vhidCLITests and SeeingTests all sleep on it.
         .target(name: "TestClock", path: "Tests/TestClock"),
+        // How a test waits for what another thread or a child does: one guard for every wait
+        // on an event that will come, and the latch and pipe that tell a test the event came.
+        // A target of its own for OwnThread's reason.
+        .target(name: "Waiting", dependencies: ["Timeline"], path: "Tests/Waiting"),
+        .testTarget(name: "WaitingTests", dependencies: ["Waiting", "OwnThread"]),
         // The authorization boundary of a root keystroke service, checked against the
         // test process's own identity and audit token: real code signing, no root.
         .testTarget(

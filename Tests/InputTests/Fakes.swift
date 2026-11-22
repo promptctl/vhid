@@ -4,6 +4,7 @@ import Keystrokes
 import Pointing
 import Synchronization
 import TestClock
+import Timeline
 import ScreenSpace
 import ScreenSpaceTesting
 import InputTesting

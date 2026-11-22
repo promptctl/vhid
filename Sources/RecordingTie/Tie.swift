@@ -1,4 +1,5 @@
 import Foundation
+import Timeline
 
 /// What the `vhid record` command and its tap app say to each other over the socket
 /// between them. `docs/design/replay.md`, "The grant recording needs", is the design: the
@@ -199,7 +200,7 @@ public final class TieListener: @unchecked Sendable {
     /// The app's end, once it connects, or a failure once `limit` has passed without it.
     public func accept(within limit: Duration) throws -> TieEnd {
         var waiting = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
-        let milliseconds = Int32(limit.components.seconds * 1000 + limit.components.attoseconds / 1_000_000_000_000_000)
+        let milliseconds = limit.wholeMilliseconds
         guard poll(&waiting, 1, milliseconds) == 1 else {
             throw TieFailure("the tap app did not connect within \(limit)")
         }

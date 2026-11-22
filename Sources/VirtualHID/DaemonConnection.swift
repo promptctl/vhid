@@ -1,4 +1,5 @@
 import Foundation
+import Timeline
 
 /// One connection to Karabiner-VirtualHIDDevice-Daemon over its Unix domain stream
 /// socket. Every failure names what the daemon did or did not say. [LAW:no-silent-failure]
@@ -469,15 +470,5 @@ private final class Link: @unchecked Sendable {
             guard ready >= 0 else { throw DaemonError.socket("poll", errno) }
             return ready > 0
         }
-    }
-}
-
-private extension Duration {
-    var seconds: TimeInterval {
-        TimeInterval(components.seconds) + TimeInterval(components.attoseconds) / 1e18
-    }
-
-    var wholeMilliseconds: Int32 {
-        Int32(clamping: components.seconds * 1_000 + components.attoseconds / 1_000_000_000_000_000)
     }
 }

@@ -5,6 +5,7 @@ import Helper
 import Signals
 import VirtualHID
 import os
+import Timeline
 
 // A screen reader is this executable run by the daemon, and is nothing else of it: it
 // takes no --service and serves nothing. See `FrontScreen`.
@@ -153,7 +154,7 @@ do {
                 }
             },
             now: { .now },
-            pause: { Thread.sleep(forTimeInterval: Double($0.components.seconds) + Double($0.components.attoseconds) / 1e18) }
+            pause: { Thread.sleep(forTimeInterval: $0.seconds) }
         )
     }
 
