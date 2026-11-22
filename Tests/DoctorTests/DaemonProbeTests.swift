@@ -1,6 +1,9 @@
 import Foundation
 import OwnThread
+import TestClock
 import Testing
+import Timeline
+import Waiting
 @testable import Doctor
 @testable import Helper
 @testable import Installations
@@ -9,7 +12,7 @@ import Testing
 /// connection: an anonymous listener in this process, so each reading is what a real
 /// round trip ending that way comes back as, and nothing but who answers is faked.
 /// [LAW:behavior-not-structure]
-@Suite(.ownThread) struct DaemonProbeTests {
+@Suite(.ownThread, .hangGuarded) struct DaemonProbeTests {
     /// How the far end meets the call. One type, the outcomes as values.
     /// [LAW:one-type-per-behavior]
     enum Answer: Sendable {
@@ -23,6 +26,8 @@ import Testing
         case fail
         /// Admitted, and refuses the call as a daemon whose devices are not up.
         case devicesDown
+        /// Fails the test if it is asked anything at all.
+        case unasked
     }
 
     private final class FarEnd: NSObject, HelperService, NSXPCListenerDelegate, @unchecked Sendable {
@@ -34,6 +39,7 @@ import Testing
         init(_ answer: Answer) { self.answer = answer }
 
         func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
+            if case .unasked = answer { Issue.record("doctor connected after its limit") }
             if case .refuseTheConnection = answer { return false }
             connection.exportedInterface = .helper()
             connection.exportedObject = self
@@ -46,7 +52,7 @@ import Testing
             case .holder(let pid): reply(pid.map { NSNumber(value: $0) }, nil)
             case .fail: reply(nil, NSError(domain: "fake", code: 7, userInfo: [NSLocalizedDescriptionKey: "refused by the fake"]))
             case .devicesDown: reply(nil, NSError(domain: Installation.refusalDomain, code: Installation.devicesDownCode, userInfo: [NSLocalizedDescriptionKey: "devices not up: the driver is not activated"]))
-            case .never, .refuseTheConnection: lock.lock(); withheld.append(reply); lock.unlock()
+            case .never, .refuseTheConnection, .unasked: lock.lock(); withheld.append(reply); lock.unlock()
             }
         }
 
@@ -68,14 +74,15 @@ import Testing
 
     /// Reads a far end answering as told. The listener holds its delegate weakly, so both
     /// are held here until the reading is taken.
-    private func reading(_ answer: Answer, invalidated: Bool = false, replyTimeout: Duration = .seconds(20)) -> DaemonReading {
+    private func reading(_ answer: Answer, invalidated: Bool = false, by deadline: Deadline = Timeline.suspending.deadline(within: hangGuard)) -> DaemonReading {
         let far = FarEnd(answer)
         let listener = NSXPCListener.anonymous()
         listener.delegate = far
         listener.resume()
         if invalidated { listener.invalidate() }
-        let helper = { HelperConnection(connection: NSXPCConnection(listenerEndpoint: listener.endpoint), service: "ai.promptctl.vhid.tests.far", replyTimeout: replyTimeout) }
-        let read = DaemonProbe.reading(helper)
+        let read = DaemonProbe.reading(by: deadline) {
+            HelperConnection(connection: NSXPCConnection(listenerEndpoint: listener.endpoint), service: "ai.promptctl.vhid.tests.far", replyTimeout: $0)
+        }
         withExtendedLifetime((far, listener)) {}
         return read
     }
@@ -99,8 +106,16 @@ import Testing
     }
 
     @Test func aDaemonThatNeverAnswersIsSilentAtTheDeadline() {
-        let read = reading(.never, replyTimeout: .milliseconds(200))
+        let read = reading(.never, by: Timeline.suspending.deadline(within: .milliseconds(200)))
         guard case .silent = read else { Issue.record("read \(read)"); return }
+    }
+
+    /// A reading whose limit the rows before it spent asks the daemon nothing, and says so.
+    @Test func aDaemonWhoseTurnCameAfterTheLimitIsNotAsked() {
+        let clock = ManualClock()
+        let deadline = Timeline(clock).deadline(within: .seconds(30))
+        clock.advance(by: .seconds(30))
+        #expect(reading(.unasked, by: deadline) == .unasked(limit: .seconds(30)))
     }
 
     /// A daemon listening without its devices is read by its code, carrying why.
@@ -124,9 +139,9 @@ import Testing
         refusing.resume(); answering.resume()
         let endpoints = [refusing.endpoint, answering.endpoint]
         var asked = 0
-        let read = DaemonProbe.reading {
+        let read = DaemonProbe.reading(by: Timeline.suspending.deadline(within: hangGuard)) {
             defer { asked += 1 }
-            return HelperConnection(connection: NSXPCConnection(listenerEndpoint: endpoints[asked]), service: "ai.promptctl.vhid.tests.far", replyTimeout: .seconds(20))
+            return HelperConnection(connection: NSXPCConnection(listenerEndpoint: endpoints[asked]), service: "ai.promptctl.vhid.tests.far", replyTimeout: $0)
         }
         #expect(read == .answered(holder: nil))
         withExtendedLifetime((refusing, answering, no, yes)) {}

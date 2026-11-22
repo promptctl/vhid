@@ -8,6 +8,7 @@ import Seeing
 import Telemetry
 import Turns
 import Vision
+import Timeline
 
 /// Reads the screen as pixels: captures the region, recognises its text on-device with
 /// Vision, and hands the runs to the one judge every reader shares.
@@ -197,7 +198,7 @@ public struct PixelReader: Reader {
 
         let r = region.cgRect
         let command = Command("/usr/sbin/screencapture", ["-x", "-t", "png", "-R\(Int(r.minX)),\(Int(r.minY)),\(Int(r.width)),\(Int(r.height))", path.path])
-        let output = try await reading { stop in Result { try command.run(by: .within(Command.limit, or: stop)) } }.get()
+        let output = try await reading(within: Command.limit, on: .suspending) { deadline, stop in Result { try command.run(by: deadline, or: stop) } }.get()
 
         guard let source = CGImageSourceCreateWithURL(path as CFURL, nil),
               // Decoded now, not on first use: the image is lazy by default, and the file

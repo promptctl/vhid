@@ -3,6 +3,7 @@ import ArgumentParser
 import Doctor
 import DriverExtension
 import Foundation
+import Timeline
 
 /// The Mach service this vhid dials when no `--service` is given.
 ///
@@ -49,7 +50,7 @@ extension ServiceCommand {
 
         func run() async throws {
             let installation = try service.installation()
-            let standing = try await reading { stop in Result { try LaunchdProbe.standing(of: installation, by: .within(Command.limit, or: stop)) } }
+            let standing = try await reading(within: Command.limit, on: .suspending) { deadline, stop in Result { try LaunchdProbe.standing(of: installation, by: deadline, or: stop) } }
             do {
                 print(try standing.get().rawValue)
             } catch {

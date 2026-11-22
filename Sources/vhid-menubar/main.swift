@@ -1,10 +1,12 @@
 import AppKit
+import ChildProcess
 import Doctor
 import DriverExtension
 import Foundation
 import Helper
 import Installations
 import MenuBar
+import Timeline
 
 /// vhid's menu bar item: whether this copy of vhid is ready, doctor's rows, and the
 /// daemon's last failure.
@@ -107,7 +109,11 @@ final class Item: NSObject {
 /// and one that did not has already cost doctor's full deadline. [LAW:effects-at-boundaries]
 func read(_ installation: Installation) -> (Glance, Readiness) {
     // Nobody stops a menu's reading: it is read to its end, and the next one waits for it.
-    let readiness = Readiness.read(for: installation, stoppedBy: .never)
+    // Its limit counts from here, where its turn on the readings queue came, and not from
+    // when it was asked for: nobody waits on a menu's reading but the next one, which the
+    // queue holds back on purpose, so a reading queued behind a slow one is a reading taken
+    // in full and not one found spent before it began.
+    let readiness = Readiness.read(for: installation, by: Timeline.suspending.deadline(within: Command.limit), or: .never)
     let lastFailure = Result { try HelperConnection(installation: installation, replyTimeout: .seconds(1)).lastFailure() }
     return (Glance(installation: installation, readiness: readiness, lastFailure: lastFailure, readAt: Date()), readiness)
 }

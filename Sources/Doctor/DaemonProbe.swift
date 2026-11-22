@@ -1,6 +1,7 @@
 import Foundation
 import Helper
 import Installations
+import Timeline
 
 /// Asking the daemon who holds the devices, and reading what came back.
 ///
@@ -9,22 +10,32 @@ import Installations
 /// devices from a client that holds them. What it came back as is read by a pure function
 /// beside it, which a test drives with every failure a connection can end in.
 public enum DaemonProbe {
-    /// What this installation's daemon says, asked now.
-    public static func reading(of installation: Installation, replyTimeout: Duration = HelperConnection.replyTimeout) -> DaemonReading {
-        reading { HelperConnection(installation: installation, replyTimeout: replyTimeout) }
+    /// What this installation's daemon says, asked now, by `deadline`: each call waits for
+    /// its reply no longer than the connection's own timeout nor than what is left of it,
+    /// and a call whose turn comes after it is not made.
+    public static func reading(of installation: Installation, by deadline: Deadline) -> DaemonReading {
+        reading(by: deadline) { HelperConnection(installation: installation, replyTimeout: $0) }
     }
 
-    /// What status calls over fresh connections from `connect` came back as.
+    /// What status calls over fresh connections from `connect`, each handed the reply
+    /// timeout it may wait, came back as.
     ///
     /// A refused connection is asked about twice, on two connections. The client hears
     /// 4097 when the daemon refuses its signature and also when a daemon that was
     /// listening exits with the call in flight. A refused signature is refused again; a
     /// daemon that died is, the second time, whatever it is now - restarted and answering,
     /// or silent. Two refusals in a row is the signature. [LAW:no-silent-failure]
-    static func reading(_ connect: () -> HelperConnection) -> DaemonReading {
-        let first = asked(connect())
+    static func reading(by deadline: Deadline, _ connect: (Duration) -> HelperConnection) -> DaemonReading {
+        let first = asked(by: deadline, connect)
         guard first == .refusedThisVhid else { return first }
-        return asked(connect())
+        return asked(by: deadline, connect)
+    }
+
+    /// [LAW:single-enforcer] The one door each call passes, so neither of the two is made
+    /// once the reading's limit has passed.
+    private static func asked(by deadline: Deadline, _ connect: (Duration) -> HelperConnection) -> DaemonReading {
+        guard !deadline.passed else { return .unasked(limit: deadline.limit) }
+        return asked(connect(min(deadline.left, HelperConnection.replyTimeout)))
     }
 
     private static func asked(_ helper: HelperConnection) -> DaemonReading {

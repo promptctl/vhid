@@ -92,13 +92,13 @@ let package = Package(
         .target(name: "ChildProcess", dependencies: ["Timeline", "Telemetry"]),
         // Against /bin/sh as the child: what it was left holding, and what a signal does
         // to it under a parent that ignores that signal.
-        .testTarget(name: "ChildProcessTests", dependencies: ["ChildProcess", "OwnThread"]),
+        .testTarget(name: "ChildProcessTests", dependencies: ["ChildProcess", "OwnThread", "TestClock", "Timeline", "Waiting"]),
         // Where the Karabiner-DriverKit-VirtualHIDDevice driver extension stands on this
         // Mac, and the four readings that answer is derived from. It links ChildProcess
         // for the commands those readings run and nothing else, so the CLI, the daemon and
         // scripts/virtual-hid-driver reach one vocabulary instead of three.
         // [LAW:one-source-of-truth]
-        .target(name: "DriverExtension", dependencies: ["ChildProcess"]),
+        .target(name: "DriverExtension", dependencies: ["ChildProcess", "Timeline"]),
         // The verdict table is a pure function of four readings, so every combination is
         // exercised here - including the ones this Mac cannot be put into.
         .testTarget(name: "DriverExtensionTests", dependencies: ["DriverExtension", "ChildProcess", "OwnThread"]),
@@ -154,8 +154,8 @@ let package = Package(
         // reads about, never a reader. Helper is for the one status call it asks the
         // daemon, over the same connection every verb dials. [LAW:one-way-deps]
         // [LAW:effects-at-boundaries]
-        .target(name: "Doctor", dependencies: ["DriverExtension", "ChildProcess", "Installations", "Helper"]),
-        .testTarget(name: "DoctorTests", dependencies: ["Doctor", "DriverExtension", "ChildProcess", "Installations", "Helper", "OwnThread"]),
+        .target(name: "Doctor", dependencies: ["DriverExtension", "ChildProcess", "Installations", "Helper", "Timeline"]),
+        .testTarget(name: "DoctorTests", dependencies: ["Doctor", "DriverExtension", "ChildProcess", "Installations", "Helper", "OwnThread", "TestClock", "Timeline", "Waiting"]),
         // What vhid's menu bar item shows, as a value built from doctor's readings and the
         // daemon's last failure, so every menu is one a test constructs. It reads nothing.
         // [LAW:effects-at-boundaries]
@@ -165,7 +165,7 @@ let package = Package(
         // set-up walk, which links DriverExtension for the one request it makes - the
         // driver's activation. Not a way to drive vhid, so it links no device vocabulary
         // and nothing that sends one. [LAW:one-way-deps]
-        .executableTarget(name: "vhid-menubar", dependencies: ["MenuBar", "Doctor", "DriverExtension", "ChildProcess", "Helper", "Installations"]),
+        .executableTarget(name: "vhid-menubar", dependencies: ["MenuBar", "Doctor", "DriverExtension", "ChildProcess", "Helper", "Installations", "Timeline"]),
         // What `vhid record` and its tap app say over the socket between them, and the
         // app's watch on the command. It links only Timeline, which links nothing, so both ends speak one vocabulary
         // without either linking the other. [LAW:one-way-deps]
@@ -213,7 +213,7 @@ let package = Package(
             name: "vhidCLITests",
             dependencies: [
                 "Timeline", "vhid", "Input", "Helper", "Installations", "Keystrokes", "Pointing", "Doctor", "DriverExtension", "Version", "OwnThread", "TestClock", "Signals",
-                "Telemetry", "TelemetryTesting", "Turns", "Seeing", "EyesVerbs", "ScreenSpace", "ScreenSpaceTesting", "InputTesting",
+                "Telemetry", "TelemetryTesting", "Turns", "Seeing", "EyesVerbs", "ScreenSpace", "ScreenSpaceTesting", "InputTesting", "Waiting",
                 .product(name: "MCP", package: "swift-sdk"),
             ]
         ),
@@ -235,7 +235,7 @@ let package = Package(
         // test process's own identity and audit token: real code signing, no root.
         .testTarget(
             name: "vhiddTests",
-            dependencies: ["vhidd", "Helper", "VirtualHID", "DriverExtension", "ChildProcess", "Keystrokes", "Pointing", "Signals", "Installations", "ScreenSpace", "ScreenSpaceTesting", "OwnThread"]
+            dependencies: ["vhidd", "Helper", "VirtualHID", "DriverExtension", "ChildProcess", "Keystrokes", "Pointing", "Signals", "Installations", "ScreenSpace", "ScreenSpaceTesting", "OwnThread", "TestClock", "Timeline", "Waiting"]
         ),
 
         // eyes: the screen read, so input can be aimed - what is in front, where text is -
@@ -243,7 +243,7 @@ let package = Package(
         // device, no daemon, no input, and no device target links one of them. What links
         // both halves is the vhid executable, whose `look` reads with these and whose acts
         // press with those, and its tests. [LAW:one-way-deps] Both halves stand on Telemetry
-        // and Turns, here under eyes/, and ChildProcess and Version, under Sources/, which
+        // and Turns, here under eyes/, and ChildProcess, Timeline and Version, under Sources/, which
         // link neither half.
         //
         // The vocabulary both readers speak and the protocol both conform to. It links the
@@ -257,7 +257,7 @@ let package = Package(
         .testTarget(name: "SeeingTests", dependencies: ["Seeing", "ScreenSpace", "ScreenSpaceTesting", "TestClock"], path: "eyes/Tests/SeeingTests"),
         // The pixel reader: the grant, the capture and Vision. Its own target, so the
         // vocabulary stays linking nothing and the tree reader sits beside it unlinked.
-        .target(name: "Pixels", dependencies: ["Seeing", "ScreenSpace", "Grants", "ChildProcess", "Telemetry", "Turns"], path: "eyes/Sources/Pixels"),
+        .target(name: "Pixels", dependencies: ["Seeing", "ScreenSpace", "Grants", "ChildProcess", "Telemetry", "Timeline", "Turns"], path: "eyes/Sources/Pixels"),
         // How a capture is cut into pieces and put back together, with no capture at all.
         .testTarget(name: "PixelsTests", dependencies: ["Pixels", "Seeing", "ScreenSpace", "ScreenSpaceTesting", "Grants", "ChildProcess", "Turns"], path: "eyes/Tests/PixelsTests"),
         // The tree reader: the accessibility grant and the element reads, apart from Pixels
@@ -267,11 +267,11 @@ let package = Package(
         .testTarget(name: "TreeTests", dependencies: ["Tree", "Seeing", "ScreenSpace", "ScreenSpaceTesting", "Grants"], path: "eyes/Tests/TreeTests"),
         // Whether the readers' grants are held and which app holds them: about the process,
         // not any reading, so apart from both readers, each of which asks it before looking.
-        .target(name: "Grants", dependencies: ["Seeing", "ChildProcess", "Telemetry", "Responsibility"], path: "eyes/Sources/Grants"),
+        .target(name: "Grants", dependencies: ["Seeing", "ChildProcess", "Telemetry", "Timeline", "Responsibility"], path: "eyes/Sources/Grants"),
         // The libSystem calls tccd's attribution rests on, which the SDK has no header for:
         // a header of its own, so they are linked and type-checked, not looked up.
         .target(name: "Responsibility", path: "eyes/Sources/Responsibility"),
-        .testTarget(name: "GrantsTests", dependencies: ["Grants", "Seeing", "Telemetry", "TelemetryTesting", "OwnThread"], path: "eyes/Tests/GrantsTests"),
+        .testTarget(name: "GrantsTests", dependencies: ["Grants", "Seeing", "Telemetry", "TelemetryTesting", "OwnThread", "Waiting"], path: "eyes/Tests/GrantsTests"),
         // One piece of work at a time, for what serves one: the daemon, and Vision. It links
         // neither half, so each half's gate is the same rule.
         .target(name: "Turns", path: "eyes/Sources/Turns"),

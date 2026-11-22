@@ -367,6 +367,7 @@ public extension Requirement {
         case .unreachable: "nothing holds the service"
         case .silent: "the service is held, and nothing answered"
         case .failed: "the call failed"
+        case .unasked(let limit): "not asked: the reading's limit of \(limit) had passed"
         }
     }
 
@@ -401,6 +402,12 @@ public extension Requirement {
             The daemon's log for the same moment:
                 \(daemonLog(installation, last: "10m"))
             """
+        case .unasked(let limit):
+            """
+            The readings above took the whole of doctor's limit of \(limit), so the daemon
+            was not asked. Until it is, nothing says it is listening. Run doctor
+            again; a row above that stays slow is the thing to fix.
+            """
         }
     }
 }
@@ -421,7 +428,7 @@ public extension Requirement {
         case .refusedThisVhid: Requirement(row: .signature, reads: reads, step: refusedStep(installation))
         // [LAW:no-silent-failure] Unmet rather than met or dropped: nothing was read, so
         // nothing may be claimed, and the step names the row in the way.
-        case .unreachable, .silent, .failed: Requirement(row: .signature, reads: reads, waitsOn: .daemon)
+        case .unreachable, .silent, .failed, .unasked: Requirement(row: .signature, reads: reads, waitsOn: .daemon)
         }
     }
 
@@ -429,7 +436,7 @@ public extension Requirement {
         switch reading {
         case .answered, .devicesDown: "admitted"
         case .refusedThisVhid: "refused: vhidd ended this vhid's connection"
-        case .unreachable, .silent, .failed: "not asked"
+        case .unreachable, .silent, .failed, .unasked: "not asked"
         }
     }
 
@@ -464,7 +471,7 @@ public extension Requirement {
         // The daemon refused to say, and it refused on the signature: that row is what
         // stands in the way, not the daemon's.
         case .refusedThisVhid: Requirement(row: .devices, reads: reads, waitsOn: .signature)
-        case .devicesDown, .unreachable, .silent, .failed: Requirement(row: .devices, reads: reads, waitsOn: .daemon)
+        case .devicesDown, .unreachable, .silent, .failed, .unasked: Requirement(row: .devices, reads: reads, waitsOn: .daemon)
         }
     }
 
@@ -473,7 +480,7 @@ public extension Requirement {
         case .answered(nil): "free"
         case .answered(let holder?): "held by pid \(holder)"
         case .devicesDown: "not up"
-        case .refusedThisVhid, .unreachable, .silent, .failed: "not asked"
+        case .refusedThisVhid, .unreachable, .silent, .failed, .unasked: "not asked"
         }
     }
 

@@ -6,6 +6,7 @@ import Seeing
 import Foundation
 import Responsibility
 import Telemetry
+import Timeline
 
 /// The two privacy grants eyes' readers need.
 ///
@@ -185,20 +186,21 @@ public struct GrantReading: Sendable, Equatable {
     /// A fresh reading: `reader` run with `arguments` as a child of this process, so macOS
     /// credits it to the same responsible app and it queries tccd anew.
     ///
-    /// - Parameter deadline: past this the child is stuck, and is killed. A read takes
-    ///   milliseconds; a new binary's first launch is checked by macOS first.
+    /// - Parameter limit: past this, counted from this call, the child is stuck and is
+    ///   killed. A read takes milliseconds; a new binary's first launch is checked by macOS
+    ///   first.
     /// One event per child, however its gates end: how long the child took and why it failed,
     /// apart from how long any gate waited on it. [LAW:nothing-unseen]
     /// Throws `GrantReadingFailure`, or `CancellationError` when the reading was withdrawn,
     /// which is a cancellation, recorded and passed on as one.
-    public static func taken(by reader: URL, _ arguments: [String], within deadline: Duration = .seconds(10)) async throws -> GrantReading {
-        try await Telemetry.unit("grant_child") { try await child(reader, arguments, within: deadline) }
+    public static func taken(by reader: URL, _ arguments: [String], within limit: Duration = .seconds(10)) async throws -> GrantReading {
+        try await Telemetry.unit("grant_child") { try await child(reader, arguments, within: limit) }
     }
 
-    private static func child(_ reader: URL, _ arguments: [String], within deadline: Duration) async throws -> GrantReading {
+    private static func child(_ reader: URL, _ arguments: [String], within limit: Duration) async throws -> GrantReading {
         // The child's records, if it makes any, belong under this reading's span.
         let command = Command(reader.path, arguments, environment: Telemetry.childEnvironment())
-        let ran = try await reading { stop in Result { try command.run(by: .within(deadline, or: stop)) } }
+        let ran = try await reading(within: limit, on: .suspending) { deadline, stop in Result { try command.run(by: deadline, or: stop) } }
         let output: Command.Output
         do { output = try ran.get() } catch { throw GrantReadingFailure("\(error)") }
         guard case .exited(let status) = output.ending, [0, GrantReading.lacking].contains(status) else {

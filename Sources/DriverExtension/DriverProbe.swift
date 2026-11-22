@@ -1,4 +1,5 @@
 import ChildProcess
+import Timeline
 import Foundation
 
 /// Reading this Mac for the facts `DriverState` is derived from.
@@ -49,13 +50,13 @@ public enum DriverProbe {
     /// replaces spelled an unreadable machine as the `unknown` verdict, which put a
     /// failed reading and a genuinely unnameable registration into one word that no
     /// caller could pull back apart. [LAW:no-silent-failure]
-    public static func facts(by deadline: Command.Deadline) throws -> DriverFacts {
+    public static func facts(by deadline: Deadline, or stop: Command.Stop) throws -> DriverFacts {
         DriverFacts(
             payload: try payload(),
-            receipt: try receiptVersion(of: bundleID, by: deadline),
-            registration: try registration(by: deadline),
-            ioNode: try ioNodePresent(by: deadline),
-            elementsReceipt: try elementsReceipt { try Command("/usr/sbin/pkgutil", "--pkg-info", elementsReceiptID).run(by: deadline) }
+            receipt: try receiptVersion(of: bundleID, by: deadline, or: stop),
+            registration: try registration(by: deadline, or: stop),
+            ioNode: try ioNodePresent(by: deadline, or: stop),
+            elementsReceipt: try elementsReceipt { try Command("/usr/sbin/pkgutil", "--pkg-info", elementsReceiptID).run(by: deadline, or: stop) }
         )
     }
 
@@ -94,8 +95,8 @@ public enum DriverProbe {
     ///
     /// The id is a parameter because two products leave receipts this program cares
     /// about and reading them differs in nothing else. [LAW:one-type-per-behavior]
-    public static func receiptVersion(of id: String, by deadline: Command.Deadline) throws -> String? {
-        try receiptVersion(of: id, from: Command("/usr/sbin/pkgutil", "--pkg-info", id).run(by: deadline))
+    public static func receiptVersion(of id: String, by deadline: Deadline, or stop: Command.Stop) throws -> String? {
+        try receiptVersion(of: id, from: Command("/usr/sbin/pkgutil", "--pkg-info", id).run(by: deadline, or: stop))
     }
 
     /// What pkgutil said, read. Pure, so the three answers it can give - a version, no
@@ -124,8 +125,8 @@ public enum DriverProbe {
     /// The driver extension's registration with macOS. Public because removal reasons
     /// about this one fact by itself: only a live registration needs withdrawing, and
     /// only the withdrawal needs the Manager app that removal is about to delete.
-    public static func registration(by deadline: Command.Deadline) throws -> Registration {
-        let listed = try Command("/usr/bin/systemextensionsctl", "list").run(by: deadline)
+    public static func registration(by deadline: Deadline, or stop: Command.Stop) throws -> Registration {
+        let listed = try Command("/usr/bin/systemextensionsctl", "list").run(by: deadline, or: stop)
         guard listed.status == 0 else {
             throw DriverUnreadable.toolFailed(tool: "systemextensionsctl list", status: listed.status, complaint: listed.merged)
         }
@@ -170,8 +171,8 @@ public enum DriverProbe {
     }
 
     /// Whether the driver has published its node in the IORegistry.
-    static func ioNodePresent(by deadline: Command.Deadline) throws -> Bool {
-        let read = try Command("/usr/sbin/ioreg", "-r", "-n", ioNodeName, "-d", "1").run(by: deadline)
+    static func ioNodePresent(by deadline: Deadline, or stop: Command.Stop) throws -> Bool {
+        let read = try Command("/usr/sbin/ioreg", "-r", "-n", ioNodeName, "-d", "1").run(by: deadline, or: stop)
         guard read.status == 0 else {
             throw DriverUnreadable.toolFailed(tool: "ioreg -n \(ioNodeName)", status: read.status, complaint: read.merged)
         }

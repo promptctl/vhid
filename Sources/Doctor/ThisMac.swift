@@ -1,6 +1,7 @@
 import ChildProcess
 import DriverExtension
 import Installations
+import Timeline
 
 public extension Readiness {
     /// Where this Mac stands for `installation`, read now.
@@ -16,14 +17,16 @@ public extension Readiness {
     /// Setup Assistant answer before it listens, so a cache read after its reply sees what
     /// a daemon started by the call filed. [LAW:no-ambient-temporal-coupling]
     ///
-    /// The driver and launchd are read by a limit apiece, so one stuck tool leaves the
-    /// other its whole limit, and both by `stop`, which ends whichever is reading.
-    static func read(for installation: Installation, stoppedBy stop: Command.Stop) -> Readiness {
+    /// Every reading is over by `deadline`, the one the caller made as it asked, so the list
+    /// takes its caller no longer than it gave: a stuck tool takes what is left of it, and a
+    /// reading its turn came too late for is unread and says so. All of them by `stop`,
+    /// which ends whichever is reading.
+    static func read(for installation: Installation, by deadline: Deadline, or stop: Command.Stop) -> Readiness {
         Readiness(
             installation: installation,
-            driver: Result { DriverState(try DriverProbe.facts(by: .within(Command.limit, or: stop))) },
-            job: Result { try LaunchdProbe.standing(of: installation, by: .within(Command.limit, or: stop)) },
-            daemon: DaemonProbe.reading(of: installation),
+            driver: Result { DriverState(try DriverProbe.facts(by: deadline, or: stop)) },
+            job: Result { try LaunchdProbe.standing(of: installation, by: deadline, or: stop) },
+            daemon: DaemonProbe.reading(of: installation, by: deadline),
             keyboardSetupAssistantAnswered: Result { try KeyboardTypeCache.read().answersThisKeyboard })
     }
 }

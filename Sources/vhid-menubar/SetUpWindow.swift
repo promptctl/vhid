@@ -5,6 +5,7 @@ import DriverExtension
 import Installations
 import MenuBar
 import os
+import Timeline
 
 /// The set-up window: doctor's unmet rows one at a time, each explained before the person
 /// presses the button that makes macOS ask.
@@ -172,8 +173,10 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
     private func request(_ ask: Requirement.Ask, for requirement: Requirement) {
         failure = nil
         let log = log
-        DispatchQueue.global(qos: .userInitiated).async {
-            let started = Result { try Self.perform(ask, log: log) }
+        // Made as the person asks, so the wait for the queue is the request's too.
+        let deadline = Timeline.suspending.deadline(within: Command.limit)
+        DispatchQueue(label: "menubar.request", qos: .userInitiated).async {
+            let started = Result { try Self.perform(ask, by: deadline, log: log) }
             DispatchQueue.main.async { MainActor.assumeIsolated { [weak self] in self?.requested(ask, for: requirement, started) } }
         }
     }
@@ -193,7 +196,7 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
     /// Runs one request as this process's user, which is the person: macOS attributes a
     /// driver activation to whoever asks, and the approval they give answers that request.
     /// What the Manager prints, and its exit, are logged when it ends. [LAW:effects-at-boundaries]
-    nonisolated private static func perform(_ ask: Requirement.Ask, log: Logger) throws {
+    nonisolated private static func perform(_ ask: Requirement.Ask, by deadline: Deadline, log: Logger) throws {
         switch ask {
         case .activateDriver:
             let manager = DriverProbe.managerExecutable
@@ -201,7 +204,7 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
             // asking again does not pile them up. pkill's pattern is a regex, and the path's
             // dots are escaped so it matches that path alone. pkill exits 1 when none was.
             let pattern = NSRegularExpression.escapedPattern(for: "\(manager) activate")
-            let ended = try Command("/usr/bin/pkill", "-u", "\(getuid())", "-f", pattern).run(by: .within(Command.limit, or: .never))
+            let ended = try Command("/usr/bin/pkill", "-u", "\(getuid())", "-f", pattern).run(by: deadline, or: .never)
             guard ended.status <= 1 else { throw ManagerError.pkill(ended.merged) }
             let process = Process()
             process.executableURL = URL(fileURLWithPath: manager)

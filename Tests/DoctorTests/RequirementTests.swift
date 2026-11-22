@@ -17,6 +17,7 @@ import Testing
         .answered(holder: nil), .answered(holder: 4242), .refusedThisVhid,
         .unreachable(reason: "NSCocoaErrorDomain 4099"), .silent(reason: "no answer in 5 seconds"),
         .failed(reason: "something new"), .devicesDown(reason: "devices not up: the driver is not activated"),
+        .unasked(limit: .seconds(30)),
     ]
 
     // MARK: - the driver extension
@@ -130,7 +131,7 @@ import Testing
             let row = Requirement.daemon(reading, installation: Self.installation)
             let listening = switch reading {
             case .answered, .refusedThisVhid: true
-            case .devicesDown, .unreachable, .silent, .failed: false
+            case .devicesDown, .unreachable, .silent, .failed, .unasked: false
             }
             #expect(row.met == listening, "\(reading)")
         }
@@ -143,14 +144,18 @@ import Testing
             let step = try #require(Requirement.daemon(reading, installation: Self.installation).step)
             let said = switch reading {
             case .devicesDown(let reason), .unreachable(let reason), .silent(let reason), .failed(let reason): reason
+            case .unasked(let limit): "\(limit)"
             case .answered, .refusedThisVhid: ""
             }
             #expect(step.contains(said), "\(reading)")
             // Nothing holding the service leaves no daemon whose log could say why: the
             // launchd row does, or the two readings disagree and a second look is the step.
+            // A daemon not asked has said nothing either, and a second look is the step.
             if case .unreachable = reading {
                 #expect(step.contains(Requirement.Row.launchdJob.rawValue))
                 #expect(step.contains("run doctor again"))
+            } else if case .unasked = reading {
+                #expect(step.contains("Run doctor"))
             } else {
                 #expect(step.contains("subsystem == \"com.example.doctor-test\""), "\(reading)")
             }
@@ -166,7 +171,7 @@ import Testing
             let row = Requirement.signature(reading, installation: Self.installation)
             let answered = switch reading {
             case .answered, .devicesDown: true
-            case .refusedThisVhid, .unreachable, .silent, .failed: false
+            case .refusedThisVhid, .unreachable, .silent, .failed, .unasked: false
             }
             #expect(row.met == answered, "\(reading)")
         }
@@ -251,7 +256,7 @@ import Testing
         for reading in Self.daemonReadings {
             let proves = switch reading {
             case .answered, .devicesDown, .refusedThisVhid: true
-            case .unreachable, .silent, .failed: false
+            case .unreachable, .silent, .failed, .unasked: false
             }
             #expect(reading.daemonHasStarted == proves, "\(reading)")
         }

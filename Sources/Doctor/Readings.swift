@@ -67,6 +67,9 @@ public enum DaemonReading: Sendable, Hashable {
     /// into the nearest of them: a reading this build cannot classify is shown as what it
     /// said. [LAW:no-silent-failure]
     case failed(reason: String)
+    /// The reading's limit had passed before the daemon's turn came, so it was not asked.
+    /// Nothing about the daemon was read. [LAW:no-silent-failure]
+    case unasked(limit: Duration)
 
     /// Whether a daemon is known to have started, and so to have had its chance to file
     /// Keyboard Setup Assistant's answer - which it does first, before it reaches the
@@ -82,7 +85,7 @@ public enum DaemonReading: Sendable, Hashable {
     public var daemonHasStarted: Bool {
         switch self {
         case .answered, .devicesDown, .refusedThisVhid: true
-        case .unreachable, .silent, .failed: false
+        case .unreachable, .silent, .failed, .unasked: false
         }
     }
 
@@ -95,7 +98,7 @@ public enum DaemonReading: Sendable, Hashable {
     public var someoneHoldsTheService: Bool {
         switch self {
         case .answered, .devicesDown, .refusedThisVhid, .silent: true
-        case .unreachable, .failed: false
+        case .unreachable, .failed, .unasked: false
         }
     }
 }

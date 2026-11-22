@@ -14,6 +14,8 @@ import Telemetry
 import TelemetryTesting
 import TestClock
 import Testing
+import Timeline
+import Waiting
 @testable import vhid
 import ScreenSpace
 import ScreenSpaceTesting
@@ -540,38 +542,33 @@ import InputTesting
     /// running, the child with it, at once rather than at the command's limit, and the
     /// record says cancelled, names the command it ended, and how long it ran.
     ///
-    /// On a thread of its own, and timed from the cancel to the child's end: the test's
-    /// waits then queue behind no other test on the pool, and how long the child took to
-    /// start is the runner's load, not the claim. [LAW:no-ambient-temporal-coupling]
-    @Test(.ownThread, .timeLimit(.minutes(1))) func aReadingCancelledMidCommandIsRecordedAsCancelledAndLeavesNoChild() async throws {
-        let pidFile = FileManager.default.temporaryDirectory.appending(path: "vhid-reading-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: pidFile) }
+    /// On a thread of its own, so the test's waits queue behind no other test on the pool.
+    /// The command's limit is the guard, so it is the cancel and only the cancel that can
+    /// end it: a reading has collected its child by the time it throws, so a child still
+    /// there once the verb has thrown is one the cancel did not end.
+    @Test(.ownThread, .hangGuarded) func aReadingCancelledMidCommandIsRecordedAsCancelledAndLeavesNoChild() async throws {
+        let said = try Handshake()
+        let script = "echo $$ > \"$0\"; exec sleep 600"
         let collected = Collected()
         let begun = ContinuousClock.now
         let verb = Task {
             try await Self.cli("driver state", into: collected) {
-                try await reading { stop in
-                    Result { try Command("/bin/sh", "-c", "echo $$ > \(pidFile.path); exec sleep 600").run(by: .within(Command.limit, or: stop)) }
+                try await reading(within: hangGuard, on: .suspending) { deadline, stop in
+                    Result { try Command("/bin/sh", "-c", script, said.path).run(by: deadline, or: stop) }
                 }
             }
         }
-        func pid() -> pid_t? { (try? String(contentsOf: pidFile, encoding: .utf8)).flatMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) } }
-        while pid() == nil { try await Task.sleep(for: .milliseconds(10)) }
-        let child = try #require(pid())
-        // The clock the command's deadline is kept on.
-        let cancelled = SuspendingClock.now
+        let child = try #require(pid_t(try said.line()))
         verb.cancel()
-        while kill(child, 0) == 0 { try await Task.sleep(for: .milliseconds(10)) }
-        #expect(errno == ESRCH)
-        #expect(SuspendingClock.now - cancelled < Command.limit / 3)
         await #expect(throws: CancellationError.self) { try await verb.value }
+        #expect(kill(child, 0) == -1 && errno == ESRCH)
         let took = ContinuousClock.now - begun
         let record = try Self.only(collected)
         #expect(record["event"] as? String == "driver state")
         #expect(record["outcome"] as? String == "cancelled")
         #expect(try #require(record["duration_ms"] as? Double) <= took / .milliseconds(1))
         let stopped = try #require((record["attributes"] as? [String: Any])?["stopped"] as? [String])
-        #expect(stopped == ["sh -c echo $$ > \(pidFile.path); exec sleep 600"])
+        #expect(stopped == ["sh -c \(script) \(said.path)"])
     }
 
     /// `doctor` prints its own report and exits 1 with nothing more to say.
