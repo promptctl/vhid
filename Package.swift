@@ -63,6 +63,15 @@ let package = Package(
         // key down on a device nothing is left to release. It links nothing.
         // [LAW:one-source-of-truth]
         .target(name: "Signals"),
+        // The one screen space both halves speak: a point, a box, their spelling, the
+        // display layout and the one rule for where on it a point or a box is pressed. It
+        // links nothing of the package, so the devices and the readers share a space without
+        // either linking the other. [LAW:one-way-deps] [LAW:one-source-of-truth]
+        .target(name: "ScreenSpace"),
+        .testTarget(name: "ScreenSpaceTests", dependencies: ["ScreenSpace"]),
+        // The one window-server read of the layout, apart from the space so the space stays
+        // values a test makes. [LAW:effects-at-boundaries]
+        .target(name: "DisplayReading", dependencies: ["ScreenSpace"]),
         // Starting a child of this process, with what every child of vhidd needs - every
         // signal at its default and no descriptor it was not given - collecting one that
         // has ended, and running a command to its end, its deadline or its stop. Both halves
