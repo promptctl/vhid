@@ -12,6 +12,8 @@ public let hangGuard: Duration = .seconds(60)
 public struct Hung: Error, CustomStringConvertible {
     public let waitingFor: String
 
+    public init(waitingFor: String) { self.waitingFor = waitingFor }
+
     public var description: String { "waited \(hangGuard) for \(waitingFor), which never came" }
 }
 

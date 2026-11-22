@@ -148,7 +148,7 @@ public final class VirtualKeyboard: KeyPress {
     public func reset() throws {
         try held.withLock { held in
             held.settled = false
-            try daemon.request(.keyboardReset, by: .now + reportTimeout)
+            try daemon.request(.keyboardReset, within: reportTimeout)
             held = Held(keysDown: [], settled: true)
         }
     }
@@ -179,7 +179,7 @@ public final class VirtualKeyboard: KeyPress {
         let report = try KeyboardReport(held: next)
         held.keysDown.formUnion(next)
         held.settled = false
-        try daemon.request(.postKeyboardInputReport, report.bytes, by: .now + reportTimeout)
+        try daemon.request(.postKeyboardInputReport, report.bytes, within: reportTimeout)
         held = Held(keysDown: next, settled: true)
     }
 }

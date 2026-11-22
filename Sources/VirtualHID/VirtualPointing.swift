@@ -95,7 +95,7 @@ public final class VirtualPointing: PointingDevice {
     /// before, for the reason `post` gives.
     public func reset() throws {
         try held.withLock { buttonsDown in
-            try daemon.request(.pointingReset, by: .now + reportTimeout)
+            try daemon.request(.pointingReset, within: reportTimeout)
             buttonsDown.removeAll()
         }
     }
@@ -112,7 +112,7 @@ public final class VirtualPointing: PointingDevice {
             let next = change(buttonsDown)
             let report = PointingReport(held: next, move: move, scroll: scroll)
             buttonsDown.formUnion(next)
-            try daemon.request(.postPointingInputReport, report.bytes, by: .now + reportTimeout)
+            try daemon.request(.postPointingInputReport, report.bytes, within: reportTimeout)
             buttonsDown = next
         }
     }

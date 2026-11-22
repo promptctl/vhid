@@ -1,6 +1,9 @@
 import Foundation
 import Testing
+import TestClock
+import Timeline
 @testable import VirtualHID
+import Waiting
 
 /// Karabiner-VirtualHIDDevice-Daemon, faked at the only place worth faking it: the far end
 /// of a real socket, speaking the real framing.
@@ -14,12 +17,17 @@ import Testing
 final class FakeDaemon: @unchecked Sendable {
     /// The descriptor to hand `DaemonConnection`, which is why that seam exists.
     let clientDescriptor: Int32
+    /// The clock the client keeps its limits on, which only a test moves. Held still, no
+    /// request the fake answers can miss, however long a loaded machine takes to carry
+    /// the answer; moved past a limit, the next frame finds the wait spent.
+    /// [LAW:no-ambient-temporal-coupling]
+    let clock = ManualClock()
 
     private let descriptor: Int32
     private let lock = NSLock()
-    private var log: [Frame] = []
+    /// Every frame the client has sent, and whether it has hung up: what a test waits on.
+    private let seen = Latch<(frames: [Frame], gone: Bool)>(([], false))
     private var pushID: UInt64 = 10_000
-    private var clientGone = false
 
     /// `handling` runs on the daemon's own thread for every frame the client sends. The
     /// default answers each request with an empty response, which is what the daemon does
@@ -44,10 +52,10 @@ final class FakeDaemon: @unchecked Sendable {
             while true {
                 do {
                     let frame = try readFrame()
-                    lock.lock(); log.append(frame); lock.unlock()
+                    seen.update { $0.frames.append(frame) }
                     try answer(frame, self)
                 } catch is Closed {
-                    lock.lock(); clientGone = true; lock.unlock()
+                    seen.update { $0.gone = true }
                     break
                 } catch {
                     // The framing is what this suite exists to check, so a frame this
@@ -67,6 +75,24 @@ final class FakeDaemon: @unchecked Sendable {
         close(descriptor)
     }
 
+    /// Statuses as the daemon's frames carry them: pairs of (status, value).
+    static func payload(_ statuses: [(DaemonConnection.Status, Bool)]) -> [UInt8] {
+        statuses.flatMap { [$0.0.rawValue, $0.1 ? 1 : 0] }
+    }
+
+    /// The client end of the pair, keeping its limits on `clock`.
+    func connect(heartbeatEvery interval: Duration = DaemonConnection.heartbeatInterval, patience: Duration = DaemonConnection.patience, whenLost: @escaping @Sendable (DaemonError) -> Void = { _ in }) throws -> DaemonConnection {
+        try DaemonConnection(fileDescriptor: clientDescriptor, heartbeatEvery: interval, patience: patience, now: Timeline(clock).now, whenLost: whenLost)
+    }
+
+    /// A request left unanswered, and its limit spent: the client's clock moves on an hour,
+    /// past any limit a test gives, and a status push saying nothing wakes the client to
+    /// find it so. What a daemon that does not answer in time looks like, with no wait.
+    func lapse() throws {
+        clock.advance(by: .seconds(3600))
+        try push([])
+    }
+
     /// The daemon hangs up, as the real one does on a client silent for fifteen seconds,
     /// or when it exits. The client sees the end of the stream at once.
     func hangUp() {
@@ -74,34 +100,28 @@ final class FakeDaemon: @unchecked Sendable {
     }
 
     /// Every frame the client has sent, in order.
-    var received: [Frame] {
-        lock.lock(); defer { lock.unlock() }
-        return log
-    }
+    var received: [Frame] { seen.state.frames }
 
     /// Waits for a frame the client sends without waiting on anything itself - its answer
     /// to a health check, say. Every other frame is logged before the response the client
     /// is blocked on, so only these need waiting for; asserting on them straight after the
     /// call under test returns is a race, and one that passes most of the time.
-    func awaitFrame(_ wanted: Frame, within limit: Duration = .seconds(2)) -> Bool {
-        let deadline = ContinuousClock.now + limit
-        while ContinuousClock.now < deadline {
-            if received.contains(wanted) { return true }
-            Thread.sleep(forTimeInterval: 0.002)
-        }
-        return received.contains(wanted)
+    func awaitFrame(_ wanted: Frame) throws(Hung) {
+        try seen.wait(for: "the client to send \(wanted)") { $0.frames.contains(wanted) }
     }
 
-    /// Whether the client ended the stream within `limit`, which is what tells the real
-    /// daemon to take down the devices it kept for that client.
-    func awaitClientHangUp(within limit: Duration = .seconds(2)) -> Bool {
-        let deadline = ContinuousClock.now + limit
-        repeat {
-            lock.lock(); let gone = clientGone; lock.unlock()
-            if gone { return true }
-            Thread.sleep(forTimeInterval: 0.002)
-        } while ContinuousClock.now < deadline
-        return false
+    /// Waits until bytes the client sent lie unread: to a handler that has stopped reading,
+    /// the sign that the client has begun its next frame.
+    func awaitUnread() throws(Hung) {
+        var waiting = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
+        let milliseconds = Int32(hangGuard.components.seconds * 1_000)
+        guard uninterrupted({ Int(poll(&waiting, 1, milliseconds)) }) > 0 else { throw Hung(waitingFor: "the client to send more") }
+    }
+
+    /// Waits for the client to end the stream, which is what tells the real daemon to take
+    /// down the devices it kept for that client.
+    func awaitClientHangUp() throws(Hung) {
+        try seen.wait(for: "the client to hang up") { $0.gone }
     }
 
     /// The payload of each request the client sent, which is where the version, the
@@ -115,10 +135,12 @@ final class FakeDaemon: @unchecked Sendable {
     }
 
     /// A status push, which the daemon sends as a request of its own and the client is
-    /// expected to answer.
-    func push(_ statuses: [(DaemonConnection.Status, Bool)]) throws {
+    /// expected to answer: the id it was sent under, which the answer carries.
+    @discardableResult
+    func push(_ statuses: [(DaemonConnection.Status, Bool)]) throws -> UInt64 {
         lock.lock(); pushID += 1; let id = pushID; lock.unlock()
-        try send(.request(id: id, payload: statuses.flatMap { [$0.0.rawValue, $0.1 ? 1 : 0] }))
+        try send(.request(id: id, payload: Self.payload(statuses)))
+        return id
     }
 
     /// Sets the kernel's send space on both ends of the pair to `bytes`, so a test that
@@ -168,6 +190,11 @@ final class FakeDaemon: @unchecked Sendable {
     /// than a failure the loop has to recognise by its message. [LAW:types-are-the-program]
     struct Closed: Error {}
     struct Failed: Error { let what: String }
+}
+
+/// A daemon that answers nothing: every request's limit lapses.
+@Sendable func daemonThatNeverAnswers(_ frame: Frame, _ fake: FakeDaemon) throws {
+    if case .request = frame { try fake.lapse() }
 }
 
 /// The request byte and payload the client actually sent, unwrapped from the two-byte

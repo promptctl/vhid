@@ -109,14 +109,19 @@ let package = Package(
         // the client both read it without either depending on the other.
         // [LAW:one-way-deps]
         .target(name: "Installations"),
+        // A clock as offsets from its start: what the pointer, the typist, the daemon
+        // connection's requests and vhidd's retries wait by. It links nothing, so each
+        // takes the real clock in use and a test's hand-moved one in a test, by one type.
+        // [LAW:one-type-per-behavior]
+        .target(name: "Timeline"),
         .testTarget(name: "InstallationsTests", dependencies: ["Installations"]),
         // Everything about the two virtual devices and nothing about what is typed on
         // them: the pqrs daemon socket, the two report layouts, and the keys and buttons
         // each device is holding. [LAW:one-way-deps]
-        .target(name: "VirtualHID", dependencies: ["DriverExtension", "Keystrokes", "Pointing"]),
+        .target(name: "VirtualHID", dependencies: ["DriverExtension", "Keystrokes", "Pointing", "Timeline"]),
         // The wire protocol against a fake daemon on the other end of a socketpair, so
         // the framing is proven without root and without the driver.
-        .testTarget(name: "VirtualHIDTests", dependencies: ["VirtualHID", "DriverExtension", "Keystrokes", "Pointing", "OwnThread"]),
+        .testTarget(name: "VirtualHIDTests", dependencies: ["VirtualHID", "DriverExtension", "Keystrokes", "Pointing", "OwnThread", "TestClock", "Timeline", "Waiting"]),
         // What crosses the privilege boundary, and the client's side of it. It links the
         // vocabularies - the keys, the pointing and the screen space - and nothing else: not
         // the layout's reading, which happens in the session in front and not across the
@@ -131,11 +136,11 @@ let package = Package(
         // caller supplies a conformance. [LAW:one-way-deps] [LAW:effects-at-boundaries]
         // Telemetry for the cause chain its stops are read by, so a record and a caller tell
         // a withdrawn run from a failed one by one rule. [LAW:single-enforcer]
-        .target(name: "Input", dependencies: ["KeyboardLayouts", "Keystrokes", "Pointing", "ScreenSpace", "Telemetry"]),
+        .target(name: "Input", dependencies: ["KeyboardLayouts", "Keystrokes", "Pointing", "ScreenSpace", "Telemetry", "Timeline"]),
         // The pointer's loop against a fake screen with an acceleration curve of its own,
         // and the typist against a keyboard that can be made to fail at the third keystroke
         // of four: no device, no window server, no grant.
-        .testTarget(name: "InputTests", dependencies: ["Input", "InputTesting", "KeyboardLayouts", "Keystrokes", "OwnThread", "Pointing", "ScreenSpace", "ScreenSpaceTesting", "TestClock", "Telemetry"]),
+        .testTarget(name: "InputTests", dependencies: ["Input", "InputTesting", "KeyboardLayouts", "Keystrokes", "OwnThread", "Pointing", "ScreenSpace", "ScreenSpaceTesting", "TestClock", "Telemetry", "Timeline"]),
         // Targets placed as a verb places them, for the tests of the devices and of the
         // verbs over them. No product names it, so nothing shipped carries it.
         .target(name: "InputTesting", dependencies: ["Input", "ScreenSpace", "ScreenSpaceTesting"], path: "Tests/InputTesting"),

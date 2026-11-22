@@ -17,7 +17,7 @@ import Testing
 }
 
 private func keyboard(on fake: FakeDaemon, reportTimeout: Duration = .seconds(2)) throws -> VirtualKeyboard {
-    VirtualKeyboard(daemon: try DaemonConnection(fileDescriptor: fake.clientDescriptor), reportTimeout: reportTimeout)
+    VirtualKeyboard(daemon: try fake.connect(), reportTimeout: reportTimeout)
 }
 
 /// The reports the device actually put on the wire, in order.
@@ -46,23 +46,30 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
     }
 
     /// Readiness is a value the daemon sends and this waits for, never a sleep. A daemon
-    /// that takes its time is waited out; one that answers sooner is not waited on longer.
+    /// that takes its time is waited out, and the start returns when it is told: on a clock
+    /// that moves only when the daemon takes its time, the startup is that time exactly.
     @Test func startWaitsForTheDaemonsWordAndReturnsWhenItComes() throws {
         let fake = FakeDaemon { frame, fake in
             guard case .request(let id, let payload) = frame else { return }
             try fake.send(.response(id: id, payload: []))
             if requestSent(payload).request == DaemonConnection.Request.keyboardInitialize.rawValue {
-                Thread.sleep(forTimeInterval: 0.2)
+                fake.clock.advance(by: .milliseconds(200))
                 try fake.push([(.keyboardReady, true)])
             }
         }
-        let startup = try keyboard(on: fake).start(within: .seconds(5))
-        #expect(startup.ready > .milliseconds(180))
-        // Well inside the five seconds it was given: it returned when told, not on a timer.
-        #expect(startup.ready < .seconds(2))
-        // The daemon answered the initialize at once and only then slept; a startup that
-        // reported this stall would be timing the next thing the daemon said, not its answer.
-        #expect(startup.answered < .milliseconds(100))
+        #expect(try keyboard(on: fake).start(within: .seconds(5)).ready == .milliseconds(200))
+    }
+
+    /// What answering cost is timed to the answer, not to the daemon's next word: a daemon
+    /// that took its time to answer and was ready as it did is one whose startup is that
+    /// time, twice over.
+    @Test func theAnswerIsTimedWhenItComes() throws {
+        let fake = FakeDaemon { frame, fake in
+            guard case .request(let id, _) = frame else { return }
+            fake.clock.advance(by: .milliseconds(100))
+            try fake.send(.response(id: id, payload: FakeDaemon.payload([(.keyboardReady, true)])))
+        }
+        #expect(try keyboard(on: fake).start(within: .seconds(5)) == Startup(answered: .milliseconds(100), ready: .milliseconds(100)))
     }
 
     /// A driver built for another protocol accepts reports and then does something other
@@ -80,8 +87,8 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
     /// A daemon that says nothing is a named failure at the deadline, not a wait without
     /// end. [LAW:no-silent-failure]
     @Test func aDaemonThatNeverAnswersIsAFailureWithAName() {
-        let fake = FakeDaemon { _, _ in }
-        #expect(throws: DaemonError.silent) { try keyboard(on: fake).start(within: .milliseconds(200)) }
+        let fake = FakeDaemon(handling: daemonThatNeverAnswers)
+        #expect(throws: DaemonError.silent) { try keyboard(on: fake).start(within: .seconds(2)) }
     }
 
     /// A daemon that answered and then never said the keyboard is ready is not silent: the
@@ -93,12 +100,14 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
         ([(.driverConnected, true), (.keyboardReady, false)], "driver connected: yes, keyboard ready: no"),
     ] as [([(DaemonConnection.Status, Bool)], String)])
     func aReadinessTimeoutNamesWhatTheDaemonSaid(pushed: [(DaemonConnection.Status, Bool)], named: String) throws {
+        // Said in the answer, so it is recorded before the start goes on to wait for the
+        // keyboard, and then the wait lapses.
         let fake = FakeDaemon { frame, fake in
             guard case .request(let id, _) = frame else { return }
-            try fake.send(.response(id: id, payload: []))
-            try fake.push(pushed)
+            try fake.send(.response(id: id, payload: FakeDaemon.payload(pushed)))
+            try fake.lapse()
         }
-        let error = try #require(throws: DaemonError.self) { try keyboard(on: fake).start(within: .milliseconds(300)) }
+        let error = try #require(throws: DaemonError.self) { try keyboard(on: fake).start(within: .seconds(2)) }
         guard case .notReady(.keyboardReady, _) = error else { Issue.record("threw \(error)"); return }
         #expect(error.description == "the driver's daemon never said keyboard ready; it last said \(named)")
     }
@@ -113,7 +122,7 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
             try fake.push([(.keyboardReady, true)])
         }
         try keyboard(on: fake).start(within: .seconds(2))
-        #expect(fake.awaitFrame(.control(.healthCheckResponse, payload: [])))
+        try fake.awaitFrame(.control(.healthCheckResponse, payload: []))
     }
 }
 
@@ -216,10 +225,10 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
     @Test func aKeyIsRecordedDownEvenWhenItsReportFails() throws {
         let fake = FakeDaemon { frame, fake in
             guard case .request(let id, let payload) = frame else { return }
-            guard requestSent(payload).request != DaemonConnection.Request.postKeyboardInputReport.rawValue else { return }
+            guard requestSent(payload).request != DaemonConnection.Request.postKeyboardInputReport.rawValue else { try fake.lapse(); return }
             try fake.send(.response(id: id, payload: []))
         }
-        let device = try keyboard(on: fake, reportTimeout: .milliseconds(200))
+        let device = try keyboard(on: fake, )
         #expect(throws: DaemonError.silent) { try device.down(.leftShift) }
         #expect(device.keysDown == [.leftShift])
     }
@@ -238,10 +247,10 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
             let releasing = sent.request == DaemonConnection.Request.keyboardReset.rawValue
                 || (sent.request == DaemonConnection.Request.postKeyboardInputReport.rawValue
                     && sent.bytes.dropFirst().allSatisfy { $0 == 0 })
-            guard !releasing else { return }
+            guard !releasing else { try fake.lapse(); return }
             try fake.send(.response(id: id, payload: []))
         }
-        let device = try keyboard(on: fake, reportTimeout: .milliseconds(200))
+        let device = try keyboard(on: fake, )
         try device.down(.leftShift)
         #expect(throws: DaemonError.silent) { try device.up(.leftShift) }
         #expect(device.keysDown == [.leftShift])
@@ -348,10 +357,10 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
         let post = post
         let fake = FakeDaemon { frame, fake in
             guard case .request(let id, let payload) = frame else { return }
-            guard requestSent(payload).request != post || answering.isOn else { return }
+            guard requestSent(payload).request != post || answering.isOn else { try fake.lapse(); return }
             try fake.send(.response(id: id, payload: []))
         }
-        let device = try keyboard(on: fake, reportTimeout: .milliseconds(200))
+        let device = try keyboard(on: fake, )
         let shift = try HeldKeys([.leftShift])
         let shiftB = try HeldKeys([.leftShift, Usage(rawValue: 0x05)])
         try device.hold(shift)

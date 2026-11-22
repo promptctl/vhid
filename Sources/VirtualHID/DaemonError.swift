@@ -10,6 +10,10 @@ public enum DaemonError: Error, CustomStringConvertible, Equatable {
     case noSocket(path: String)
     case socket(String, Int32)
     case silent
+    /// A request its limit kept from going out: the socket was still taken by another
+    /// frame, or had no room for its first byte. Nothing of it reached the daemon, so the
+    /// daemon is not the one that was silent, and the connection goes on.
+    case unsent
     case closed
     /// A frame that is not one. The message names no sender: the framing is read from both
     /// ends of a socketpair in the tests, and an error that says "the daemon sent" about
@@ -32,6 +36,8 @@ public enum DaemonError: Error, CustomStringConvertible, Equatable {
             "\(call) on the driver's daemon's socket failed: \(String(cString: strerror(code))) (\(code))"
         case .silent:
             "the driver's daemon did not answer in time"
+        case .unsent:
+            "a request to the driver's daemon could not be sent in time: its socket took nothing of it"
         case .closed:
             "the driver's daemon closed the connection"
         case .malformed(let what):
