@@ -21,8 +21,44 @@ public enum FromApp: Codable, Equatable, Sendable {
     case recording
     /// Something the person should hear about the recording, on stderr.
     case note(String)
-    /// The recording, whole, as `vhid play` reads it. The last message.
-    case script(String)
+    /// The recording, whole, as `vhid play` reads it, and how it ended. The last message.
+    case script(String, RecordingEnd)
+}
+
+/// How a recording ended and what it left out: what the command's record says of it.
+/// [LAW:nothing-unseen] A recording that wrote every move and one that dropped half of them
+/// off the displays are told apart by this, not by reading the script.
+public struct RecordingEnd: Codable, Equatable, Sendable {
+    public let ending: Ending
+    /// Key presses with no HID usage, fn among them.
+    public let unmappedKeys: Int
+    /// The person's moves to a point no display holds.
+    public let offDisplay: Int
+    /// How many times the layout came to press otherwise while recording.
+    public let layoutChanges: Int
+
+    public init(ending: Ending, unmappedKeys: Int, offDisplay: Int, layoutChanges: Int) {
+        self.ending = ending
+        self.unmappedKeys = unmappedKeys
+        self.offDisplay = offDisplay
+        self.layoutChanges = layoutChanges
+    }
+
+    /// What ended it: the person's stop, the command's end, or the app's own.
+    public enum Ending: String, Codable, Sendable {
+        /// Control-C, whose keys came out.
+        case stop
+        /// SIGTERM, or the command's cancel, which dropped nothing.
+        case end
+        /// macOS turned the tap off, so what came after was missed.
+        case tapOff = "tap_off"
+        /// An hour, the longest a script plays.
+        case hour
+        /// vhid's devices came back and could not be told apart again.
+        case devicesLost = "devices_lost"
+        /// The layout changed and could not be read again.
+        case layoutLost = "layout_lost"
+    }
 }
 
 /// One end of the socket, as lines of messages.

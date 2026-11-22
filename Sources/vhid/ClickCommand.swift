@@ -28,8 +28,9 @@ struct ClickCommand: AsyncParsableCommand {
     }
 
     func run() async throws {
+        let asked = try places(place, count: 1)[0]
         print(try await Devices.using(try service.installation()) {
-            try await Self.click(at: try places(place, count: 1)[0], button: button, times: times, holding: modifiers, with: $0.pointer, $0.keyboard)
+            try await Self.click(at: try await $0.placed(asked)[0], button: button, times: times, holding: modifiers, with: $0.pointer, $0.keyboard)
         })
     }
 

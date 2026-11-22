@@ -2,6 +2,7 @@ import Foundation
 import KeyboardLayouts
 import Keystrokes
 import Pointing
+import ScreenSpace
 
 /// One event as the session tap delivered it, reduced to what a recording reads: when,
 /// from which device, where the cursor was, and what happened.
@@ -47,9 +48,11 @@ public struct Recorder {
     /// The registry IDs of the pqrs services vhid posts through: an event from one of
     /// them is vhid's, not the person's.
     public var vhid: Set<UInt64>
-    public let start: ScreenPoint
-    /// Whether a point is on a screen's edge, where motion can be stopped short.
-    private let atEdge: @Sendable (ScreenPoint) -> Bool
+    public let start: Placed<ScreenPoint>
+    /// What every point written is placed on: the layout's online displays, as `vhid play`
+    /// places a script on them, so every line written is one a play accepts on the layout it
+    /// was recorded on. Replaced by `displaysChanged(to:)`.
+    public private(set) var displays: Displays
 
     private var lines: [Line]
     /// Keys the person holds, modifiers apart.
@@ -68,6 +71,12 @@ public struct Recorder {
 
     /// Key presses with no usage, fn above all, left out of the recording.
     public private(set) var unmapped = 0
+    /// The person's moves to a point no display holds, left out of the recording: a point
+    /// written without vhid's motion that lands off every display.
+    public private(set) var offDisplay = 0
+    /// How many times the layout came to press otherwise while recording, by
+    /// `Displays.pressesAlike`, the rule a play's `layout` is said by.
+    public private(set) var layoutChanges = 0
     /// Motion of vhid's that ended on a screen edge, after which the offset may be wrong.
     public private(set) var vhidAtEdge = 0
 
@@ -83,16 +92,31 @@ public struct Recorder {
         }
     }
 
-    /// A recording from `start`, with the session's modifier `flags` as they were then:
-    /// the first keys line, at 0, is the modifiers already down. vhid holds nothing then,
-    /// because recording refuses to start while it holds the devices.
-    public init(start: ScreenPoint, flags: UInt64, vhid: Set<UInt64>, atEdge: @escaping @Sendable (ScreenPoint) -> Bool) {
-        self.start = start
+    /// A recording from `start`, placed on `displays`, with the session's modifier `flags`
+    /// as they were then: the first keys line, at 0, is the modifiers already down. vhid
+    /// holds nothing then, because recording refuses to start while it holds the devices.
+    public init(start: ScreenPoint, on displays: Displays, flags: UInt64, vhid: Set<UInt64>) throws(Unplaced) {
+        self.start = try displays.place(start)
+        self.displays = displays
         self.vhid = vhid
-        self.atEdge = atEdge
         session = Self.modifiers(in: flags)
         last = start
         lines = [.keys(.zero, session)]
+    }
+
+    /// The layout as it is now, after a reconfiguration: the points from here on are placed
+    /// on it, and a change in how it presses is counted.
+    public mutating func displaysChanged(to displays: Displays) {
+        layoutChanges += self.displays.pressesAlike(displays) ? 0 : 1
+        self.displays = displays
+    }
+
+    /// Whether a point is on a display and less than a point from its edge, where motion
+    /// can be stopped short. A point on no display is not at an edge of one.
+    private func atEdge(_ point: ScreenPoint) -> Bool {
+        displays.frames.contains { frame in
+            frame.contains(point) && (point.x < frame.x + 1 || point.x >= frame.maxX - 1 || point.y < frame.y + 1 || point.y >= frame.maxY - 1)
+        }
     }
 
     /// Takes one event, writing a line when it changed what the person holds or where
@@ -167,7 +191,13 @@ public struct Recorder {
         case .flagsChanged(_, let flags):
             session = Self.modifiers(in: flags)
         case .motion:
-            lines.append(.at(event.at, ScreenPoint(x: event.location.x - offset.x, y: event.location.y - offset.y) ?? event.location))
+            // Placed as written, so a line a play would refuse is left out here and counted.
+            // [LAW:no-silent-failure]
+            do {
+                lines.append(.at(event.at, try displays.place(ScreenPoint(x: event.location.x - offset.x, y: event.location.y - offset.y)).value))
+            } catch {
+                offDisplay += 1
+            }
         case .buttonDown(let button):
             buttons.insert(button)
             lines.append(.buttons(event.at, buttons))
@@ -207,7 +237,7 @@ public struct Recorder {
         }
         let end = max(stop, kept.last?.at ?? .zero)
         let written = kept + [.keys(end, []), .buttons(end, [])]
-        return ([#"{"to":\#(Self.point(start))}"#] + written.map(Self.render)).joined(separator: "\n") + "\n"
+        return ([#"{"to":\#(Self.point(start.value))}"#] + written.map(Self.render)).joined(separator: "\n") + "\n"
     }
 
     private static func render(_ line: Line) -> String {
@@ -230,10 +260,10 @@ public struct Recorder {
     }
 
     /// Three decimals at most, and no trailing zeros: a microsecond, or a thousandth of a
-    /// point, is finer than anything the tap reports.
+    /// point, is finer than anything the tap reports. Every number written is a time within
+    /// the hour or a coordinate on a display, so the thousandths are whole in a Double.
     private static func number(_ value: Double) -> String {
-        let rounded = (value * 1000).rounded() / 1000
-        return rounded == rounded.rounded() ? String(Int(rounded)) : String(rounded)
+        Coordinate.spelled((value * 1000).rounded() / 1000)
     }
 
     static let capsLockCode: UInt16 = 0x39

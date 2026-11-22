@@ -1,6 +1,8 @@
 import ArgumentParser
 import Foundation
 import Input
+import ScreenSpace
+import Telemetry
 
 /// Replays a script of keyboard and mouse acts at fixed times, and says when each report
 /// went out.
@@ -33,13 +35,18 @@ struct PlayCommand: AsyncParsableCommand {
     }
 
     /// A script's text as what the player sends, refused whole or not at all.
-    static func schedule(_ text: String) throws -> Schedule {
+    static func schedule(_ text: String) throws -> Schedule<ScreenPoint> {
         try Schedule(Play.parse(text))
     }
 
-    /// The verb itself, over devices from anywhere. [LAW:decomposition]
-    static func play(_ schedule: Schedule, with devices: Devices) async throws -> Played {
-        try await Player(pointer: devices.pointer, keyboard: devices.keyboard, wall: epochMicroseconds, lead: lead).play(schedule)
+    /// The verb itself, over devices from anywhere: the schedule placed on one read of the
+    /// layout's online displays, refused at the line of the first point none shows, and
+    /// played. [LAW:decomposition]
+    static func play(_ schedule: Schedule<ScreenPoint>, with devices: Devices) async throws -> Played {
+        let placed = try schedule.placed(on: try await devices.layout().online)
+        let played = try await Player(pointer: devices.pointer, keyboard: devices.keyboard, wall: epochMicroseconds, layout: devices.layout, lead: lead).play(placed)
+        Telemetry.note(.layout, .string(played.layout.word))
+        return played
     }
 
     /// What a play left behind: the reports that went out, and - only when it finished -
@@ -93,8 +100,13 @@ struct PlayCommand: AsyncParsableCommand {
     /// The line that says a play finished, and the whole of what the tool answers: a
     /// recorded minute is thousands of report lines, which a tool's caller reads into its
     /// context and a harness reads from the command line instead.
+    ///
+    /// It says whether the layout still pressed as it did when the script was placed on it:
+    /// `kept`, `changed`, or `unread` with `layout_unread` saying why.
     static func done(_ played: Played) throws -> String {
-        try line(DoneLine(done: .init(reports: played.reports.count, startReports: played.startReports, lateUs: played.lateness)))
+        let unread: String? = if case .unread(let why) = played.layout { why } else { nil }
+        return try line(DoneLine(done: .init(reports: played.reports.count, startReports: played.startReports, lateUs: played.lateness,
+                                             layout: played.layout.word, layoutUnread: unread)))
     }
 
     /// How early each report is woken for. `Player` sleeps until this much before the
@@ -164,6 +176,8 @@ struct PlayCommand: AsyncParsableCommand {
             let reports: Int
             let startReports: Int
             let lateUs: Lateness
+            let layout: String
+            let layoutUnread: String?
         }
     }
 }

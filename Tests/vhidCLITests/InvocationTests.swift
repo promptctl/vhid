@@ -15,12 +15,15 @@ import TelemetryTesting
 import TestClock
 import Testing
 @testable import vhid
+import ScreenSpace
+import ScreenSpaceTesting
+import InputTesting
 
 /// Every invocation leaves one record, however it ends, and the record carries what the
 /// verb decided. Driven through `Devices.using` over a real XPC connection to a far end of
 /// the test's own, because that is where the reports are counted. [LAW:behavior-not-structure]
 @Suite(.eventsKept) struct InvocationTests {
-    static let at = ScreenPoint(x: 40, y: 30)!
+    static let at = ScreenPoint.at(40, 30)
 
     /// `body` against a far end that acknowledges every act until `after` of them.
     private static func against<T: Sendable>(acknowledging after: Int = .max, _ body: (Devices) async throws -> T) async throws -> T {
@@ -35,7 +38,7 @@ import Testing
 
     private static func scroll(vertical: Int, horizontal: Int, clock: ManualClock = ManualClock(), on devices: Devices) async throws -> String {
         try await ScrollCommand.scroll(at: .point(at), vertical: vertical, horizontal: horizontal, holding: .none,
-                                       with: Pointer(mouse: devices.mouse, cursor: { at }, displays: { .vast }, clock: clock, randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: devices.trail.traced), devices.keyboard)
+                                       with: Pointer(mouse: devices.mouse, cursor: { at }, clock: clock, randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: devices.trail.traced), devices.keyboard)
     }
 
     private static func only(_ collected: Collected) throws -> [String: Any] {
@@ -99,7 +102,7 @@ import Testing
         #expect(paths[0].filter { !["bow", "halfway"].contains($0.key) }.compactMapValues { $0 as? Double } == ["fitts_width": 20, "planned_ms": 0, "ends_kept": 1, "bow_kept": 1, "steered_reports": 0, "closing_reports": 0, "lost_reports": 0])
         // The bow and speed profile it drew: the pointer's randomness is seed 1, and the move is its first draw.
         var generator = SeededGenerator(seed: 1)
-        let drawn = Trajectory(from: Self.at, toward: .point(Self.at), within: .vast, drawing: &generator)
+        let drawn = try Trajectory(from: Self.at, toward: .point(Self.at), drawing: &generator)
         #expect(paths[0]["bow"] as? Double == drawn.bow)
         #expect(paths[0]["halfway"] as? Double == drawn.halfway)
         // A point is aimed at exactly, from where the cursor was, and read back there when it landed.
@@ -110,7 +113,7 @@ import Testing
         // Which of the four structures the move drew, by its design-note name.
         #expect(Set(["direct", "undershoot", "overshoot", "two_corrections"]).contains(paths[0]["structure"] as? String ?? ""))
         // The layout the path was kept on, as the pointer read it.
-        #expect(paths[0]["displays"] as? [[Double]] == [[-100_000, -100_000, 200_000, 200_000]])
+        #expect(paths[0]["displays"] as? [[Double]] == [[-1e6, -1e6, 2e6, 2e6]])
     }
 
     /// Typing records its waits beside the pointer's, totalled by the report each ends in,
@@ -167,10 +170,12 @@ import Testing
         let thrown = await #expect(throws: (any Error).self) {
             try await Self.mcp("move", into: collected) {
                 // The far end's cursor is always at (0, 0).
-                try await Self.against { try await MoveCommand.move(to: .box(ScreenRect(x: 30, y: -5, width: 20, height: 10)!), with: $0.pointer) }
+                try await Self.against { try await MoveCommand.move(to: try await $0.placed(.box(ScreenRect.at(30, -5, 20, 10)))[0], with: $0.pointer) }
             }
         }
-        #expect(thrown.map { "\($0)".contains("drawn inside the box 30,-5,20,10") } == true, "\(String(describing: thrown))")
+        // Half the box is above the display, so the move is drawn inside the half it shows.
+        #expect(thrown.map { "\($0)".contains("drawn inside the box 30,0,20,5, the part of 30,-5,20,10 on a display") } == true,
+                "\(String(describing: thrown))")
         let record = try Self.only(collected)
         #expect(record["outcome"] as? String == "failed")
         let recorded = try #require((record["attributes"] as? [String: Any])?["paths"] as? [[String: Any]])
@@ -184,12 +189,13 @@ import Testing
         #expect(paths[0]["steered_reports"].map { $0 > 0 } == true)
         #expect(paths[0]["lost_reports"] == paths[0]["steered_reports"])
         #expect(paths[0]["closing_reports"] == Double(Pointer.stalls))
-        #expect(paths[0]["fitts_width"] == 10)
-        #expect(recorded[0]["box"] as? [Double] == [30, -5, 20, 10])
+        #expect(paths[0]["fitts_width"] == 5)
+        #expect(recorded[0]["box"] as? [Double] == [30, 0, 20, 5])
+        #expect(recorded[0]["bound"] as? [Double] == [30, -5, 20, 10])
         #expect(recorded[0]["from"] as? [Double] == [0, 0])
         #expect(Set(["direct", "undershoot", "overshoot", "two_corrections"]).contains(recorded[0]["structure"] as? String ?? ""))
         let aimed = try #require(recorded[0]["aimed"] as? [Double])
-        #expect((32 ... 48).contains(aimed[0]) && (-3 ... 3).contains(aimed[1]), "\(aimed)")
+        #expect((32 ... 48).contains(aimed[0]) && (0 ... 5).contains(aimed[1]), "\(aimed)")
         #expect(recorded[0]["landed"] == nil)
     }
 

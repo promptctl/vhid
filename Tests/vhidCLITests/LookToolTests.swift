@@ -6,6 +6,8 @@ import Telemetry
 import TelemetryTesting
 import Testing
 @testable import vhid
+import ScreenSpace
+import ScreenSpaceTesting
 
 /// The `look` tool as `vhid mcp` serves it, on a screen a test wrote: one record of each
 /// call, and no wait behind the daemon. [LAW:behavior-not-structure]

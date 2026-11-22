@@ -23,9 +23,10 @@ struct DragCommand: AsyncParsableCommand {
     }
 
     func run() async throws {
-        let ends = try vhid.places(places, count: 2)
+        let asked = try vhid.places(places, count: 2)
         print(try await Devices.using(try service.installation()) {
-            try await Self.drag(from: ends[0], to: ends[1], button: button, holding: modifiers, with: $0.pointer, $0.keyboard)
+            let ends = try await $0.placed(asked[0], asked[1])
+            return try await Self.drag(from: ends[0], to: ends[1], button: button, holding: modifiers, with: $0.pointer, $0.keyboard)
         })
     }
 

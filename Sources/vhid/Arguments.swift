@@ -1,6 +1,7 @@
 import ArgumentParser
 import Input
 import Pointing
+import ScreenSpace
 
 /// Two coordinates from a command line as a place on the screen, or the refusal that says
 /// they are not one.
@@ -10,26 +11,30 @@ import Pointing
 /// [LAW:single-enforcer] Every verb that takes a place reads it through here, from both
 /// its `validate` and its `run`, so the refusal is worded one way everywhere.
 func place(_ x: Double, _ y: Double) throws -> ScreenPoint {
-    guard let point = ScreenPoint(x: x, y: y) else {
-        throw ValidationError("(\(x), \(y)) is not a place on the screen")
+    do {
+        return try ScreenPoint(x: x, y: y)
+    } catch {
+        throw ValidationError(error.description)
     }
-    return point
 }
 
 /// `count` places from a command line's words, in order: each a point as two numbers, `x y`,
-/// or a box as one word, `x,y,width,height`, the form eyes prints beside each point. A word
-/// with a comma in it is a box, and any other starts a point.
+/// or one word as a reading prints it, `x,y` a point and `x,y,width,height` a box. A word
+/// with a comma in it is one place, and any other starts a point.
 ///
 /// [LAW:single-enforcer] Every pointer verb reads its places through here, so a point is
-/// refused by `place` and a box by `ScreenRect(spelled:)`, as the MCP server refuses them.
-func places(_ words: [String], count: Int) throws -> [Target] {
-    var rest = words[...], read: [Target] = []
+/// refused by `place` and a spelled place by `Target.Asked(spelled:)`, as the MCP server
+/// refuses them. Whether a display shows it is asked once the devices are open, of the
+/// layout they read.
+func places(_ words: [String], count: Int) throws -> [Target.Asked] {
+    var rest = words[...], read: [Target.Asked] = []
     while let word = rest.first {
         if word.contains(",") {
-            guard let box = ScreenRect(spelled: word) else {
-                throw ValidationError("\(word) is not a box: a box is x,y,width,height in points, finite, each side at least a point")
+            do {
+                read.append(try Target.Asked(spelled: word))
+            } catch {
+                throw ValidationError(error.description)
             }
-            read.append(.box(box))
             rest = rest.dropFirst()
         } else {
             let pair = Array(rest.prefix(2))

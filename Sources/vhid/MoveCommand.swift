@@ -16,7 +16,8 @@ struct MoveCommand: AsyncParsableCommand {
     }
 
     func run() async throws {
-        print(try await Devices.using(try service.installation()) { try await Self.move(to: try places(place, count: 1)[0], with: $0.pointer) })
+        let asked = try places(place, count: 1)[0]
+        print(try await Devices.using(try service.installation()) { try await Self.move(to: try await $0.placed(asked)[0], with: $0.pointer) })
     }
 
     /// The verb itself, over a pointer from anywhere. [LAW:decomposition]

@@ -2,6 +2,8 @@ import Foundation
 import Keystrokes
 import OwnThread
 import Pointing
+import ScreenSpace
+import ScreenSpaceTesting
 import Testing
 @testable import Helper
 
@@ -88,9 +90,9 @@ import Testing
             lock.lock(); pointing.append("cursor"); lock.unlock()
             respond { reply(812.5, 400, $0) }
         }
-        func displays(reply: @escaping ([NSNumber], Error?) -> Void) {
-            lock.lock(); pointing.append("displays"); lock.unlock()
-            respond { reply([0, 0, 1920, 1080, 1920, -200, 1280, 800].map { NSNumber(value: $0) }, $0) }
+        func layout(reply: @escaping ([NSNumber], Error?) -> Void) {
+            lock.lock(); pointing.append("layout"); lock.unlock()
+            respond { reply(HelperKeyboardTests.layout.record.map { NSNumber(value: $0) }, $0) }
         }
 
         func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
@@ -196,13 +198,25 @@ import Testing
         #expect(far.service.pointed == ["cursor"])
     }
 
-    /// The displays cross the wire as four numbers each and arrive as rectangles, a display
-    /// above the main one's top included, and the read leaves the connection unspoken.
-    @Test func theDisplaysAreReadAsRectangles() throws {
+    /// A main display and one above its top, asleep.
+    static let layout = DisplayLayout.at([.at(0, 0, 1920, 1080), .at(1920, -200, 1280, 800)], asleep: [1])
+
+    /// The layout crosses the wire as its record and arrives as the layout it was, the
+    /// sleeping display above the main one's top included, and the read leaves the
+    /// connection unspoken.
+    @Test func theLayoutCrossesTheWireAsItself() throws {
         let (helper, far) = helper(.acknowledge)
-        #expect(try helper.displays() == [CGRect(x: 0, y: 0, width: 1920, height: 1080), CGRect(x: 1920, y: -200, width: 1280, height: 800)])
+        #expect(try helper.layout() == Self.layout)
         try helper.leave()
-        #expect(far.service.pointed == ["displays"])
+        #expect(far.service.pointed == ["layout"])
+    }
+
+    /// The four-number record went out under the name `displays(reply:)`. The protocol no
+    /// longer has it, so a client of an older build asking a daemon of this one fails at the
+    /// lookup instead of reading six numbers a display as four.
+    @Test func theOldRecordsNameIsGoneFromTheProtocol() {
+        #expect(protocol_getMethodDescription(HelperService.self, NSSelectorFromString("displaysWithReply:"), true, true).name == nil)
+        #expect(protocol_getMethodDescription(HelperService.self, #selector(HelperService.layout(reply:)), true, true).name != nil)
     }
 
     /// A service that neither answers nor hangs up is unreachable at the deadline, rather

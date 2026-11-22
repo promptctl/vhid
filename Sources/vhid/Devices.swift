@@ -5,6 +5,7 @@ import Input
 import Installations
 import Keystrokes
 import Pointing
+import ScreenSpace
 import struct Seeing.Front
 import Telemetry
 
@@ -25,6 +26,9 @@ struct Devices {
     let keyboard: any Keyboard
     let mouse: any Mouse
     let cursor: @Sendable () async throws -> ScreenPoint
+    /// The display layout as the daemon reads it, in the session in front, for the reason the
+    /// cursor is read there. [LAW:single-enforcer] Every act reads its layout here.
+    let layout: @Sendable () async throws -> DisplayLayout
     let front: @Sendable () async throws -> Front.App?
     /// The pointer this mouse is steered by, reading the cursor back after every report -
     /// which is the only place the truth about where the pointer went lives, since macOS
@@ -79,8 +83,8 @@ struct Devices {
         let keyRepeatDelay = Duration.seconds(NSEvent.keyRepeatDelay)
         Telemetry.note(.keyRepeatDelayMilliseconds, .double(keyRepeatDelay / .milliseconds(1)))
         let keyboard = TalliedKeyboard(keyboard: QueuedKeyboard(keyboard: helper.keyboard, queue: queue))
-        let devices = Devices(keyboard: keyboard, mouse: mouse, cursor: cursor, front: front(helper, on: queue),
-                              pointer: Pointer(mouse: mouse, cursor: cursor, displays: displays(helper, on: queue), clock: ContinuousClock(),
+        let devices = Devices(keyboard: keyboard, mouse: mouse, cursor: cursor, layout: layout(helper, on: queue), front: front(helper, on: queue),
+                              pointer: Pointer(mouse: mouse, cursor: cursor, clock: ContinuousClock(),
                                                randomness: randomness, hand: Hand(doubleClickInterval: doubleClick), traced: trail.traced),
                               typist: Typist(keyboard: keyboard, clock: ContinuousClock(), randomness: randomness,
                                              cadence: Cadence(keyRepeatDelay: keyRepeatDelay), traced: trail.typed), trail: trail)
@@ -126,19 +130,25 @@ struct Devices {
     static func cursor(_ helper: HelperConnection, on queue: DeviceQueue) -> @Sendable () async throws -> ScreenPoint {
         {
             let at = try await queue.run { try helper.cursor() }
-            guard let point = ScreenPoint(x: at.x, y: at.y) else { throw CursorUnreadable() }
-            return point
+            do {
+                return try ScreenPoint(x: at.x, y: at.y)
+            } catch {
+                throw CursorUnreadable()
+            }
         }
     }
 
-    /// The displays as the daemon reads them, in the session in front, for the reason the
-    /// cursor is read there. [LAW:single-enforcer] Every move reads them here.
-    static func displays(_ helper: HelperConnection, on queue: DeviceQueue) -> @Sendable () async throws -> Displays {
-        {
-            let frames = try await queue.run { try helper.displays() }
-            guard let displays = Displays(frames: frames) else { throw DisplaysUnreadable(frames: frames) }
-            return displays
-        }
+    /// The layout as the daemon reads it, waited for on `queue` for the reason the cursor is.
+    static func layout(_ helper: HelperConnection, on queue: DeviceQueue) -> @Sendable () async throws -> DisplayLayout {
+        { try await queue.run { try helper.layout() } }
+    }
+
+    /// The places a verb was given, placed by the one rule on one read of the layout's online
+    /// displays, where the cursor moves: an act reads its layout once, so all its places and
+    /// every path between them are decided on one. [LAW:one-source-of-truth]
+    func placed(_ asked: Target.Asked...) async throws -> [Target] {
+        let online = try await layout().online
+        return try asked.map { asked throws(Unplaced) in try asked.placed(on: online) }
     }
 }
 

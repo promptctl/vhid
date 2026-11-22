@@ -28,7 +28,7 @@ struct ScrollCommand: AsyncParsableCommand {
 
     func run() async throws {
         print(try await Devices.using(try service.installation()) {
-            try await Self.scroll(at: try places(place, count: 1)[0], vertical: vertical, horizontal: horizontal, holding: modifiers, with: $0.pointer, $0.keyboard)
+            try await Self.scroll(at: try await $0.placed(try places(place, count: 1)[0])[0], vertical: vertical, horizontal: horizontal, holding: modifiers, with: $0.pointer, $0.keyboard)
         })
     }
 

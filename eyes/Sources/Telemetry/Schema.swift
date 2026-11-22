@@ -77,6 +77,14 @@ extension Telemetry {
         case stopped
         /// Why the devices were not handed back when the verb ended. Absent when they were.
         case leaveFailed = "leave_failed"
+        /// Whether the displays still pressed as they did when a play was placed on them:
+        /// `kept`, `changed` or `unread`. Absent for a verb that played nothing.
+        case layout
+        /// How a recording ended - `stop`, `end`, `tap_off`, `hour`, `devices_lost` or
+        /// `layout_lost` - and what it left out, by reason, zeros included. Absent for a
+        /// verb that recorded nothing.
+        case ending
+        case leftOut = "left_out"
 
         /// The double-click interval the pointer's hand was fitted to, and the delay until a
         /// held key repeats the typist's key holds were fitted to, as the HID system holds

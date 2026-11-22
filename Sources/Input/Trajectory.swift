@@ -1,5 +1,6 @@
 import Foundation
 import Pointing
+import ScreenSpace
 
 /// Where a person's aimed pointer movement is, moment by moment, from one point to another:
 /// a main movement that lands on the target, stops short, or overshoots, then as many
@@ -143,8 +144,12 @@ public struct Trajectory: Sendable, Equatable {
     /// and always whole: at most 1.6 points, under the few the steering follows the path to,
     /// it swings toward every edge it runs beside, and checking it would cut every other
     /// deviation with it.
-    public init(from start: ScreenPoint, toward aimed: Target, within displays: Displays, drawing generator: inout some RandomNumberGenerator) {
-        let target = aimed.aim(from: start, drawing: &generator)
+    ///
+    /// The path is kept on the displays the target was placed on, so a move is decided on
+    /// the one layout its act read. [LAW:one-source-of-truth]
+    public init(from start: ScreenPoint, toward aimed: Target, drawing generator: inout some RandomNumberGenerator) throws(NotAPlace) {
+        let displays = aimed.displays
+        let target = try aimed.aim(from: start, drawing: &generator)
         let pace = Self.pace.draw(using: &generator)
         let structure = Structure.draw(using: &generator)
         let (short, over) = (Self.short.draw(using: &generator), Self.over.draw(using: &generator))

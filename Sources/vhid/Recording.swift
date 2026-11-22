@@ -1,5 +1,6 @@
 import Foundation
 import Input
+import ScreenSpace
 import Signals
 import Synchronization
 import Telemetry
@@ -79,20 +80,27 @@ final class Trail: Sendable {
                                     "structure": .string(move.structure.rawValue),
                                     "bow": .double(move.bow),
                                     "halfway": .double(move.halfway),
-                                    "displays": .array(move.displays.frames.map { frame in .array([frame.minX, frame.minY, frame.width, frame.height].map { .double(Double($0)) }) }),
+                                    "displays": .array(move.displays.frames.map(box)),
                                     "ends_kept": .double(move.kept.ends),
                                     "bow_kept": .double(move.kept.bow),
                                     "steered_reports": .int(move.steered),
                                     "closing_reports": .int(move.closing),
                                     "lost_reports": .int(move.lost)]
         path["landed"] = move.landed.map(point)
-        // The box the aim was drawn inside, which with the seed and `from` draws the path
-        // again; a point target is `aimed` itself.
-        if case .box(let box) = move.toward { path["box"] = .array([box.x, box.y, box.width, box.height].map(JSON.double)) }
+        // The part the aim was drawn inside, which with the seed and `from` draws the path
+        // again, and the box it is the shown part of; a point target is `aimed` itself.
+        if case .box(let placed) = move.toward {
+            path["box"] = box(placed.value.part)
+            path["bound"] = box(placed.value.bound)
+        }
         kept.withLock { $0.moves.append(.object(path)) }
     }
 
     private func point(_ point: ScreenPoint) -> JSON {
         .array([.double(point.x), .double(point.y)])
+    }
+
+    private func box(_ box: ScreenRect) -> JSON {
+        .array([box.x, box.y, box.width, box.height].map(JSON.double))
     }
 }

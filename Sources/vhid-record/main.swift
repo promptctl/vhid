@@ -1,4 +1,5 @@
 import CoreGraphics
+import DisplayReading
 import Foundation
 import IOKit
 import IOKit.hid
@@ -7,6 +8,7 @@ import KeyboardLayouts
 import Keystrokes
 import Pointing
 import RecordingTie
+import ScreenSpace
 
 // The tap app `vhid record` launches: `vhid-record <socket> <command pid>`.
 //
@@ -95,24 +97,44 @@ do {
     refuse("vhid's own devices could not be told apart: \(error)")
 }
 
-/// Whether a point is on the edge of a display, where motion can be stopped short.
-@Sendable func atEdge(_ point: ScreenPoint) -> Bool {
-    var count: UInt32 = 0
-    CGGetActiveDisplayList(0, nil, &count)
-    var displays = [CGDirectDisplayID](repeating: 0, count: Int(count))
-    CGGetActiveDisplayList(count, &displays, &count)
-    let x = CGFloat(point.x), y = CGFloat(point.y)
-    return displays.map(CGDisplayBounds).contains { (bounds: CGRect) -> Bool in
-        let inside = bounds.insetBy(dx: -0.5, dy: -0.5).contains(CGPoint(x: x, y: y))
-        let onEdge = x <= bounds.minX || x >= bounds.maxX - 1 || y <= bounds.minY || y >= bounds.maxY - 1
-        return inside && onEdge
+// A reconfiguration is heard from before the first read of the layout, so none can fall
+// between the read and the watch: one that comes first is read again, and the recorder
+// takes the layout as it is then. [LAW:no-ambient-temporal-coupling] Online displays, as
+// `vhid play` places on: the cursor moves on a sleeping one, so a recording on a Mac whose
+// only display is asleep records there.
+let reconfigured: CGDisplayReconfigurationCallBack = { _, flags, _ in
+    // Each change is said twice, once before it with `beginConfigurationFlag` and once
+    // after; the layout is read after.
+    guard !flags.contains(.beginConfigurationFlag) else { return }
+    DispatchQueue.main.async {
+        MainActor.assumeIsolated {
+            do {
+                session.recorder.displaysChanged(to: try DisplayLayout.read().online)
+            } catch {
+                session.finish(.layoutLost, notes: ["the displays changed and could not be read again (\(error)), so the recording ends there"])
+            }
+        }
     }
+}
+guard CGDisplayRegisterReconfigurationCallback(reconfigured, nil) == .success else {
+    refuse("the displays could not be watched for changes")
+}
+let layout: DisplayLayout
+do {
+    layout = try DisplayLayout.read()
+} catch {
+    refuse("the displays could not be read: \(error)")
 }
 
 // Read here, not through vhidd: a recording taps this session's events, so it only
 // records in the session it can read the cursor in.
 guard let startPoint = CGEvent(source: nil)?.location else { refuse("the cursor could not be read") }
-guard let start = ScreenPoint(x: startPoint.x, y: startPoint.y) else { refuse("the cursor's position \(startPoint) is not a point") }
+let start: ScreenPoint
+do {
+    start = try ScreenPoint(x: startPoint.x, y: startPoint.y)
+} catch {
+    refuse("the cursor's position is not a point: \(error)")
+}
 let clock = ContinuousClock()
 /// The tap's own clock at the start: nanoseconds since boot, which every event's
 /// timestamp is on. An event's time is when it happened, not when the tap handed it over.
@@ -136,7 +158,7 @@ func sinceStart() -> Duration { .nanoseconds(Int64(clock_gettime_nsec_np(CLOCK_U
 
     /// Sends the recording and exits: a stop waits up to half a second, or until nothing
     /// is held, for the stop chord's own releases, and takes out its keys.
-    func finish(_ ending: ToApp, notes: [String] = []) {
+    func finish(_ ending: RecordingEnd.Ending, notes: [String] = []) {
         guard !finishing else { return }
         finishing = true
         // Never past an hour, which is as far as a script's times go.
@@ -146,10 +168,13 @@ func sinceStart() -> Duration { .nanoseconds(Int64(clock_gettime_nsec_np(CLOCK_U
             taking = false
             var said = notes
             if recorder.unmapped > 0 { said.append("\(recorder.unmapped) key presses with no HID usage, fn among them, are not in the recording") }
+            if recorder.offDisplay > 0 { said.append("\(recorder.offDisplay) moves to a point on no display are not in the recording") }
+            if recorder.layoutChanges > 0 { said.append("the displays changed \(recorder.layoutChanges) times while recording, so a point recorded after a change may be on no display when it plays") }
             if recorder.vhidAtEdge > 0 { said.append("vhid's motion reached a screen edge \(recorder.vhidAtEdge) times while recording, so the pointer points after it may be off") }
             do {
                 for note in said { try command.send(FromApp.note(note)) }
-                try command.send(FromApp.script(recorder.script(stoppedAt: stoppedAt, stopKeys: ending == .stop ? stopKeys : [])))
+                let ended = RecordingEnd(ending: ending, unmappedKeys: recorder.unmapped, offDisplay: recorder.offDisplay, layoutChanges: recorder.layoutChanges)
+                try command.send(FromApp.script(recorder.script(stoppedAt: stoppedAt, stopKeys: ending == .stop ? stopKeys : []), ended))
                 exit(0)
             } catch {
                 exit(1)
@@ -163,14 +188,18 @@ func sinceStart() -> Duration { .nanoseconds(Int64(clock_gettime_nsec_np(CLOCK_U
     }
 }
 
-let session = MainActor.assumeIsolated {
-    Session(recorder: Recorder(start: start, flags: CGEventSource.flagsState(.combinedSessionState).rawValue, vhid: initialSenders, atEdge: atEdge))
+let recorder: Recorder
+do {
+    recorder = try Recorder(start: start, on: layout.online, flags: CGEventSource.flagsState(.combinedSessionState).rawValue, vhid: initialSenders)
+} catch {
+    refuse("the cursor is not where a recording can start: \(error)")
 }
+let session = MainActor.assumeIsolated { Session(recorder: recorder) }
 
 /// A tap event as the recorder reads it, or nil for a kind it does not record.
 func tapEvent(_ type: CGEventType, _ event: CGEvent) -> TapEvent? {
     let location = event.location
-    guard let place = ScreenPoint(x: location.x, y: location.y) else { return nil }
+    guard let place = try? ScreenPoint(x: location.x, y: location.y) else { return nil }
     let button = { Button(rawValue: UInt8(event.getIntegerValueField(.mouseEventButtonNumber) + 1)) }
     let code = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
     let kind: TapEvent.Kind?
@@ -198,9 +227,9 @@ guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .tailAppendEve
         // A tap macOS turned off has missed events, so what it recorded is ended there
         // rather than carried on with a gap in it, and said so.
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-            session.finish(.end, notes: ["macOS turned the tap off (\(type == .tapDisabledByTimeout ? "too slow" : "by user input")), so the recording ends there"])
+            session.finish(.tapOff, notes: ["macOS turned the tap off (\(type == .tapDisabledByTimeout ? "too slow" : "by user input")), so the recording ends there"])
         } else if session.taking, let taken = tapEvent(type, event) {
-            if taken.at > hour { session.finish(.end, notes: [hourNote]) } else { session.recorder.take(taken) }
+            if taken.at > hour { session.finish(.hour, notes: [hourNote]) } else { session.recorder.take(taken) }
         }
     }
     return Unmanaged.passUnretained(event)
@@ -223,7 +252,7 @@ let reread: IOServiceMatchingCallback = { _, iterator in
         do {
             session.recorder.vhid = try vhidSenders()
         } catch {
-            session.finish(.end, notes: ["vhid's devices came back and could not be told apart again (\(error)), so the recording ends there"])
+            session.finish(.devicesLost, notes: ["vhid's devices came back and could not be told apart again (\(error)), so the recording ends there"])
         }
     }
 }
@@ -235,7 +264,7 @@ reread(nil, appeared)
 
 // An hour with no event ends the recording too.
 DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(Int(Play.longest))) {
-    MainActor.assumeIsolated { session.finish(.end, notes: [hourNote]) }
+    MainActor.assumeIsolated { session.finish(.hour, notes: [hourNote]) }
 }
 
 try? command.send(FromApp.recording)
@@ -243,7 +272,7 @@ Thread.detachNewThread {
     // The command's messages, and its end: a socket closed without a word is the command
     // gone, and so is the app.
     while let message = try? command.receive(ToApp.self) {
-        DispatchQueue.main.async { MainActor.assumeIsolated { session.finish(message) } }
+        DispatchQueue.main.async { MainActor.assumeIsolated { session.finish(message == .stop ? .stop : .end) } }
     }
     DispatchQueue.main.async { exit(1) }
 }

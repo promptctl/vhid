@@ -1,4 +1,4 @@
-import CoreGraphics
+import ScreenSpace
 import Installations
 import Foundation
 
@@ -194,16 +194,13 @@ public final class HelperConnection: @unchecked Sendable {
         try exchange { service, reply in service.cursor { x, y, error in reply(error.map { .failed($0) } ?? .answered((x, y))) } }
     }
 
-    /// Where the displays are, read in the session in front, as rectangles.
+    /// The display layout, read in the session in front.
     ///
-    /// [LAW:parse-dont-validate] The wire's flat numbers become rectangles here, once: a
-    /// count that is not four to a display is a daemon this client does not understand.
-    public func displays() throws -> [CGRect] {
-        let numbers: [NSNumber] = try exchange { service, reply in service.displays { numbers, error in reply(error.map { .failed($0) } ?? .answered(numbers)) } }
-        guard numbers.count % 4 == 0 else { throw Unreachable(service: service, cause: .notAHelper) }
-        return stride(from: 0, to: numbers.count, by: 4).map {
-            CGRect(x: numbers[$0].doubleValue, y: numbers[$0 + 1].doubleValue, width: numbers[$0 + 2].doubleValue, height: numbers[$0 + 3].doubleValue)
-        }
+    /// [LAW:parse-dont-validate] The wire's flat numbers become a layout here, once, by the
+    /// record's own reading, and a record that is not one is refused by what it is not.
+    public func layout() throws -> DisplayLayout {
+        let numbers: [NSNumber] = try exchange { service, reply in service.layout { numbers, error in reply(error.map { .failed($0) } ?? .answered(numbers)) } }
+        return try DisplayLayout(record: numbers.map(\.doubleValue))
     }
 
     /// The keyboard over this connection.

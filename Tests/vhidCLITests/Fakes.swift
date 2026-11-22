@@ -9,6 +9,9 @@ import TestClock
 import Testing
 import Turns
 @testable import vhid
+import ScreenSpace
+import ScreenSpaceTesting
+import InputTesting
 
 extension VerbTool {
     /// One call alone, as a session with nothing else underway makes it: its turn is free.
@@ -87,7 +90,7 @@ final class FakeMouse: Mouse {
         state.withLock { $0.x = x; $0.y = y }
     }
 
-    var cursor: ScreenPoint { state.withLock { ScreenPoint(x: $0.x, y: $0.y)! } }
+    var cursor: ScreenPoint { state.withLock { ScreenPoint.at($0.x, $0.y) } }
     var buttons: [Button] { state.withLock { $0.buttons } }
     var releases: Int { state.withLock { $0.releases } }
     var moves: Int { state.withLock { $0.moves } }
@@ -116,8 +119,3 @@ extension Installation {
     static let nobody = Installation(service: "ai.promptctl.vhid.tests.nobody")!
 }
 
-extension Displays {
-    /// A screen whose edges are further than any test's path goes, for tests that are not
-    /// about the edges.
-    static let vast = Displays(frames: [CGRect(x: -100_000, y: -100_000, width: 200_000, height: 200_000)])!
-}

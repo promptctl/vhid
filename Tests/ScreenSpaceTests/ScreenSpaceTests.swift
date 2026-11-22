@@ -1,11 +1,23 @@
+import Foundation
 import Testing
 @testable import ScreenSpace
 
 /// The point, the box, their spelling and the layout record, as values.
 @Suite struct ScreenSpaceTests {
-    @Test func aPairThatIsNotFiniteIsNotAPlace() {
-        #expect(throws: NotAPlace.self) { try ScreenPoint(x: .nan, y: 0) }
-        #expect(throws: NotAPlace.self) { try ScreenPoint(x: 0, y: .infinity) }
+    /// [LAW:parse-dont-validate] A pair that is not a place is refused where it is made.
+    /// The NaN is the one that matters: every comparison against it is false, so it would
+    /// pass the pointer's arrival test on both axes and a click would land wherever the
+    /// cursor was.
+    @Test(arguments: [(Double.nan, 0.0), (0.0, Double.nan), (.infinity, 0.0), (0.0, -.infinity), (.nan, .nan)])
+    func aPairThatIsNotFiniteIsNotAPlace(x: Double, y: Double) {
+        #expect(throws: NotAPlace.self) { try ScreenPoint(x: x, y: y) }
+    }
+
+    /// And refused again on the way in from a script or a request, so nothing decodes into
+    /// a point the constructor would not have made. [LAW:single-enforcer]
+    @Test func aDecodedPairCrossesTheSameRefusal() throws {
+        #expect(throws: (any Error).self) { try JSONDecoder().decode(ScreenPoint.self, from: Data(#"{"x":1e400,"y":1}"#.utf8)) }
+        #expect(try JSONDecoder().decode(ScreenPoint.self, from: Data(#"{"x":800,"y":500.5}"#.utf8)) == ScreenPoint(x: 800, y: 500.5))
     }
 
     @Test func aBoxRefusesWhatNoArithmeticOnItHolds() {

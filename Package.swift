@@ -69,6 +69,9 @@ let package = Package(
         // either linking the other. [LAW:one-way-deps] [LAW:one-source-of-truth]
         .target(name: "ScreenSpace"),
         .testTarget(name: "ScreenSpaceTests", dependencies: ["ScreenSpace"]),
+        // The points, boxes and layouts every suite that places writes, so each writes them
+        // one way. A target of its own for OwnThread's reason. No product names it.
+        .target(name: "ScreenSpaceTesting", dependencies: ["ScreenSpace"], path: "Tests/ScreenSpaceTesting"),
         // The one window-server read of the layout, apart from the space so the space stays
         // values a test makes. [LAW:effects-at-boundaries]
         .target(name: "DisplayReading", dependencies: ["ScreenSpace"]),
@@ -114,11 +117,11 @@ let package = Package(
         // the framing is proven without root and without the driver.
         .testTarget(name: "VirtualHIDTests", dependencies: ["VirtualHID", "DriverExtension", "Keystrokes", "Pointing", "OwnThread"]),
         // What crosses the privilege boundary, and the client's side of it. It links the
-        // two vocabularies and nothing else: not the layout, because a root daemon must
+        // vocabularies - the keys, the pointing and the screen space - and nothing else: not the layout, because a root daemon must
         // never read one, and not the device, because a client must never open one.
         // [LAW:one-way-deps]
-        .target(name: "Helper", dependencies: ["Installations", "Keystrokes", "Pointing"]),
-        .testTarget(name: "HelperTests", dependencies: ["Helper", "Installations", "Keystrokes", "Pointing", "OwnThread"]),
+        .target(name: "Helper", dependencies: ["Installations", "Keystrokes", "Pointing", "ScreenSpace"]),
+        .testTarget(name: "HelperTests", dependencies: ["Helper", "Installations", "Keystrokes", "Pointing", "ScreenSpace", "ScreenSpaceTesting", "OwnThread"]),
         // What a caller asks the devices for, said in a caller's terms: text lowered to
         // keystrokes, a chord, a place on the screen to click. It links the two
         // vocabularies and the layout, and deliberately not Helper or VirtualHID: which
@@ -126,11 +129,14 @@ let package = Package(
         // caller supplies a conformance. [LAW:one-way-deps] [LAW:effects-at-boundaries]
         // Telemetry for the cause chain its stops are read by, so a record and a caller tell
         // a withdrawn run from a failed one by one rule. [LAW:single-enforcer]
-        .target(name: "Input", dependencies: ["KeyboardLayouts", "Keystrokes", "Pointing", "Telemetry"]),
+        .target(name: "Input", dependencies: ["KeyboardLayouts", "Keystrokes", "Pointing", "ScreenSpace", "Telemetry"]),
         // The pointer's loop against a fake screen with an acceleration curve of its own,
         // and the typist against a keyboard that can be made to fail at the third keystroke
         // of four: no device, no window server, no grant.
-        .testTarget(name: "InputTests", dependencies: ["Input", "KeyboardLayouts", "Keystrokes", "OwnThread", "Pointing", "TestClock", "Telemetry"]),
+        .testTarget(name: "InputTests", dependencies: ["Input", "InputTesting", "KeyboardLayouts", "Keystrokes", "OwnThread", "Pointing", "ScreenSpace", "ScreenSpaceTesting", "TestClock", "Telemetry"]),
+        // Targets placed as a verb places them, for the tests of the devices and of the
+        // verbs over them. No product names it, so nothing shipped carries it.
+        .target(name: "InputTesting", dependencies: ["Input", "ScreenSpace", "ScreenSpaceTesting"], path: "Tests/InputTesting"),
         // What must hold before a verb can reach the devices, as a table from readings of
         // this Mac to a step for a person. The table reads nothing: every requirement is a
         // pure function of readings, so every combination is exercised in its tests,
@@ -161,13 +167,13 @@ let package = Package(
         // Monitoring can be granted to it once. It reads the tap and the I/O Registry and
         // hands the events to Input's `Recorder`; it never reaches the devices.
         // [LAW:effects-at-boundaries]
-        .executableTarget(name: "vhid-record", dependencies: ["Input", "Keystrokes", "KeyboardLayouts", "Pointing", "RecordingTie"]),
+        .executableTarget(name: "vhid-record", dependencies: ["Input", "Keystrokes", "KeyboardLayouts", "Pointing", "RecordingTie", "ScreenSpace", "DisplayReading"]),
         // The root daemon that owns the devices. It links DriverExtension for the identity
         // the keyboard files its Keyboard Setup Assistant answer under, and deliberately
         // not KeyboardLayouts: text never reaches this process. [LAW:one-way-deps]
         .executableTarget(
             name: "vhidd",
-            dependencies: ["Helper", "VirtualHID", "DriverExtension", "ChildProcess", "Keystrokes", "Pointing", "Signals", "Installations"]
+            dependencies: ["Helper", "VirtualHID", "DriverExtension", "ChildProcess", "Keystrokes", "Pointing", "Signals", "Installations", "ScreenSpace", "DisplayReading"]
         ),
         // The verbs, against the daemon over the helper connection - from a command line,
         // or as tools over MCP. It links Input for what the verbs mean and Helper for how
@@ -183,7 +189,7 @@ let package = Package(
             name: "vhid",
             dependencies: [
                 "Input", "Helper", "Installations", "KeyboardLayouts", "Keystrokes", "Pointing", "DriverExtension", "ChildProcess", "Doctor",
-                "Version", "RecordingTie", "Signals", "Telemetry", "Turns", "Seeing", "EyesVerbs", "Grants",
+                "Version", "RecordingTie", "Signals", "Telemetry", "Turns", "Seeing", "EyesVerbs", "Grants", "ScreenSpace",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "MCP", package: "swift-sdk"),
                 .product(name: "Logging", package: "swift-log"),
@@ -196,7 +202,7 @@ let package = Package(
             name: "vhidCLITests",
             dependencies: [
                 "vhid", "Input", "Helper", "Installations", "Keystrokes", "Pointing", "Doctor", "DriverExtension", "Version", "OwnThread", "TestClock", "Signals",
-                "Telemetry", "TelemetryTesting", "Turns", "Seeing", "EyesVerbs",
+                "Telemetry", "TelemetryTesting", "Turns", "Seeing", "EyesVerbs", "ScreenSpace", "ScreenSpaceTesting", "InputTesting",
                 .product(name: "MCP", package: "swift-sdk"),
             ]
         ),
@@ -213,7 +219,7 @@ let package = Package(
         // test process's own identity and audit token: real code signing, no root.
         .testTarget(
             name: "vhiddTests",
-            dependencies: ["vhidd", "Helper", "VirtualHID", "DriverExtension", "ChildProcess", "Keystrokes", "Pointing", "Signals", "Installations", "OwnThread"]
+            dependencies: ["vhidd", "Helper", "VirtualHID", "DriverExtension", "ChildProcess", "Keystrokes", "Pointing", "Signals", "Installations", "ScreenSpace", "ScreenSpaceTesting", "OwnThread"]
         ),
 
         // eyes: the screen read, so input can be aimed - what is in front, where text is -
