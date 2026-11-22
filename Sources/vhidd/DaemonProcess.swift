@@ -134,7 +134,7 @@ extension DaemonProcess.Effects {
     /// moment the stop is decided. [LAW:no-silent-failure]
     func reach(within limit: Duration, whenLost: @escaping @Sendable (DaemonError, DaemonProcess.Origin) -> Void) throws -> DaemonProcess.Reached<Device> {
         let stopping = Mutex(false)
-        let (devices, origin) = try connection(by: .now + limit) { error, origin in
+        let (devices, origin) = try connection(by: Timeline.suspending.deadline(within: limit)) { error, origin in
             if !stopping.withLock({ $0 }) { whenLost(error, origin) }
         }
         do {
@@ -147,7 +147,7 @@ extension DaemonProcess.Effects {
     }
 
     /// A connection to the daemon and where the daemon came from.
-    private func connection(by deadline: ContinuousClock.Instant, whenLost: @escaping @Sendable (DaemonError, DaemonProcess.Origin) -> Void) throws -> (Device, DaemonProcess.Origin) {
+    private func connection(by deadline: Deadline, whenLost: @escaping @Sendable (DaemonError, DaemonProcess.Origin) -> Void) throws -> (Device, DaemonProcess.Origin) {
         do {
             return (try connect { whenLost($0, .alreadyRunning) }, .alreadyRunning)
         } catch let unreachable as DaemonError {
@@ -160,7 +160,7 @@ extension DaemonProcess.Effects {
             do {
                 return (try connect { whenLost($0, origin) }, origin)
             } catch let unreachable as DaemonError {
-                guard ContinuousClock.now < deadline else { stop(origin); throw unreachable }
+                guard !deadline.passed else { stop(origin); throw unreachable }
                 Thread.sleep(forTimeInterval: 0.1)
             }
         }

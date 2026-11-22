@@ -108,7 +108,7 @@ do {
     let driver: @Sendable () throws -> DriverState = { try DriverState(DriverProbe.facts(by: Timeline.suspending.deadline(within: Readiness.driverReadLimit), or: .never)) }
     let readiness = Readiness(driver: driver)
     let listener = NSXPCListener(machServiceName: installation.service)
-    let delegate = Listener(readiness: readiness, callers: callers, screen: FrontScreen.real(build))
+    let delegate = Listener(readiness: readiness, callers: callers, screen: FrontScreen.real(build), timeline: .suspending)
     listener.delegate = delegate
     listener.resume()
     log("listening on \(installation.service)")
@@ -134,7 +134,7 @@ do {
             serve: { reached in
                 log("the keyboard is up: the driver's daemon answered in \(reached.startup.keyboard.answered), ready after \(reached.startup.keyboard.ready)")
                 log("the mouse is up: the driver's daemon answered in \(reached.startup.mouse.answered), ready after \(reached.startup.mouse.ready)")
-                let devices = Devices(keyboard: reached.devices.keyboard, mouse: reached.devices.mouse)
+                let devices = Devices(keyboard: reached.devices.keyboard, mouse: reached.devices.mouse, timeline: .suspending)
                 // Whatever the daemon was holding for its last occupant - a vhidd that
                 // exited while the daemon lived on, or a hand-run session - is up before
                 // any client is served: the devices are handed over only after.

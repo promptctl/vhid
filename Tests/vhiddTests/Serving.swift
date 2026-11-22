@@ -1,7 +1,12 @@
 import Foundation
 import ScreenSpace
 import ScreenSpaceTesting
+import Timeline
+import Waiting
 @testable import vhidd
+
+/// A deadline for an act that will be answered: the guard, so only a hang fails it.
+func guarded() -> Deadline { Timeline.suspending.deadline(within: hangGuard) }
 
 extension Readiness {
     /// Readiness whose one attempt brought `devices` up, as a seat finds it once vhidd serves.
@@ -13,22 +18,32 @@ extension Readiness {
     }
 }
 
-/// Devices that record every act and answer each with nil.
-final class RecordingDevices: NSObject, ServedDevices, @unchecked Sendable {
-    private let lock = NSLock()
-    private var acts: [String] = []
-    var done: [String] { lock.lock(); defer { lock.unlock() }; return acts }
-    private func note(_ act: String, _ reply: (Error?) -> Void) { lock.lock(); acts.append(act); lock.unlock(); reply(nil) }
-    func down(usage: UInt16, reply: @escaping (Error?) -> Void) { note("down \(usage)", reply) }
-    func releaseAll(reply: @escaping (Error?) -> Void) { note("release keys", reply) }
-    func hold(usages: [UInt16], reply: @escaping (Error?) -> Void) { note("hold \(usages)", reply) }
-    func buttonDown(_ button: UInt8, reply: @escaping (Error?) -> Void) { note("button \(button)", reply) }
-    func releaseButtons(reply: @escaping (Error?) -> Void) { note("release buttons", reply) }
-    func holdButtons(_ buttons: UInt32, reply: @escaping (Error?) -> Void) { note("hold buttons \(buttons)", reply) }
-    func move(x: Int8, y: Int8, reply: @escaping (Error?) -> Void) { note("move", reply) }
-    func scroll(vertical: Int8, horizontal: Int8, reply: @escaping (Error?) -> Void) { note("scroll", reply) }
-    func releaseKeysHeldPastLimit() -> KeysLetGo? { nil }
-    func releaseEverything(because reason: String) { lock.lock(); acts.append(reason); lock.unlock() }
+/// Devices that record every act, and hold each on `turn` until it says go: a test that
+/// needs an act still under way when the next arrives keeps it there.
+final class RecordingDevices: ServedDevices, @unchecked Sendable {
+    private let acts = Latch<[String]>([])
+    /// Whether acts may finish; true unless a test holds them.
+    let turn: Latch<Bool>
+
+    init(holdingActs: Bool = false) { turn = Latch(!holdingActs) }
+
+    var done: [String] { acts.current }
+    /// Waits until `act` has begun.
+    func awaitBegun(_ act: String) throws { try acts.wait(for: act) { $0.contains(act) } }
+    private func note(_ act: String) throws {
+        acts.update { $0.append(act) }
+        try turn.wait(for: "the test to let \(act) finish") { $0 }
+    }
+    func down(usage: UInt16, by deadline: Deadline) throws { try note("down \(usage)") }
+    func releaseAll(by deadline: Deadline) throws { try note("release keys") }
+    func hold(usages: [UInt16], by deadline: Deadline) throws { try note("hold \(usages)") }
+    func buttonDown(_ button: UInt8, by deadline: Deadline) throws { try note("button \(button)") }
+    func releaseButtons(by deadline: Deadline) throws { try note("release buttons") }
+    func holdButtons(_ buttons: UInt32, by deadline: Deadline) throws { try note("hold buttons \(buttons)") }
+    func move(x: Int8, y: Int8, by deadline: Deadline) throws { try note("move") }
+    func scroll(vertical: Int8, horizontal: Int8, by deadline: Deadline) throws { try note("scroll") }
+    func releaseKeysHeldPastLimit(heldBy holder: () -> pid_t?) -> KeysLetGo? { nil }
+    func releaseEverything(because reason: String) { acts.update { $0.append(reason) } }
 }
 
 /// A screen whose cursor is always at one place over one display, for seats whose tests

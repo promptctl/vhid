@@ -3,6 +3,8 @@ import Installations
 import Keystrokes
 import OwnThread
 import Testing
+import Timeline
+import Waiting
 @testable import Helper
 @testable import vhidd
 
@@ -14,46 +16,36 @@ import Testing
 /// [LAW:behavior-not-structure]
 @Suite(.ownThread) struct ListenerTests {
     /// The devices served: remember what they were asked, and say when they were released.
-    private final class FakeDevices: NSObject, ServedDevices, @unchecked Sendable {
+    private final class FakeDevices: ServedDevices, @unchecked Sendable {
         private let lock = NSLock()
         private var usages: [UInt16] = []
-        private var reasons: [String] = []
-        private let released = DispatchSemaphore(value: 0)
+        private let reasons = Latch<[String]>([])
 
         var asked: [UInt16] {
             lock.lock(); defer { lock.unlock() }
             return usages
         }
 
-        var releasedBecause: [String] {
-            lock.lock(); defer { lock.unlock() }
-            return reasons
-        }
+        var releasedBecause: [String] { reasons.current }
 
-        func down(usage: UInt16, reply: @escaping (Error?) -> Void) {
+        func down(usage: UInt16, by deadline: Deadline) throws {
             lock.lock(); usages.append(usage); lock.unlock()
-            reply(nil)
         }
 
-        func releaseAll(reply: @escaping (Error?) -> Void) { reply(nil) }
-        func hold(usages: [UInt16], reply: @escaping (Error?) -> Void) { reply(nil) }
-        func buttonDown(_ button: UInt8, reply: @escaping (Error?) -> Void) { reply(nil) }
-        func releaseButtons(reply: @escaping (Error?) -> Void) { reply(nil) }
-        func holdButtons(_ buttons: UInt32, reply: @escaping (Error?) -> Void) { reply(nil) }
-        func move(x: Int8, y: Int8, reply: @escaping (Error?) -> Void) { reply(nil) }
-        func scroll(vertical: Int8, horizontal: Int8, reply: @escaping (Error?) -> Void) { reply(nil) }
+        func releaseAll(by deadline: Deadline) throws {}
+        func hold(usages: [UInt16], by deadline: Deadline) throws {}
+        func buttonDown(_ button: UInt8, by deadline: Deadline) throws {}
+        func releaseButtons(by deadline: Deadline) throws {}
+        func holdButtons(_ buttons: UInt32, by deadline: Deadline) throws {}
+        func move(x: Int8, y: Int8, by deadline: Deadline) throws {}
+        func scroll(vertical: Int8, horizontal: Int8, by deadline: Deadline) throws {}
 
-        func releaseKeysHeldPastLimit() -> KeysLetGo? { nil }
-        func releaseEverything(because reason: String) {
-            lock.lock(); reasons.append(reason); lock.unlock()
-            released.signal()
-        }
+        func releaseKeysHeldPastLimit(heldBy holder: () -> pid_t?) -> KeysLetGo? { nil }
+        func releaseEverything(because reason: String) { reasons.update { $0.append(reason) } }
 
-        /// Blocks until the release or ten seconds. Ten because the bound only ends a hang:
-        /// at two, CI missed the release on both attempts of run 36336822361
-        /// (vhid-ci-flake-80e).
-        func awaitRelease() -> Bool {
-            released.wait(timeout: .now() + .seconds(10)) == .success
+        /// The reason of the first release, once there is one.
+        func awaitRelease() throws -> String {
+            try reasons.wait(for: "a release") { $0.first }
         }
     }
 
@@ -67,7 +59,7 @@ import Testing
 
     private func serve(requiring requirement: String? = nil) throws -> Served {
         let devices = FakeDevices()
-        let delegate = Listener(readiness: .serving(devices), callers: try CallerIdentity(requirement: try requirement ?? OwnProcess.requirement()), screen: FixedScreen())
+        let delegate = Listener(readiness: .serving(devices), callers: try CallerIdentity(requirement: try requirement ?? OwnProcess.requirement()), screen: FixedScreen(), timeline: .suspending)
         let listener = NSXPCListener.anonymous()
         listener.delegate = delegate
         listener.resume()
@@ -107,29 +99,21 @@ import Testing
 
     /// The first client going away releases everything, and the devices are then another
     /// client's. The release comes before the devices are let go, and the test can see
-    /// only the first of the two, so the next client's admission is asked for, a beat apart,
-    /// until it comes or ten seconds have passed - each ask itself bounded by the client's
-    /// own reply timeout.
-    @Test func aClientGoingAwayReleasesEverythingAndFreesTheDevices() async throws {
+    /// only the first of the two: the far end says the devices are free only by admitting
+    /// the next client, so the next client asks until it is admitted, each ask a round
+    /// trip of its own, within the guard. Admitted at last at any pace, so the asking
+    /// decides nothing but when.
+    @Test(.hangGuarded) func aClientGoingAwayReleasesEverythingAndFreesTheDevices() throws {
         let served = try serve()
         let first = client(of: served)
         let keyboard = first.helper.keyboard
         try keyboard.down(.leftShift)
-        let left = ContinuousClock.now
         first.connection.invalidate()
-        let released = served.devices.awaitRelease()
-        // How long the release took and why, printed whether or not it passes: on CI this
-        // test has run for six seconds, and which of that is the release is the question
-        // vhid-ci-flake-80e is open on. [LAW:nothing-unseen]
-        let seen = "release after \(ContinuousClock.now - left), because \(served.devices.releasedBecause)"
-        print("ListenerTests: \(seen)")
-        #expect(released, "\(seen)")
-        #expect(served.devices.releasedBecause.first == "a client went away", "\(seen)")
+        #expect(try served.devices.awaitRelease() == "a client went away")
 
-        let deadline = ContinuousClock.now + .seconds(10)
+        let guardEnds = ContinuousClock.now + hangGuard
         var next = try admitted(served, pressing: .space)
-        while !next, ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(50))
+        while !next, ContinuousClock.now < guardEnds {
             next = try admitted(served, pressing: .space)
         }
         #expect(next, "no client was admitted after the first went away")

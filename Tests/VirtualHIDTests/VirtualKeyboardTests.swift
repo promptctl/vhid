@@ -131,6 +131,9 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
 
     /// The daemon health-checks its clients, and a client that does not answer is one it
     /// drops. The answer goes out from inside the wait for something else.
+    ///
+    /// The device is kept until the answer is seen: the answer is queued for the writer, and
+    /// a device let go hangs up with whatever is still queued unsent, as hanging up should.
     @Test func aHealthCheckIsAnsweredEvenWhileWaitingForSomethingElse() throws {
         let fake = FakeDaemon { frame, fake in
             guard case .request(let id, _) = frame else { return }
@@ -138,8 +141,10 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
             try fake.send(.response(id: id, payload: []))
             try fake.push([(.keyboardReady, true)])
         }
-        try keyboard(on: fake).start(by: guarded())
+        let device = try keyboard(on: fake)
+        try device.start(by: guarded())
         try fake.awaitFrame(.control(.healthCheckResponse, payload: []))
+        withExtendedLifetime(device) {}
     }
 }
 

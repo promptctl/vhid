@@ -6,22 +6,33 @@ import Pointing
 import Timeline
 import VirtualHID
 
-/// The devices as the listener serves them: what a client is handed, and the release made
-/// on a client's behalf when it goes. [LAW:decomposition] Admitting and letting go are the
-/// listener's; what a release is belongs to the devices, and devices of a test's own stand
-/// behind the real listener through this.
-protocol ServedDevices: DeviceService {
+/// The devices as the listener serves them: a client's acts, each by the deadline its seat
+/// made when the act arrived, and the releases made on a client's behalf.
+/// [LAW:decomposition] Admitting and letting go are the listener's; what a release is
+/// belongs to the devices, and devices of a test's own stand behind the real listener
+/// through this.
+protocol ServedDevices: AnyObject, Sendable {
+    func down(usage: UInt16, by deadline: Deadline) throws
+    func releaseAll(by deadline: Deadline) throws
+    func hold(usages: [UInt16], by deadline: Deadline) throws
+    func buttonDown(_ button: UInt8, by deadline: Deadline) throws
+    func releaseButtons(by deadline: Deadline) throws
+    func holdButtons(_ buttons: UInt32, by deadline: Deadline) throws
+    func move(x: Int8, y: Int8, by deadline: Deadline) throws
+    func scroll(vertical: Int8, horizontal: Int8, by deadline: Deadline) throws
     func releaseEverything(because reason: String)
     /// Releases the keyboard when a key has been down past the limit with no keyboard
-    /// report, answering with what that let go of, or nil when nothing was due.
-    func releaseKeysHeldPastLimit() -> KeysLetGo?
+    /// report, answering with what that let go of and whose it was, as `holder` names it
+    /// then, or nil when nothing was due.
+    func releaseKeysHeldPastLimit(heldBy holder: () -> pid_t?) -> KeysLetGo?
 }
 
-/// Keys the deadline released, the limit they were held past, and the reason the release
-/// failed if it did.
+/// Keys the deadline released, the limit they were held past, the client that held them,
+/// and the reason the release failed if it did.
 struct KeysLetGo: Equatable {
     let usages: [UInt16]
     let limit: Duration
+    let holder: pid_t?
     let failure: String?
 }
 
@@ -56,7 +67,7 @@ extension VirtualPointing: HeldPointing {}
 /// device is ready on a one-second timer, so a connect-per-client daemon would put up to
 /// a full second in front of every client's first keystroke, for a reason that has
 /// nothing to do with the hardware. Paid once here, where nobody is waiting.
-final class Devices: NSObject, ServedDevices, @unchecked Sendable {
+final class Devices: ServedDevices, @unchecked Sendable {
     /// The seams and not the drivers, so a test hands in devices of its own and the
     /// daemon hands in the real ones. [LAW:composability]
     private let keyboard: any HeldKeyboard
@@ -69,8 +80,9 @@ final class Devices: NSObject, ServedDevices, @unchecked Sendable {
     ///
     /// A lock and not a queue, because every call here is a round trip the client is
     /// already waiting on: hopping to another thread to do synchronous work would add a
-    /// hop and take away the ability to answer on the thread that asked.
-    private let device = NSLock()
+    /// hop and take away the ability to answer on the thread that asked. Taken by the
+    /// act's deadline, so an act whose turn comes too late is refused and not done.
+    private let device = TimedLock()
 
     /// How long a key may stay down with no keyboard report before the daemon lets it go.
     ///
@@ -86,92 +98,98 @@ final class Devices: NSObject, ServedDevices, @unchecked Sendable {
     /// nothing at all.
     static let keyLimit = HeldKeys.silenceLimit
 
-    /// How long one act has from when the devices take it up.
-    static let reportLimit: Duration = .seconds(2)
+    /// How long a release made on a client's behalf has for each device's report, counted
+    /// once its turn has come: a release waits out the act ahead of it rather than be given
+    /// up on, because a release given up on is a key left down.
+    static let releaseLimit: Duration = .seconds(2)
 
     private let limit: Duration
-    private let now: () -> ContinuousClock.Instant
-    /// When a client last asked for a report of either device; under `device`.
-    private var lastReport: ContinuousClock.Instant
+    private let timeline: Timeline
+    /// When a client last asked for a report of either device, on `timeline`; under `device`.
+    private var lastReport: Duration
 
-    init(keyboard: any HeldKeyboard, mouse: any HeldPointing, limit: Duration = keyLimit,
-         now: @escaping () -> ContinuousClock.Instant = { .now }) {
+    init(keyboard: any HeldKeyboard, mouse: any HeldPointing, limit: Duration = keyLimit, timeline: Timeline) {
         self.keyboard = keyboard
         self.mouse = mouse
         self.limit = limit
-        self.now = now
-        self.lastReport = now()
+        self.timeline = timeline
+        self.lastReport = timeline.now()
     }
 
-    /// [LAW:dataflow-not-control-flow] Every call is the same act - take the devices, do
-    /// one thing to them, answer with what happened - so they are one function taking the
-    /// thing to do, not eight copies of the same locking and error handling.
-    private func attempt(_ act: (Deadline) throws -> Void, _ reply: (Error?) -> Void) {
-        device.lock()
-        defer { device.unlock() }
-        // Both ends: a report the driver took seconds to answer is the client being active
-        // throughout, not idle.
-        lastReport = now()
-        let answered = outcome(of: act)
-        lastReport = now()
-        reply(answered)
-    }
-
-    /// The lock is the caller's to hold, so an act made of several is still one sequence.
-    private func outcome(of act: (Deadline) throws -> Void) -> Error? {
-        do {
-            try act(Timeline.suspending.deadline(within: Self.reportLimit))
-            return nil
-        } catch {
-            return refusal(error)
+    /// [LAW:dataflow-not-control-flow] Every call is the same act - take the devices by
+    /// the act's deadline, do one thing to them - so they are one function taking the
+    /// thing to do, not eight copies of the same locking.
+    private func attempt(by deadline: Deadline, _ act: () throws -> Void) throws {
+        try device.withLock(by: deadline) {
+            // Both ends: a report the driver took seconds to answer is the client being
+            // active throughout, not idle.
+            lastReport = timeline.now()
+            defer { lastReport = timeline.now() }
+            try act()
         }
     }
 
-    func down(usage: UInt16, reply: @escaping (Error?) -> Void) {
-        attempt({ try keyboard.down(try Self.usage(usage), by: $0) }, reply)
+    /// What an act threw, for the releases that report a failure rather than throw it.
+    private func outcome(_ act: () throws -> Void) -> (any Error)? {
+        do {
+            try act()
+            return nil
+        } catch {
+            return error
+        }
     }
 
-    func releaseAll(reply: @escaping (Error?) -> Void) {
-        attempt({ try keyboard.releaseAll(by: $0) }, reply)
+    func down(usage: UInt16, by deadline: Deadline) throws {
+        try attempt(by: deadline) { try keyboard.down(try Self.usage(usage), by: deadline) }
+    }
+
+    func releaseAll(by deadline: Deadline) throws {
+        try attempt(by: deadline) { try keyboard.releaseAll(by: deadline) }
     }
 
     /// [LAW:single-enforcer] More than a report carries is refused by `HeldKeys`, by name,
     /// before the device sees it. A usage named twice on the wire is one key held.
-    func hold(usages: [UInt16], reply: @escaping (Error?) -> Void) {
-        attempt({ try keyboard.hold(try HeldKeys(Set(usages.map(Self.usage))), by: $0) }, reply)
+    func hold(usages: [UInt16], by deadline: Deadline) throws {
+        try attempt(by: deadline) { try keyboard.hold(try HeldKeys(Set(usages.map(Self.usage))), by: deadline) }
     }
 
     /// A release the keyboard refused is tried again one limit later, not on every sweep:
     /// a hung driver would otherwise hold every client's act behind a timed-out release
     /// four times a second, and log each one.
-    func releaseKeysHeldPastLimit() -> KeysLetGo? {
-        device.lock()
-        defer { device.unlock() }
-        let held = keyboard.keysDown
-        guard !held.isEmpty, now() - lastReport >= limit else { return nil }
-        let failure = outcome(of: keyboard.releaseAll).map { "\($0)" }
-        if failure != nil { lastReport = now() }
-        return KeysLetGo(usages: held.sorted().map(\.rawValue), limit: limit, failure: failure)
+    ///
+    /// Taken only when the devices are free at once: a client mid-act is a client alive,
+    /// with nothing of its due, so the sweep waits behind no act and no act behind it
+    /// for longer than one release. The holder is named under the devices' lock, where
+    /// the keys it held were set, so the pid named is the one whose keys these were.
+    func releaseKeysHeldPastLimit(heldBy holder: () -> pid_t?) -> KeysLetGo? {
+        let due = try? device.withLock(by: timeline.deadline(within: .zero)) { () -> KeysLetGo? in
+            let held = keyboard.keysDown
+            guard !held.isEmpty, timeline.now() - lastReport >= limit else { return nil }
+            let failure = outcome { try keyboard.releaseAll(by: timeline.deadline(within: Self.releaseLimit)) }.map { "\($0)" }
+            if failure != nil { lastReport = timeline.now() }
+            return KeysLetGo(usages: held.sorted().map(\.rawValue), limit: limit, holder: holder(), failure: failure)
+        }
+        return due ?? nil
     }
 
-    func buttonDown(_ button: UInt8, reply: @escaping (Error?) -> Void) {
-        attempt({ try mouse.down(try Self.button(button), by: $0) }, reply)
+    func buttonDown(_ button: UInt8, by deadline: Deadline) throws {
+        try attempt(by: deadline) { try mouse.down(try Self.button(button), by: deadline) }
     }
 
-    func releaseButtons(reply: @escaping (Error?) -> Void) {
-        attempt({ try mouse.releaseAll(by: $0) }, reply)
+    func releaseButtons(by deadline: Deadline) throws {
+        try attempt(by: deadline) { try mouse.releaseAll(by: deadline) }
     }
 
-    func holdButtons(_ buttons: UInt32, reply: @escaping (Error?) -> Void) {
-        attempt({ try mouse.hold(Button.buttons(in: buttons), by: $0) }, reply)
+    func holdButtons(_ buttons: UInt32, by deadline: Deadline) throws {
+        try attempt(by: deadline) { try mouse.hold(Button.buttons(in: buttons), by: deadline) }
     }
 
-    func move(x: Int8, y: Int8, reply: @escaping (Error?) -> Void) {
-        attempt({ try mouse.move(Move(x: try Self.count(x), y: try Self.count(y)), by: $0) }, reply)
+    func move(x: Int8, y: Int8, by deadline: Deadline) throws {
+        try attempt(by: deadline) { try mouse.move(Move(x: try Self.count(x), y: try Self.count(y)), by: deadline) }
     }
 
-    func scroll(vertical: Int8, horizontal: Int8, reply: @escaping (Error?) -> Void) {
-        attempt({ try mouse.scroll(Scroll(vertical: try Self.count(vertical), horizontal: try Self.count(horizontal)), by: $0) }, reply)
+    func scroll(vertical: Int8, horizontal: Int8, by deadline: Deadline) throws {
+        try attempt(by: deadline) { try mouse.scroll(Scroll(vertical: try Self.count(vertical), horizontal: try Self.count(horizontal)), by: deadline) }
     }
 
     /// Releases everything the client that just went away had left held, on both devices.
@@ -182,16 +200,16 @@ final class Devices: NSObject, ServedDevices, @unchecked Sendable {
     /// macOS continues across whatever the pointer crosses. The client cannot clean up
     /// after itself in precisely the case that matters, so vhidd does it, on every
     /// way a connection can end - and on its own way out, for the same reason. Each device
-    /// is released whatever the other answered, and the lock is held across both: a
-    /// report landing between them would be a key set down after the keyboard was cleared,
-    /// with nothing left to catch it.
+    /// is released whatever the other answered, each with a limit of its own, and the lock
+    /// is held across both: a report landing between them would be a key set down after the
+    /// keyboard was cleared, with nothing left to catch it.
     func releaseEverything(because reason: String) {
-        device.lock()
-        defer { device.unlock() }
-        let key = outcome(of: keyboard.releaseAll)
-        log(key.map { "\(reason), and the keyboard would not release: \($0)" } ?? "\(reason); every key is up")
-        let button = outcome(of: mouse.releaseAll)
-        log(button.map { "\(reason), and the mouse would not release: \($0)" } ?? "\(reason); every button is up")
+        device.withLock {
+            let key = outcome { try keyboard.releaseAll(by: timeline.deadline(within: Self.releaseLimit)) }
+            log(key.map { "\(reason), and the keyboard would not release: \($0)" } ?? "\(reason); every key is up")
+            let button = outcome { try mouse.releaseAll(by: timeline.deadline(within: Self.releaseLimit)) }
+            log(button.map { "\(reason), and the mouse would not release: \($0)" } ?? "\(reason); every button is up")
+        }
     }
 
     /// [LAW:parse-dont-validate] The wire is wider than the device on every count - a usage
