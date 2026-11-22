@@ -119,6 +119,22 @@ one of the pool's.
 and lacks it is slow or hung on any Mac, and not only on CI. `thePoolIsOneThreadWide`
 fails on a wider pool, so a run that has lost the narrow one says so.
 
+No test's verdict turns on how fast the Mac runs it, so a test waits for an event and
+never for a time. From the `Waiting` target:
+
+- A state a test waits on is a `Latch`: the code under test, or a fake, updates it, and
+  the test waits for the state it needs. A sleep, or a poll that gives up, is a guess at
+  how long the work takes.
+- A wait whose length is not what the test tests is bounded by `hangGuard`, and only by
+  it: past it the wait is a hang, and the test fails as one rather than hanging the run.
+- A limit that is what the test tests runs on a clock the test holds. A `ManualClock`
+  from `TestClock`, given as a `Timeline`, stands still until the test advances it, so a
+  miss is forced and nothing else times out. A limit counts from the call that asks for
+  it; a test proves that by holding the queue the work waits for, not by loading the Mac.
+- A child that must outlive the test sleeps an hour, and `exec`s its sleep: stopping a
+  shell does not stop the `sleep` it started, and that `sleep` holds the runner's stderr
+  open, so `swift test` waits on it after every test has passed.
+
 ## Checking the reach matrix
 
 The user guide's table of where input reaches over SSH ([guide.md](guide.md#where-the-input-reaches)) is measured, and [design/remote-hands.md](design/remote-hands.md) has the evidence for each cell. `scripts/reach <host> <place>` checks one row again on a real Mac; with no place, it lists what to put on screen for each.
