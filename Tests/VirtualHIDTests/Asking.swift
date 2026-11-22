@@ -5,9 +5,6 @@ import Timeline
 import Waiting
 @testable import VirtualHID
 
-/// A deadline for a request that will be answered: the guard, so only a hang fails it.
-func guarded() -> Deadline { Timeline.suspending.deadline(within: hangGuard) }
-
 /// A deadline that had passed before anything was asked by it.
 func spent() -> Deadline {
     let clock = ManualClock()

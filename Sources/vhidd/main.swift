@@ -105,7 +105,7 @@ do {
     // Listening comes first, and bringing the devices up after, on a thread of its own:
     // a client that calls while they are down is answered at once with the reason, from
     // `readiness`, rather than finding no service at all. [LAW:no-silent-failure]
-    let driver: @Sendable () throws -> DriverState = { try DriverState(DriverProbe.facts(by: Timeline.suspending.deadline(within: Readiness.driverReadLimit), or: .never)) }
+    let driver: @Sendable (Deadline) throws -> DriverState = { try DriverState(DriverProbe.facts(by: $0, or: .never)) }
     let readiness = Readiness(driver: driver)
     let listener = NSXPCListener(machServiceName: installation.service)
     let delegate = Listener(readiness: readiness, callers: callers, screen: FrontScreen.real(build), timeline: .suspending)
@@ -134,22 +134,16 @@ do {
             serve: { reached in
                 log("the keyboard is up: the driver's daemon answered in \(reached.startup.keyboard.answered), ready after \(reached.startup.keyboard.ready)")
                 log("the mouse is up: the driver's daemon answered in \(reached.startup.mouse.answered), ready after \(reached.startup.mouse.ready)")
-                let devices = Devices(keyboard: reached.devices.keyboard, mouse: reached.devices.mouse, timeline: .suspending)
-                // Whatever the daemon was holding for its last occupant - a vhidd that
-                // exited while the daemon lived on, or a hand-run session - is up before
-                // any client is served: the devices are handed over only after.
-                // Unconditionally: the daemon's origin says who started it, not what it
-                // holds. [LAW:dataflow-not-control-flow] [LAW:no-ambient-temporal-coupling]
-                devices.releaseEverything(because: "starting")
-                return devices
+                return Devices(keyboard: reached.devices.keyboard, mouse: reached.devices.mouse, timeline: .suspending)
             },
             // A driver that could not be read ends no wait, so the reason it could not is
             // said here, where it would otherwise be lost. [LAW:no-silent-failure]
+            // The loop's own reading, by a deadline made as it asks: no client waits on it.
             driver: {
                 do {
-                    return try driver()
+                    return try driver(Timeline.suspending.deadline(within: .seconds(2)))
                 } catch {
-                    log("could not read the driver extension: \(error)")
+                    logFailure("could not read the driver extension: \(error)")
                     return nil
                 }
             },

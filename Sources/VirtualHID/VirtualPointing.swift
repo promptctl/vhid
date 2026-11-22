@@ -1,6 +1,5 @@
 import Foundation
 import Pointing
-import Synchronization
 import Timeline
 
 /// The pointing input report as the driver's packed `pointing_input` lays it out: a
@@ -39,17 +38,18 @@ struct PointingReport {
 /// **The calling process must be root**, for the reason `DaemonConnection` gives.
 public final class VirtualPointing: Sendable {
     private let daemon: DaemonConnection
-    /// The buttons the device is holding, kept by the rule `Held` gives, under the lock
-    /// its reports are posted under, for the reason `VirtualKeyboard` gives.
-    private let held = Mutex(Held<Button>())
+    /// The buttons held, kept by the rule `Held` gives, and every report a reading of them.
+    private let buttons: HeldDevice<Button>
 
-    public var buttonsDown: Set<Button> { held.withLock { $0.down } }
+    /// The buttons the driver may be holding: what a release must clear.
+    public var buttonsDown: Set<Button> { buttons.down }
 
     /// Over a connection the keyboard may share: pqrs's daemon keeps one keyboard and one
     /// pointing device per client connection, so the two devices of one client ride one
     /// socket, and the daemon's `erase_client` takes both when it closes.
     public init(daemon: DaemonConnection) {
         self.daemon = daemon
+        buttons = HeldDevice(daemon: daemon, report: .postPointingInputReport, reset: .pointingReset)
     }
 
     /// Brings the device up and waits for the daemon's word that it is ready, by
@@ -62,7 +62,7 @@ public final class VirtualPointing: Sendable {
 
     /// Holds `button` down.
     public func down(_ button: Button, by deadline: Deadline) throws {
-        try post(move: .none, scroll: .none, by: deadline) { $0.union([button]) }
+        try post(move: .none, scroll: .none, by: deadline) { $0.asked.union([button]) }
     }
 
     /// Every button up. Posted unconditionally, for the reason the keyboard's release is:
@@ -81,30 +81,22 @@ public final class VirtualPointing: Sendable {
 
     /// Moves by `delta`, with whatever is held still held.
     public func move(_ delta: Move, by deadline: Deadline) throws {
-        try post(move: delta, scroll: .none, by: deadline) { $0 }
+        try post(move: delta, scroll: .none, by: deadline) { $0.asked }
     }
 
     /// Rolls the wheel by `delta`, with whatever is held still held.
     public func scroll(_ delta: Scroll, by deadline: Deadline) throws {
-        try post(move: .none, scroll: delta, by: deadline) { $0 }
+        try post(move: .none, scroll: delta, by: deadline) { $0.asked }
     }
 
-    /// Clears the device's own state as well as this side's, for the case where the two
-    /// might have drifted apart. The record is kept by `Held`'s rule, as a release is.
+    /// Clears the device's own state as well as this side's, with `pointingReset`.
     public func reset(by deadline: Deadline) throws {
-        try held.withLock { held in
-            try held.post([]) { () throws(DaemonConnection.Unanswered) in try daemon.request(.pointingReset, by: deadline) }
-        }
+        try buttons.reset(by: deadline)
     }
 
-    /// Posts the report for what `change` makes of the buttons held, with this report's
-    /// motion, and keeps the record by how far it got, under the lock the keyboard holds
-    /// across its round trip, for the same reason.
-    private func post(move: Move, scroll: Scroll, by deadline: Deadline, holding change: (Set<Button>) -> Set<Button>) throws {
-        try held.withLock { held in
-            let next = change(held.down)
-            let report = PointingReport(held: next, move: move, scroll: scroll)
-            try held.post(next) { () throws(DaemonConnection.Unanswered) in try daemon.request(.postPointingInputReport, report.bytes, by: deadline) }
-        }
+    /// Posts the report for the buttons `change` makes of the record, with this report's
+    /// motion.
+    private func post(move: Move, scroll: Scroll, by deadline: Deadline, holding change: (Held<Button>) -> Set<Button>) throws {
+        try buttons.post(by: deadline, { change($0) }) { PointingReport(held: $0, move: move, scroll: scroll).bytes }
     }
 }

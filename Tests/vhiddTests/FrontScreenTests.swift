@@ -3,6 +3,7 @@ import OwnThread
 import ScreenSpace
 import ScreenSpaceTesting
 import Testing
+import Timeline
 import Waiting
 @testable import vhidd
 
@@ -15,12 +16,12 @@ import Waiting
         let log: Log
         var fails = false
         init(_ session: FrontScreen.Session, _ log: Log) { self.session = session; self.log = log }
-        func cursor() throws -> (x: Double, y: Double) {
+        func cursor(by deadline: Deadline) throws -> (x: Double, y: Double) {
             log.add("read in \(session.audit)")
             if fails { throw FrontScreen.NobodyInFront() }
             return (Double(session.audit), 1)
         }
-        func layout() throws -> DisplayLayout {
+        func layout(by deadline: Deadline) throws -> DisplayLayout {
             log.add("layout in \(session.audit)")
             return .at([.at(0, 0, Double(session.audit), 1)])
         }
@@ -40,31 +41,31 @@ import Waiting
     /// The layout is asked of the same child as the cursor: one reader per session.
     @Test func theLayoutIsReadByTheFrontSessionsChild() throws {
         let log = Log()
-        let screen = FrontScreen(front: { bmf }, start: { log.add("start \($0.audit)"); return Reader($0, log) }, failed: log.add)
-        #expect(try screen.cursor() == (100003, 1))
-        #expect(try screen.layout() == .at([.at(0, 0, 100003, 1)]))
+        let screen = FrontScreen(front: { bmf }, start: { session, _ in log.add("start \(session.audit)"); return Reader(session, log) }, failed: log.add)
+        #expect(try screen.cursor(by: guarded()) == (100003, 1))
+        #expect(try screen.layout(by: guarded()) == .at([.at(0, 0, 100003, 1)]))
         #expect(log.all == ["start 100003", "read in 100003", "layout in 100003"])
     }
 
     @Test func aSessionComingToTheFrontIsReadByAChildOfItsOwn() throws {
         let log = Log()
         var front = bmf
-        let cursor = FrontScreen(front: { front }, start: { log.add("start \($0.audit)"); return Reader($0, log) }, failed: log.add)
-        #expect(try cursor.cursor() == (100003, 1))
-        #expect(try cursor.cursor() == (100003, 1))
+        let cursor = FrontScreen(front: { front }, start: { session, _ in log.add("start \(session.audit)"); return Reader(session, log) }, failed: log.add)
+        #expect(try cursor.cursor(by: guarded()) == (100003, 1))
+        #expect(try cursor.cursor(by: guarded()) == (100003, 1))
         front = loginWindow
-        #expect(try cursor.cursor() == (100120, 1))
+        #expect(try cursor.cursor(by: guarded()) == (100120, 1))
         #expect(log.all == ["start 100003", "read in 100003", "read in 100003", "stop 100003", "start 100120", "read in 100120"])
     }
 
     @Test func aReaderThatFailsIsStoppedAndTheNextReadStartsAnother() throws {
         let log = Log()
         var readers: [Reader] = []
-        let cursor = FrontScreen(front: { bmf }, start: { let reader = Reader($0, log); readers.append(reader); return reader }, failed: log.add)
-        _ = try cursor.cursor()
+        let cursor = FrontScreen(front: { bmf }, start: { session, _ in let reader = Reader(session, log); readers.append(reader); return reader }, failed: log.add)
+        _ = try cursor.cursor(by: guarded())
         readers[0].fails = true
-        #expect(throws: FrontScreen.NobodyInFront.self) { try cursor.cursor() }
-        #expect(try cursor.cursor() == (100003, 1))
+        #expect(throws: FrontScreen.NobodyInFront.self) { try cursor.cursor(by: guarded()) }
+        #expect(try cursor.cursor(by: guarded()) == (100003, 1))
         #expect(readers.count == 2)
         #expect(log.all == ["read in 100003", "read in 100003", "stop 100003",
                             "the screen reader in bmf's session 100003 failed: no session is in front to read the screen in",
@@ -75,16 +76,16 @@ import Waiting
     /// read, and the next read tries again.
     @Test func aReaderThatCouldNotStartIsAFailure() throws {
         let log = Log()
-        let cursor = FrontScreen(front: { bmf }, start: { log.add("start \($0.audit)"); throw FrontScreen.NobodyInFront() }, failed: log.add)
-        #expect(throws: FrontScreen.NobodyInFront.self) { try cursor.cursor() }
-        #expect(throws: FrontScreen.NobodyInFront.self) { try cursor.cursor() }
+        let cursor = FrontScreen(front: { bmf }, start: { session, _ in log.add("start \(session.audit)"); throw FrontScreen.NobodyInFront() }, failed: log.add)
+        #expect(throws: FrontScreen.NobodyInFront.self) { try cursor.cursor(by: guarded()) }
+        #expect(throws: FrontScreen.NobodyInFront.self) { try cursor.cursor(by: guarded()) }
         let failure = "the screen reader in bmf's session 100003 failed: no session is in front to read the screen in"
         #expect(log.all == ["start 100003", failure, "start 100003", failure])
     }
 
     @Test func nobodyInFrontIsSaidAndStartsNothing() {
-        let cursor = FrontScreen(front: { throw FrontScreen.NobodyInFront() }, start: { _ in Issue.record("started a reader"); throw FrontScreen.NobodyInFront() }, failed: { _ in })
-        #expect(throws: FrontScreen.NobodyInFront.self) { try cursor.cursor() }
+        let cursor = FrontScreen(front: { throw FrontScreen.NobodyInFront() }, start: { _, _ in Issue.record("started a reader"); throw FrontScreen.NobodyInFront() }, failed: { _ in })
+        #expect(throws: FrontScreen.NobodyInFront.self) { try cursor.cursor(by: guarded()) }
     }
 
     /// IOConsoleUsers as `ioreg` showed it on studious at the login window, bmf switched
@@ -100,26 +101,22 @@ import Waiting
         #expect(throws: FrontScreen.Unnamed.self) { try FrontScreen.frontSession([["kCGSSessionOnConsoleKey": true]]) }
     }
 
-    /// Long enough that no runner is slow enough to reach it: the limit on what a test does
-    /// not test, there so a child that hangs fails the test and does not hang the run.
-    /// [LAW:no-ambient-temporal-coupling] a test's verdict does not turn on how fast `sh` is.
-    private static let unhurried: Duration = .seconds(30)
-
     /// The build the daemon is, in every test that starts a child.
     private let build = Build(cdhash: "c0de")
 
     /// A real child over real pipes, played by `sh`: what it says is what the read says.
-    /// Each wait is unhurried but in the test of that wait. The script says `joined c0de`
-    /// itself, after whatever the test needs to be so by the time the reader is handed back.
-    private func child(_ script: String, joinWithin: Duration = unhurried, patience: Duration = unhurried) throws -> ChildReader {
-        try ChildReader(in: bmf, executable: "/bin/sh", arguments: ["-c", script], build: build, joinWithin: joinWithin, patience: patience)
+    /// It joins by `deadline`, the one guard unless the join is what the test is of. The
+    /// script says `joined c0de` itself, after whatever the test needs to be so by the time
+    /// the reader is handed back.
+    private func child(_ script: String, joiningBy deadline: Deadline = guarded()) throws -> ChildReader {
+        try ChildReader(in: bmf, executable: "/bin/sh", arguments: ["-c", script], build: build, by: deadline)
     }
 
     @Test func aChildAnswersEachLineWithTheCursor() throws {
         let reader = try child("echo joined c0de; while read _; do echo '12.5 40'; done")
         defer { reader.stop() }
-        #expect(try reader.cursor() == (12.5, 40))
-        #expect(try reader.cursor() == (12.5, 40))
+        #expect(try reader.cursor(by: guarded()) == (12.5, 40))
+        #expect(try reader.cursor(by: guarded()) == (12.5, 40))
     }
 
     /// Each question goes as its own line, and the answer to `layout` is the layout's record;
@@ -129,11 +126,11 @@ import Waiting
         echo joined c0de; while read q; do case $q in cursor) echo '12.5 40';; layout) echo '1 0 0 1920 1080 1 2 1920 -200 1280 800 0';; *) echo nonsense;; esac; done
         """)
         defer { reader.stop() }
-        #expect(try reader.layout() == .at([.at(0, 0, 1920, 1080), .at(1920, -200, 1280, 800)], asleep: [1]))
-        #expect(try reader.cursor() == (12.5, 40))
+        #expect(try reader.layout(by: guarded()) == .at([.at(0, 0, 1920, 1080), .at(1920, -200, 1280, 800)], asleep: [1]))
+        #expect(try reader.cursor(by: guarded()) == (12.5, 40))
         let garbled = try child("echo joined c0de; while read _; do echo '1 0 0 1920'; done")
         defer { garbled.stop() }
-        #expect { try garbled.layout() } throws: { "\($0)".contains("answered '1 0 0 1920': the display layout record is not one this build reads") }
+        #expect { try garbled.layout(by: guarded()) } throws: { "\($0)".contains("answered '1 0 0 1920': the display layout record is not one this build reads") }
     }
 
     /// `refused` and why is the child unable to read what it was asked, whichever question it
@@ -141,8 +138,8 @@ import Waiting
     @Test func aChildSaysWhyItCouldNotRead() throws {
         let reader = try child("echo joined c0de; while read q; do echo \"refused $q went wrong\"; done")
         defer { reader.stop() }
-        #expect { try reader.layout() } throws: { ($0 as? WindowServerRefused).map { $0.question == .layout && $0.why == "layout went wrong" } == true }
-        #expect { try reader.cursor() } throws: { ($0 as? WindowServerRefused).map { $0.question == .cursor && $0.why == "cursor went wrong" } == true }
+        #expect { try reader.layout(by: guarded()) } throws: { ($0 as? WindowServerRefused).map { $0.question == .layout && $0.why == "layout went wrong" } == true }
+        #expect { try reader.cursor(by: guarded()) } throws: { ($0 as? WindowServerRefused).map { $0.question == .cursor && $0.why == "cursor went wrong" } == true }
     }
 
     @Test func aChildThatCouldNotJoinSaysWhy() {
@@ -167,8 +164,8 @@ import Waiting
     /// ended and reaped: `stop` waits for it. [LAW:verifiable-goals]
     @Test func aChildThatNeverSaysItJoinedIsGivenUpOnAndEnded() {
         #expect {
-            try child("trap '' TERM; sleep 600", joinWithin: .milliseconds(300))
-        } throws: { "\($0)".contains("did not say it joined within 0.3 seconds") }
+            try child("trap '' TERM; sleep 600", joiningBy: Timeline.suspending.deadline(within: .milliseconds(300)))
+        } throws: { "\($0)".contains("did not say it joined by the limit of 0.3 seconds") }
     }
 
     @Test func aChildThatHasEndedFailsTheReadAndNotTheDaemon() throws {
@@ -186,7 +183,7 @@ import Waiting
         // [LAW:no-ambient-temporal-coupling] Waited for by reading, not by a sleep.
         var failure: ChildReader.Failed?
         repeat {
-            failure = #expect(throws: ChildReader.Failed.self) { try reader.cursor() }
+            failure = #expect(throws: ChildReader.Failed.self) { try reader.cursor(by: guarded()) }
         } while failure?.what == "ended before it could answer"
         // That write would raise SIGPIPE and end this test process.
         #expect(failure?.what == "could not be asked: errno \(EPIPE)")
@@ -200,12 +197,12 @@ import Waiting
         reader.stop()
     }
 
-    /// A child that cannot answer is given up on at its patience, and sleeps past the
+    /// A child that cannot answer is given up on by the read's deadline, and sleeps past the
     /// test's whole limit, so the read returning at all is the give-up.
-    @Test func aChildThatDoesNotAnswerIsGivenUpOnInTime() throws {
-        let reader = try child("echo joined c0de; sleep 600", patience: .milliseconds(300))
+    @Test func aChildThatDoesNotAnswerIsGivenUpOnByTheReadsDeadline() throws {
+        let reader = try child("echo joined c0de; sleep 600")
         defer { reader.stop() }
-        #expect { try reader.cursor() } throws: { "\($0)".contains("did not answer within 0.3 seconds") }
+        #expect { try reader.cursor(by: Timeline.suspending.deadline(within: .milliseconds(300))) } throws: { "\($0)".contains("did not answer by the limit of 0.3 seconds") }
     }
 
     @Test func theReaderFlagIsReadOnlyWithASession() {
@@ -217,7 +214,7 @@ import Waiting
     /// The seat answers the read without taking the devices, and while they are down.
     @Test func aSeatReadsTheCursorWithoutTheDevices() {
         let holder = Holder()
-        let seat = Seat(ObjectIdentifier(NSObject()), pid: 41, holder: holder, readiness: Readiness(driver: { .running }), screen: FixedScreen(at: (7, 9)), timeline: .suspending)
+        let seat = Seat(ObjectIdentifier(NSObject()), pid: 41, holder: holder, readiness: Readiness(driver: { _ in .running }), screen: FixedScreen(at: (7, 9)), timeline: .suspending)
         var answer: (Double, Double, Error?)?
         seat.cursor { answer = ($0, $1, $2) }
         #expect(answer?.0 == 7 && answer?.1 == 9 && answer?.2 == nil)
@@ -228,7 +225,7 @@ import Waiting
     @Test func aSeatReadsTheLayoutWithoutTheDevices() {
         let holder = Holder()
         let layout = DisplayLayout.at([.at(0, 0, 1920, 1080), .at(-1280, 0, 1280, 800)], asleep: [1])
-        let seat = Seat(ObjectIdentifier(NSObject()), pid: 41, holder: holder, readiness: Readiness(driver: { .running }), screen: FixedScreen(displays: layout), timeline: .suspending)
+        let seat = Seat(ObjectIdentifier(NSObject()), pid: 41, holder: holder, readiness: Readiness(driver: { _ in .running }), screen: FixedScreen(displays: layout), timeline: .suspending)
         var answer: ([NSNumber], Error?)?
         seat.layout { answer = ($0, $1) }
         #expect(answer?.0.map(\.doubleValue) == layout.record && answer?.1 == nil)

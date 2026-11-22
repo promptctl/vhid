@@ -26,7 +26,9 @@ import Timeline
 /// much as the cursor is, and a client that read them for itself would read its own
 /// session's, or none at the login window.
 ///
-/// Reads are serialized: one child, one line in and one line out at a time.
+/// Reads are serialized: one child, one line in and one line out at a time. Each is by the
+/// deadline of the client that asked, which its wait for the read before it, a child's
+/// start and the child's answer are all counted against.
 final class FrontScreen: ScreenSource, @unchecked Sendable {
     /// A console session, as IOConsoleUsers names it.
     struct Session: Hashable, CustomStringConvertible {
@@ -38,22 +40,22 @@ final class FrontScreen: ScreenSource, @unchecked Sendable {
 
     /// Something that reads the screen in one session, until it is stopped.
     protocol Reader: AnyObject {
-        func cursor() throws -> (x: Double, y: Double)
-        func layout() throws -> DisplayLayout
+        func cursor(by deadline: Deadline) throws -> (x: Double, y: Double)
+        func layout(by deadline: Deadline) throws -> DisplayLayout
         func stop()
     }
 
     private let front: () throws -> Session
-    private let start: (Session) throws -> any Reader
+    private let start: (Session, Deadline) throws -> any Reader
     private let failed: (String) -> Void
-    private let lock = NSLock()
+    private let lock = TimedLock()
     private var reading: (session: Session, reader: any Reader)?
 
     /// `front` says which session is in front; `start` makes a reader in one; `failed` is
     /// told each reader that could not start or could not answer.
     /// [LAW:effects-at-boundaries] All three are handed in, so which child answers which
     /// read is a test and not a session switch on a real Mac.
-    init(front: @escaping () throws -> Session, start: @escaping (Session) throws -> any Reader, failed: @escaping (String) -> Void) {
+    init(front: @escaping () throws -> Session, start: @escaping (Session, Deadline) throws -> any Reader, failed: @escaping (String) -> Void) {
         self.front = front
         self.start = start
         self.failed = failed
@@ -62,21 +64,24 @@ final class FrontScreen: ScreenSource, @unchecked Sendable {
     /// Over the console this Mac has, with children of this very executable that are
     /// `build`, kept as the daemon's failures.
     static func real(_ build: Build) -> FrontScreen {
-        FrontScreen(front: { try frontSession(consoleUsers()) }, start: { try ChildReader(in: $0, build: build) }, failed: logFailure)
+        FrontScreen(front: { try frontSession(consoleUsers()) }, start: { try ChildReader(in: $0, build: build, by: $1) }, failed: logFailure)
     }
 
-    func cursor() throws -> (x: Double, y: Double) { try read { try $0.cursor() } }
+    func cursor(by deadline: Deadline) throws -> (x: Double, y: Double) { try read(by: deadline) { try $0.cursor(by: deadline) } }
 
-    func layout() throws -> DisplayLayout { try read { try $0.layout() } }
+    func layout(by deadline: Deadline) throws -> DisplayLayout { try read(by: deadline) { try $0.layout(by: deadline) } }
 
-    /// `question` asked of the front session's reader.
-    private func read<Answer>(_ question: (any Reader) throws -> Answer) throws -> Answer {
-        lock.lock(); defer { lock.unlock() }
+    /// `question` asked of the front session's reader, by `deadline`.
+    private func read<Answer>(by deadline: Deadline, _ question: (any Reader) throws -> Answer) throws -> Answer {
+        try lock.withLock(by: deadline) { try reading(by: deadline, question) }
+    }
+
+    private func reading<Answer>(by deadline: Deadline, _ question: (any Reader) throws -> Answer) throws -> Answer {
         let session = try front()
         // [LAW:nothing-unseen] A reader that could not start is logged as one that failed
         // a question is: either way the client hears it, and only the log keeps it.
         do {
-            let reader = try reader(for: session)
+            let reader = try reader(for: session, by: deadline)
             do {
                 return try question(reader)
             } catch {
@@ -94,11 +99,11 @@ final class FrontScreen: ScreenSource, @unchecked Sendable {
     }
 
     /// The reader for `session`, the one already running when it is that session's.
-    private func reader(for session: Session) throws -> any Reader {
+    private func reader(for session: Session, by deadline: Deadline) throws -> any Reader {
         if let reading, reading.session == session { return reading.reader }
         reading?.reader.stop()
         reading = nil
-        let reader = try start(session)
+        let reader = try start(session, deadline)
         log("reading the screen in \(session)")
         reading = (session, reader)
         return reader
@@ -144,8 +149,8 @@ struct WindowServerRefused: Error, CustomStringConvertible {
 
 /// Where the cursor is and where the displays are, as the daemon answers them.
 protocol ScreenSource: Sendable {
-    func cursor() throws -> (x: Double, y: Double)
-    func layout() throws -> DisplayLayout
+    func cursor(by deadline: Deadline) throws -> (x: Double, y: Double)
+    func layout(by deadline: Deadline) throws -> DisplayLayout
 }
 
 /// This executable, run as `--read-screen-in <audit session>`: a child in the session in
@@ -157,24 +162,21 @@ final class ChildReader: FrontScreen.Reader {
     private let requests: Int32
     private let answers: Int32
     private let session: FrontScreen.Session
-    private let patience: Duration
     /// Bytes read past the last whole line; a read may hand back less than a line.
     private var pending: [UInt8] = []
 
-    /// `patience` is how long one answer may take: well under the client's own wait, so a
-    /// child stuck in the window server is ended and replaced while the client is still
-    /// listening, and the lock `FrontScreen` holds across the read is never held forever.
+    /// Waits, by `deadline`, for the child's first line, which says whether it joined
+    /// `session` and, when it did, which build it is: one that is not `build` is refused,
+    /// since the two need not speak one protocol (see `Build`). The line is read before
+    /// anything is written to the child, so a child that could not join and ended is heard
+    /// saying why, and not taken for a broken pipe. [LAW:no-ambient-temporal-coupling]
     ///
-    /// Waits for the child's first line, which says whether it joined `session` and, when it
-    /// did, which build it is: one that is not `build` is refused, since the two need not
-    /// speak one protocol (see `Build`). The line is read before anything is written to the
-    /// child, so a child that could not join and ended is heard saying why, and not taken
-    /// for a broken pipe. [LAW:no-ambient-temporal-coupling]
-    /// `joinWithin` is how long that first line may take. It is a limit of its own because
-    /// it covers the child being started, which an answer does not.
-    init(in session: FrontScreen.Session, executable: String, arguments: [String], build: Build, joinWithin: Duration = .seconds(1), patience: Duration = .seconds(1)) throws {
+    /// Every answer is by the deadline of the client that asked, well under its own wait,
+    /// so a child stuck in the window server is ended and replaced while the client is
+    /// still listening, and the lock `FrontScreen` holds across the read is never held
+    /// forever.
+    init(in session: FrontScreen.Session, executable: String, arguments: [String], build: Build, by deadline: Deadline) throws {
         self.session = session
-        self.patience = patience
         var stdin: [Int32] = [0, 0], stdout: [Int32] = [0, 0]
         guard pipe(&stdin) == 0 else { throw Failed(session: session, what: "could not be given a pipe: errno \(errno)") }
         guard pipe(&stdout) == 0 else {
@@ -194,7 +196,7 @@ final class ChildReader: FrontScreen.Reader {
             throw error
         }
         do {
-            let joined = try answerLine(within: joinWithin, to: "say it joined")
+            let joined = try answerLine(by: deadline, to: "say it joined")
             guard joined.split(separator: " ").first == Substring(joinedAnswer) else { throw Failed(session: session, what: "answered '\(joined)'") }
             guard joined == "\(joinedAnswer) \(build)" else { throw AnotherBuild(session: session, joined: joined, build: build, executable: executable) }
         } catch {
@@ -204,8 +206,8 @@ final class ChildReader: FrontScreen.Reader {
     }
 
     /// This very executable, reading in `session`, when it is still `build`.
-    convenience init(in session: FrontScreen.Session, build: Build) throws {
-        try self.init(in: session, executable: Bundle.main.executablePath!, arguments: [screenReaderFlag, String(session.audit)], build: build)
+    convenience init(in session: FrontScreen.Session, build: Build, by deadline: Deadline) throws {
+        try self.init(in: session, executable: Bundle.main.executablePath!, arguments: [screenReaderFlag, String(session.audit)], build: build, by: deadline)
     }
 
     /// A child that joined as another build than this daemon's: the file it was started
@@ -226,16 +228,16 @@ final class ChildReader: FrontScreen.Reader {
         var description: String { "the reader in \(session) \(what)" }
     }
 
-    func cursor() throws -> (x: Double, y: Double) {
-        let line = try ask(.cursor)
+    func cursor(by deadline: Deadline) throws -> (x: Double, y: Double) {
+        let line = try ask(.cursor, by: deadline)
         guard let fields = Self.numbers(line), fields.count == 2 else { throw Failed(session: session, what: "answered '\(line)'") }
         return (fields[0], fields[1])
     }
 
     /// The child's numbers read as the record they are, by `DisplayLayout(record:)`, so the
     /// record has one reading wherever it is read. [LAW:one-source-of-truth]
-    func layout() throws -> DisplayLayout {
-        let line = try ask(.layout)
+    func layout(by deadline: Deadline) throws -> DisplayLayout {
+        let line = try ask(.layout, by: deadline)
         guard let numbers = Self.numbers(line) else { throw Failed(session: session, what: "answered '\(line)'") }
         do {
             return try DisplayLayout(record: numbers)
@@ -246,10 +248,10 @@ final class ChildReader: FrontScreen.Reader {
 
     /// `question` sent as its line, and the line answering it: `WindowServerRefused`, with
     /// the child's why, when the child says it could not read it.
-    private func ask(_ question: ScreenQuestion) throws -> String {
+    private func ask(_ question: ScreenQuestion, by deadline: Deadline) throws -> String {
         let line = question.rawValue + "\n"
         guard Darwin.write(requests, line, line.utf8.count) == line.utf8.count else { throw Failed(session: session, what: "could not be asked: errno \(errno)") }
-        let answer = try answerLine(within: patience, to: "answer")
+        let answer = try answerLine(by: deadline, to: "answer")
         guard !answer.hasPrefix(refusedAnswer) else { throw WindowServerRefused(session: session, question: question, why: String(answer.dropFirst(refusedAnswer.count))) }
         return answer
     }
@@ -261,23 +263,23 @@ final class ChildReader: FrontScreen.Reader {
         return numbers.count == fields.count ? numbers : nil
     }
 
-    /// One line from the child, or `Failed` once `limit` has passed or the child ends.
+    /// One line from the child, or `Failed` once `deadline` has passed or the child ends.
     /// `what` is what the child does by sending it, so a failure says which wait it was.
     /// [LAW:nothing-unseen] A child that never started and one stuck in the window server
     /// are told apart by what the daemon says of them.
-    private func answerLine(within limit: Duration, to what: String) throws -> String {
-        let deadline = ContinuousClock.now + limit
+    private func answerLine(by deadline: Deadline, to what: String) throws -> String {
         while true {
             if let newline = pending.firstIndex(of: UInt8(ascii: "\n")) {
                 defer { pending.removeSubrange(...newline) }
                 return String(decoding: pending[..<newline], as: UTF8.self)
             }
-            let milliseconds = max(.zero, ContinuousClock.now.duration(to: deadline)).wholeMilliseconds
+            guard !deadline.passed else { throw Failed(session: session, what: "did not \(what) by the limit of \(deadline.limit)") }
             var poll = pollfd(fd: answers, events: Int16(POLLIN), revents: 0)
-            let ready = Darwin.poll(&poll, 1, milliseconds)
+            let ready = Darwin.poll(&poll, 1, deadline.left.wholeMilliseconds)
             if ready < 0, errno == EINTR { continue }
             guard ready >= 0 else { throw Failed(session: session, what: "could not be heard: errno \(errno)") }
-            guard ready > 0 else { throw Failed(session: session, what: "did not \(what) within \(limit)") }
+            // Around again to look at the deadline: a poll that woke early is not a miss.
+            guard ready > 0 else { continue }
             var buffer = [UInt8](repeating: 0, count: 256)
             let count = Darwin.read(answers, &buffer, buffer.count)
             if count < 0, errno == EINTR { continue }

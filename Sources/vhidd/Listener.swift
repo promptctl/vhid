@@ -25,7 +25,13 @@ final class Listener: NSObject, NSXPCListenerDelegate {
         self.timeline = timeline
         super.init()
         sweep.schedule(deadline: .now(), repeating: .milliseconds(250), leeway: .milliseconds(100))
-        sweep.setEventHandler { [readiness, holder] in releaseKeysHeldPastLimit(readiness, holder).map(log) }
+        sweep.setEventHandler { [readiness, holder] in
+            switch releaseKeysHeldPastLimit(readiness, holder) {
+            case .happened(let what)?: log(what)
+            case .failed(let what)?: logFailure(what)
+            case nil: break
+            }
+        }
         sweep.resume()
     }
 
@@ -62,13 +68,14 @@ final class Listener: NSObject, NSXPCListenerDelegate {
     }
 }
 
-/// Lets go of keys a client has held past the limit and says whose they were. The holder
-/// keeps the devices: the client's next act still works, and its own key-up is harmless.
-func releaseKeysHeldPastLimit(_ readiness: Readiness, _ holder: Holder) -> String? {
+/// Lets go of keys a client has held past the limit and says whose they were, as the
+/// daemon's own failure when they would not come up. The holder keeps the devices: the
+/// client's next act still works, and its own key-up is harmless.
+func releaseKeysHeldPastLimit(_ readiness: Readiness, _ holder: Holder) -> DaemonProcess.Said? {
     guard let up = readiness.up else { return nil }
     return up.devices.releaseKeysHeldPastLimit { holder.pid(on: up.attempt) }.map { letGo in
         let keys = letGo.usages.map { String(format: "0x%02X", $0) }.joined(separator: ", ")
-        return "\(letGo.holder.map { "pid \($0)" } ?? "no client") held \(keys) past \(letGo.limit) with no report; "
-            + (letGo.failure.map { "the keyboard would not release: \($0)" } ?? "released")
+        let held = "\(letGo.holder.map { "pid \($0)" } ?? "no client") held \(keys) past \(letGo.limit) with no report; "
+        return letGo.failure.map { .failed(held + "the keyboard would not release: \($0)") } ?? .happened(held + "released")
     }
 }

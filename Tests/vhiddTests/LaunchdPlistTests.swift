@@ -50,7 +50,7 @@ import Waiting
         let script = URL(filePath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appending(path: "scripts/launchd-plist")
-        let output = try Command(script.path, service, daemon).run(by: Timeline.suspending.deadline(within: hangGuard), or: .never)
+        let output = try Command(script.path, service, daemon).run(by: guarded(), or: .never)
         try #require(output.status == 0, "scripts/launchd-plist exited \(output.status): \(output.merged)")
         let parsed = try PropertyListSerialization.propertyList(from: Data(output.stdout.utf8), format: nil)
         return try #require(parsed as? [String: Any])

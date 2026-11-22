@@ -6,9 +6,6 @@ import Timeline
 import Waiting
 @testable import ChildProcess
 
-/// A deadline for a command that is going to end: the guard, so only a hang fails it.
-func guarded() -> Deadline { Timeline.suspending.deadline(within: hangGuard) }
-
 /// What `Command` promises about the two streams it reads: both come back whole, and
 /// neither the size of a stream nor the order the child writes them in changes what comes
 /// back. The payload is deliberately past the ~64KB a kernel pipe buffer holds, because
@@ -103,8 +100,8 @@ func guarded() -> Deadline { Timeline.suspending.deadline(within: hangGuard) }
         let named = try #require(overran)
         #expect(named.command == "sh -c \(script) \(said.path)")
         #expect(named.limit == .milliseconds(500))
-        #expect(named.ran == .milliseconds(500))
-        #expect(named.description == "`\(named.command)` had not ended \(named.ran) after it was started, at the limit of 0.5 seconds, and was given up on")
+        #expect(named.had == .milliseconds(500))
+        #expect(named.description == "`\(named.command)` had not ended \(named.had) after it was started, at the limit of 0.5 seconds, and was given up on")
         let pid = try #require(child.current)
         // Signal 0 reaches a zombie as much as a running child, so this is the child both
         // stopped and collected, and by the time the command was thrown: nothing is left
@@ -137,7 +134,7 @@ func guarded() -> Deadline { Timeline.suspending.deadline(within: hangGuard) }
         let overran = try #require(#expect(throws: Command.Overran.self) {
             try Command("/bin/sh", "-c", "echo $$ > \"$0\"; exec sleep 600", said.path).run(by: deadline, or: .never)
         })
-        #expect(overran.ran == .milliseconds(250))
+        #expect(overran.had == .milliseconds(250))
         #expect(overran.limit == .seconds(30))
     }
 

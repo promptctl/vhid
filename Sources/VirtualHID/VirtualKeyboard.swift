@@ -1,7 +1,6 @@
 import DriverExtension
 import Foundation
 import Keystrokes
-import Synchronization
 import Timeline
 
 /// The keyboard input report as the driver's packed `keyboard_input` lays it out: report
@@ -61,15 +60,12 @@ public final class VirtualKeyboard: Sendable {
 
     private let daemon: DaemonConnection
 
-    /// What the device is holding, kept by the rule `Held` gives. Nothing outside this
-    /// type may set it, and every report is a reading of it - taken under the lock the
-    /// report is posted under, so a press made from one thread reads what a press from
-    /// another left. The lock is held across the round trip: a change read from a record
-    /// another post has yet to settle would be a report missing that post's key, which the
-    /// driver reads as a release nobody sent.
-    private let held = Mutex(Held<Usage>())
+    /// The keys held, kept by the rule `Held` gives, and every report a reading of them.
+    /// Nothing outside this type may set them.
+    private let keys: HeldDevice<Usage>
 
-    public var keysDown: Set<Usage> { held.withLock { $0.down } }
+    /// The keys the driver may be holding: what a release must clear.
+    public var keysDown: Set<Usage> { keys.down }
 
     /// Connects to the daemon and takes nothing else on faith. The device is not up until
     /// `start` says so.
@@ -87,6 +83,7 @@ public final class VirtualKeyboard: Sendable {
     /// Over a connection the mouse may share, for the reason `VirtualPointing` gives.
     public init(daemon: DaemonConnection) {
         self.daemon = daemon
+        keys = HeldDevice(daemon: daemon, report: .postKeyboardInputReport, reset: .keyboardReset)
     }
 
     /// Brings the device up and waits for the daemon's word that it is ready, by
@@ -105,11 +102,11 @@ public final class VirtualKeyboard: Sendable {
 
     /// Holds `usage` down.
     public func down(_ usage: Usage, by deadline: Deadline) throws {
-        try post(by: deadline) { $0.union([usage]) }
+        try post(by: deadline) { $0.asked.union([usage]) }
     }
 
     public func up(_ usage: Usage, by deadline: Deadline) throws {
-        try post(by: deadline) { $0.subtracting([usage]) }
+        try post(by: deadline) { $0.asked.subtracting([usage]) }
     }
 
     /// Every key up, which is what a report of nothing held says. This is the line between
@@ -129,35 +126,20 @@ public final class VirtualKeyboard: Sendable {
     /// request that may have reached the driver unanswered unsettles, so the retry of such
     /// a `hold` always posts.
     public func hold(_ keys: HeldKeys, by deadline: Deadline) throws {
-        try held.withLock { held in
-            if keys.usages.isEmpty || !held.settled || held.down != keys.usages {
-                try post(&held, keys.usages, by: deadline)
-            }
-        }
+        try post(by: deadline) { keys.usages.isEmpty || !$0.settled || $0.down != keys.usages ? keys.usages : nil }
     }
 
-    /// Clears the device's own state as well as this side's. `keyboardReset` is what the
-    /// daemon offers for the case where the two might have drifted apart. The record is
-    /// kept by `Held`'s rule, as a report of nothing held is.
+    /// Clears the device's own state as well as this side's, with `keyboardReset`.
     public func reset(by deadline: Deadline) throws {
-        try held.withLock { held in
-            try held.post([]) { () throws(DaemonConnection.Unanswered) in try daemon.request(.keyboardReset, by: deadline) }
-        }
+        try keys.reset(by: deadline)
     }
 
-    /// Posts the report for what `change` makes of the keys held, and keeps the record by
-    /// how far it got.
-    private func post(by deadline: Deadline, _ change: (Set<Usage>) -> Set<Usage>) throws {
-        try held.withLock { held in try post(&held, change(held.down), by: deadline) }
-    }
-
-    /// The post itself, under a lock the caller already holds.
+    /// Posts the report for the keys `change` makes of the record.
     ///
-    /// The report is built first because `TooManyKeys` is this side refusing with nothing
-    /// on the wire - the driver did not see that key, and a record that claims otherwise
-    /// re-encodes the same over-capacity set and throws again on every later post.
-    private func post(_ held: inout Held<Usage>, _ next: Set<Usage>, by deadline: Deadline) throws {
-        let report = try KeyboardReport(held: next)
-        try held.post(next) { () throws(DaemonConnection.Unanswered) in try daemon.request(.postKeyboardInputReport, report.bytes, by: deadline) }
+    /// `TooManyKeys` is this side refusing with nothing on the wire - the driver did not
+    /// see that key, and a record that claimed otherwise would re-encode the same
+    /// over-capacity set and throw again on every later post.
+    private func post(by deadline: Deadline, _ change: (Held<Usage>) -> Set<Usage>?) throws {
+        try keys.post(by: deadline, change) { try KeyboardReport(held: $0).bytes }
     }
 }

@@ -50,14 +50,14 @@ enum Frame: Equatable {
 
     /// [LAW:parse-dont-validate] The length is sane by the time it leaves here, so
     /// nothing downstream allocates against a number it has to think about first.
-    static func bodyLength(header: [UInt8]) throws -> Int {
+    static func bodyLength(header: [UInt8]) throws(DaemonError) -> Int {
         let length = header.reduce(0) { $0 << 8 | Int($1) }
         guard length >= 1 else { throw DaemonError.malformed("an empty frame") }
         guard length <= largestBody else { throw DaemonError.malformed("a frame of \(length) bytes, past the \(largestBody) this reads") }
         return length
     }
 
-    static func decode(body: [UInt8]) throws -> Frame {
+    static func decode(body: [UInt8]) throws(DaemonError) -> Frame {
         guard let type = body.first else { throw DaemonError.malformed("a frame body of no bytes, which has no type") }
         switch type {
         case requestByte, responseByte:

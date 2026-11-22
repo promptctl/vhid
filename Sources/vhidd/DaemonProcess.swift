@@ -67,14 +67,14 @@ enum DaemonProcess {
         /// The devices on a connection to a daemon that is running, or `DaemonError` when
         /// none answers. `whenLost` is told when that connection ends underneath them.
         var connect: (_ whenLost: @escaping @Sendable (DaemonError) -> Void) throws -> Device
-        /// The devices brought up on their connection, each within the limit, counted from
-        /// when its own start is asked for.
-        var bringUp: (Device, Duration) throws -> Startups
+        /// The devices brought up on their connection, each by a deadline `deadline` makes
+        /// as its own start is asked for.
+        var bringUp: (Device, _ deadline: () -> Deadline) throws -> Startups
         /// The daemon started as this process's child.
         var launch: () throws -> pid_t
         var terminate: (pid_t) -> Void
         var say: (Said) -> Void
-        /// The clock the connect loop's deadline is made on.
+        /// The clock every deadline of a bring-up is made on.
         var timeline: Timeline
         /// The pause before a daemon started here is dialed again, on `timeline`.
         var redialPause: (Duration) -> Void
@@ -91,11 +91,8 @@ enum DaemonProcess {
                 let daemon = try DaemonConnection(whenLost: whenLost)
                 return HID(keyboard: VirtualKeyboard(daemon: daemon), mouse: VirtualPointing(daemon: daemon))
             },
-            bringUp: { hid, limit in
-                Startups(
-                    keyboard: try hid.keyboard.start(by: Timeline.suspending.deadline(within: limit)),
-                    mouse: try hid.mouse.start(by: Timeline.suspending.deadline(within: limit))
-                )
+            bringUp: { hid, deadline in
+                Startups(keyboard: try hid.keyboard.start(by: deadline()), mouse: try hid.mouse.start(by: deadline()))
             },
             launch: { try spawn(executable, [], stdio: [:]) },
             terminate: end,
@@ -147,7 +144,7 @@ extension DaemonProcess.Effects {
             if !stopping.withLock({ $0 }) { whenLost(error, origin) }
         }
         do {
-            return DaemonProcess.Reached(devices: devices, daemon: origin, startup: try bringUp(devices, limit))
+            return DaemonProcess.Reached(devices: devices, daemon: origin, startup: try bringUp(devices) { timeline.deadline(within: limit) })
         } catch {
             stopping.withLock { $0 = true }
             stop(origin)
@@ -336,7 +333,18 @@ extension DaemonProcess.Effects {
             let attempt = readiness.begin()
             do {
                 let reached = try reach(within: limit) { lost, _ in _ = readiness.lost(lost, in: attempt) }
-                readiness.up(serve(reached))
+                let devices = serve(reached)
+                // Whatever the daemon was holding for its last occupant - a vhidd that
+                // exited while the daemon lived on, or a hand-run session - is up before
+                // any client is served, and devices that would not bring it up are a
+                // failed attempt, not a client's first keystroke landing on a held key.
+                // Unconditionally: the daemon's origin says who started it, not what it
+                // holds. [LAW:dataflow-not-control-flow] [LAW:no-ambient-temporal-coupling]
+                if case .failed(let unreleased) = devices.releaseEverything(because: "starting") {
+                    stop(reached.daemon)
+                    throw unreleased
+                }
+                readiness.up(devices)
                 say(.happened("serving"))
                 // Devices that came up did so on a driver that is on, whatever it read
                 // before them: a loss of these is not that driver turning on.

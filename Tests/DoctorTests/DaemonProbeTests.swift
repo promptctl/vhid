@@ -74,7 +74,7 @@ import Waiting
 
     /// Reads a far end answering as told. The listener holds its delegate weakly, so both
     /// are held here until the reading is taken.
-    private func reading(_ answer: Answer, invalidated: Bool = false, by deadline: Deadline = Timeline.suspending.deadline(within: hangGuard)) -> DaemonReading {
+    private func reading(_ answer: Answer, invalidated: Bool = false, by deadline: Deadline = guarded()) -> DaemonReading {
         let far = FarEnd(answer)
         let listener = NSXPCListener.anonymous()
         listener.delegate = far
@@ -139,11 +139,31 @@ import Waiting
         refusing.resume(); answering.resume()
         let endpoints = [refusing.endpoint, answering.endpoint]
         var asked = 0
-        let read = DaemonProbe.reading(by: Timeline.suspending.deadline(within: hangGuard)) {
+        let read = DaemonProbe.reading(by: guarded()) {
             defer { asked += 1 }
             return HelperConnection(connection: NSXPCConnection(listenerEndpoint: endpoints[asked]), service: "ai.promptctl.vhid.tests.far", replyTimeout: $0)
         }
         #expect(read == .answered(holder: nil))
         withExtendedLifetime((refusing, answering, no, yes)) {}
+    }
+
+    /// A refusal heard with no time left to ask again is what was heard: it stands, and is
+    /// not turned into a reading that says the daemon was never asked. The limit is spent
+    /// while the first call is under way, on a clock the test holds.
+    @Test func aRefusalWithNoTimeLeftToAskAgainStands() {
+        let refusing = NSXPCListener.anonymous()
+        let no = FarEnd(.refuseTheConnection)
+        refusing.delegate = no
+        refusing.resume()
+        let clock = ManualClock()
+        var asked = 0
+        let read = DaemonProbe.reading(by: Timeline(clock).deadline(within: .seconds(30))) {
+            asked += 1
+            clock.advance(by: .seconds(30))
+            return HelperConnection(connection: NSXPCConnection(listenerEndpoint: refusing.endpoint), service: "ai.promptctl.vhid.tests.far", replyTimeout: $0)
+        }
+        #expect(read == .refusedThisVhid)
+        #expect(asked == 1)
+        withExtendedLifetime((refusing, no)) {}
     }
 }

@@ -2,6 +2,7 @@ import Foundation
 import Installations
 import Keystrokes
 import OwnThread
+import Pointing
 import Testing
 import Timeline
 import Waiting
@@ -28,20 +29,24 @@ import Waiting
 
         var releasedBecause: [String] { reasons.current }
 
-        func down(usage: UInt16, by deadline: Deadline) throws {
-            lock.lock(); usages.append(usage); lock.unlock()
+        func down(_ usage: Usage, by deadline: Deadline) throws {
+            lock.lock(); usages.append(usage.rawValue); lock.unlock()
         }
 
         func releaseAll(by deadline: Deadline) throws {}
-        func hold(usages: [UInt16], by deadline: Deadline) throws {}
-        func buttonDown(_ button: UInt8, by deadline: Deadline) throws {}
+        func hold(_ keys: HeldKeys, by deadline: Deadline) throws {}
+        func buttonDown(_ button: Button, by deadline: Deadline) throws {}
         func releaseButtons(by deadline: Deadline) throws {}
-        func holdButtons(_ buttons: UInt32, by deadline: Deadline) throws {}
-        func move(x: Int8, y: Int8, by deadline: Deadline) throws {}
-        func scroll(vertical: Int8, horizontal: Int8, by deadline: Deadline) throws {}
+        func holdButtons(_ buttons: Set<Button>, by deadline: Deadline) throws {}
+        func move(_ delta: Move, by deadline: Deadline) throws {}
+        func scroll(_ delta: Scroll, by deadline: Deadline) throws {}
+        func release(by deadline: Deadline) throws {}
 
         func releaseKeysHeldPastLimit(heldBy holder: () -> pid_t?) -> KeysLetGo? { nil }
-        func releaseEverything(because reason: String) { reasons.update { $0.append(reason) } }
+        func releaseEverything(because reason: String) -> Release {
+            reasons.update { $0.append(reason) }
+            return .released
+        }
 
         /// The reason of the first release, once there is one.
         func awaitRelease() throws -> String {

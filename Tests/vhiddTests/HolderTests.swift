@@ -1,11 +1,13 @@
 import Foundation
+import Installations
+import OwnThread
 import Testing
 import Waiting
 @testable import vhidd
 
 /// One client at a time holds the devices, and the refusal names who has them.
 /// [LAW:behavior-not-structure]
-@Suite(.hangGuarded) struct HolderTests {
+@Suite(.hangGuarded, .ownThread) struct HolderTests {
     /// Held for the test's life: an identifier taken from an object that is gone names
     /// whatever is allocated at its address next, which was the other one.
     private let one = NSObject(), other = NSObject()
@@ -23,20 +25,20 @@ import Waiting
         let holder = Holder()
         let up = Self.up(1)
         #expect(holder.pid(on: 1) == nil)
-        try holder.claim(first, by: 41, on: up)
-        let refusal = #expect(throws: Holder.Busy.self) { try holder.claim(second, by: 42, on: up) }
+        try holder.claim(first, by: 41, on: up, by: guarded())
+        let refusal = #expect(throws: Holder.Busy.self) { try holder.claim(second, by: 42, on: up, by: guarded()) }
         #expect(refusal?.pid == 41)
-        try holder.claim(first, by: 41, on: up)
+        try holder.claim(first, by: 41, on: up, by: guarded())
         #expect(holder.pid(on: 1) == 41)
     }
 
     @Test func freeingRunsTheReleaseOnTheHoldersDevicesAndFreesThemForTheNextClaim() throws {
         let holder = Holder()
         let devices = RecordingDevices()
-        try holder.claim(first, by: 41, on: Self.up(1, devices))
+        try holder.claim(first, by: 41, on: Self.up(1, devices), by: guarded())
         holder.free(first) { $0.releaseEverything(because: "left") }
         #expect(devices.done == ["left"])
-        try holder.claim(second, by: 42, on: Self.up(1))
+        try holder.claim(second, by: 42, on: Self.up(1), by: guarded())
     }
 
     /// The release a leaving client is owed runs outside the holder's lock, and the claim
@@ -45,21 +47,22 @@ import Waiting
     @Test func aClaimDuringTheLeaversReleaseIsRefusedAtOnceAndServedAfterIt() throws {
         let holder = Holder()
         let up = Self.up(1)
-        try holder.claim(first, by: 41, on: up)
+        try holder.claim(first, by: 41, on: up, by: guarded())
         let releasing = Latch(false), released = Latch(false), go = Latch(false)
         Thread.detachNewThread { [first] in
             holder.free(first) { _ in
                 releasing.update { $0 = true }
                 _ = try? go.wait(for: "the test to end the release") { $0 }
+                return .released
             }
             released.update { $0 = true }
         }
         try releasing.wait(for: "the release to begin") { $0 }
-        let refusal = #expect(throws: Holder.Busy.self) { try holder.claim(second, by: 42, on: up) }
+        let refusal = #expect(throws: Holder.Busy.self) { try holder.claim(second, by: 42, on: up, by: guarded()) }
         #expect(refusal?.pid == 41)
         go.update { $0 = true }
         try released.wait(for: "the release to end") { $0 }
-        try holder.claim(second, by: 42, on: up)
+        try holder.claim(second, by: 42, on: up, by: guarded())
     }
 
     /// A refused connection never held the devices, and a connection that left no longer
@@ -68,20 +71,20 @@ import Waiting
     @Test func freeingByOneThatDoesNotHoldItChangesNothingAndReleasesNothing() throws {
         let holder = Holder()
         let up = Self.up(1)
-        try holder.claim(first, by: 41, on: up)
+        try holder.claim(first, by: 41, on: up, by: guarded())
         var released = false
-        holder.free(second) { _ in released = true }
+        holder.free(second) { _ in released = true; return .released }
         #expect(!released)
-        let refusal = #expect(throws: Holder.Busy.self) { try holder.claim(second, by: 42, on: up) }
+        let refusal = #expect(throws: Holder.Busy.self) { try holder.claim(second, by: 42, on: up, by: guarded()) }
         #expect(refusal?.pid == 41)
     }
 
     @Test func onlyTheHolderIsServed() throws {
         let holder = Holder()
-        try holder.claim(first, by: 41, on: Self.up(1))
+        try holder.claim(first, by: 41, on: Self.up(1), by: guarded())
         var served: [String] = []
-        #expect(holder.whileHolding(first) { _ in served.append("first") })
-        #expect(!holder.whileHolding(second) { _ in served.append("second") })
+        holder.whileHolding(first) { _ in served.append("first") }
+        holder.whileHolding(second) { _ in served.append("second") }
         #expect(served == ["first"])
     }
 
@@ -97,12 +100,45 @@ import Waiting
     @Test func aHoldOnLostDevicesDoesNotRefuseTheNextClient() throws {
         let holder = Holder()
         let (lost, fresh) = (RecordingDevices(), RecordingDevices())
-        try holder.claim(first, by: 41, on: Self.up(1, lost))
-        try holder.claim(second, by: 42, on: Self.up(2, fresh))
+        try holder.claim(first, by: 41, on: Self.up(1, lost), by: guarded())
+        try holder.claim(second, by: 42, on: Self.up(2, fresh), by: guarded())
         #expect(holder.pid(on: 2) == 42)
         #expect(holder.pid(on: 3) == nil)
         holder.free(first) { $0.releaseEverything(because: "left") }
         #expect(fresh.done.isEmpty)
         #expect(holder.pid(on: 2) == 42)
+    }
+
+    /// A leaver whose release failed leaves the devices to nobody: the next client's first
+    /// act releases them again by its own deadline, under its own claim, before it acts.
+    @Test func devicesWhoseReleaseFailedAreReleasedAgainBeforeTheNextClientActs() throws {
+        let holder = Holder()
+        let devices = RecordingDevices()
+        let up = Self.up(1, devices)
+        try holder.claim(first, by: 41, on: up, by: guarded())
+        devices.unreleased = Unreleased(reason: "left", keyboard: DevicesTests.Refused(), mouse: nil)
+        holder.free(first) { $0.releaseEverything(because: "left") }
+        #expect(holder.pid(on: 1) == nil)
+        devices.unreleased = nil
+        try holder.claim(second, by: 42, on: up, by: guarded())
+        #expect(devices.done == ["left", "release"])
+        #expect(holder.pid(on: 1) == 42)
+    }
+
+    /// When that release fails too, the client is refused as holding nothing - nothing of
+    /// its act was sent - and the devices stay unreleased for the next to try.
+    @Test func aClientWhoseReleaseOfTheLastOnesKeysFailsIsRefusedAndHoldsNothing() throws {
+        let holder = Holder()
+        let devices = RecordingDevices()
+        let up = Self.up(1, devices)
+        try holder.claim(first, by: 41, on: up, by: guarded())
+        devices.unreleased = Unreleased(reason: "left", keyboard: DevicesTests.Refused(), mouse: nil)
+        holder.free(first) { $0.releaseEverything(because: "left") }
+        #expect(throws: Holder.LeftHeld.self) { try holder.claim(second, by: 42, on: up, by: guarded()) }
+        #expect(holder.pid(on: 1) == nil)
+        #expect(refusal(Holder.LeftHeld(left: devices.unreleased!, release: DevicesTests.Refused())).code == Installation.seatRefusedCode)
+        devices.unreleased = nil
+        try holder.claim(second, by: 42, on: up, by: guarded())
+        #expect(devices.done == ["left", "release", "release"])
     }
 }

@@ -1,10 +1,13 @@
+import Foundation
+import OwnThread
 import TestClock
 import Testing
 import Timeline
+import Waiting
 
 /// A deadline counts from when it was made, whatever happens after: the time a caller then
 /// spends waiting for a thread or a lock is time its limit has already counted.
-@Suite struct DeadlineTests {
+@Suite(.ownThread) struct DeadlineTests {
     @Test func aDeadlineCountsFromWhenItWasMade() {
         let clock = ManualClock()
         let deadline = Timeline(clock).deadline(within: .milliseconds(200))
@@ -14,6 +17,23 @@ import Timeline
         clock.advance(by: .milliseconds(50))
         #expect(deadline.passed)
         #expect(deadline.limit == .milliseconds(200))
+    }
+
+    /// A blocking wait by a deadline of a clock the test holds is ended by the move that
+    /// passes it, so a test of a timed wait waits on its own moves and not the runner's pace.
+    @Test(.hangGuarded) func aBlockingWaitEndsWhenTheClockIsMovedPastItsDeadline() throws {
+        let clock = ManualClock()
+        let deadline = Timeline(clock).deadline(within: .seconds(5))
+        let (condition, woke) = (NSCondition(), Latch(false))
+        Thread.detachNewThread {
+            condition.lock()
+            while !deadline.passed { deadline.wait(on: condition) }
+            condition.unlock()
+            woke.update { $0 = true }
+        }
+        try clock.awaitBlocked("the wait to block")
+        clock.advance(by: .seconds(5))
+        try woke.wait(for: "the wait to end") { $0 }
     }
 
     @Test func whatIsLeftOfAPassedDeadlineIsNone() {

@@ -25,16 +25,14 @@ public enum DaemonProbe {
     /// listening exits with the call in flight. A refused signature is refused again; a
     /// daemon that died is, the second time, whatever it is now - restarted and answering,
     /// or silent. Two refusals in a row is the signature. [LAW:no-silent-failure]
+    ///
+    /// Neither call is made once the reading's limit has passed. A refusal with no time
+    /// left to ask again stands as what was heard, rather than being replaced by a reading
+    /// that says nothing was.
     static func reading(by deadline: Deadline, _ connect: (Duration) -> HelperConnection) -> DaemonReading {
-        let first = asked(by: deadline, connect)
-        guard first == .refusedThisVhid else { return first }
-        return asked(by: deadline, connect)
-    }
-
-    /// [LAW:single-enforcer] The one door each call passes, so neither of the two is made
-    /// once the reading's limit has passed.
-    private static func asked(by deadline: Deadline, _ connect: (Duration) -> HelperConnection) -> DaemonReading {
         guard !deadline.passed else { return .unasked(limit: deadline.limit) }
+        let first = asked(connect(min(deadline.left, HelperConnection.replyTimeout)))
+        guard first == .refusedThisVhid, !deadline.passed else { return first }
         return asked(connect(min(deadline.left, HelperConnection.replyTimeout)))
     }
 

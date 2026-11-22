@@ -68,7 +68,7 @@ let package = Package(
         // takes. It links nothing, so every target that waits takes the one deadline type.
         // [LAW:one-source-of-truth]
         .target(name: "Timeline"),
-        .testTarget(name: "TimelineTests", dependencies: ["Timeline", "TestClock"]),
+        .testTarget(name: "TimelineTests", dependencies: ["Timeline", "TestClock", "OwnThread", "Waiting"]),
         // The one screen space both halves speak: a point, a box, their spelling, the
         // display layout and the one rule for where on it a point or a box is pressed. It
         // links nothing of the package, so the devices and the readers share a space without
@@ -95,7 +95,8 @@ let package = Package(
         .testTarget(name: "ChildProcessTests", dependencies: ["ChildProcess", "OwnThread", "TestClock", "Timeline", "Waiting"]),
         // Where the Karabiner-DriverKit-VirtualHIDDevice driver extension stands on this
         // Mac, and the four readings that answer is derived from. It links ChildProcess
-        // for the commands those readings run and nothing else, so the CLI, the daemon and
+        // for the commands those readings run, and Timeline for the deadline they run by,
+        // and nothing else, so the CLI, the daemon and
         // scripts/virtual-hid-driver reach one vocabulary instead of three.
         // [LAW:one-source-of-truth]
         .target(name: "DriverExtension", dependencies: ["ChildProcess", "Timeline"]),
@@ -124,7 +125,8 @@ let package = Package(
         // the framing is proven without root and without the driver.
         .testTarget(name: "VirtualHIDTests", dependencies: ["VirtualHID", "DriverExtension", "Keystrokes", "Pointing", "OwnThread", "TestClock", "Timeline", "Waiting"]),
         // What crosses the privilege boundary, and the client's side of it. It links the
-        // vocabularies - the keys, the pointing and the screen space - and nothing else: not
+        // vocabularies - the keys, the pointing and the screen space - and Timeline, for the
+        // deadline a call is answered by, and nothing else: not
         // the layout's reading, which happens in the session in front and not across the
         // boundary, and not the device, because a client must never open one.
         // [LAW:one-way-deps]
@@ -225,7 +227,7 @@ let package = Package(
         // A clock that moves only when a test moves it or something sleeps on it, so a
         // verb that rests between reports is tested without waiting. A target of its own
         // for OwnThread's reason: InputTests, vhidCLITests and SeeingTests all sleep on it.
-        .target(name: "TestClock", path: "Tests/TestClock"),
+        .target(name: "TestClock", dependencies: ["Timeline", "Waiting"], path: "Tests/TestClock"),
         // How a test waits for what another thread or a child does: one guard for every wait
         // on an event that will come, and the latch and pipe that tell a test the event came.
         // A target of its own for OwnThread's reason.

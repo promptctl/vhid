@@ -11,20 +11,48 @@ import VirtualHID
 /// [LAW:decomposition] Admitting and letting go are the listener's; what a release is
 /// belongs to the devices, and devices of a test's own stand behind the real listener
 /// through this.
+///
+/// [LAW:parse-dont-validate] In the devices' own values: the seat parses the wire's
+/// numbers before it claims anything, so an act refused for what it asked holds nothing.
 protocol ServedDevices: AnyObject, Sendable {
-    func down(usage: UInt16, by deadline: Deadline) throws
+    func down(_ usage: Usage, by deadline: Deadline) throws
     func releaseAll(by deadline: Deadline) throws
-    func hold(usages: [UInt16], by deadline: Deadline) throws
-    func buttonDown(_ button: UInt8, by deadline: Deadline) throws
+    func hold(_ keys: HeldKeys, by deadline: Deadline) throws
+    func buttonDown(_ button: Button, by deadline: Deadline) throws
     func releaseButtons(by deadline: Deadline) throws
-    func holdButtons(_ buttons: UInt32, by deadline: Deadline) throws
-    func move(x: Int8, y: Int8, by deadline: Deadline) throws
-    func scroll(vertical: Int8, horizontal: Int8, by deadline: Deadline) throws
-    func releaseEverything(because reason: String)
+    func holdButtons(_ buttons: Set<Button>, by deadline: Deadline) throws
+    func move(_ delta: Move, by deadline: Deadline) throws
+    func scroll(_ delta: Scroll, by deadline: Deadline) throws
+    /// Every key and button up, as one act by `deadline`: for a client taking devices
+    /// whose last client's release failed.
+    func release(by deadline: Deadline) throws
+    /// Releases everything a client left held, however long its turn takes, and says
+    /// whether it all came up.
+    func releaseEverything(because reason: String) -> Release
     /// Releases the keyboard when a key has been down past the limit with no keyboard
     /// report, answering with what that let go of and whose it was, as `holder` names it
     /// then, or nil when nothing was due.
     func releaseKeysHeldPastLimit(heldBy holder: () -> pid_t?) -> KeysLetGo?
+}
+
+/// What a release made on a client's behalf came to. [LAW:no-silent-failure] A value and
+/// not a line in the log, so whoever frees the devices after it knows whether they are
+/// fit to hand on.
+enum Release {
+    case released
+    case failed(Unreleased)
+}
+
+/// A release on a client's behalf that did not bring everything up: why, device by device.
+struct Unreleased: Error, CustomStringConvertible {
+    let reason: String
+    let keyboard: (any Error)?
+    let mouse: (any Error)?
+
+    var description: String {
+        "\(reason), and " + [keyboard.map { "the keyboard would not release: \($0)" }, mouse.map { "the mouse would not release: \($0)" }]
+            .compactMap { $0 }.joined(separator: "; ")
+    }
 }
 
 /// Keys the deadline released, the limit they were held past, the client that held them,
@@ -139,18 +167,16 @@ final class Devices: ServedDevices, @unchecked Sendable {
         }
     }
 
-    func down(usage: UInt16, by deadline: Deadline) throws {
-        try attempt(by: deadline) { try keyboard.down(try Self.usage(usage), by: deadline) }
+    func down(_ usage: Usage, by deadline: Deadline) throws {
+        try attempt(by: deadline) { try keyboard.down(usage, by: deadline) }
     }
 
     func releaseAll(by deadline: Deadline) throws {
         try attempt(by: deadline) { try keyboard.releaseAll(by: deadline) }
     }
 
-    /// [LAW:single-enforcer] More than a report carries is refused by `HeldKeys`, by name,
-    /// before the device sees it. A usage named twice on the wire is one key held.
-    func hold(usages: [UInt16], by deadline: Deadline) throws {
-        try attempt(by: deadline) { try keyboard.hold(try HeldKeys(Set(usages.map(Self.usage))), by: deadline) }
+    func hold(_ keys: HeldKeys, by deadline: Deadline) throws {
+        try attempt(by: deadline) { try keyboard.hold(keys, by: deadline) }
     }
 
     /// A release the keyboard refused is tried again one limit later, not on every sweep:
@@ -162,34 +188,47 @@ final class Devices: ServedDevices, @unchecked Sendable {
     /// for longer than one release. The holder is named under the devices' lock, where
     /// the keys it held were set, so the pid named is the one whose keys these were.
     func releaseKeysHeldPastLimit(heldBy holder: () -> pid_t?) -> KeysLetGo? {
-        let due = try? device.withLock(by: timeline.deadline(within: .zero)) { () -> KeysLetGo? in
+        let due = device.whenFree { () -> KeysLetGo? in
             let held = keyboard.keysDown
             guard !held.isEmpty, timeline.now() - lastReport >= limit else { return nil }
             let failure = outcome { try keyboard.releaseAll(by: timeline.deadline(within: Self.releaseLimit)) }.map { "\($0)" }
-            if failure != nil { lastReport = timeline.now() }
+            // Whatever the release came to: one that worked leaves nothing held for the time
+            // to matter to, and one that did not is tried again a limit from now.
+            lastReport = timeline.now()
             return KeysLetGo(usages: held.sorted().map(\.rawValue), limit: limit, holder: holder(), failure: failure)
         }
-        return due ?? nil
+        switch due {
+        case .took(let letGo): return letGo
+        // A client mid-act is a client alive: nothing of its is due.
+        case .busy: return nil
+        }
     }
 
-    func buttonDown(_ button: UInt8, by deadline: Deadline) throws {
-        try attempt(by: deadline) { try mouse.down(try Self.button(button), by: deadline) }
+    func buttonDown(_ button: Button, by deadline: Deadline) throws {
+        try attempt(by: deadline) { try mouse.down(button, by: deadline) }
     }
 
     func releaseButtons(by deadline: Deadline) throws {
         try attempt(by: deadline) { try mouse.releaseAll(by: deadline) }
     }
 
-    func holdButtons(_ buttons: UInt32, by deadline: Deadline) throws {
-        try attempt(by: deadline) { try mouse.hold(Button.buttons(in: buttons), by: deadline) }
+    func holdButtons(_ buttons: Set<Button>, by deadline: Deadline) throws {
+        try attempt(by: deadline) { try mouse.hold(buttons, by: deadline) }
     }
 
-    func move(x: Int8, y: Int8, by deadline: Deadline) throws {
-        try attempt(by: deadline) { try mouse.move(Move(x: try Self.count(x), y: try Self.count(y)), by: deadline) }
+    func move(_ delta: Move, by deadline: Deadline) throws {
+        try attempt(by: deadline) { try mouse.move(delta, by: deadline) }
     }
 
-    func scroll(vertical: Int8, horizontal: Int8, by deadline: Deadline) throws {
-        try attempt(by: deadline) { try mouse.scroll(Scroll(vertical: try Self.count(vertical), horizontal: try Self.count(horizontal)), by: deadline) }
+    func scroll(_ delta: Scroll, by deadline: Deadline) throws {
+        try attempt(by: deadline) { try mouse.scroll(delta, by: deadline) }
+    }
+
+    func release(by deadline: Deadline) throws {
+        try attempt(by: deadline) {
+            try keyboard.releaseAll(by: deadline)
+            try mouse.releaseAll(by: deadline)
+        }
     }
 
     /// Releases everything the client that just went away had left held, on both devices.
@@ -203,49 +242,23 @@ final class Devices: ServedDevices, @unchecked Sendable {
     /// is released whatever the other answered, each with a limit of its own, and the lock
     /// is held across both: a report landing between them would be a key set down after the
     /// keyboard was cleared, with nothing left to catch it.
-    func releaseEverything(because reason: String) {
+    ///
+    /// What came of it is answered, and told once here: a failure as the daemon's own, so
+    /// `vhid doctor` and the menu read it back. [LAW:single-enforcer]
+    func releaseEverything(because reason: String) -> Release {
         device.withLock {
             let key = outcome { try keyboard.releaseAll(by: timeline.deadline(within: Self.releaseLimit)) }
-            log(key.map { "\(reason), and the keyboard would not release: \($0)" } ?? "\(reason); every key is up")
             let button = outcome { try mouse.releaseAll(by: timeline.deadline(within: Self.releaseLimit)) }
-            log(button.map { "\(reason), and the mouse would not release: \($0)" } ?? "\(reason); every button is up")
+            guard key != nil || button != nil else {
+                log("\(reason); every key and button is up")
+                return .released
+            }
+            let failed = Unreleased(reason: reason, keyboard: key, mouse: button)
+            logFailure("\(failed)")
+            return .failed(failed)
         }
     }
 
-    /// [LAW:parse-dont-validate] The wire is wider than the device on every count - a usage
-    /// outside the keyboard page's keys names no key, button 0 and 33 upward have no bit,
-    /// and -128 is below the descriptor's minimum -
-    /// and a value the device cannot carry is refused here by name, once, rather than
-    /// folded to the nearest one it can.
-    private static func usage(_ value: UInt16) throws -> Usage {
-        guard Usage.keys.contains(value) else { throw NotOnTheDevice.usage(value) }
-        return Usage(rawValue: value)
-    }
-
-    private static func button(_ number: UInt8) throws -> Button {
-        guard let button = Button(rawValue: number) else { throw NotOnTheDevice.button(number) }
-        return button
-    }
-
-    private static func count(_ value: Int8) throws -> Count {
-        guard let count = Count(exactly: value) else { throw NotOnTheDevice.count(value) }
-        return count
-    }
-}
-
-/// A value the wire can carry and the device cannot.
-enum NotOnTheDevice: Error, CustomStringConvertible {
-    case usage(UInt16)
-    case button(UInt8)
-    case count(Int8)
-
-    var description: String {
-        switch self {
-        case .usage(let value): "usage \(value) is not one of the keys \(Usage.keys.lowerBound) through \(Usage.keys.upperBound)"
-        case .button(let number): "button \(number) is not one of the 32 the device has a bit for"
-        case .count(let value): "\(value) is outside the -127 through 127 a report carries"
-        }
-    }
 }
 
 /// An error a client can actually receive.
@@ -265,13 +278,16 @@ enum NotOnTheDevice: Error, CustomStringConvertible {
 /// written to make. [LAW:decomposition]
 ///
 /// Devices that are not up cross under their own code, which is how doctor tells that
-/// refusal from the rest; an act the seat turned away crosses under another, which is how
-/// a client knows no key of its is held. [LAW:types-are-the-program]
+/// refusal from the rest; a refusal that proves this connection holds nothing crosses under
+/// another, which is how a client knows no key of its is held. [LAW:types-are-the-program]
 func refusal(_ error: any Error) -> NSError {
-    let code = switch error {
-    case is Readiness.Refused: Installation.devicesDownCode
-    case is Holder.Busy, is Seat.Ended, is Seat.Lost: Installation.seatRefusedCode
-    default: 1
+    let (code, said) = switch error {
+    case is Readiness.Refused: (Installation.devicesDownCode, "\(error)")
+    case is Holder.Busy, is Holder.LeftHeld, is Seat.Ended, is Seat.Lost: (Installation.seatRefusedCode, "\(error)")
+    // Late proves this act was not done, and nothing about the acts before it: a key one
+    // of them set down may still be held, so it is not the code that says none is.
+    case is Late: (1, "\(error)")
+    default: (1, "\(error)")
     }
-    return NSError(domain: Installation.refusalDomain, code: code, userInfo: [NSLocalizedDescriptionKey: "\(error)"])
+    return NSError(domain: Installation.refusalDomain, code: code, userInfo: [NSLocalizedDescriptionKey: said])
 }

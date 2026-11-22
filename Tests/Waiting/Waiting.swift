@@ -18,6 +18,21 @@ extension Trait where Self == TimeLimitTrait {
     public static var hangGuarded: Self { .timeLimit(.minutes(2)) }
 }
 
+/// A deadline for a wait on an event that will come: `hangGuard` from now, so only a hang
+/// ends it. [LAW:single-enforcer] The one spelling of the guard as a deadline.
+public func guarded() -> Deadline { Timeline.suspending.deadline(within: hangGuard) }
+
+/// Yields to the other tasks of the caller's actor until `holds`, or throws `Hung` once
+/// `hangGuard` has passed: the wait for something a task of that same actor does, which a
+/// blocking wait would keep from ever running.
+public func yielding(until what: String, isolation: isolated (any Actor)? = #isolation, _ holds: () -> Bool) async throws {
+    let deadline = guarded()
+    while !holds() {
+        guard !deadline.passed else { throw Hung(waitingFor: what) }
+        await Task.yield()
+    }
+}
+
 /// A wait for `hangGuard` that ran out: the event the test was waiting on never came.
 public struct Hung: Error, CustomStringConvertible {
     public let waitingFor: String
@@ -56,14 +71,12 @@ public final class Latch<Value: Sendable>: @unchecked Sendable {
     /// what the test asserts on is the value its wait ended on, not one read again after.
     /// Throws `Hung` once `hangGuard` has passed without it.
     public func wait<Found>(for what: String, until find: (Value) -> Found?) throws -> Found {
-        let guardEnds = Date(timeIntervalSinceNow: hangGuard.seconds)
+        let deadline = guarded()
         condition.lock(); defer { condition.unlock() }
         while true {
             if let found = find(value) { return found }
-            guard condition.wait(until: guardEnds) else {
-                if let found = find(value) { return found }
-                throw Hung(waitingFor: what)
-            }
+            guard !deadline.passed else { throw Hung(waitingFor: what) }
+            deadline.wait(on: condition)
         }
     }
 
@@ -71,11 +84,6 @@ public final class Latch<Value: Sendable>: @unchecked Sendable {
     public func wait(for what: String, until holds: (Value) -> Bool) throws {
         _ = try wait(for: what) { holds($0) ? () : nil }
     }
-}
-
-extension Latch where Value == Int {
-    /// One more of whatever is being counted.
-    public func count() { update { $0 += 1 } }
 }
 
 /// A named pipe a child process says something through, for a test that has to know the
@@ -123,13 +131,12 @@ public final class Handshake: @unchecked Sendable {
     /// `hangGuard` has passed without one.
     public func line() throws -> String {
         var said: [UInt8] = []
-        let guardEnds = ContinuousClock.now + hangGuard
+        let deadline = guarded()
         while true {
             if let newline = said.firstIndex(of: UInt8(ascii: "\n")) { return String(decoding: said[..<newline], as: UTF8.self) }
-            let left = max(.zero, ContinuousClock.now.duration(to: guardEnds))
-            guard left > .zero else { throw Hung(waitingFor: "a line through \(path)") }
+            guard !deadline.passed else { throw Hung(waitingFor: "a line through \(path)") }
             var waiting = pollfd(fd: reading, events: Int16(POLLIN), revents: 0)
-            let ready = poll(&waiting, 1, left.wholeMilliseconds)
+            let ready = poll(&waiting, 1, deadline.left.wholeMilliseconds)
             if ready < 0, errno == EINTR { continue }
             guard ready >= 0 else { throw Failed(description: "poll \(path): \(String(cString: strerror(errno)))") }
             guard ready > 0 else { continue }

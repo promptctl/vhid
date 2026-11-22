@@ -107,8 +107,8 @@ import Waiting
     /// own two installations and for a label nothing registers.
     @Test func thisMacsLaunchdIsReadWithoutRoot() throws {
         for installation in Installation.vhids {
-            _ = try LaunchdProbe.standing(of: installation, by: Timeline.suspending.deadline(within: hangGuard), or: .never)
+            _ = try LaunchdProbe.standing(of: installation, by: guarded(), or: .never)
         }
-        #expect(try LaunchdProbe.standing(of: Installation(service: "ai.promptctl.vhid.tests.nobody")!, by: Timeline.suspending.deadline(within: hangGuard), or: .never) == .noJob)
+        #expect(try LaunchdProbe.standing(of: Installation(service: "ai.promptctl.vhid.tests.nobody")!, by: guarded(), or: .never) == .noJob)
     }
 }

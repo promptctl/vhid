@@ -1,7 +1,6 @@
 import Foundation
 import Synchronization
 import Timeline
-import Timeline
 
 /// One command run against the machine, and everything it said.
 ///
@@ -129,15 +128,15 @@ public struct Command: Sendable {
     /// A command that had not ended at its deadline: the child still running, or a stream
     /// of it still open in something the child started.
     ///
-    /// `ran` is how long this command had, to the millisecond, beside the limit of the
+    /// `had` is how long this command had, to the millisecond, beside the limit of the
     /// reading it was run for: the command a reading's limit ends on is the one running
     /// then, and may have had a moment of it where one before it had the rest.
     public struct Overran: Error, CustomStringConvertible, Equatable {
         public let command: String
-        public let ran: Duration
+        public let had: Duration
         public let limit: Duration
 
-        public var description: String { "`\(command)` had not ended \(ran) after it was started, at the limit of \(limit), and was given up on" }
+        public var description: String { "`\(command)` had not ended \(had) after it was started, at the limit of \(limit), and was given up on" }
     }
 
     /// A command not started because its reading's deadline had passed before its turn
@@ -226,7 +225,7 @@ public struct Command: Sendable {
         case .ended(let carried):
             streams = carried
         case .overran:
-            throw Overran(command: said, ran: .milliseconds(had.wholeMilliseconds), limit: deadline.limit)
+            throw Overran(command: said, had: .milliseconds(had.wholeMilliseconds), limit: deadline.limit)
         case .stopped:
             throw CancellationError()
         }

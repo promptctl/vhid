@@ -1,5 +1,6 @@
 import DriverExtension
 import Foundation
+import Timeline
 
 /// Whether the devices are up, and the devices when they are: what every seat asks before
 /// it acts, and what the bring-up loop tells as it goes.
@@ -9,7 +10,7 @@ import Foundation
 /// in. Now the reason is the answer every act gets from a listener that is already up.
 /// [LAW:no-silent-failure]
 ///
-/// [LAW:parse-dont-validate] `devices()` is the one crossing: it hands back devices that
+/// [LAW:parse-dont-validate] `devices(by:)` is the one crossing: it hands back devices that
 /// are up or throws why not, so a seat asks before it claims the holder, and a client
 /// turned away while the devices are down holds nothing.
 final class Readiness: @unchecked Sendable {
@@ -80,15 +81,13 @@ final class Readiness: @unchecked Sendable {
     /// reported late by an attempt that already failed cannot replace why it failed, and
     /// devices whose connection went before they were handed over are not handed over.
     private var ended = false
-    /// How long a reading of the driver is given. A client refused is answered after the
-    /// reading, and waits `HelperConnection.replyTimeout` for the answer: a reading that
-    /// cannot be taken is given up on while that client is still listening.
-    static let driverReadLimit: Duration = .seconds(2)
 
-    /// Reads the driver extension on this Mac.
-    private let driver: () throws -> DriverState
+    /// Reads the driver extension on this Mac, by the deadline of the client it is read
+    /// for: a client refused is answered after the reading, so a reading that cannot be
+    /// taken is given up on while that client is still listening.
+    private let driver: (Deadline) throws -> DriverState
 
-    init(driver: @escaping () throws -> DriverState) {
+    init(driver: @escaping (Deadline) throws -> DriverState) {
         self.driver = driver
     }
 
@@ -97,11 +96,11 @@ final class Readiness: @unchecked Sendable {
         return state
     }
 
-    /// The devices, or the refusal a client is told. The driver is read outside the lock,
-    /// so one client's refusal holds up nobody else's act.
-    func devices() throws -> Up {
+    /// The devices, or the refusal a client is told, by that client's `deadline`. The
+    /// driver is read outside the lock, so one client's refusal holds up nobody else's act.
+    func devices(by deadline: Deadline) throws -> Up {
         switch current {
-        case .down(let why): throw Refused(why: why, driver: Result { try driver() })
+        case .down(let why): throw Refused(why: why, driver: Result { try driver(deadline) })
         case .up(let up): return up
         }
     }
@@ -115,11 +114,13 @@ final class Readiness: @unchecked Sendable {
         }
     }
 
-    /// Devices that are not up hold nothing, so there is nothing to release.
+    /// Devices that are not up hold nothing, so there is nothing to release. For a daemon
+    /// on its way out: what came of it is told where it came, and nobody is left to hand
+    /// the devices to.
     func releaseEverything(because reason: String) {
         switch current {
         case .down(let why): log("\(reason); nothing is held: \(why)")
-        case .up(let up): up.devices.releaseEverything(because: reason)
+        case .up(let up): _ = up.devices.releaseEverything(because: reason)
         }
     }
 

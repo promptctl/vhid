@@ -18,7 +18,7 @@ import Waiting
         let stop = Command.Stop()
         stop.pull()
         let readiness = Readiness.read(for: try #require(Installation(service: "ai.promptctl.vhid.tests.nobody")),
-                                       by: Timeline.suspending.deadline(within: hangGuard), or: stop)
+                                       by: guarded(), or: stop)
         let rows = Dictionary(uniqueKeysWithValues: readiness.requirements.map { ($0.row, $0.reads) })
         #expect(rows[.driverExtension] == "could not be read: \(CancellationError())")
         #expect(rows[.launchdJob] == "could not be read: \(CancellationError())")

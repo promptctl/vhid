@@ -13,20 +13,23 @@ public extension Readiness {
     /// beyond reading that no Mach client can avoid: a daemon launchd holds a job for but
     /// has not started is started by the call, as it would be by any verb. [LAW:one-source-of-truth]
     ///
-    /// In this order, and in series, because of that start: the daemon files the Keyboard
-    /// Setup Assistant answer before it listens, so a cache read after its reply sees what
-    /// a daemon started by the call filed. [LAW:no-ambient-temporal-coupling]
+    /// In series, and the daemon first: it is the reading that says whether anything is
+    /// listening, so no stuck tool before it can leave it unasked, and the Keyboard Setup
+    /// Assistant cache is read after its reply because of that start - the daemon files the
+    /// answer before it listens, so a read after the reply sees what a daemon started by the
+    /// call filed. [LAW:no-ambient-temporal-coupling]
     ///
     /// Every reading is over by `deadline`, the one the caller made as it asked, so the list
     /// takes its caller no longer than it gave: a stuck tool takes what is left of it, and a
     /// reading its turn came too late for is unread and says so. All of them by `stop`,
     /// which ends whichever is reading.
     static func read(for installation: Installation, by deadline: Deadline, or stop: Command.Stop) -> Readiness {
-        Readiness(
+        let daemon = DaemonProbe.reading(of: installation, by: deadline)
+        return Readiness(
             installation: installation,
             driver: Result { DriverState(try DriverProbe.facts(by: deadline, or: stop)) },
             job: Result { try LaunchdProbe.standing(of: installation, by: deadline, or: stop) },
-            daemon: DaemonProbe.reading(of: installation, by: deadline),
+            daemon: daemon,
             keyboardSetupAssistantAnswered: Result { try KeyboardTypeCache.read().answersThisKeyboard })
     }
 }

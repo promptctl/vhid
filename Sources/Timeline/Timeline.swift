@@ -7,11 +7,28 @@ import Foundation
 public struct Timeline: Sendable {
     public let now: @Sendable () -> Duration
     public let sleep: @Sendable (_ until: Duration) async throws -> Void
+    /// Blocks on a condition the caller holds until it is signalled or `until` comes on this
+    /// timeline, whichever is first. [LAW:single-enforcer] The one blocking wait, taken
+    /// through `Deadline.wait(on:)`, so a timeline a test moves wakes every lock and
+    /// condition a deadline of its bounds, and none waits out a span on the wall clock.
+    let block: @Sendable (_ condition: NSCondition, _ until: Duration) -> Void
 
     public init<C: Clock>(_ clock: C) where C.Duration == Duration {
         let origin = clock.now
-        now = { origin.duration(to: clock.now) }
-        sleep = { try await clock.sleep(until: origin.advanced(by: $0), tolerance: .zero) }
+        let now: @Sendable () -> Duration = { origin.duration(to: clock.now) }
+        self.init(
+            now: now,
+            sleep: { try await clock.sleep(until: origin.advanced(by: $0), tolerance: .zero) },
+            block: { condition, until in _ = condition.wait(until: Date(timeIntervalSinceNow: max(until - now(), .zero).seconds)) })
+    }
+
+    /// A timeline from its three parts, for a clock whose blocking wait is not the wall
+    /// clock's: one a test moves, which wakes its waiters as it moves.
+    public init(now: @escaping @Sendable () -> Duration, sleep: @escaping @Sendable (_ until: Duration) async throws -> Void,
+                block: @escaping @Sendable (_ condition: NSCondition, _ until: Duration) -> Void) {
+        self.now = now
+        self.sleep = sleep
+        self.block = block
     }
 
     /// The clock every caller's limit is counted on, in every process here: it stops while
@@ -23,8 +40,9 @@ public struct Timeline: Sendable {
     public static var suspending: Timeline { Timeline(SuspendingClock()) }
 
     /// A sleep until `due` that hands `slept` how long it slept once it ends, however it
-    /// ends: one a cancel cut short says how long it got. [LAW:single-enforcer] Every wait a
-    /// pointer or a typist makes between its reports is one of these, so every one is traced.
+    /// ends: one a cancel cut short says how long it got. [LAW:single-enforcer] Every pause
+    /// of the hand a pointer or a typist makes is one of these, so every one is traced; the
+    /// waits that pace a move's reports are its motion, and its trace is the reports.
     public func pause(until due: Duration, slept: (Duration) -> Void) async throws {
         let began = now()
         defer { slept(max(now() - began, .zero)) }
@@ -66,14 +84,18 @@ public struct Deadline: Sendable {
     /// How long since it was made, on its own clock: what a wait it bounded cost.
     public var spent: Duration { timeline.now() - (at - limit) }
 
-    /// The deadline as a moment on the wall clock, for the system waits that take one:
-    /// `NSLock.lock(before:)`, `NSCondition.wait(until:)`.
-    public var date: Date { Date(timeIntervalSinceNow: left.seconds) }
+    /// Blocks on `condition`, which the caller holds, until it is signalled or this deadline
+    /// passes on the timeline it was made on. The caller looks again at what it waits for,
+    /// and at `passed`, each time this returns: a wake says only that something moved.
+    public func wait(on condition: NSCondition) {
+        timeline.block(condition, at)
+    }
 }
 
 /// A span in the units each system wait takes. [LAW:single-enforcer] The one place a
 /// `Duration`'s components are read for a kernel or Foundation wait, so each is rounded
-/// one way.
+/// one way. A wait on a descriptor is the kernel's to wake, so it is given what is left of
+/// its deadline in these units, and looks again at the deadline when it wakes.
 public extension Duration {
     var seconds: TimeInterval {
         TimeInterval(components.seconds) + TimeInterval(components.attoseconds) / 1e18

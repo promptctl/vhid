@@ -2,13 +2,16 @@ import DriverExtension
 import Foundation
 import Helper
 import Installations
+import OwnThread
+import TestClock
 import Testing
+import Timeline
 import Waiting
 @testable import vhidd
 
 /// A seat that has ended - its client left, or its connection went - serves nothing and
 /// claims nothing, whichever way it ended. [LAW:behavior-not-structure]
-@Suite(.hangGuarded) struct SeatTests {
+@Suite(.hangGuarded, .ownThread) struct SeatTests {
 
     private let one = NSObject()
 
@@ -28,30 +31,26 @@ import Waiting
     }
 
     /// An act whose turn has not come by its limit - the act before it still under way -
-    /// is refused before it reaches the devices, while its client is still listening: the
-    /// client is told nothing of it was sent, and the devices never see it, not even once
-    /// the act ahead has finished. The act ahead is held for as long as the test likes,
-    /// so the limit is spent whatever the runner's pace.
+    /// is refused before it reaches the devices: the client is told nothing of it was sent,
+    /// and the devices never see it, not even once the act ahead has finished. The limit
+    /// passes on a clock the test holds, once the second act is waiting its turn, so the
+    /// verdict is the same at any pace.
     @Test func anActWhoseTurnDoesNotComeInTimeIsRefusedAndNeverReachesTheDevices() throws {
         let devices = RecordingDevices(holdingActs: true)
-        let seat = Seat(ObjectIdentifier(one), pid: 41, holder: Holder(), readiness: .serving(devices), screen: FixedScreen(), timeline: .suspending)
-        let first = Latch<Error??>(nil)
+        let clock = ManualClock()
+        let seat = Seat(ObjectIdentifier(one), pid: 41, holder: Holder(), readiness: .serving(devices), screen: FixedScreen(), timeline: Timeline(clock))
+        let first = Latch<Error??>(nil), second = Latch<NSError??>(nil)
         Thread.detachNewThread { seat.down(usage: 4) { answer in first.update { $0 = answer } } }
         try devices.awaitBegun("down 4")
-        var refused: NSError?
-        seat.down(usage: 5) { refused = $0 as NSError? }
+        Thread.detachNewThread { seat.down(usage: 5) { answer in second.update { $0 = answer as NSError? } } }
+        try clock.awaitBlocked("the second act to wait its turn")
+        clock.advance(by: Seat.actLimit)
+        let refused = try second.wait(for: "the second act's answer") { $0 }
         #expect(refused?.localizedDescription == "\(Late(limit: Seat.actLimit))")
         #expect(refused?.code == 1)
         devices.turn.update { $0 = true }
         #expect(try first.wait(for: "the first act's answer") { $0 } == nil)
         #expect(devices.done == ["down 4"])
-    }
-
-    /// The act's limit is counted from when it arrives and ends before its client stops
-    /// listening, with room for the refusal to reach it.
-    @Test func anActIsGivenUpOnBeforeItsClientStopsListening() {
-        #expect(Seat.actLimit < HelperConnection.replyTimeout)
-        #expect(Seat.actLimit > .zero)
     }
 
     /// A seat that ends without ever acting releases nothing: it never held the devices.
@@ -66,7 +65,7 @@ import Waiting
     /// While the devices are down an act is refused with why, and claims nothing: the next
     /// client is told the same reason, not that the first is in the way.
     @Test func anActWhileTheDevicesAreDownIsRefusedWithWhyAndClaimsNothing() {
-        let (holder, readiness) = (Holder(), Readiness(driver: { .running }))
+        let (holder, readiness) = (Holder(), Readiness(driver: { _ in .running }))
         let other = NSObject()
         let first = Seat(ObjectIdentifier(one), pid: 41, holder: holder, readiness: readiness, screen: FixedScreen(), timeline: .suspending)
         let second = Seat(ObjectIdentifier(other), pid: 42, holder: holder, readiness: readiness, screen: FixedScreen(), timeline: .suspending)
@@ -80,7 +79,7 @@ import Waiting
     /// The refusal a client receives names the driver's step, under the code that says
     /// the devices are down.
     @Test func anActRefusedWhileTheDriverIsOffCarriesItsStep() throws {
-        let readiness = Readiness(driver: { .awaitingApproval })
+        let readiness = Readiness(driver: { _ in .awaitingApproval })
         let seat = Seat(ObjectIdentifier(one), pid: 41, holder: Holder(), readiness: readiness, screen: FixedScreen(), timeline: .suspending)
         var refused: NSError?
         seat.down(usage: 4) { refused = $0 as NSError? }
@@ -91,7 +90,7 @@ import Waiting
 
     /// Status is not the proof the devices are up when they are not: it answers why.
     @Test func statusWhileTheDevicesAreDownSaysWhy() {
-        let seat = Seat(ObjectIdentifier(one), pid: 41, holder: Holder(), readiness: Readiness(driver: { .running }), screen: FixedScreen(), timeline: .suspending)
+        let seat = Seat(ObjectIdentifier(one), pid: 41, holder: Holder(), readiness: Readiness(driver: { _ in .running }), screen: FixedScreen(), timeline: .suspending)
         var answer: (NSNumber?, String?)
         seat.status { answer = ($0, ($1 as NSError?)?.localizedDescription) }
         #expect(answer.0 == nil)
@@ -101,7 +100,7 @@ import Waiting
     /// A client whose devices were lost is told so on its next act, and on every act
     /// after, rather than acting on fresh devices as if what it held were still held.
     @Test func aSeatWhoseDevicesWereLostEnds() {
-        let (holder, readiness) = (Holder(), Readiness(driver: { .running }))
+        let (holder, readiness) = (Holder(), Readiness(driver: { _ in .running }))
         let first = readiness.begin()
         readiness.up(RecordingDevices())
         let seat = Seat(ObjectIdentifier(one), pid: 41, holder: holder, readiness: readiness, screen: FixedScreen(), timeline: .suspending)

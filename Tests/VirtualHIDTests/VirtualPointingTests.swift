@@ -131,6 +131,25 @@ private func pointingReports(_ fake: FakeDaemon) -> [[UInt8]] {
         #expect(device.buttonsDown == [.right])
     }
 
+    /// A release that went unanswered is not undone by the move after it: the move is built
+    /// from what was asked, so it carries no button, and its answer - the whole of what the
+    /// device holds - settles the button up. A move built from what may be held would press
+    /// it again.
+    @Test func aMoveAfterAnUnansweredReleaseDoesNotPressTheButtonAgain() throws {
+        let fake = FakeDaemon { frame, fake in
+            guard case .request(let id, let payload) = frame else { return }
+            let sent = requestSent(payload)
+            guard !(sent.request == post.rawValue && sent.bytes.allSatisfy { $0 == 0 }) else { return }
+            try fake.send(.response(id: id, payload: []))
+        }
+        let device = try mouse(on: fake)
+        try device.down(.right, by: guarded())
+        #expect(try missed(once: fake, has: sent(post, times: 2)) { try device.releaseAll(by: $0) } as? DaemonError == .silent)
+        try device.move(Move(x: Count(clamping: 1), y: .zero), by: guarded())
+        #expect(pointingReports(fake).last == [0, 0, 0, 0, 1, 0, 0, 0])
+        #expect(device.buttonsDown.isEmpty)
+    }
+
     @Test func aButtonIsRecordedDownWhenItsReportReachedTheDaemonUnanswered() throws {
         let fake = FakeDaemon { _, _ in }
         let device = try mouse(on: fake)
