@@ -216,6 +216,11 @@ let package = Package(
         // target cannot link another. No product names it, so nothing shipped carries it.
         .target(name: "OwnThread", path: "Tests/OwnThread"),
         .testTarget(name: "OwnThreadTests", dependencies: ["OwnThread"]),
+        // How a test waits for what the code under test does: a latch over a state, a FIFO a
+        // child says it started through, and the one bound past which a wait is a hang. A
+        // target of its own for OwnThread's reason. No product names it.
+        .target(name: "Waiting", path: "Tests/Waiting"),
+        .testTarget(name: "WaitingTests", dependencies: ["Waiting", "OwnThread"]),
         // A clock that moves only when a test moves it or something sleeps on it, so a
         // verb that rests between reports is tested without waiting. A target of its own
         // for OwnThread's reason: InputTests, vhidCLITests and SeeingTests all sleep on it.
