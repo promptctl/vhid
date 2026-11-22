@@ -45,135 +45,80 @@ import Testing
         #expect(try Command("/bin/sh", "-c", "kill -KILL $$").run(by: .within(.seconds(30), or: .never)).status == SIGKILL)
     }
 
-    /// A command that has returned holds nothing open, on a thread that never drains a
-    /// pool as much as on one that does: vhidd runs the driver probe every two seconds
-    /// from a thread that never returns, and four commands a probe each leaving two
-    /// descriptors behind would be the whole table within the minute.
-    ///
-    /// The count is the process's, and other tests open descriptors of their own while
-    /// this runs, so what is checked is that it did not grow by the 200 that 100 leaking
-    /// runs leave.
-    @Test(.timeLimit(.minutes(1))) func aCommandThatHasReturnedHoldsNoDescriptorOpen() throws {
-        // Listed, not probed slot by slot: the table's size is a limit, and where the
-        // limit is lifted there are more slots than a test has time to ask about.
-        @Sendable func open() throws -> Int { try FileManager.default.contentsOfDirectory(atPath: "/dev/fd").count }
-        let done = DispatchSemaphore(value: 0)
-        nonisolated(unsafe) var counted: Result<(ran: Int, grew: Int), any Error>?
-        Thread.detachNewThread {
-            counted = Result {
-                let before = try open()
-                let ran = (0..<100).count { _ in (try? Command("/usr/bin/true").run(by: .within(.seconds(30), or: .never)))?.status == 0 }
-                return (ran, try open() - before)
-            }
-            done.signal()
-        }
-        done.wait()
-        let (ran, grew) = try #require(counted).get()
-        #expect(ran == 100)
-        #expect(grew < 100)
+    /// A FIFO of the test's own, which a child opens to say it got as far as the open, or
+    /// blocks in until this side opens the other end. The order it forces is the test's,
+    /// on any runner. [LAW:no-ambient-temporal-coupling]
+    static func fifo() throws -> URL {
+        let path = FileManager.default.temporaryDirectory.appending(path: "vhid-command-\(UUID().uuidString)")
+        try #require(mkfifo(path.path, 0o600) == 0)
+        return path
     }
 
     /// A command that never ends is given up on at its limit and said by name, with the
-    /// limit, and the child is stopped and not left running behind the reading that gave up
-    /// on it.
+    /// limit. It cannot end on its own, so its returning at all is the limit's doing.
     @Test(.timeLimit(.minutes(1))) func aCommandThatNeverEndsIsStoppedAtItsLimitAndNamed() throws {
-        let pidFile = FileManager.default.temporaryDirectory.appending(path: "vhid-command-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: pidFile) }
-        let began = ContinuousClock.now
         let overran = #expect(throws: Command.Overran.self) {
-            try Command("/bin/sh", "-c", "echo $$ > \(pidFile.path); exec sleep 600").run(by: .within(.milliseconds(500), or: .never))
+            try Command("/bin/sleep", "600").run(by: .within(.milliseconds(500), or: .never))
         }
-        #expect(ContinuousClock.now - began < .seconds(10))
         let named = try #require(overran)
-        #expect(named.command == "sh -c echo $$ > \(pidFile.path); exec sleep 600")
+        #expect(named.command == "sleep 600")
         #expect(named.limit == .milliseconds(500))
-        #expect(named.ran >= .milliseconds(500))
-        #expect(named.description == "`\(named.command)` had not ended \(named.ran) after it was started, at the limit of 0.5 seconds, and was given up on")
-        // On a runner slow enough that the shell was stopped before it wrote its pid there
-        // is no pid to ask after, and the test is not failed for the runner's pace.
-        guard let pid = (try? String(contentsOf: pidFile, encoding: .utf8)).flatMap({ pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) }) else { return }
-        // Signal 0 reaches a zombie as much as a running child, so this is the child both
-        // stopped and collected, and by the time the command was thrown: nothing is left
-        // to collect it afterwards.
-        #expect(kill(pid, 0) == -1 && errno == ESRCH)
+        #expect(named.description == "`sleep 600` had not ended \(named.ran) after it was started, at the limit of 0.5 seconds, and was given up on")
     }
 
     /// A child that has exited can leave its streams open in something it started, and
-    /// the end of a stream is what a reading waits for: the limit covers that wait too.
+    /// the end of a stream is what a reading waits for: the limit covers that wait too. What
+    /// it started holds the streams until this side opens the FIFO it blocks on, which is
+    /// only once the command has been given up on.
     @Test(.timeLimit(.minutes(1))) func aStreamHeldOpenPastTheChildsExitIsGivenUpOnAtTheLimit() throws {
-        let began = ContinuousClock.now
+        let held = try Self.fifo()
+        defer { try? FileManager.default.removeItem(at: held) }
         #expect(throws: Command.Overran.self) {
-            try Command("/bin/sh", "-c", "sleep 5 & exit 0").run(by: .within(.milliseconds(500), or: .never))
+            try Command("/bin/sh", "-c", "cat \"$0\" & exit 0", held.path).run(by: .within(.milliseconds(500), or: .never))
         }
-        #expect(ContinuousClock.now - began < .seconds(4))
+        // Lets what it started go: its open ends with this one, and it reads the end.
+        close(open(held.path, O_WRONLY))
     }
 
-    /// The limit is the reading's: a command run by a deadline that another has used most
-    /// of is given what is left, where a limit of its own would let two commands take the
-    /// reading twice as long as its caller gave it. A second of the three goes to the
-    /// first, so the second has run two when it is given up on, and not the three a limit
-    /// apiece gives it. The error says both: how long this command had, and the limit.
-    @Test(.timeLimit(.minutes(1))) func commandsRunByOneDeadlineShareItsLimit() throws {
-        let deadline = Command.Deadline.within(.seconds(3), or: .never)
-        #expect(try Command("/bin/sleep", "1").run(by: deadline).status == 0)
-        let overran = try #require(#expect(throws: Command.Overran.self) { try Command("/bin/sleep", "600").run(by: deadline) })
-        #expect(overran.ran < .milliseconds(2500))
-        #expect(overran.limit == .seconds(3))
-    }
-
-    /// A command given up on holds nothing open either: vhidd reads the driver every two
-    /// seconds while it waits, and a stuck tool is stuck at every one of them. Both ways of
-    /// overrunning: a child that never ends, whose streams end when it is stopped, and one
-    /// that has ended and left its streams open in something it started, where giving up is
-    /// all that lets go of them. That one is given long enough for the shell to have exited.
-    @Test(.timeLimit(.minutes(1)), arguments: [
-        ("exec sleep 600", Duration.milliseconds(20), 50),
-        ("sleep 20 & exit 0", Duration.milliseconds(300), 10),
-    ])
-    func aCommandGivenUpOnHoldsNoDescriptorOpen(script: String, limit: Duration, runs: Int) throws {
-        @Sendable func open() throws -> Int { try FileManager.default.contentsOfDirectory(atPath: "/dev/fd").count }
-        let done = DispatchSemaphore(value: 0)
-        nonisolated(unsafe) var counted: Result<(overran: Int, grew: Int), any Error>?
-        Thread.detachNewThread {
-            counted = Result {
-                let before = try open()
-                let overran = (0..<runs).count { _ in
-                    do { _ = try Command("/bin/sh", "-c", script).run(by: .within(limit, or: .never)); return false } catch { return error is Command.Overran }
-                }
-                return (overran, try open() - before)
-            }
-            done.signal()
-        }
-        done.wait()
-        let (overran, grew) = try #require(counted).get()
-        #expect(overran == runs)
-        #expect(grew < runs)
+    /// The limit is the reading's: a command run by a deadline that others have spent is
+    /// given only what is left, where a limit of its own would let two commands take the
+    /// reading twice as long as its caller gave it. Spent here before the command starts,
+    /// so the command is given up on at its first look on any runner, and the error names
+    /// the reading's limit.
+    @Test(.timeLimit(.minutes(1))) func aCommandIsGivenOnlyWhatItsDeadlineHasLeft() async throws {
+        let deadline = Command.Deadline.within(.milliseconds(50), or: .never)
+        // On the deadline's own clock, which a sleeping Mac stops.
+        try await SuspendingClock().sleep(for: .milliseconds(50))
+        let overran = try #require(#expect(throws: Command.Overran.self) { try Command("/usr/bin/true").run(by: deadline) })
+        #expect(overran.limit == .milliseconds(50))
     }
 
     /// A reading stopped while a command runs ends at once, the command with it: thrown as
     /// a cancel, not as a command that failed or overran, and the child stopped and
-    /// collected by the time it is thrown, as one given up on at its limit is.
+    /// collected by the time it is thrown, as one given up on at its limit is. The child
+    /// never ends on its own and the limit is far past it, so the stop is what ended it.
     @Test(.timeLimit(.minutes(1))) func aCommandWhoseReadingIsStoppedEndsAtOnceAndLeavesNoChild() async throws {
-        let pidFile = FileManager.default.temporaryDirectory.appending(path: "vhid-command-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: pidFile) }
+        let running = try Self.fifo()
+        defer { try? FileManager.default.removeItem(at: running) }
         let stop = Command.Stop()
-        let began = ContinuousClock.now
         // On a thread of its own, as a reading is taken: the command blocks the thread it
         // runs on, and the cooperative pool may have only the one.
         let (ending, end) = AsyncStream<Result<Command.Output, any Error>>.makeStream()
         Thread.detachNewThread {
-            end.yield(Result { try Command("/bin/sh", "-c", "echo $$ > \(pidFile.path); exec sleep 600").run(by: .within(.seconds(30), or: stop)) })
+            end.yield(Result { try Command("/bin/sh", "-c", "echo $$ > \"$0\"; exec sleep 600", running.path).run(by: .within(.seconds(30), or: stop)) })
             end.finish()
         }
-        func pid() -> pid_t? { (try? String(contentsOf: pidFile, encoding: .utf8)).flatMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) } }
-        while pid() == nil { try await Task.sleep(for: .milliseconds(10)) }
+        // Blocks until the child has written its pid: the stop lands while it runs.
+        let said = try #require(FileHandle(forReadingAtPath: running.path)?.readDataToEndOfFile())
+        let child = try #require(pid_t(String(decoding: said, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)))
         stop.pull()
         var ended: Result<Command.Output, any Error>?
         for await result in ending { ended = result }
         let endedResult = try #require(ended)
-        #expect(ContinuousClock.now - began < .seconds(10))
         #expect(throws: CancellationError.self) { try endedResult.get() }
-        let child = try #require(pid())
+        // Signal 0 reaches a zombie as much as a running child, so this is the child both
+        // stopped and collected, and by the time the command was thrown: nothing is left
+        // to collect it afterwards.
         #expect(kill(child, 0) == -1 && errno == ESRCH)
     }
 

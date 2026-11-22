@@ -6,7 +6,9 @@ import TelemetryTesting
 import OwnThread
 import Testing
 
-@Suite(.eventsKept, .ownThread) struct GrantsTests {
+/// Its children never end on their own where a deadline or a cancel is to end them, so a
+/// reading that failed to end them would hang: the limit says so as a failure.
+@Suite(.eventsKept, .ownThread, .timeLimit(.minutes(1))) struct GrantsTests {
     /// The session-start hook reads a reading's verdict by its exit status alone, so its arms
     /// are the statuses a reading exits with, and every other status is unknown.
     @Test func theHookReadsTheStatusesAReadingExitsWith() throws {
@@ -53,22 +55,19 @@ import Testing
         await #expect(throws: GrantReadingFailure("/usr/bin/false exited 1")) {
             try await GrantReading.taken(by: URL(fileURLWithPath: "/usr/bin/false"), [])
         }
-        // Given up on at its deadline as every command is, and said as `Command` says it.
+        // Given up on at its deadline as every command is, and said as `Command` says it. The
+        // child never ends on its own, so only the deadline can end the call, however long
+        // the call waited for a thread before its deadline began. [LAW:no-ambient-temporal-coupling]
         let stuck = await #expect(throws: GrantReadingFailure.self) {
-            try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/sleep"), ["5"], within: .milliseconds(200))
+            try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/sleep"), ["3600"], within: .milliseconds(200))
         }
-        #expect(stuck?.description.hasPrefix("`sleep 5` had not ended") == true)
+        #expect(stuck?.description.hasPrefix("`sleep 3600` had not ended") == true)
         #expect(stuck?.description.hasSuffix("at the limit of 0.2 seconds, and was given up on") == true)
-        // A grandchild holding the pipe does not hold the call past its deadline.
-        let start = ContinuousClock.now
-        await #expect(throws: GrantReadingFailure.self) {
-            try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/sh"), ["-c", "sleep 5"], within: .milliseconds(200))
-        }
-        #expect(ContinuousClock.now - start < .seconds(2))
     }
 
     /// A reading withdrawn while its child runs is a cancellation, recorded as one, and its
-    /// child is gone with it.
+    /// child is gone with it. The child never ends on its own, so the reading ending at all
+    /// is the cancel's doing.
     @Test func aReadingWithdrawnWhileItsChildRunsIsCancelled() async throws {
         let events = Collected()
         // The child says it is running through a FIFO, which this side's open blocks on
@@ -78,7 +77,7 @@ import Testing
         defer { try? FileManager.default.removeItem(at: started) }
         let reading = Task {
             try await Telemetry.$export.withValue(events.export) {
-                try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/sh"), ["-c", "echo > \"$0\"; exec sleep 5", started.path])
+                try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/sh"), ["-c", "echo > \"$0\"; exec sleep 3600", started.path])
             }
         }
         await withCheckedContinuation { running in
@@ -87,10 +86,8 @@ import Testing
                 running.resume()
             }
         }
-        let start = ContinuousClock.now
         reading.cancel()
         await #expect(throws: CancellationError.self) { try await reading.value }
-        #expect(ContinuousClock.now - start < .seconds(2))
         #expect(events.all.map(\.outcome) == [.cancelled])
     }
 

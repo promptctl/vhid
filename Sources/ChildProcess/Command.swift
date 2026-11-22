@@ -194,27 +194,14 @@ public struct Command: Sendable {
         let started = SuspendingClock.now
         // Nothing to read: a reading takes no input, and under an MCP server this process's
         // own stdin is the client's JSON-RPC stream, which a child must not take from.
-        let nothing = open("/dev/null", O_RDONLY)
-        guard nothing >= 0 else { throw unheard("could not be given an empty stdin") }
-        let out: (read: Int32, write: Int32)
-        do { out = try pipe() } catch {
-            close(nothing)
-            throw error
-        }
-        let err: (read: Int32, write: Int32)
-        do { err = try pipe() } catch {
-            close(nothing); close(out.read); close(out.write)
-            throw error
-        }
-        defer { close(out.read); close(err.read) }
-        let pid: pid_t
-        do {
-            // The writing ends are the child's once it has them: one left open here is a
-            // stream that never ends.
-            defer { close(out.write); close(err.write); close(nothing) }
-            pid = try spawn(tool.path, arguments, stdio: [0: nothing, 1: out.write, 2: err.write], environment: environment)
-        }
-        let heard = Result { try hear(pid, [out.read, err.read], by: deadline) }
+        let empty = open("/dev/null", O_RDONLY)
+        guard empty >= 0 else { throw unheard("could not be given an empty stdin") }
+        let nothing = Descriptor(raw: empty)
+        let out = try pipe()
+        let err = try pipe()
+        let pid = try start(stdin: nothing, stdout: out.write, stderr: err.write)
+        let heard: Result<Heard, any Error>
+        do { heard = .success(try hear(pid, [out.read.raw, err.read.raw], by: deadline)) } catch { heard = .failure(error) }
         // [LAW:single-enforcer] The one place the child is stopped and collected, however
         // the hearing ended. What it started is not reached: a stream held open past the
         // child's exit is let go of here and goes on being held there. SIGKILL, because a
@@ -243,15 +230,22 @@ public struct Command: Sendable {
         }
         return Output(
             ending: ending,
-            stdout: String(decoding: streams[out.read, default: []], as: UTF8.self),
-            stderr: String(decoding: streams[err.read, default: []], as: UTF8.self)
+            stdout: String(decoding: streams[out.read.raw, default: []], as: UTF8.self),
+            stderr: String(decoding: streams[err.read.raw, default: []], as: UTF8.self)
         )
     }
 
-    private func pipe() throws -> (read: Int32, write: Int32) {
+    /// Starts the child on the three descriptors it is given, which this side lets go of
+    /// as it returns, started or not: the writing ends are the child's once it has them,
+    /// and one left open here is a stream that never ends.
+    private func start(stdin: consuming Descriptor, stdout: consuming Descriptor, stderr: consuming Descriptor) throws -> pid_t {
+        try spawn(tool.path, arguments, stdio: [0: stdin.raw, 1: stdout.raw, 2: stderr.raw], environment: environment)
+    }
+
+    private func pipe() throws -> Pipe {
         var ends: [Int32] = [0, 0]
         guard Darwin.pipe(&ends) == 0 else { throw unheard("could not be given a pipe") }
-        return (ends[0], ends[1])
+        return Pipe(read: Descriptor(raw: ends[0]), write: Descriptor(raw: ends[1]))
     }
 
     /// How a hearing ended: with everything each stream carried, once the child had exited
@@ -270,13 +264,13 @@ public struct Command: Sendable {
     /// end the read being waited on. [LAW:no-ambient-temporal-coupling] Watching all of it
     /// from the start leaves no order to get wrong.
     private func hear(_ pid: pid_t, _ streams: [Int32], by deadline: Deadline) throws -> Heard {
-        let queue = kqueue()
-        guard queue >= 0 else { throw unheard("could not be watched") }
-        defer { close(queue) }
+        let made = kqueue()
+        guard made >= 0 else { throw unheard("could not be watched") }
+        let queue = Descriptor(raw: made)
         func watch(_ ident: UInt, _ filter: Int32, _ flags: Int32, _ fflags: UInt32 = 0) -> Int32 {
             var change = kevent(ident: ident, filter: Int16(filter), flags: UInt16(flags | EV_RECEIPT), fflags: fflags, data: 0, udata: nil)
             var receipt = kevent()
-            return kevent(queue, &change, 1, &receipt, 1, nil) == 1 ? Int32(receipt.data) : errno
+            return kevent(queue.raw, &change, 1, &receipt, 1, nil) == 1 ? Int32(receipt.data) : errno
         }
         for stream in streams {
             let refused = watch(UInt(stream), EVFILT_READ, EV_ADD)
@@ -289,8 +283,8 @@ public struct Command: Sendable {
         guard gone == 0 || gone == ESRCH else { throw unheard("could not be watched", gone) }
         let stoppable = watch(0, EVFILT_USER, EV_ADD | EV_CLEAR)
         guard stoppable == 0 else { throw unheard("could not be watched", stoppable) }
-        deadline.stop.wake(queue, running: said)
-        defer { deadline.stop.forget(queue) }
+        deadline.stop.wake(queue.raw, running: said)
+        defer { deadline.stop.forget(queue.raw) }
         var exited = gone == ESRCH
         var open = Set(streams)
         var carried: [Int32: [UInt8]] = [:]
@@ -300,7 +294,7 @@ public struct Command: Sendable {
             let left = SuspendingClock.now.duration(to: deadline.at)
             guard left > .zero else { return .overran }
             var patience = timespec(tv_sec: Int(left.components.seconds), tv_nsec: Int(left.components.attoseconds / 1_000_000_000))
-            let ready = kevent(queue, nil, 0, &events, Int32(events.count), &patience)
+            let ready = kevent(queue.raw, nil, 0, &events, Int32(events.count), &patience)
             if ready < 0, errno == EINTR { continue }
             guard ready >= 0 else { throw unheard("could not be watched") }
             for event in events.prefix(Int(ready)) {
