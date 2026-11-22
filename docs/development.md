@@ -117,7 +117,30 @@ one of the pool's.
 
 `make test` runs the suite with the pool one thread wide, so a test that needs the trait
 and lacks it is slow or hung on any Mac, and not only on CI. `thePoolIsOneThreadWide`
-fails on a wider pool, so a run that has lost the narrow one says so.
+fails when that setting is missing, so a run that has lost the narrow one says so.
+
+The same holds for what vhid ships. `DispatchQueue.global()` adds a thread only while
+fewer than the core count are running, so blocking work queued there waits on whatever
+else is spinning: on CI a reading with a 0.2 s limit returned after 14 s. Work that
+blocks goes on a `DispatchQueue(label:)` of its own, and a deadline is taken at the call
+and not inside the dispatched work.
+
+A test never waits a guessed time. Each wait is one of three kinds:
+
+- **On an event:** a `Gate`, from `OwnThread`, which the code under test opens or updates
+  and the test waits on. A child says it has started by writing to a `FIFO`. A thing let
+  go is seen by a `deinit`. No loop sleeps and looks again.
+- **A give-up:** shown against a peer that cannot end on its own, such as a child that
+  runs `exec sleep 3600` or a fake that never answers, so the limit is the only way the
+  wait can end. No wall-time bound goes beside it. A limit kept on a clock the test holds
+  (`HandClock` or `ManualClock`, from `TestClock`) is passed by moving that clock, as the fake daemon's
+  `withhold` does.
+- **A hang guard:** `hangGuard`, the 30 s every `Gate` wait is bounded by, which turns a
+  hang into a failure that names what it was waiting for. A test never passes by reaching it.
+
+A test of state the whole process shares, like open descriptors, child processes or
+signal dispositions, runs in an exit test (`#expect(processExitsWith:)`), so no other
+test can disturb what it counts.
 
 ## Checking the reach matrix
 
