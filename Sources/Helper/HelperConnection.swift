@@ -1,6 +1,7 @@
 import ScreenSpace
 import Installations
 import Foundation
+import Time
 
 /// One connection to vhidd, and the two devices reached over it.
 ///
@@ -23,6 +24,9 @@ import Foundation
 public final class HelperConnection: @unchecked Sendable {
     private let connection: NSXPCConnection
     private let replyTimeout: Duration
+    /// What every reply is waited for on, and what a client over this connection times its
+    /// reports on. [LAW:one-source-of-truth]
+    public let timeline: Timeline
     /// The Mach service dialled, which every failure names: installations run side by
     /// side, and "the helper" does not say which one did not answer.
     private let service: String
@@ -97,27 +101,31 @@ public final class HelperConnection: @unchecked Sendable {
         public var description: String { "\(service) refused: \(reason)" }
     }
 
-    /// How long a client waits for vhidd's reply to a call, unless it says otherwise.
+    /// How long a client waits for vhidd's reply, unless it says otherwise: an act's limit,
+    /// counted from when it is asked, and a read's, within the deadline of whatever asked it.
     public static let replyTimeout: Duration = .seconds(5)
 
     /// Connects to vhidd's Mach service. The connection is lazy - launchd starts the
     /// job on the first call, not here - so a vhidd that is not installed is discovered
     /// when a key is first pressed rather than at construction.
     ///
-    /// `replyTimeout` bounds each call: a vhidd that neither answers nor drops the
-    /// connection is unreachable at the deadline rather than a caller blocked for good.
+    /// `replyTimeout` bounds each act, counted from when it is asked: a vhidd that neither
+    /// answers nor drops the connection is unreachable at the deadline rather than a caller
+    /// blocked for good.
     /// `installation` says whose daemon this reaches. It has no default: installations run
     /// side by side, and a connection that guessed would type through another copy's
     /// keyboard. [LAW:no-silent-failure]
-    public convenience init(installation: Installation, replyTimeout: Duration = HelperConnection.replyTimeout) {
-        self.init(connection: NSXPCConnection(machServiceName: installation.service, options: .privileged), service: installation.service, replyTimeout: replyTimeout)
+    public convenience init(installation: Installation, timeline: Timeline, replyTimeout: Duration = HelperConnection.replyTimeout) {
+        self.init(connection: NSXPCConnection(machServiceName: installation.service, options: .privileged), service: installation.service,
+                  timeline: timeline, replyTimeout: replyTimeout)
     }
 
     /// Over a connection someone else made, which is how a test puts a service of its own
     /// on the far end. [LAW:decomposition]
-    init(connection: NSXPCConnection, service: String, replyTimeout: Duration) {
+    init(connection: NSXPCConnection, service: String, timeline: Timeline, replyTimeout: Duration) {
         self.connection = connection
         self.service = service
+        self.timeline = timeline
         self.replyTimeout = replyTimeout
         connection.remoteObjectInterface = .helper()
         connection.resume()
@@ -169,8 +177,8 @@ public final class HelperConnection: @unchecked Sendable {
     ///
     /// Not a word on the devices, so it leaves this connection as unspoken as it found it:
     /// a `leave` after it still has nothing to hand back. [LAW:dataflow-not-control-flow]
-    public func status() throws -> Int32? {
-        try exchange { service, reply in service.status { holder, error in reply(error.map { .failed($0) } ?? .answered(holder?.int32Value)) } }
+    public func status(by deadline: Deadline) throws -> Int32? {
+        try exchange(by: deadline) { service, reply in service.status { holder, error in reply(error.map { .failed($0) } ?? .answered(holder?.int32Value)) } }
     }
 
     /// The daemon's most recent failure, or nil when it has had none since it started.
@@ -178,8 +186,8 @@ public final class HelperConnection: @unchecked Sendable {
     /// [LAW:parse-dont-validate] The wire's pair becomes one optional here, once: a text
     /// without a time or a time without a text is a daemon this client does not
     /// understand, and is thrown as that rather than shown as half a failure.
-    public func lastFailure() throws -> DaemonFailure? {
-        let (text, at): (String?, Date?) = try exchange { service, reply in service.lastFailure { reply(.answered(($0, $1))) } }
+    public func lastFailure(by deadline: Deadline) throws -> DaemonFailure? {
+        let (text, at): (String?, Date?) = try exchange(by: deadline) { service, reply in service.lastFailure { reply(.answered(($0, $1))) } }
         switch (text, at) {
         case (let text?, let at?): return DaemonFailure(text: text, at: at)
         case (nil, nil): return nil
@@ -190,16 +198,16 @@ public final class HelperConnection: @unchecked Sendable {
     /// Where the cursor is, read in the session in front, as the wire's two numbers.
     ///
     /// Not a word on the devices either, so it leaves the connection unspoken.
-    public func cursor() throws -> (x: Double, y: Double) {
-        try exchange { service, reply in service.cursor { x, y, error in reply(error.map { .failed($0) } ?? .answered((x, y))) } }
+    public func cursor(by deadline: Deadline) throws -> (x: Double, y: Double) {
+        try exchange(by: deadline) { service, reply in service.cursor { x, y, error in reply(error.map { .failed($0) } ?? .answered((x, y))) } }
     }
 
     /// The display layout, read in the session in front.
     ///
     /// [LAW:parse-dont-validate] The wire's flat numbers become a layout here, once, by the
     /// record's own reading, and a record that is not one is refused by what it is not.
-    public func layout() throws -> DisplayLayout {
-        let numbers: [NSNumber] = try exchange { service, reply in service.layout { numbers, error in reply(error.map { .failed($0) } ?? .answered(numbers)) } }
+    public func layout(by deadline: Deadline) throws -> DisplayLayout {
+        let numbers: [NSNumber] = try exchange(by: deadline) { service, reply in service.layout { numbers, error in reply(error.map { .failed($0) } ?? .answered(numbers)) } }
         return try DisplayLayout(record: numbers.map(\.doubleValue))
     }
 
@@ -214,22 +222,20 @@ public final class HelperConnection: @unchecked Sendable {
     /// the call may have returned: a late one writes here, into something that outlives the
     /// call, and never into a local that does not. [LAW:no-ambient-temporal-coupling]
     private final class Outcome<Answer>: @unchecked Sendable {
-        private let lock = NSLock()
-        private let spoken = DispatchSemaphore(value: 0)
+        private let spoken = NSCondition()
+        /// Under `spoken`.
         private var word: Word<Answer>?
 
         func say(_ word: Word<Answer>) {
-            lock.lock()
+            spoken.lock(); defer { spoken.unlock() }
             if self.word == nil { self.word = word }
-            lock.unlock()
-            spoken.signal()
+            spoken.broadcast()
         }
 
-        /// The word, or nil when none came in time.
-        func await(_ timeout: Duration) -> Word<Answer>? {
-            let nanoseconds = timeout.components.seconds * 1_000_000_000 + timeout.components.attoseconds / 1_000_000_000
-            guard spoken.wait(timeout: .now() + .nanoseconds(Int(nanoseconds))) == .success else { return nil }
-            lock.lock(); defer { lock.unlock() }
+        /// The word, or nil when none came by `deadline`.
+        func await(_ deadline: Deadline) -> Word<Answer>? {
+            spoken.lock(); defer { spoken.unlock() }
+            while word == nil, deadline.wait(on: spoken) {}
             return word
         }
     }
@@ -246,7 +252,7 @@ public final class HelperConnection: @unchecked Sendable {
         history.lock()
         hasSpoken = true
         history.unlock()
-        let outcome = Result { try exchange { service, reply in body(service) { error in reply(error.map { .failed($0) } ?? .answered(())) } } }
+        let outcome = Result { try exchange(by: .within(replyTimeout, on: timeline)) { service, reply in body(service) { error in reply(error.map { .failed($0) } ?? .answered(())) } } }
         // The daemon ran this act: it acknowledged it, or reached the devices and failed
         // there. Not a refusal at the seat, the connection's failure, or silence.
         let ran = switch outcome {
@@ -264,11 +270,15 @@ public final class HelperConnection: @unchecked Sendable {
     /// vhidd refused, the connection did, or nobody said anything - and a client that
     /// only reads the first types into a dead service forever. All three arrive here, and
     /// all three throw.
-    private func exchange<Answer>(_ body: (HelperService, @escaping (Word<Answer>) -> Void) -> Void) throws -> Answer {
+    private func exchange<Answer>(by asked: Deadline, _ body: (HelperService, @escaping (Word<Answer>) -> Void) -> Void) throws -> Answer {
+        let deadline = asked.capped(replyTimeout)
         history.lock()
         let gaveUp = abandoned
         history.unlock()
         if let gaveUp { throw Unreachable(service: service, cause: .abandoned(gaveUp)) }
+        // Not asked at all once its asker's limit has passed, so a reading that ran out
+        // before its turn says so and is never taken for a daemon that did not answer.
+        guard !deadline.passed else { throw deadline.refusal }
         let outcome = Outcome<Answer>()
         let proxy = connection.remoteObjectProxyWithErrorHandler { error in
             let failed = error as NSError
@@ -276,7 +286,7 @@ public final class HelperConnection: @unchecked Sendable {
         }
         guard let helper = proxy as? HelperService else { throw Unreachable(service: service, cause: .notAHelper) }
         body(helper) { outcome.say($0) }
-        let word = outcome.await(replyTimeout)
+        let word = outcome.await(deadline)
         switch word {
         case .answered(let answer): return answer
         case .failed(let error as Unreachable): throw error
@@ -289,9 +299,9 @@ public final class HelperConnection: @unchecked Sendable {
             // A vhidd silent this long is taken as gone, and the connection with it: every
             // call after this one, the leave included, fails at once rather than waiting out
             // a deadline of its own. The daemon releases what it held when it sees this.
-            history.lock(); abandoned = replyTimeout; history.unlock()
+            history.lock(); abandoned = deadline.limit; history.unlock()
             connection.invalidate()
-            throw Unreachable(service: service, cause: .silence(replyTimeout))
+            throw Unreachable(service: service, cause: .silence(deadline.limit))
         }
     }
 }

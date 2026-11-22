@@ -1,3 +1,4 @@
+import Time
 import AppKit
 import Foundation
 import Helper
@@ -57,7 +58,7 @@ struct Devices {
     /// daemon that is not installed is discovered when the first report goes out rather
     /// than at construction. Nothing is claimed about it before then. [LAW:no-silent-failure]
     static func using<T>(_ installation: Installation, _ body: (Devices) async throws -> T) async throws -> T {
-        try await using(HelperConnection(installation: installation), body)
+        try await using(HelperConnection(installation: installation, timeline: Vhid.timeline), body)
     }
 
     /// Over a connection someone else made, which is how a test puts a daemon of its own on
@@ -84,9 +85,9 @@ struct Devices {
         Telemetry.note(.keyRepeatDelayMilliseconds, .double(keyRepeatDelay / .milliseconds(1)))
         let keyboard = TalliedKeyboard(keyboard: QueuedKeyboard(keyboard: helper.keyboard, queue: queue))
         let devices = Devices(keyboard: keyboard, mouse: mouse, cursor: cursor, layout: layout(helper, on: queue), front: front(helper, on: queue),
-                              pointer: Pointer(mouse: mouse, cursor: cursor, timeline: .suspending,
+                              pointer: Pointer(mouse: mouse, cursor: cursor, timeline: helper.timeline,
                                                randomness: randomness, hand: Hand(doubleClickInterval: doubleClick), traced: trail.traced),
-                              typist: Typist(keyboard: keyboard, timeline: .suspending, randomness: randomness,
+                              typist: Typist(keyboard: keyboard, timeline: helper.timeline, randomness: randomness,
                                              cadence: Cadence(keyRepeatDelay: keyRepeatDelay), traced: trail.typed), trail: trail)
         let ran: Result<T, any Error>
         do { ran = .success(try await body(devices)) } catch { ran = .failure(error) }
@@ -117,7 +118,7 @@ struct Devices {
     /// like every other call, and claims nothing. [LAW:no-ambient-temporal-coupling]
     static func front(_ helper: HelperConnection, on queue: DeviceQueue) -> @Sendable () async throws -> Front.App? {
         {
-            _ = try await queue.run { try helper.status() }
+            _ = try await queue.run { try helper.status(by: .within(HelperConnection.replyTimeout, on: helper.timeline)) }
             return try await Aim.inFront()
         }
     }
@@ -129,7 +130,7 @@ struct Devices {
     /// the reason the devices' are.
     static func cursor(_ helper: HelperConnection, on queue: DeviceQueue) -> @Sendable () async throws -> ScreenPoint {
         {
-            let at = try await queue.run { try helper.cursor() }
+            let at = try await queue.run { try helper.cursor(by: .within(HelperConnection.replyTimeout, on: helper.timeline)) }
             do throws(NotAPlace) {
                 return try ScreenPoint(x: at.x, y: at.y)
             } catch {
@@ -140,7 +141,7 @@ struct Devices {
 
     /// The layout as the daemon reads it, waited for on `queue` for the reason the cursor is.
     static func layout(_ helper: HelperConnection, on queue: DeviceQueue) -> @Sendable () async throws -> DisplayLayout {
-        { try await queue.run { try helper.layout() } }
+        { try await queue.run { try helper.layout(by: .within(HelperConnection.replyTimeout, on: helper.timeline)) } }
     }
 
     /// The place a verb was given, placed by the one rule on one read of the layout's online

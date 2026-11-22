@@ -4,7 +4,9 @@ import OwnThread
 import Pointing
 import ScreenSpace
 import ScreenSpaceTesting
+import TestClock
 import Testing
+import Time
 @testable import Helper
 
 /// The client's side of the privilege seam, driven against a service of the test's own
@@ -29,6 +31,8 @@ import Testing
         /// Replies never given, held so that a reply that was dropped rather than
         /// withheld cannot pass as the same thing.
         private var withheld: [(Error?) -> Void] = []
+        /// Opened when a reply is first withheld: the call has reached the far end.
+        let reached = Latch()
 
         /// What `lastFailure` answers, as the wire's pair, so a test can hand back a half.
         private let failure: (String?, Date?)
@@ -57,6 +61,7 @@ import Testing
                 reply(NSError(domain: domain, code: code, userInfo: [NSLocalizedDescriptionKey: "refused by the fake"]))
             case .never:
                 lock.lock(); withheld.append(reply); lock.unlock()
+                reached.open()
             }
         }
 
@@ -111,15 +116,15 @@ import Testing
         let service: Service
     }
 
-    /// The bound ends a test whose far end is broken; it measures nothing, so it sits far
-    /// above any round trip. [LAW:no-ambient-temporal-coupling]
-    private func helper(_ answer: Answer, failure: (String?, Date?) = (nil, nil), replyTimeout: Duration = .seconds(20)) -> (HelperConnection, FarEnd) {
+    /// On a test clock, which only the test moves: a reply is waited for until it comes, and
+    /// a silence is a silence when the test moves the clock past the limit.
+    private func helper(_ answer: Answer, failure: (String?, Date?) = (nil, nil), replyTimeout: Duration = .seconds(5), clock: ManualClock = ManualClock()) -> (HelperConnection, FarEnd) {
         let service = Service(answer, failure: failure)
         let listener = NSXPCListener.anonymous()
         listener.delegate = service
         listener.resume()
         let connection = NSXPCConnection(listenerEndpoint: listener.endpoint)
-        return (HelperConnection(connection: connection, service: "ai.promptctl.vhid.tests.far", replyTimeout: replyTimeout), FarEnd(listener: listener, service: service))
+        return (HelperConnection(connection: connection, service: "ai.promptctl.vhid.tests.far", timeline: clock.timeline, replyTimeout: replyTimeout), FarEnd(listener: listener, service: service))
     }
 
     @Test func anAcknowledgedKeyGoesDownAndTheCallReturns() throws {
@@ -186,14 +191,14 @@ import Testing
     /// still not spoken, so a `leave` after it sends nothing.
     @Test func statusAnswersTheHolderAndLeavesTheConnectionUnspoken() throws {
         let (helper, far) = helper(.acknowledge)
-        #expect(try helper.status() == 41)
+        #expect(try helper.status(by: .within(.seconds(5), on: ManualClock().timeline)) == 41)
         try helper.leave()
         #expect(far.service.pointed == ["status"])
     }
 
     @Test func theCursorIsReadAndLeavesTheConnectionUnspoken() throws {
         let (helper, far) = helper(.acknowledge)
-        #expect(try helper.cursor() == (812.5, 400))
+        #expect(try helper.cursor(by: .within(.seconds(5), on: ManualClock().timeline)) == (812.5, 400))
         try helper.leave()
         #expect(far.service.pointed == ["cursor"])
     }
@@ -206,7 +211,7 @@ import Testing
     /// connection unspoken.
     @Test func theLayoutCrossesTheWireAsItself() throws {
         let (helper, far) = helper(.acknowledge)
-        #expect(try helper.layout() == Self.layout)
+        #expect(try helper.layout(by: .within(.seconds(5), on: ManualClock().timeline)) == Self.layout)
         try helper.leave()
         #expect(far.service.pointed == ["layout"])
     }
@@ -222,11 +227,17 @@ import Testing
     /// A service that neither answers nor hangs up is unreachable at the deadline, rather
     /// than a caller blocked for good. [LAW:no-ambient-temporal-coupling]
     @Test func aServiceThatNeverAnswersIsUnreachableAtTheDeadline() throws {
-        let (helper, far) = helper(.never, replyTimeout: .milliseconds(200))
-        let began = ContinuousClock.now
-        let unreachable = #expect(throws: HelperConnection.Unreachable.self) { try helper.keyboard.down(.space) }
-        #expect(unreachable?.cause == .silence(.milliseconds(200)))
-        #expect(ContinuousClock.now - began >= .milliseconds(200))
+        let clock = ManualClock(), ended = Latch()
+        let (helper, far) = helper(.never, replyTimeout: .milliseconds(200), clock: clock)
+        nonisolated(unsafe) var said: (any Error)?
+        Thread.detachNewThread {
+            do { try helper.keyboard.down(.space) } catch { said = error }
+            ended.open()
+        }
+        far.service.reached.wait("the call to reach the far end")
+        clock.advance(by: .milliseconds(200))
+        try #require(ended.wait("the call to give up"))
+        #expect((said as? HelperConnection.Unreachable)?.cause == .silence(.milliseconds(200)))
         // Held to the deadline: a far end gone early is unreachable for the wrong reason,
         // and a test that cannot tell the two apart proves nothing.
         withExtendedLifetime(far) {}
@@ -237,13 +248,13 @@ import Testing
     @Test func theLastFailureIsBothHalvesOrNeither() throws {
         let at = Date(timeIntervalSince1970: 1_790_000_000)
         let (both, bothFar) = helper(.acknowledge, failure: ("the keyboard would not release", at))
-        #expect(try both.lastFailure() == DaemonFailure(text: "the keyboard would not release", at: at))
+        #expect(try both.lastFailure(by: .within(.seconds(5), on: ManualClock().timeline)) == DaemonFailure(text: "the keyboard would not release", at: at))
 
         let (neither, neitherFar) = helper(.acknowledge)
-        #expect(try neither.lastFailure() == nil)
+        #expect(try neither.lastFailure(by: .within(.seconds(5), on: ManualClock().timeline)) == nil)
 
         let (half, halfFar) = helper(.acknowledge, failure: ("a text with no time", nil))
-        let garbled = #expect(throws: HelperConnection.Unreachable.self) { try half.lastFailure() }
+        let garbled = #expect(throws: HelperConnection.Unreachable.self) { try half.lastFailure(by: .within(.seconds(5), on: ManualClock().timeline)) }
         #expect(garbled?.cause == .notAHelper)
         withExtendedLifetime((bothFar, neitherFar, halfFar)) {}
     }

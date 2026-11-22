@@ -48,6 +48,33 @@ public final class Handshake: Sendable {
     }
 }
 
+/// A named pipe a child process writes to say it has reached a point - started, wrote its
+/// pid - which the test reads to know it has, with no poll and no sleep.
+public final class Fifo: Sendable {
+    public let path: String
+
+    public init() throws {
+        path = FileManager.default.temporaryDirectory.appending(path: "fifo-\(UUID().uuidString)").path
+        guard mkfifo(path, 0o600) == 0 else { throw CocoaError(.fileWriteUnknown) }
+    }
+
+    deinit { unlink(path) }
+
+    /// What the next writer wrote, once it closes the pipe, or nil after `hangGuard`. The
+    /// blocking open and read are on a thread of their own, so a writer that never comes
+    /// is a recorded hang and not a test that never ends.
+    public func said(sourceLocation: SourceLocation = #_sourceLocation) -> String? {
+        let heard = Latch(), path = path
+        nonisolated(unsafe) var said: String?
+        Thread.detachNewThread {
+            said = FileHandle(forReadingAtPath: path).map { String(decoding: $0.readDataToEndOfFile(), as: UTF8.self) }
+            heard.open()
+        }
+        guard heard.wait("a writer to \(path)", sourceLocation: sourceLocation) else { return nil }
+        return said?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
 /// Yields until `condition` holds, for a test that needs a task it cannot join to reach a
 /// point first, failing as a hang after `hangGuard`. Only for a state the test has no event
 /// to wait on: every wait with an event takes a latch.

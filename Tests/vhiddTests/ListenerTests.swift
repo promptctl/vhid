@@ -2,6 +2,8 @@ import Foundation
 import Installations
 import Keystrokes
 import OwnThread
+import TestClock
+import Time
 import Testing
 @testable import Helper
 @testable import vhidd
@@ -78,7 +80,7 @@ import Testing
     /// going away does.
     private func client(of served: Served) -> (helper: HelperConnection, connection: NSXPCConnection) {
         let connection = NSXPCConnection(listenerEndpoint: served.listener.endpoint)
-        return (HelperConnection(connection: connection, service: "ai.promptctl.vhid.tests.far", replyTimeout: .seconds(20)), connection)
+        return (HelperConnection(connection: connection, service: "ai.promptctl.vhid.tests.far", timeline: ManualClock().timeline, replyTimeout: .seconds(5)), connection)
     }
 
     /// Whether a fresh client pressing `usage` was served. A client refused as busy hears
@@ -172,12 +174,12 @@ import Testing
     @Test func statusAnswersTheHolderWithoutTakingTheDevices() throws {
         let served = try serve()
         let asker = client(of: served).helper
-        #expect(try asker.status() == nil)
+        #expect(try asker.status(by: .within(.seconds(5), on: asker.timeline)) == nil)
 
         let first = client(of: served)
         let keyboard = first.helper.keyboard
         try keyboard.down(.leftShift)
-        #expect(try asker.status() == getpid())
+        #expect(try asker.status(by: .within(.seconds(5), on: asker.timeline)) == getpid())
 
         try keyboard.down(.space)
         #expect(served.devices.asked == [Usage.leftShift.rawValue, Usage.space.rawValue])
@@ -197,7 +199,7 @@ import Testing
         let refused = #expect(throws: HelperConnection.Refused.self) { try keyboard.down(.tab) }
         #expect(refused?.domain == Installation.refusalDomain)
         #expect(refused?.reason == "\(Seat.Ended())")
-        #expect(try leaver.status() == nil)
+        #expect(try leaver.status(by: .within(.seconds(5), on: leaver.timeline)) == nil)
         #expect(served.devices.asked == [Usage.leftShift.rawValue])
         withExtendedLifetime((served, first)) {}
     }
@@ -208,7 +210,7 @@ import Testing
     @Test func aCallerOutsideTheRequirementHearsAnInterruptedConnection() throws {
         let served = try serve(requiring: #"identifier "ai.promptctl.vhid.tests.nobody""#)
         let asker = client(of: served).helper
-        let refused = #expect(throws: HelperConnection.Unreachable.self) { try asker.status() }
+        let refused = #expect(throws: HelperConnection.Unreachable.self) { try asker.status(by: .within(.seconds(5), on: asker.timeline)) }
         guard case .connection(let domain, let code, _) = refused?.cause else {
             Issue.record("refused for another cause: \(String(describing: refused))")
             return

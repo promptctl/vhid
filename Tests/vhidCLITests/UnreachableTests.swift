@@ -89,7 +89,7 @@ import InputTesting
         listener.delegate = service
         listener.resume()
         defer { listener.invalidate() }
-        let helper = HelperConnection(connection: NSXPCConnection(listenerEndpoint: listener.endpoint), service: Self.far, replyTimeout: .seconds(20))
+        let helper = HelperConnection(connection: NSXPCConnection(listenerEndpoint: listener.endpoint), service: Self.far, timeline: ManualClock().timeline, replyTimeout: .seconds(5))
         return await failure { try await Devices.using(helper, verb) }
     }
 
@@ -109,7 +109,7 @@ import InputTesting
     /// the deadline.
     @Test func aServiceNobodyHoldsIsNamedAndNoKeyIsClaimedHeld() async {
         let unreachable = "no launchd job answers \(Self.far) (NSCocoaErrorDomain 4099): vhidd is not installed or not loaded"
-        func helper() -> HelperConnection { HelperConnection(connection: Unanswered(), service: Self.far, replyTimeout: .seconds(20)) }
+        func helper() -> HelperConnection { HelperConnection(connection: Unanswered(), service: Self.far, timeline: ManualClock().timeline, replyTimeout: .seconds(5)) }
         let at = ScreenPoint.at(5, 5)
         let typed = await Self.failure { try await Devices.using(helper()) { try await TypeCommand.type("ab", on: VerbTests.us, into: .anywhere, with: $0.typist, front: $0.front) } }
         let clicked = await Self.failure {

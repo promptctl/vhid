@@ -24,6 +24,13 @@ public struct Deadline: Sendable, CustomStringConvertible {
         Deadline(limit: max(.zero, at - timeline.now()), at: at, timeline: timeline)
     }
 
+    /// This deadline, or `limit` from now where that is sooner: for a wait under the request
+    /// that has a limit of its own, as a reply has, and is still over when the request is.
+    public func capped(_ limit: Duration) -> Deadline {
+        let soonest = min(at, timeline.now() + limit)
+        return Deadline(limit: min(self.limit, soonest - (at - self.limit)), at: soonest, timeline: timeline)
+    }
+
     /// What is left of the limit, none once it has passed.
     public var left: Duration { max(.zero, at - timeline.now()) }
     public var passed: Bool { timeline.now() >= at }
@@ -54,7 +61,7 @@ public struct Deadline: Sendable, CustomStringConvertible {
     public var description: String { "\(limit), \(left) left" }
 
     /// The request's limit passed while it waited, and it was let go before it ran anything.
-    public struct Passed: Error, Equatable, CustomStringConvertible {
+    public struct Passed: Error, Hashable, CustomStringConvertible {
         public let limit: Duration
         public let spent: Duration
 

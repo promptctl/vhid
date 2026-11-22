@@ -1,5 +1,6 @@
 import Foundation
 import Synchronization
+import Time
 
 /// One command run against the machine, and everything it said.
 ///
@@ -58,35 +59,11 @@ public struct Command: Sendable {
     /// waits less, and has a limit of its own.
     public static let limit: Duration = .seconds(30)
 
-    /// When a reading is to be over, and the limit that put it there.
-    ///
-    /// [LAW:no-ambient-temporal-coupling] One is made for a reading and handed to every
-    /// command the reading runs, so the limit is the reading's: each command is given what
-    /// the ones before it left, where a limit apiece would add up to several.
-    ///
-    /// On the clock that stops with the Mac: a child does not run while the Mac sleeps, and
-    /// a limit that counted the sleep would be past on waking for a tool that had run a
-    /// moment of it.
-    ///
-    /// Or over sooner, at `stop`: a person's Control-C, or an MCP call withdrawn, ends the
-    /// reading where it stands, and the command running then with it.
-    public struct Deadline: Sendable {
-        public let limit: Duration
-        fileprivate let at: SuspendingClock.Instant
-        fileprivate let stop: Stop
-
-        /// Over `limit` from now, or at `stop`, whichever comes first.
-        /// [LAW:dataflow-not-control-flow] Every reading has a stop, and one nobody pulls
-        /// is the reading that runs to its end. [LAW:types-are-the-program] Not defaulted,
-        /// so a caller says which: a reading nobody can stop is never one that forgot to
-        /// take its stop.
-        public static func within(_ limit: Duration, or stop: Stop) -> Deadline {
-            Deadline(limit: limit, at: .now + limit, stop: stop)
-        }
-    }
-
     /// What ends a reading before its deadline, pulled from whichever thread hears the
-    /// cancel while the reading blocks another.
+    /// cancel while the reading blocks another: a person's Control-C, or an MCP call
+    /// withdrawn, ends the reading where it stands, and the command running then with it.
+    /// [LAW:dataflow-not-control-flow] Every reading has a stop, and one nobody pulls is the
+    /// reading that runs to its end.
     ///
     /// A stop pulled stays pulled: a command the reading runs afterwards is not started, so
     /// a reading of several commands ends at the one running and runs no more.
@@ -119,12 +96,7 @@ public struct Command: Sendable {
             state.withLock { $0.ended }
         }
 
-        /// Throws the cancel where the stop has been pulled, so a stopped reading starts no
-        /// command: one like `open` acts as it starts, before any kill could reach it. A
-        /// pull that lands after this is heard by `wake`.
-        fileprivate func admit() throws(CancellationError) {
-            if state.withLock({ $0.pulled }) { throw CancellationError() }
-        }
+        fileprivate var pulled: Bool { state.withLock { $0.pulled } }
 
         /// Wakes `queue`, which is running `command`, when the stop is pulled, which can be
         /// now. `queue` is watched for the wake already, and is not closed before `forget`
@@ -143,11 +115,8 @@ public struct Command: Sendable {
             _ = state.withLock { $0.waiting.removeValue(forKey: queue) }
         }
 
-        /// The event `hear` watches for, set off. Nothing is lost when this fails: the
-        /// queue is a reading's own and one it cannot be woken on is one that is closing.
         private static func trigger(_ queue: Int32) {
-            var trigger = kevent(ident: 0, filter: Int16(EVFILT_USER), flags: 0, fflags: UInt32(NOTE_TRIGGER), data: 0, udata: nil)
-            _ = kevent(queue, &trigger, 1, nil, 0, nil)
+            Command.trigger(queue, Command.stopEvent)
         }
     }
 
@@ -163,6 +132,16 @@ public struct Command: Sendable {
         public let limit: Duration
 
         public var description: String { "`\(command)` had not ended \(ran) after it was started, at the limit of \(limit), and was given up on" }
+    }
+
+    /// A command not started, because its reading's limit had passed before its turn: what
+    /// ran before it in the reading, or the wait for a thread to read on, had spent it.
+    public struct Unstarted: Error, CustomStringConvertible, Equatable {
+        public let command: String
+        public let limit: Duration
+        public let spent: Duration
+
+        public var description: String { "`\(command)` was not started: its reading's limit of \(limit) had passed, \(spent.milliseconds) ms after it was asked" }
     }
 
     /// A command this Mac would not let be heard to its end: no pipe for it, no watch on
@@ -183,15 +162,21 @@ public struct Command: Sendable {
     private func unheard(_ what: String, _ code: Int32 = errno) -> Unheard { Unheard(command: said, what: what, code: code) }
 
     /// Runs the command to its end, or to `deadline`, where it is given up on and thrown as
-    /// `Overran`, or to the deadline's stop, where it is thrown as a `CancellationError`.
+    /// `Overran`, or to `stop`, where it is thrown as a `CancellationError`.
     /// [LAW:types-are-the-program] The deadline is not optional, so nothing this program
-    /// runs can hold its caller for good.
+    /// runs can hold its caller for good, and neither is the stop, so a reading nobody can
+    /// stop is never one that forgot to take its stop.
+    ///
+    /// Admitted first: a pulled stop is the cancel and a spent deadline is `Unstarted`, and
+    /// either way nothing is spawned - a command like `open` acts as it starts, before any
+    /// kill could reach it. A pull that lands after this is heard by `wake`.
     ///
     /// The child is this call's from `spawn` to `collect`: nothing of it is left once this
     /// returns or throws, not a descriptor and not a pid to collect.
-    public func run(by deadline: Deadline) throws -> Output {
-        try deadline.stop.admit()
-        let started = SuspendingClock.now
+    public func run(by deadline: Deadline, or stop: Stop) throws -> Output {
+        if stop.pulled { throw CancellationError() }
+        guard !deadline.passed else { throw Unstarted(command: said, limit: deadline.limit, spent: deadline.spent) }
+        let started = deadline.timeline.now()
         // Nothing to read: a reading takes no input, and under an MCP server this process's
         // own stdin is the client's JSON-RPC stream, which a child must not take from.
         let nothing = open("/dev/null", O_RDONLY)
@@ -214,7 +199,7 @@ public struct Command: Sendable {
             defer { close(out.write); close(err.write); close(nothing) }
             pid = try spawn(tool.path, arguments, stdio: [0: nothing, 1: out.write, 2: err.write], environment: environment)
         }
-        let heard = Result { try hear(pid, [out.read, err.read], by: deadline) }
+        let heard = Result { try hear(pid, [out.read, err.read], by: deadline, or: stop) }
         // [LAW:single-enforcer] The one place the child is stopped and collected, however
         // the hearing ended. What it started is not reached: a stream held open past the
         // child's exit is let go of here and goes on being held there. SIGKILL, because a
@@ -232,12 +217,7 @@ public struct Command: Sendable {
         case .ended(let carried):
             streams = carried
         case .overran:
-            let ran = SuspendingClock.now - started
-            throw Overran(
-                command: said,
-                ran: .milliseconds(ran.components.seconds * 1000 + ran.components.attoseconds / 1_000_000_000_000_000),
-                limit: deadline.limit
-            )
+            throw Overran(command: said, ran: .milliseconds((deadline.timeline.now() - started).milliseconds), limit: deadline.limit)
         case .stopped:
             throw CancellationError()
         }
@@ -262,6 +242,16 @@ public struct Command: Sendable {
         case stopped
     }
 
+    /// The two events a hearing's queue is woken by besides the child: its stop pulled, and
+    /// its timeline moved, which only a test's does.
+    fileprivate static let stopEvent: UInt = 0
+    fileprivate static let timelineEvent: UInt = 1
+
+    fileprivate static func trigger(_ queue: Int32, _ event: UInt) {
+        var trigger = kevent(ident: event, filter: Int16(EVFILT_USER), flags: 0, fflags: UInt32(NOTE_TRIGGER), data: 0, udata: nil)
+        _ = kevent(queue, &trigger, 1, nil, 0, nil)
+    }
+
     /// Hears the child out, by `deadline`.
     ///
     /// The exit and the streams are waited for at once, on one queue. A child whose pipe
@@ -269,7 +259,7 @@ public struct Command: Sendable {
     /// is a stream whose turn can never come: the child cannot reach the exit that would
     /// end the read being waited on. [LAW:no-ambient-temporal-coupling] Watching all of it
     /// from the start leaves no order to get wrong.
-    private func hear(_ pid: pid_t, _ streams: [Int32], by deadline: Deadline) throws -> Heard {
+    private func hear(_ pid: pid_t, _ streams: [Int32], by deadline: Deadline, or stop: Stop) throws -> Heard {
         let queue = kqueue()
         guard queue >= 0 else { throw unheard("could not be watched") }
         defer { close(queue) }
@@ -287,24 +277,33 @@ public struct Command: Sendable {
         // process is this child, ended.
         let gone = watch(UInt(pid), EVFILT_PROC, EV_ADD, UInt32(NOTE_EXIT))
         guard gone == 0 || gone == ESRCH else { throw unheard("could not be watched", gone) }
-        let stoppable = watch(0, EVFILT_USER, EV_ADD | EV_CLEAR)
-        guard stoppable == 0 else { throw unheard("could not be watched", stoppable) }
-        deadline.stop.wake(queue, running: said)
-        defer { deadline.stop.forget(queue) }
+        for event in [Self.stopEvent, Self.timelineEvent] {
+            let wakeable = watch(event, EVFILT_USER, EV_ADD | EV_CLEAR)
+            guard wakeable == 0 else { throw unheard("could not be watched", wakeable) }
+        }
+        stop.wake(queue, running: said)
+        defer { stop.forget(queue) }
         var exited = gone == ESRCH
         var open = Set(streams)
         var carried: [Int32: [UInt8]] = [:]
-        var events = Array(repeating: Darwin.kevent(), count: streams.count + 2)
+        var events = Array(repeating: Darwin.kevent(), count: streams.count + 3)
         var buffer = [UInt8](repeating: 0, count: 65536)
         while !(exited && open.isEmpty) {
-            let left = SuspendingClock.now.duration(to: deadline.at)
-            guard left > .zero else { return .overran }
-            var patience = timespec(tv_sec: Int(left.components.seconds), tv_nsec: Int(left.components.attoseconds / 1_000_000_000))
-            let ready = kevent(queue, nil, 0, &events, Int32(events.count), &patience)
+            guard !deadline.passed else { return .overran }
+            var ready: Int32 = 0
+            deadline.block(waking: { Self.trigger(queue, Self.timelineEvent) }) { span in
+                var patience = span.timespec
+                ready = kevent(queue, nil, 0, &events, Int32(events.count), &patience)
+                return ready != 0
+            }
             if ready < 0, errno == EINTR { continue }
             guard ready >= 0 else { throw unheard("could not be watched") }
             for event in events.prefix(Int(ready)) {
-                if event.filter == Int16(EVFILT_USER) { return .stopped }
+                if event.filter == Int16(EVFILT_USER) {
+                    // The timeline moved: around the loop, to look at the deadline again.
+                    guard event.ident == Self.stopEvent else { continue }
+                    return .stopped
+                }
                 guard event.filter == Int16(EVFILT_READ) else { exited = true; continue }
                 let stream = Int32(event.ident)
                 let count = read(stream, &buffer, buffer.count)

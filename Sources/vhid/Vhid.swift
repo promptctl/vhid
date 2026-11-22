@@ -1,3 +1,4 @@
+import Time
 import ArgumentParser
 import EyesVerbs
 import Foundation
@@ -36,6 +37,10 @@ struct Vhid: AsyncParsableCommand {
             DragCommand.self, CursorCommand.self, PlayCommand.self, RecordCommand.self, McpCommand.self, DriverCommand.self,
             ServiceCommand.self, DoctorCommand.self, ReadGrants.self,
         ])
+
+    /// The one clock this process measures and waits on, made once here at its root and
+    /// handed from each verb's entry to everything under it. [LAW:one-source-of-truth]
+    static let timeline = Timeline.suspending
 
     /// ArgumentParser's own `main`, run as one invocation: parsing argv is part of it, so
     /// a refused argument leaves a record too. [LAW:nothing-unseen]

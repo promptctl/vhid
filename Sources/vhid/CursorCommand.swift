@@ -1,3 +1,4 @@
+import Time
 import ArgumentParser
 import Helper
 import Input
@@ -10,7 +11,7 @@ struct CursorCommand: AsyncParsableCommand {
     @OptionGroup var service: ServiceOption
 
     func run() async throws {
-        print(try await Self.cursor(Devices.cursor(HelperConnection(installation: try service.installation()), on: DeviceQueue())))
+        print(try await Self.cursor(Devices.cursor(HelperConnection(installation: try service.installation(), timeline: Vhid.timeline), on: DeviceQueue())))
     }
 
     /// The verb itself, over a cursor from anywhere. [LAW:decomposition]

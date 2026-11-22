@@ -1,3 +1,4 @@
+import Time
 import DriverExtension
 import Installations
 import Foundation
@@ -70,6 +71,9 @@ func logFailure(_ message: String) {
     lastFailure.record(message)
 }
 
+/// The one clock this process measures and waits on. [LAW:one-source-of-truth]
+let timeline = Timeline.suspending
+
 do {
     let callers = try CallerIdentity.sameSignerAsThisProcess()
     log("callers must satisfy: \(callers.text)")
@@ -104,7 +108,7 @@ do {
     // Listening comes first, and bringing the devices up after, on a thread of its own:
     // a client that calls while they are down is answered at once with the reason, from
     // `readiness`, rather than finding no service at all. [LAW:no-silent-failure]
-    let driver: @Sendable () throws -> DriverState = { try DriverState(DriverProbe.facts(by: .within(Readiness.driverReadLimit, or: .never))) }
+    let driver: @Sendable () throws -> DriverState = { try DriverState(DriverProbe.facts(by: .within(Readiness.driverReadLimit, on: timeline), or: .never)) }
     let readiness = Readiness(driver: driver)
     let listener = NSXPCListener(machServiceName: installation.service)
     let delegate = Listener(readiness: readiness, callers: callers, screen: FrontScreen.real(build))

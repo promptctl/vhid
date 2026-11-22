@@ -1,3 +1,4 @@
+import Time
 import ChildProcess
 import AppKit
 import Doctor
@@ -53,8 +54,15 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
 
     private static let width: CGFloat = 540
 
-    init(installation: Installation, readNow: @escaping @MainActor () -> Void) {
+    /// What a request's commands are timed on.
+    private let timeline: Timeline
+    /// Where a request is made, off the main thread: a queue of its own, which dispatch gives
+    /// a thread whenever it has work, not the bounded pool behind `DispatchQueue.global()`.
+    private let requests = DispatchQueue(label: "SetUpWindow.requests", qos: .userInitiated)
+
+    init(installation: Installation, timeline: Timeline, readNow: @escaping @MainActor () -> Void) {
         self.readNow = readNow
+        self.timeline = timeline
         log = Logger(subsystem: installation.service, category: "setup")
     }
 
@@ -171,9 +179,11 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
     /// seconds of it landing. [LAW:one-source-of-truth]
     private func request(_ ask: Requirement.Ask, for requirement: Requirement) {
         failure = nil
-        let log = log
-        DispatchQueue.global(qos: .userInitiated).async {
-            let started = Result { try Self.perform(ask, log: log) }
+        let log = log, timeline = timeline
+        // The limit is counted from the press, so a request whose turn comes late is not made.
+        let deadline = Deadline.within(Command.limit, on: timeline)
+        requests.async {
+            let started = Result { try Self.perform(ask, by: deadline, log: log) }
             DispatchQueue.main.async { MainActor.assumeIsolated { [weak self] in self?.requested(ask, for: requirement, started) } }
         }
     }
@@ -193,7 +203,7 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
     /// Runs one request as this process's user, which is the person: macOS attributes a
     /// driver activation to whoever asks, and the approval they give answers that request.
     /// What the Manager prints, and its exit, are logged when it ends. [LAW:effects-at-boundaries]
-    nonisolated private static func perform(_ ask: Requirement.Ask, log: Logger) throws {
+    nonisolated private static func perform(_ ask: Requirement.Ask, by deadline: Deadline, log: Logger) throws {
         switch ask {
         case .activateDriver:
             let manager = DriverProbe.managerExecutable
@@ -201,7 +211,7 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
             // asking again does not pile them up. pkill's pattern is a regex, and the path's
             // dots are escaped so it matches that path alone. pkill exits 1 when none was.
             let pattern = NSRegularExpression.escapedPattern(for: "\(manager) activate")
-            let ended = try Command("/usr/bin/pkill", "-u", "\(getuid())", "-f", pattern).run(by: .within(Command.limit, or: .never))
+            let ended = try Command("/usr/bin/pkill", "-u", "\(getuid())", "-f", pattern).run(by: deadline, or: .never)
             guard ended.status <= 1 else { throw ManagerError.pkill(ended.merged) }
             let process = Process()
             process.executableURL = URL(fileURLWithPath: manager)
