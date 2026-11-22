@@ -501,10 +501,15 @@ public struct WouldNotReach: Error, CustomStringConvertible {
     }
 }
 
+/// The cursor was read, and what came back is not a place.
 public struct CursorUnreadable: Error, CustomStringConvertible {
-    public init() {}
+    public let read: NotAPlace
 
-    public var description: String { "the window server would not say where the cursor is" }
+    public init(_ read: NotAPlace) {
+        self.read = read
+    }
+
+    public var description: String { "the cursor was read as \(read)" }
 }
 
 

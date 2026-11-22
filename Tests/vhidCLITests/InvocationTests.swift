@@ -170,7 +170,7 @@ import InputTesting
         let thrown = await #expect(throws: (any Error).self) {
             try await Self.mcp("move", into: collected) {
                 // The far end's cursor is always at (0, 0).
-                try await Self.against { try await MoveCommand.move(to: try await $0.placed(.box(ScreenRect.at(30, -5, 20, 10)))[0], with: $0.pointer) }
+                try await Self.against { try await MoveCommand.move(to: try await $0.placed(.box(ScreenRect.at(30, -5, 20, 10))), with: $0.pointer) }
             }
         }
         // Half the box is above the display, so the move is drawn inside the half it shows.

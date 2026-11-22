@@ -52,8 +52,9 @@ is what tells a page's Settings button from a browser bookmark of the same name,
 field from its label. The box is `x,y,width,height` in the same points, the form `--rect`
 takes: the part of the run a display shows within what the run is drawn in, so a row half
 under its list's edge, or narrowed to the words matched, prints only what is drawn. The
-point is the whole point nearest that part's middle, and `click` given either the point or
-the box as printed presses that same point. Every rectangle eyes prints is in that form, as
+point is the whole point nearest that part's middle: `click` given the point presses it
+exactly, and given the box lands on a point drawn inside it, as a person's clicks scatter
+on a button and never within 2 points of its edge. Every rectangle eyes prints is in that form, as
 given, a window's or display's bounds and a scope line's region too, so any of them can be
 passed back as `--rect`. Text whose element claims a frame that is no box - not finite, a
 side under zero - is counted `not_a_box`, and text read but shown by no display a point a

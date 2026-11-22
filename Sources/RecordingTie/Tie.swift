@@ -12,6 +12,14 @@ public enum ToApp: String, Codable, Sendable {
     case stop
     /// Any other ending - SIGTERM - which drops nothing.
     case end
+
+    /// How the recording ends for this message.
+    public var ending: RecordingEnd.Ending {
+        switch self {
+        case .stop: .stop
+        case .end: .end
+        }
+    }
 }
 
 public enum FromApp: Codable, Equatable, Sendable {
@@ -34,13 +42,16 @@ public struct RecordingEnd: Codable, Equatable, Sendable {
     public let unmappedKeys: Int
     /// The person's moves to a point no display holds.
     public let offDisplay: Int
+    /// Events at a point that is not a place on the screen.
+    public let unlocated: Int
     /// How many times the layout came to press otherwise while recording.
     public let layoutChanges: Int
 
-    public init(ending: Ending, unmappedKeys: Int, offDisplay: Int, layoutChanges: Int) {
+    public init(ending: Ending, unmappedKeys: Int, offDisplay: Int, unlocated: Int, layoutChanges: Int) {
         self.ending = ending
         self.unmappedKeys = unmappedKeys
         self.offDisplay = offDisplay
+        self.unlocated = unlocated
         self.layoutChanges = layoutChanges
     }
 
@@ -58,6 +69,14 @@ public struct RecordingEnd: Codable, Equatable, Sendable {
         case devicesLost = "devices_lost"
         /// The layout changed and could not be read again.
         case layoutLost = "layout_lost"
+
+        /// Whether the person's stop chord ended it: its keys are waited for and come out.
+        public var isStopChord: Bool {
+            switch self {
+            case .stop: true
+            case .end, .tapOff, .hour, .devicesLost, .layoutLost: false
+            }
+        }
     }
 }
 

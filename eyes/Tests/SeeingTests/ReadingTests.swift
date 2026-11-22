@@ -195,7 +195,7 @@ import Testing
         #expect(rows.map(\.distance) == [1, 2, 3])
         #expect(rows[2].found == found("Help"))
         #expect(near.scope.boxes == Boxes(narrowed: 1, unchecked: [.overTime: 1], calls: 14))
-        #expect(near.scope.boxes.unchecked == [.unanswered: 0, .elsewhere: 0, .overTime: 1])
+        #expect(near.scope.boxes.unchecked == [.unanswered: 0, .elsewhere: 0, .unshown: 0, .overTime: 1])
         let matched = reading(outcome: .matched(Matches([found("Allow")])!), examined: 1, reach: .whole).pressing(press)
         #expect(matched.outcome == .matched(Matches([try! found("Allow").cut(to: cut)])!))
         #expect(matched.scope.boxes == Boxes(narrowed: 1, calls: 9))
@@ -215,14 +215,15 @@ import Testing
         #expect(list.contains(m.first.press))
     }
 
-    /// A cut no display shows a point a side of leaves the row as it was placed, counted
-    /// unchecked as a box elsewhere - never a row placed outside what it is drawn within.
+    /// A cut no display shows a point a side of within the row's bound leaves the row as it
+    /// was placed, counted unchecked as unshown - never a row placed outside what it is drawn
+    /// within, nor a hit test blamed that landed where it should.
     @Test func aCutOutsideTheBoundLeavesTheRowAsPlaced() throws {
         let row = found("Allow")
         let pressed = reading(outcome: .matched(Matches([row])!), examined: 1, reach: .whole)
             .pressing { _ in Checked(.narrowed(.at(2000, 2000, 10, 10)), calls: 1) }
         #expect(pressed.outcome == .matched(Matches([row])!))
-        #expect(pressed.scope.boxes.unchecked[.elsewhere] == 1)
+        #expect(pressed.scope.boxes.unchecked == [.unanswered: 0, .elsewhere: 0, .unshown: 1, .overTime: 0])
     }
 
     /// A reader that did not stop read the region whole unless something it set aside went

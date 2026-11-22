@@ -271,6 +271,7 @@ enum Report {
         switch why {
         case .unanswered: "unanswered"
         case .elsewhere: "its point on something else"
+        case .unshown: "pressed in a part under a point a side"
         case .overTime: "out of time"
         }
     }
@@ -289,9 +290,10 @@ enum Report {
 
     /// The columns every row has in the same place - `then`, a near miss's distance, among
     /// them - before the element's other words, however many it says.
-    /// Both as the pressing rule placed them, so either one passed to `vhid click` as printed
-    /// presses the one point: the box lies on one display, a point a side or more, and is
-    /// pressed at that point. [LAW:one-source-of-truth]
+    /// Both as the pressing rule placed them: the box lies on one display, a point a side or
+    /// more, and the point is in it, so `vhid click` given the point presses it exactly and
+    /// given the box lands inside it, as a person's clicks scatter on a button.
+    /// [LAW:one-source-of-truth]
     private static func row(_ found: Found, then: [String] = []) -> String {
         (["\(found.press)", "\(found.part)", spelled(found.text.value), found.source.role?.rawValue ?? "pixels"]
             + then + found.source.also.map { "\($0.attribute.rawValue) \(spelled($0.text.value))" }).joined(separator: "\t")

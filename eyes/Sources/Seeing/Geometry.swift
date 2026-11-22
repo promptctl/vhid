@@ -29,8 +29,9 @@ public extension ScreenRect {
             leads: x < other.x)
     }
 
-    /// The one conversion from image space into screen space, and the only place the flip
-    /// and the capture's origin are applied. [LAW:single-enforcer]
+    /// The one conversion from image space into screen space; it and its inverse,
+    /// `normalized(in:)`, below it, are the only places the flip and the capture's origin
+    /// are applied. [LAW:single-enforcer]
     ///
     /// **The backing scale factor does not appear, and that is the point.** A normalized
     /// box is a fraction of the image, and the same fraction of the captured rectangle's

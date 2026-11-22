@@ -20,18 +20,24 @@ public struct OnlineDisplay: Hashable, Sendable {
 
 /// The displays as one read of the window server found them, every online one in its order.
 ///
-/// [LAW:one-source-of-truth] Read once per act and once per pass of a look, and handed down
-/// as this value, so every place one act or one pass decides is decided on one layout.
+/// [LAW:one-source-of-truth] Read once for an act's places and once per pass of a look, and
+/// handed down as this value, so every place one act or one pass decides is decided on one
+/// layout. A play reads it once more after its last report, to say whether the layout it
+/// was placed on still holds.
 public struct DisplayLayout: Hashable, Sendable {
     public let displays: [OnlineDisplay]
     /// The box holding every display: finite, which is what lets any box drawn on them be
     /// joined with another without running past a Double.
     public let extent: ScreenRect
 
-    /// [LAW:parse-dont-validate] At least one online display, and a finite extent; refused by
-    /// name otherwise.
+    /// [LAW:parse-dont-validate] At least one online display, each with an id of its own and
+    /// a side of at least a point, and a finite extent; refused by name otherwise. An empty
+    /// frame is a read that went wrong, not a display.
     public init(_ displays: [OnlineDisplay]) throws(LayoutUnreadable) {
         guard let first = displays.first else { throw .noDisplay }
+        if let empty = displays.first(where: { $0.frame.width < 1 || $0.frame.height < 1 }) { throw .empty(empty.id, empty.frame) }
+        var ids = Set<UInt32>()
+        if let again = displays.first(where: { !ids.insert($0.id).inserted }) { throw .sameId(again.id) }
         var extent = first.frame
         for display in displays.dropFirst() {
             do { extent = try extent.union(display.frame) } catch { throw .tooWide(error) }
@@ -81,6 +87,10 @@ public enum LayoutUnreadable: Error, Hashable, CustomStringConvertible {
     case noDisplay
     /// A display's bounds were not a box.
     case display(UInt32, NotABox)
+    /// A display's bounds are a box with a side under a point.
+    case empty(UInt32, ScreenRect)
+    /// Two displays listed with one id.
+    case sameId(UInt32)
     /// The displays together are wider or taller than a Double holds.
     case tooWide(NotABox)
     /// A record that is not one this build reads.
@@ -91,6 +101,8 @@ public enum LayoutUnreadable: Error, Hashable, CustomStringConvertible {
         case .windowServer(let list, let code): "the window server would not list the \(list) displays: CGError \(code)"
         case .noDisplay: "the window server listed no online display"
         case .display(let id, let refused): "display \(id)'s bounds are not a box: \(refused)"
+        case .empty(let id, let frame): "display \(id)'s bounds \(frame) have a side under a point"
+        case .sameId(let id): "two displays are listed as display \(id)"
         case .tooWide(let refused): "the displays together are not a box: \(refused)"
         case .record(let what): "the display layout record is not one this build reads: \(what)"
         }

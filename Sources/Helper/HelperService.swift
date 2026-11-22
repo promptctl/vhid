@@ -136,8 +136,10 @@ import Foundation
     ///
     /// **A record whose shape changes gets a new name.** It was `displays(reply:)`, four
     /// numbers a display. A client and a daemon from builds either side of the change then
-    /// fail at the method's lookup, which names it, instead of reading one record's numbers
-    /// as the other's. [LAW:no-silent-failure]
+    /// ask for a method the other has none of - the call fails, or goes unanswered until
+    /// `HelperConnection.replyTimeout` - instead of reading one record's numbers as the
+    /// other's. Which of the two a mismatched pair sees has not been checked against a
+    /// running daemon. [LAW:no-silent-failure]
     func layout(reply: @escaping ([NSNumber], Error?) -> Void)
 }
 

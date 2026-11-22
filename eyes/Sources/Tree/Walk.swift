@@ -131,37 +131,39 @@ extension Node {
     func candidate(in clip: ScreenRect, on displays: Displays, under covers: Covers) -> Candidate {
         let leaf = if case .answered(let children) = children { children.isEmpty } else { false }
         guard leaf || !areas.contains(facts.role) else { return .excluded(.area) }
-        // Where a click would press it, when its frame says: placed by the one rule, which the
-        // row is placed by below.
-        var press: ScreenPoint?
+        // Placed once, by the one rule: the covers test and the row take this one placing.
+        let placing: Placing
         switch facts.frame {
         case .answered(.none): return .excluded(.unplaced)
         case .answered(.box(let frame)):
             guard !frame.isThin else { return .excluded(.unplaced) }
-            do { press = try displays.place(frame, within: clip).value.press } catch { return .excluded(.unplaced) }
-        case .answered(.refused), .unanswered: break
+            do { placing = .placed(try displays.place(frame, within: clip)) } catch { return .excluded(.unplaced) }
+        case .answered(.refused): placing = .not(.notABox)
+        case .unanswered: placing = .not(.unanswered)
         }
         let words = facts.texts.compactMap { $0.answer??.words }
         let text = words.first?.text
         guard text != nil || facts.texts.contains(.unanswered) else { return .excluded(.wordless) }
-        if let press {
-            switch covers.hide(press) {
+        switch placing {
+        case .not(let why): return .excluded(why)
+        case .placed(let placed):
+            switch covers.hide(placed.value.press) {
             case .answered(false): break
             case .answered(true): return .excluded(.covered)
             case .unanswered: return .excluded(.overlaid)
             }
-        }
-        if case .answered(.refused) = facts.frame { return .excluded(.notABox) }
-        guard let text, case .answered(.box(let frame)) = facts.frame else { return .excluded(.unanswered) }
-        var said: Set = [text]
-        let also = words.dropFirst().filter { said.insert($0.text).inserted }
-        do {
-            return .found(try Found(text: text, frame: frame, source: .tree(role: facts.role, frame: frame, also: also), within: clip, on: displays))
-        } catch {
-            // The rule placed this frame within this clip above, so it places it again.
-            return .excluded(.unplaced)
+            guard let text else { return .excluded(.unanswered) }
+            var said: Set = [text]
+            let also = words.dropFirst().filter { said.insert($0.text).inserted }
+            return .found(Found(text: text, source: .tree(role: facts.role, frame: placed.value.box, also: also), placed: placed))
         }
     }
+}
+
+/// An element's frame placed by the one rule, or the reason it was not.
+private enum Placing {
+    case placed(Placed<Shown>)
+    case not(Exclusion.Reason)
 }
 
 extension ScreenRect {
@@ -232,9 +234,14 @@ func pages<Element>(
         // not say where it is leaves unknown which page is shown and how much of it:
         // descending into the first finds its iframes, dropping the second could leave a
         // DevTools pane the one page or hand back the toolbar. [LAW:no-silent-failure]
-        guard node.facts.named, node.facts.saysWhere else { unread = true; continue }
+        guard node.facts.named else { unread = true; continue }
+        let inner: ScreenRect
+        switch node.facts.drawn(within: bound) {
+        case .within(let cut): inner = cut
         // Clipped to nothing: nothing under it is drawn, so no page is shown there.
-        guard let inner = node.facts.bound(within: bound) else { continue }
+        case .nowhere: continue
+        case .unknown: unread = true; continue
+        }
         if node.facts.role == webArea {
             if case .answered(.box(let placed)) = node.facts.frame, !placed.isEmpty, !inner.isThin { pages.append(inner) }
             continue
@@ -271,6 +278,15 @@ let webArea = Role(rawValue: "AXWebArea")
 /// inside its viewport.
 let clips: Set<Role> = [Role(rawValue: kAXScrollAreaRole), webArea]
 
+/// Where what an element holds can be drawn.
+enum Drawn: Equatable {
+    case within(ScreenRect)
+    /// Clipped to nothing: nothing under it is drawn.
+    case nowhere
+    /// It clips and does not say where, so what it lets show is unknown.
+    case unknown(Exclusion.Reason)
+}
+
 /// What the walk does under an element: how its children are read.
 enum Descent: Equatable {
     /// Walk them, counting in `clip` - what can be clicked in the region - and drawn no
@@ -306,35 +322,31 @@ extension Facts {
     /// 2.7 times the elements pruning at the region read, and at most a fifth of a second
     /// more. The walk's own bounds cap it, and say so in the reach.
     ///
-    /// Where what this element holds can be drawn: `bound`, cut to its own frame when it
-    /// clips - the one rule the reading walk and the page search narrow by - or nowhere,
-    /// when the two share no area. [LAW:single-enforcer]
-    func bound(within bound: ScreenRect) -> ScreenRect? {
-        guard clips.contains(role), case .answered(.box(let placed)) = frame, !placed.isEmpty else { return bound }
-        return bound.intersection(placed)
-    }
-
-    /// Whether this element says where what it holds can be drawn: it draws its children
-    /// wherever they are, or its frame answered - a box, or no position at all, which bounds
-    /// nothing. A clipping element whose frame did not answer or is no box leaves unknown
-    /// what it lets show. [LAW:single-enforcer] The one predicate the reading walk and the
-    /// page search ask.
-    var saysWhere: Bool {
-        guard clips.contains(role) else { return true }
+    /// Where what this element holds can be drawn, within `bound`: all of it, for an element
+    /// that does not clip or says it is nowhere; `bound` cut to its own frame when it clips,
+    /// or nowhere when the two share no area; or unknown, by why, for a clipping element whose
+    /// frame did not answer or is no box. [LAW:single-enforcer] The one answer the reading
+    /// walk and the page search narrow by.
+    func drawn(within bound: ScreenRect) -> Drawn {
+        guard clips.contains(role) else { return .within(bound) }
         switch frame {
-        case .answered(.none), .answered(.box): return true
-        case .answered(.refused), .unanswered: return false
+        case .answered(.none): return .within(bound)
+        case .answered(.box(let placed)) where placed.isEmpty: return .within(bound)
+        case .answered(.box(let placed)): return bound.intersection(placed).map(Drawn.within) ?? .nowhere
+        case .answered(.refused): return .unknown(.notABox)
+        case .unanswered: return .unknown(.unanswered)
         }
     }
 
     /// The one place the descend, probe and prune decision is made. [LAW:single-enforcer]
     func descent(clip: ScreenRect, bound: ScreenRect, under covers: Covers) -> Descent {
-        guard saysWhere else { return .unsure(frame == .unanswered ? .unanswered : .notABox) }
+        let drawn = drawn(within: bound)
+        if case .unknown(let why) = drawn { return .unsure(why) }
         guard case .answered(.box(let placed)) = frame, !placed.isEmpty else { return .descend(clip: clip, bound: bound) }
         let clipping = clips.contains(role)
         if let shown = visible(placed, in: clip, under: covers) {
             guard clipping else { return .descend(clip: clip, bound: bound) }
-            guard let inner = self.bound(within: bound) else { return .prune }
+            guard case .within(let inner) = drawn else { return .prune }
             return .descend(clip: shown, bound: inner)
         }
         guard !clipping, placed.intersects(bound) else { return .prune }
@@ -427,17 +439,19 @@ func walk<Element>(
                 queue.append(contentsOf: children.map { Root(element: $0, clip: root.clip, bound: root.bound, covers: root.covers, probe: true) })
             // A subtree unread is one more part left unread - unless nothing in it could be
             // seen, or this element was already counted as one, by the same why.
-            case (.unanswered, .descend), (.unanswered, .probe), (.unanswered, .unsure):
+            case (.unanswered, .descend), (.unanswered, .probe):
                 if !unread { counts[.unanswered, default: 0] += 1 }
-            case (.answered(let children), .unsure(let why)) where !children.isEmpty:
-                if candidate != .excluded(why) { counts[why, default: 0] += 1 }
-            case (_, .prune), (.answered, .unsure): break
+            // An element unsure of what it lets show leaves what it holds unread for its own
+            // why, whether its children answered or not - unless it holds nothing.
+            case (let children, .unsure(let why)):
+                let holdsNothing = if case .answered(let children) = children { children.isEmpty } else { false }
+                if !holdsNothing, candidate != .excluded(why) { counts[why, default: 0] += 1 }
+            case (_, .prune): break
             }
         }
     }
 
-    // Ordered by the reason's spelling so one screen always reports the same way.
-    let excluded = counts.map { Exclusion(reason: $0.key, count: $0.value) }.sorted { $0.reason.rawValue < $1.reason.rawValue }
+    let excluded = [Exclusion](counts: counts)
     let reach = stop.map(Reach.stopped) ?? Reach(excluded)
     return Walked(found: found, examined: examined, excluded: excluded, reach: reach)
 }

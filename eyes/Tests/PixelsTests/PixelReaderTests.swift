@@ -80,7 +80,7 @@ import Testing
     /// The measured case: 400x300 reaching past the main display's corner is captured as
     /// only its on-screen 212x182, so that is the rectangle the boxes map back through.
     @Test func aRectHangingOffTheDisplayIsReadAsItsOnScreenPart() throws {
-        let seen = try PixelReader.onOneDisplay(ScreenRect.at(1300, 800, 400, 300), displays: [Self.main, Self.left])
+        let seen = try PixelReader.onOneDisplay(ScreenRect.at(1300, 800, 400, 300), displays: DisplayLayout.at([Self.main, Self.left]).active)
         #expect(seen == ScreenRect.at(1300, 800, 212, 182))
     }
 
@@ -88,13 +88,20 @@ import Testing
     /// while the reading claimed the whole region, so the rectangle is refused.
     @Test func aRectAcrossTwoDisplaysIsRefused() {
         #expect(throws: PixelsError.self) {
-            try PixelReader.onOneDisplay(ScreenRect.at(-100, 10, 400, 50), displays: [Self.main, Self.left])
+            try PixelReader.onOneDisplay(ScreenRect.at(-100, 10, 400, 50), displays: DisplayLayout.at([Self.main, Self.left]).active)
         }
+    }
+
+    /// A sliver under a point on a neighbour is no part a display shows, by the pressing
+    /// rule's own floor, so the rectangle is read on the one display it lies on.
+    @Test func aSliverOnANeighbourIsNoPartOfTheRect() throws {
+        let seen = try PixelReader.onOneDisplay(ScreenRect.at(-0.4, 10, 10.4, 50), displays: DisplayLayout.at([Self.main, Self.left]).active)
+        #expect(seen == ScreenRect.at(0, 10, 10, 50))
     }
 
     @Test func aRectOnNoDisplayIsRefusedNotReadAsBlank() {
         #expect(throws: PixelsError.self) {
-            try PixelReader.onOneDisplay(ScreenRect.at(9000, 9000, 40, 30), displays: [Self.main, Self.left])
+            try PixelReader.onOneDisplay(ScreenRect.at(9000, 9000, 40, 30), displays: DisplayLayout.at([Self.main, Self.left]).active)
         }
     }
 

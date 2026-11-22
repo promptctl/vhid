@@ -426,7 +426,7 @@ public extension Reading {
     /// A cut row is placed again within its own bound, by the one pressing rule. A cut no
     /// display shows a point a side of - a control pressed only along a line through its
     /// middle - leaves the row as placed, its point not proven to press what it names, and
-    /// counted so. [LAW:no-silent-failure]
+    /// counted unchecked as `unshown`. [LAW:no-silent-failure]
     func pressing(_ press: (Found) throws -> Checked) rethrows -> Reading {
         var narrowed = scope.boxes.narrowed, unchecked = scope.boxes.unchecked, calls = scope.boxes.calls
         func pressed(_ found: Found) throws -> Found {
@@ -440,7 +440,7 @@ public extension Reading {
                     narrowed += 1
                     return cut
                 } catch {
-                    unchecked[.elsewhere, default: 0] += 1
+                    unchecked[.unshown, default: 0] += 1
                     return found
                 }
             case .unchecked(let why): unchecked[why, default: 0] += 1; return found
@@ -478,15 +478,14 @@ public extension Reading {
     }
 }
 
-extension Array where Element == Exclusion {
-    /// One entry per reason, in the order reasons first appear, with no zero counts.
-    var summed: [Exclusion] {
-        var order: [Exclusion.Reason] = []
-        var counts: [Exclusion.Reason: Int] = [:]
-        for e in self where e.count > 0 {
-            if counts[e.reason] == nil { order.append(e.reason) }
-            counts[e.reason, default: 0] += e.count
-        }
-        return order.map { Exclusion(reason: $0, count: counts[$0]!) }
+public extension Array where Element == Exclusion {
+    /// Counts by reason, one entry a reason counted, in the order `Exclusion.Reason` lists
+    /// them. [LAW:single-enforcer] The one order every reader and a merge report in, so one
+    /// screen always reports the same way.
+    init(counts: [Exclusion.Reason: Int]) {
+        self = Exclusion.Reason.allCases.compactMap { why in counts[why].flatMap { $0 > 0 ? Exclusion(reason: why, count: $0) : nil } }
     }
+
+    /// One entry per reason, summed.
+    var summed: [Exclusion] { [Exclusion](counts: Dictionary(map { ($0.reason, $0.count) }, uniquingKeysWith: +)) }
 }

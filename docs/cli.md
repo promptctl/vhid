@@ -166,13 +166,14 @@ no keys, and absent for a verb that never typed.
 A finished `play` records `attributes.layout`, as its done line says it: `kept` when the
 displays, read again once its last report was out, have the same frames in the same order
 as the ones the script was placed on, whichever are asleep, `changed` when they do not, and
-`unread` when they could not be read. `vhid record` records `attributes.ending`, how the
+`unread` when they could not be read, with `attributes.layout_unread` saying why. `vhid record` records `attributes.ending`, how the
 recording ended (`stop` for Control-C, `end` for `SIGTERM`, `tap_off` when macOS turned
 the tap off, `hour`, `devices_lost` when vhid's devices came back and could not be told
 apart again, or `layout_lost` when the displays changed and could not be read), and
 `attributes.left_out`, what it left out by reason, zeros included: `unmapped_keys`, key
 presses with no HID usage, fn among them; `off_display`, the moves to a point no display
-holds; and `layout_changes`, how many times the displays came to be laid out otherwise.
+holds; `unlocated`, the events the tap gave at a point that is not a place on the screen;
+and `layout_changes`, how many times the displays came to be laid out otherwise.
 
 With `OTEL_EXPORTER_OTLP_ENDPOINT` set, the record goes to that OpenTelemetry collector
 instead, as an OTLP/HTTP JSON log on `/v1/logs`, and the file is not written.

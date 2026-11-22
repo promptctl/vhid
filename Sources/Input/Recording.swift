@@ -74,6 +74,9 @@ public struct Recorder {
     /// The person's moves to a point no display holds, left out of the recording: a point
     /// written without vhid's motion that lands off every display.
     public private(set) var offDisplay = 0
+    /// Events the tap gave at a point that is not a place on the screen, and moves that come
+    /// to one once vhid's motion is taken out: left out of the recording.
+    public private(set) var unlocated = 0
     /// How many times the layout came to press otherwise while recording, by
     /// `Displays.pressesAlike`, the rule a play's `layout` is said by.
     public private(set) var layoutChanges = 0
@@ -111,12 +114,17 @@ public struct Recorder {
         self.displays = displays
     }
 
-    /// Whether a point is on a display and less than a point from its edge, where motion
-    /// can be stopped short. A point on no display is not at an edge of one.
+    /// Whether a point is on the displays and less than a point from where they end, where
+    /// motion can be stopped short: by the planner's one rule, `Displays.covers`, so the seam
+    /// between two displays side by side is no edge. A point on no display is at no edge.
     private func atEdge(_ point: ScreenPoint) -> Bool {
-        displays.frames.contains { frame in
-            frame.contains(point) && (point.x < frame.x + 1 || point.x >= frame.maxX - 1 || point.y < frame.y + 1 || point.y >= frame.maxY - 1)
-        }
+        displays.covers((point.x, point.y), by: 0) && !displays.covers((point.x, point.y), by: 1)
+    }
+
+    /// An event the tap gave at a point that is not a place on the screen, left out and
+    /// counted. [LAW:no-silent-failure]
+    public mutating func takeUnlocated() {
+        unlocated += 1
     }
 
     /// Takes one event, writing a line when it changed what the person holds or where
@@ -194,9 +202,10 @@ public struct Recorder {
             // Placed as written, so a line a play would refuse is left out here and counted.
             // [LAW:no-silent-failure]
             do {
-                lines.append(.at(event.at, try displays.place(ScreenPoint(x: event.location.x - offset.x, y: event.location.y - offset.y)).value))
+                let written = try ScreenPoint(x: event.location.x - offset.x, y: event.location.y - offset.y)
+                do { lines.append(.at(event.at, try displays.place(written).value)) } catch { offDisplay += 1 }
             } catch {
-                offDisplay += 1
+                unlocated += 1
             }
         case .buttonDown(let button):
             buttons.insert(button)

@@ -23,12 +23,13 @@ struct ScrollCommand: AsyncParsableCommand {
     @OptionGroup var service: ServiceOption
 
     func validate() throws {
-        _ = try places(place, count: 1)
+        _ = try onePlace(place)
     }
 
     func run() async throws {
+        let asked = try onePlace(place)
         print(try await Devices.using(try service.installation()) {
-            try await Self.scroll(at: try await $0.placed(try places(place, count: 1)[0])[0], vertical: vertical, horizontal: horizontal, holding: modifiers, with: $0.pointer, $0.keyboard)
+            try await Self.scroll(at: try await $0.placed(asked), vertical: vertical, horizontal: horizontal, holding: modifiers, with: $0.pointer, $0.keyboard)
         })
     }
 

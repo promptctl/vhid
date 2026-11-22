@@ -15,6 +15,7 @@ public extension Region {
         case .rect(let rect):
             // A rectangle on no display has nothing in it to read, and a reader that walked
             // it would report a blank screen. [LAW:no-silent-failure]
+            guard !rect.isEmpty else { throw NoSuchPlace.empty(rect) }
             guard layout.active.frames.contains(where: { $0.intersects(rect) }) else { throw NoSuchPlace.offScreen(rect) }
             return rect
         case .display(let id):
@@ -25,7 +26,8 @@ public extension Region {
             guard let window = try Geometry.onScreen().windows.first(where: { $0.id == id }) else {
                 throw NoSuchPlace.window(id)
             }
-            return window.frame
+            // On a display, as any rectangle must be: a window on a sleeping display is blindness.
+            return try Region.rect(window.frame).bounds(on: layout)
         case .front(let front):
             // Its display, as `.display` is refused when asleep or detached; the windows read
             // on it are the front's owners, which each reader takes from its own window list.
@@ -89,9 +91,11 @@ public enum NoSuchPlace: Error, CustomStringConvertible {
     case display(CGDirectDisplayID)
     case window(UInt32)
     case offScreen(ScreenRect)
+    case empty(ScreenRect)
 
     public var description: String {
         switch self {
+        case .empty(let r): "\(r) has a side of zero, so there is nothing in it to read"
         case .offScreen(let r): "\(r) is on no active display, so there is nothing there to read"
         case .display(let id): "no active display has id \(id)"
         case .window(let id): "no on-screen window has id \(id); `look` with no arguments, or `eyes windows`, lists the ones that do"

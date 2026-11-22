@@ -3,13 +3,8 @@ import Input
 import Pointing
 import ScreenSpace
 
-/// Two coordinates from a command line as a place on the screen, or the refusal that says
-/// they are not one.
-///
-/// [LAW:parse-dont-validate] `ScreenPoint` refuses what is not a place on the screen, and
-/// `inf` and `nan` are both things a shell hands over as a Double without complaint.
-/// [LAW:single-enforcer] Every verb that takes a place reads it through here, from both
-/// its `validate` and its `run`, so the refusal is worded one way everywhere.
+/// An MCP tool's `x` and `y` as a place on the screen, or the refusal that says they are not
+/// one. [LAW:parse-dont-validate] `ScreenPoint` refuses what is not a place on the screen.
 func place(_ x: Double, _ y: Double) throws -> ScreenPoint {
     do {
         return try ScreenPoint(x: x, y: y)
@@ -22,10 +17,10 @@ func place(_ x: Double, _ y: Double) throws -> ScreenPoint {
 /// or one word as a reading prints it, `x,y` a point and `x,y,width,height` a box. A word
 /// with a comma in it is one place, and any other starts a point.
 ///
-/// [LAW:single-enforcer] Every pointer verb reads its places through here, so a point is
-/// refused by `place` and a spelled place by `Target.Asked(spelled:)`, as the MCP server
-/// refuses them. Whether a display shows it is asked once the devices are open, of the
-/// layout they read.
+/// [LAW:single-enforcer] Every pointer verb reads its places through here, and every place
+/// is read by `Target.Asked(spelled:)` - `x y` as the point `x,y` is - as the MCP server
+/// reads a spelled one. Whether a display shows it is asked once the devices are open, of
+/// the layout they read.
 func places(_ words: [String], count: Int) throws -> [Target.Asked] {
     var rest = words[...], read: [Target.Asked] = []
     while let word = rest.first {
@@ -38,10 +33,13 @@ func places(_ words: [String], count: Int) throws -> [Target.Asked] {
             rest = rest.dropFirst()
         } else {
             let pair = Array(rest.prefix(2))
-            guard pair.count == 2, let x = Double(pair[0]), let y = Double(pair[1]) else {
-                throw ValidationError("\(pair.joined(separator: " ")) is not a point: a point is two numbers, x y")
+            let refused = { (because: String?) in ValidationError("\(pair.joined(separator: " ")) is not a point: \(because ?? "a point is two numbers, x y")") }
+            guard pair.count == 2 else { throw refused(nil) }
+            do {
+                read.append(.point(try ScreenPoint(spelled: pair.joined(separator: ","))))
+            } catch {
+                throw refused(error.because)
             }
-            read.append(.point(try place(x, y)))
             rest = rest.dropFirst(2)
         }
     }
@@ -49,6 +47,17 @@ func places(_ words: [String], count: Int) throws -> [Target.Asked] {
         throw ValidationError("\(words.joined(separator: " ")) is \(counted(read.count, "place")), and this takes \(count)")
     }
     return read
+}
+
+/// The one place a click, a move or a scroll takes. [LAW:types-are-the-program]
+func onePlace(_ words: [String]) throws -> Target.Asked {
+    try places(words, count: 1)[0]
+}
+
+/// A drag's two places, where it starts and where it ends.
+func twoPlaces(_ words: [String]) throws -> (from: Target.Asked, to: Target.Asked) {
+    let read = try places(words, count: 2)
+    return (read[0], read[1])
 }
 
 /// A button as a command line writes one: the word for the three that have a word, the

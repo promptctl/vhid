@@ -15,6 +15,17 @@ import Testing
         #expect(try #require(row.intersection(row)) == row)
     }
 
+    /// A union one box spans on a side keeps that side as given, so a row joined from words
+    /// prints in the numbers its outer word was read in.
+    @Test func aUnionKeepsTheSideOneBoxSpans() throws {
+        let outer = try ScreenRect(x: 10.9, y: 20.3, width: 100.1, height: 10.7)
+        let inner = try ScreenRect(x: 40, y: 22, width: 10, height: 5)
+        #expect(try outer.union(inner) == outer)
+        let right = try ScreenRect(x: 200, y: 20.3, width: 10, height: 10.7)
+        let both = try outer.union(right)
+        #expect((both.x, both.y, both.height, both.maxX) == (10.9, 20.3, 10.7, 210))
+    }
+
     /// [LAW:parse-dont-validate] A pair that is not a place is refused where it is made.
     /// The NaN is the one that matters: every comparison against it is false, so it would
     /// pass the pointer's arrival test on both axes and a click would land wherever the

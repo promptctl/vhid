@@ -165,13 +165,16 @@ let package = Package(
         .target(name: "RecordingTie"),
         .testTarget(name: "RecordingTieTests", dependencies: ["RecordingTie", "ChildProcess", "OwnThread"]),
         // The tap app `vhid record` launches, shipped as a signed bundle so Input
-        // Monitoring can be granted to it once. It reads the tap and the I/O Registry and
-        // hands the events to Input's `Recorder`; it never reaches the devices.
+        // Monitoring can be granted to it once. It reads the tap, the I/O Registry and,
+        // through DisplayReading, the display layout every point it writes is placed on,
+        // and hands the events to Input's `Recorder`; it never reaches the devices.
         // [LAW:effects-at-boundaries]
         .executableTarget(name: "vhid-record", dependencies: ["Input", "Keystrokes", "KeyboardLayouts", "Pointing", "RecordingTie", "ScreenSpace", "DisplayReading"]),
         // The root daemon that owns the devices. It links DriverExtension for the identity
         // the keyboard files its Keyboard Setup Assistant answer under, and deliberately
-        // not KeyboardLayouts: text never reaches this process. [LAW:one-way-deps]
+        // not KeyboardLayouts: text never reaches this process. [LAW:one-way-deps] It
+        // links ScreenSpace and DisplayReading for the layout it reads in the session in
+        // front, which `cursor`'s points are placed on.
         .executableTarget(
             name: "vhidd",
             dependencies: ["Helper", "VirtualHID", "DriverExtension", "ChildProcess", "Keystrokes", "Pointing", "Signals", "Installations", "ScreenSpace", "DisplayReading"]

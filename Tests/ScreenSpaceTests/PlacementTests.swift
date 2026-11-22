@@ -107,4 +107,34 @@ import Testing
                                        OnlineDisplay(id: 2, frame: Self.box(-1000, 0, 1000, 900), active: true)])
         #expect(try !Self.layout().online.pressesAlike(moved.online))
     }
+
+    /// Two displays of one size side by side show a box across their seam equally: it is
+    /// pressed on the one listed first, so one box is pressed in one place every time.
+    @Test func aBoxSplitEquallyIsPressedOnTheDisplayListedFirst() throws {
+        let twins = try DisplayLayout([OnlineDisplay(id: 1, frame: Self.box(0, 0, 1000, 900), active: true),
+                                       OnlineDisplay(id: 2, frame: Self.box(1000, 0, 1000, 900), active: true)])
+        #expect(try twins.online.place(Self.box(900, 0, 200, 40)).value.part == (try Self.box(900, 0, 100, 40)))
+    }
+
+    /// A box with a side of zero is refused saying so, not as a box on no display.
+    @Test func aBoxWithASideOfZeroIsRefusedSayingSo() throws {
+        let flat = #expect(throws: Unplaced.self) { try Self.layout().online.place(Self.box(10, 10, 0, 30)) }
+        #expect(flat?.description == "the box 10,10,0,30 has a side of zero")
+        let outside = #expect(throws: Unplaced.self) { try Self.layout().online.place(Self.box(100, 500, 200, 40), within: Self.box(0, 0, 800, 400)) }
+        #expect(outside?.description == "the box 100,500,200,40 is outside 0,0,800,400, which it is drawn within")
+    }
+
+    /// A display with a side under a point, or two listed under one id, is no layout: every
+    /// place the rule pressed on it would be pressed on a display that cannot show it.
+    @Test func aLayoutWithADisplayShowingNothingOrTwiceIsRefused() throws {
+        let thin = #expect(throws: LayoutUnreadable.self) {
+            try DisplayLayout([OnlineDisplay(id: 1, frame: Self.box(0, 0, 1600, 0.5), active: true)])
+        }
+        guard case .empty(1, _) = thin else { Issue.record("\(String(describing: thin))"); return }
+        let twice = #expect(throws: LayoutUnreadable.self) {
+            try DisplayLayout([OnlineDisplay(id: 1, frame: Self.box(0, 0, 1600, 900), active: true),
+                               OnlineDisplay(id: 1, frame: Self.box(1600, 0, 1000, 900), active: true)])
+        }
+        guard case .sameId(1) = twice else { Issue.record("\(String(describing: twice))"); return }
+    }
 }

@@ -97,28 +97,8 @@ do {
     refuse("vhid's own devices could not be told apart: \(error)")
 }
 
-// A reconfiguration is heard from before the first read of the layout, so none can fall
-// between the read and the watch: one that comes first is read again, and the recorder
-// takes the layout as it is then. [LAW:no-ambient-temporal-coupling] Online displays, as
-// `vhid play` places on: the cursor moves on a sleeping one, so a recording on a Mac whose
-// only display is asleep records there.
-let reconfigured: CGDisplayReconfigurationCallBack = { _, flags, _ in
-    // Each change is said twice, once before it with `beginConfigurationFlag` and once
-    // after; the layout is read after.
-    guard !flags.contains(.beginConfigurationFlag) else { return }
-    DispatchQueue.main.async {
-        MainActor.assumeIsolated {
-            do {
-                session.recorder.displaysChanged(to: try DisplayLayout.read().online)
-            } catch {
-                session.finish(.layoutLost, notes: ["the displays changed and could not be read again (\(error)), so the recording ends there"])
-            }
-        }
-    }
-}
-guard CGDisplayRegisterReconfigurationCallback(reconfigured, nil) == .success else {
-    refuse("the displays could not be watched for changes")
-}
+// Online displays, as `vhid play` places on: the cursor moves on a sleeping one, so a
+// recording on a Mac whose only display is asleep records there.
 let layout: DisplayLayout
 do {
     layout = try DisplayLayout.read()
@@ -169,12 +149,14 @@ func sinceStart() -> Duration { .nanoseconds(Int64(clock_gettime_nsec_np(CLOCK_U
             var said = notes
             if recorder.unmapped > 0 { said.append("\(recorder.unmapped) key presses with no HID usage, fn among them, are not in the recording") }
             if recorder.offDisplay > 0 { said.append("\(recorder.offDisplay) moves to a point on no display are not in the recording") }
+            if recorder.unlocated > 0 { said.append("\(recorder.unlocated) events at a point that is not a place on the screen are not in the recording") }
             if recorder.layoutChanges > 0 { said.append("the displays changed \(recorder.layoutChanges) times while recording, so a point recorded after a change may be on no display when it plays") }
             if recorder.vhidAtEdge > 0 { said.append("vhid's motion reached a screen edge \(recorder.vhidAtEdge) times while recording, so the pointer points after it may be off") }
             do {
                 for note in said { try command.send(FromApp.note(note)) }
-                let ended = RecordingEnd(ending: ending, unmappedKeys: recorder.unmapped, offDisplay: recorder.offDisplay, layoutChanges: recorder.layoutChanges)
-                try command.send(FromApp.script(recorder.script(stoppedAt: stoppedAt, stopKeys: ending == .stop ? stopKeys : []), ended))
+                let ended = RecordingEnd(ending: ending, unmappedKeys: recorder.unmapped, offDisplay: recorder.offDisplay, unlocated: recorder.unlocated,
+                                         layoutChanges: recorder.layoutChanges)
+                try command.send(FromApp.script(recorder.script(stoppedAt: stoppedAt, stopKeys: ending.isStopChord ? stopKeys : []), ended))
                 exit(0)
             } catch {
                 exit(1)
@@ -184,7 +166,7 @@ func sinceStart() -> Duration { .nanoseconds(Int64(clock_gettime_nsec_np(CLOCK_U
             guard recorder.holdsKeys, clock.now < deadline else { return send() }
             DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(10), execute: wait)
         }
-        ending == .stop ? wait() : send()
+        ending.isStopChord ? wait() : send()
     }
 }
 
@@ -196,10 +178,37 @@ do {
 }
 let session = MainActor.assumeIsolated { Session(recorder: recorder) }
 
-/// A tap event as the recorder reads it, or nil for a kind it does not record.
-func tapEvent(_ type: CGEventType, _ event: CGEvent) -> TapEvent? {
+// The session the watch acts on exists before the watch does, and the layout is read once
+// more once it is watched, so a reconfiguration between the first read and the watch is
+// taken too. [LAW:no-ambient-temporal-coupling]
+let reconfigured: CGDisplayReconfigurationCallBack = { _, flags, _ in
+    // Each change is said twice, once before it with `beginConfigurationFlag` and once
+    // after; the layout is read after.
+    guard !flags.contains(.beginConfigurationFlag) else { return }
+    DispatchQueue.main.async {
+        MainActor.assumeIsolated {
+            do {
+                session.recorder.displaysChanged(to: try DisplayLayout.read().online)
+            } catch {
+                session.finish(.layoutLost, notes: ["the displays changed and could not be read again (\(error)), so the recording ends there"])
+            }
+        }
+    }
+}
+guard CGDisplayRegisterReconfigurationCallback(reconfigured, nil) == .success else {
+    refuse("the displays could not be watched for changes")
+}
+do {
+    let watched = try DisplayLayout.read()
+    MainActor.assumeIsolated { session.recorder.displaysChanged(to: watched.online) }
+} catch {
+    refuse("the displays could not be read once watched: \(error)")
+}
+
+/// A tap event as the recorder reads it: nil for a kind it does not record, and the refusal
+/// for one at a point that is not a place on the screen, which the recorder counts.
+func tapEvent(_ type: CGEventType, _ event: CGEvent) -> Result<TapEvent, NotAPlace>? {
     let location = event.location
-    guard let place = try? ScreenPoint(x: location.x, y: location.y) else { return nil }
     let button = { Button(rawValue: UInt8(event.getIntegerValueField(.mouseEventButtonNumber) + 1)) }
     let code = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
     let kind: TapEvent.Kind?
@@ -214,7 +223,12 @@ func tapEvent(_ type: CGEventType, _ event: CGEvent) -> TapEvent? {
     }
     // Field 87: the registry ID of the service that sent it; not a published CGEventField.
     let at = Duration.nanoseconds(Int64(event.timestamp) - Int64(startedAt))
-    return kind.map { TapEvent(at: max(at, .zero), sender: UInt64(bitPattern: event.getIntegerValueField(CGEventField(rawValue: 87)!)), location: place, kind: $0) }
+    return kind.map { kind in
+        Result { () throws(NotAPlace) in
+            TapEvent(at: max(at, .zero), sender: UInt64(bitPattern: event.getIntegerValueField(CGEventField(rawValue: 87)!)),
+                     location: try ScreenPoint(x: location.x, y: location.y), kind: kind)
+        }
+    }
 }
 
 let kinds: [CGEventType] = [
@@ -228,8 +242,12 @@ guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .tailAppendEve
         // rather than carried on with a gap in it, and said so.
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             session.finish(.tapOff, notes: ["macOS turned the tap off (\(type == .tapDisabledByTimeout ? "too slow" : "by user input")), so the recording ends there"])
-        } else if session.taking, let taken = tapEvent(type, event) {
-            if taken.at > hour { session.finish(.hour, notes: [hourNote]) } else { session.recorder.take(taken) }
+        } else if session.taking, let tapped = tapEvent(type, event) {
+            switch tapped {
+            case .success(let taken) where taken.at > hour: session.finish(.hour, notes: [hourNote])
+            case .success(let taken): session.recorder.take(taken)
+            case .failure: session.recorder.takeUnlocated()
+            }
         }
     }
     return Unmanaged.passUnretained(event)
@@ -272,7 +290,7 @@ Thread.detachNewThread {
     // The command's messages, and its end: a socket closed without a word is the command
     // gone, and so is the app.
     while let message = try? command.receive(ToApp.self) {
-        DispatchQueue.main.async { MainActor.assumeIsolated { session.finish(message == .stop ? .stop : .end) } }
+        DispatchQueue.main.async { MainActor.assumeIsolated { session.finish(message.ending) } }
     }
     DispatchQueue.main.async { exit(1) }
 }

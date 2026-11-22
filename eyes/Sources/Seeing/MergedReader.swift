@@ -81,6 +81,14 @@ public struct BothBlind: Error, CustomStringConvertible {
     public var description: String { "neither reader could look: \(first); \(second)" }
 }
 
+/// The readers of a merged read looked at regions that share no area, so there is no place
+/// both looked to answer for. [LAW:no-silent-failure]
+public struct ReadersApart: Error, CustomStringConvertible {
+    public let regions: [ScreenRect]
+
+    public var description: String { "the readers looked at \(regions.map(\.description).joined(separator: " and ")), which share no area" }
+}
+
 public extension Candidates {
     /// What two readers saw, as what one merged reader saw.
     ///
@@ -139,10 +147,10 @@ public extension Candidates {
             split(loose, of: run)
         }
         let regions = seen.map(\.region)
-        let both = regions.dropFirst().reduce(Optional(regions[0])) { $0?.intersection($1) }
+        guard let both = regions.dropFirst().reduce(Optional(regions[0]), { $0?.intersection($1) }) else { throw ReadersApart(regions: regions) }
         return Candidates(
             found: (kept + extra).inReadingOrder,
-            region: both ?? seen[0].region,
+            region: both,
             examined: seen.map(\.examined).reduce(0, +),
             excluded: (seen.flatMap(\.excluded) + [Exclusion(reason: .duplicate, count: duplicates), Exclusion(reason: .unshown, count: unshown)]).summed,
             reach: a.part.isWhole && b.part.isWhole ? .whole : .stopped(.merged(a.part, b.part)),

@@ -325,7 +325,7 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
         #expect(w.found.map(\.text.value) == ["Save changes?", "Cancel", "OK", "OK"])
         #expect(w.found.map(\.source.role?.rawValue) == ["AXButton", "AXButton", "AXButton", "AXStaticText"])
         #expect(w.examined == 5)
-        #expect(w.excluded == [Exclusion(reason: .unanswered, count: 1), Exclusion(reason: .wordless, count: 1)])
+        #expect(w.excluded == [Exclusion(reason: .wordless, count: 1), Exclusion(reason: .unanswered, count: 1)])
     }
 
     /// A subtree that went unread keeps the region from having been read whole, so a busy
@@ -436,7 +436,7 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
         ])
         let w = tree.walked()
         #expect(w.examined == 4)
-        #expect(w.excluded == [Exclusion(reason: .unplaced, count: 1), Exclusion(reason: .wordless, count: 1)])
+        #expect(w.excluded == [Exclusion(reason: .wordless, count: 1), Exclusion(reason: .unplaced, count: 1)])
         #expect(w.reach == .whole)
     }
 
@@ -537,7 +537,7 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
         ])
         let w = tree.walked()
         #expect(w.examined == 4)
-        #expect(w.excluded == [Exclusion(reason: .unplaced, count: 1), Exclusion(reason: .wordless, count: 1)])
+        #expect(w.excluded == [Exclusion(reason: .wordless, count: 1), Exclusion(reason: .unplaced, count: 1)])
     }
 
     /// In a browser: the header is inside the page, just above the region, and its
@@ -580,8 +580,8 @@ func node(_ text: String?, _ frame: ScreenRect? = button, children: Heard<[Strin
         var origin = CGPoint(x: -1500, y: -200)
         var size = CGSize(width: 80, height: 30)
         let frame = TreeReader.frame(AXValueCreate(.cgPoint, &origin), AXValueCreate(.cgSize, &size))
-        #expect(frame == .box(.at(-1500, -200, 80, 30)))
-        guard case .box(let box) = frame else { return }
+        #expect(frame == .answered(.box(.at(-1500, -200, 80, 30))))
+        guard case .answered(.box(let box)) = frame else { return }
         #expect(box.centre == .at(-1460, -185))
     }
 
@@ -799,17 +799,20 @@ extension Covers {
 
     /// An app can claim a frame that is no place; it is refused as no box, by name, never
     /// read as no position. A document's text area runs past any screen and is a box however
-    /// large, spelled as every box is. An answer that is no geometry at all is no frame.
+    /// large, spelled as every box is. No position or size is no frame; an answer that is
+    /// no geometry value at all is unanswered, never taken for no frame.
     @Test func aFrameThatIsNoPlaceIsNoBox() {
         let placed = boxed(10, 20, 30, 40)
-        #expect(TreeReader.frame(placed.0, placed.1) == .box(.at(10, 20, 30, 40)))
+        #expect(TreeReader.frame(placed.0, placed.1) == .answered(.box(.at(10, 20, 30, 40))))
         for (x, w) in [(Double.nan, 30.0), (10, .infinity)] {
             let claimed = boxed(x, 20, w, 40)
-            guard case .refused = TreeReader.frame(claimed.0, claimed.1) else { Issue.record("\(x),\(w) was taken as a box"); continue }
+            guard case .answered(.refused) = TreeReader.frame(claimed.0, claimed.1) else { Issue.record("\(x),\(w) was taken as a box"); continue }
         }
         let document = boxed(46, -1_280_000, 1e20, 1_300_000)
-        #expect(TreeReader.frame(document.0, document.1).description == "46,-1280000,1e+20,1300000")
-        #expect(TreeReader.frame(nil, placed.1) == .none)
+        guard case .answered(.box(let large)) = TreeReader.frame(document.0, document.1) else { Issue.record("a document's frame was no box"); return }
+        #expect(large.description == "46,-1280000,1e+20,1300000")
+        #expect(TreeReader.frame(nil, placed.1) == .answered(.none))
+        #expect(TreeReader.frame("10,20" as CFString, placed.1) == .unanswered)
     }
 
     /// A checkbox's value is a number, said in figures, and a link's an address; a range or an

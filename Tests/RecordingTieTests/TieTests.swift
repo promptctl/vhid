@@ -12,7 +12,7 @@ import Testing
         let listener = try TieListener()
         let app = try TieEnd.connect(to: listener.path)
         let command = try listener.accept(within: .seconds(1))
-        let ended = RecordingEnd(ending: .layoutLost, unmappedKeys: 1, offDisplay: 2, layoutChanges: 3)
+        let ended = RecordingEnd(ending: .layoutLost, unmappedKeys: 1, offDisplay: 2, unlocated: 4, layoutChanges: 3)
         try app.send(FromApp.recording)
         try app.send(FromApp.script("{\"to\":{\"x\":1,\"y\":2}}\n{\"t_ms\":0,\"keys\":[]}\n", ended))
         try command.send(ToApp.stop)

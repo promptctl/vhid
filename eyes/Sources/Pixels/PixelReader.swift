@@ -68,9 +68,7 @@ public struct PixelReader: Reader {
         let dropped = (runs + joined).compactMap { if case .excluded(let why) = $0 { why } else { nil } } + setAside
         var counts = Dictionary(dropped.map { ($0, 1) }, uniquingKeysWith: +)
         counts[.duplicate, default: 0] += readable.count - joined.count
-        let excluded = ([.wordless, .duplicate] + Exclusion.Reason.allCases.filter { $0 != .wordless && $0 != .duplicate })
-            .compactMap { why in counts[why].map { Exclusion(reason: why, count: $0) } }
-            .filter { $0.count > 0 }
+        let excluded = [Exclusion](counts: counts)
         return Candidates(
             found: seen.filter { $0.seen == .read }.map(\.found).inReadingOrder,
             region: region,
@@ -145,10 +143,10 @@ public struct PixelReader: Reader {
         let ordered = kept.map(\.word).sorted { $0.frame.x < $1.frame.x }
         // A joined run is no surer than its least sure piece.
         let confidence = pieces.compactMap { if case .pixels(let c) = $0.run.source { c } else { nil } }.min()!
-        do {
+        do throws(Unshown) {
             return .found(try Found(first: ordered[0], rest: Array(ordered.dropFirst()), source: .pixels(confidence: confidence), placedAs: pieces[0].run))
         } catch {
-            return .excluded(.unshown)
+            return .excluded(error.reason)
         }
     }
 
@@ -156,7 +154,7 @@ public struct PixelReader: Reader {
     /// on `layout`, clipped to the active display it lies on.
     @MainActor
     static func resolve(_ region: Region, on layout: DisplayLayout) throws -> ScreenRect {
-        try onOneDisplay(region.bounds(on: layout), displays: layout.active.frames)
+        try onOneDisplay(region.bounds(on: layout), displays: layout.active)
     }
 
     /// The part of `rect` a capture can see, on the one display it lies on, in whole points.
@@ -169,13 +167,17 @@ public struct PixelReader: Reader {
     /// and the rectangle the same shape; a rectangle on no display is refused, not read as
     /// blank. Whole points because the capture takes whole points, and the rectangle boxes
     /// are mapped back through must be the one that was captured.
-    nonisolated static func onOneDisplay(_ rect: ScreenRect, displays: [ScreenRect]) throws -> ScreenRect {
-        let seen = displays.compactMap { $0.intersection(rect.integral) }
+    ///
+    /// [LAW:single-enforcer] What a display shows of the rectangle is `Displays.parts(of:)`,
+    /// the pressing rule's: a sliver under a point on a neighbour is no part of it to read,
+    /// as it is none to press.
+    nonisolated static func onOneDisplay(_ rect: ScreenRect, displays: Displays) throws -> ScreenRect {
+        let seen = displays.parts(of: rect)
         // Across two displays, the part on the other one is on screen and would go unread
         // while the reading claimed the whole region, so it is refused by name instead.
         guard seen.count <= 1 else { throw PixelsError.spansDisplays(rect) }
-        guard let only = seen.first else { throw PixelsError.offScreen(rect) }
-        return only.integral
+        guard let only = seen.first, let whole = only.part.integral.intersection(only.display.frame) else { throw PixelsError.offScreen(rect) }
+        return whole
     }
 
     /// Captures exactly `region` with `screencapture`, in points of the global space it
@@ -273,8 +275,8 @@ public struct PixelReader: Reader {
                 return .found(try Found(first: first, rest: Array(placed.dropFirst()), source: source, within: region, on: displays))
             } catch is NotABox {
                 return .excluded(.notABox)
-            } catch {
-                return .excluded(.unshown)
+            } catch let refused as Unshown {
+                return .excluded(refused.reason)
             }
         }
     }

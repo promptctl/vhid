@@ -135,12 +135,13 @@ import Testing
         #expect { try garbled.layout() } throws: { "\($0)".contains("answered '1 0 0 1920': the display layout record is not one this build reads") }
     }
 
-    /// `refused` is the window server declining, whichever question it answers.
-    @Test func aChildSaysTheWindowServerRefused() throws {
-        let reader = try child("echo joined c0de; while read _; do echo refused; done")
+    /// `refused` and why is the child unable to read what it was asked, whichever question it
+    /// answers, and the why reaches the refusal.
+    @Test func aChildSaysWhyItCouldNotRead() throws {
+        let reader = try child("echo joined c0de; while read q; do echo \"refused $q went wrong\"; done")
         defer { reader.stop() }
-        #expect { try reader.layout() } throws: { ($0 as? WindowServerRefused)?.question == .layout }
-        #expect { try reader.cursor() } throws: { ($0 as? WindowServerRefused)?.question == .cursor }
+        #expect { try reader.layout() } throws: { ($0 as? WindowServerRefused).map { $0.question == .layout && $0.why == "layout went wrong" } == true }
+        #expect { try reader.cursor() } throws: { ($0 as? WindowServerRefused).map { $0.question == .cursor && $0.why == "cursor went wrong" } == true }
     }
 
     @Test func aChildThatCouldNotJoinSaysWhy() {

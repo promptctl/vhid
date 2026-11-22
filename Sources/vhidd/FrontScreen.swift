@@ -132,12 +132,13 @@ final class FrontScreen: ScreenSource, @unchecked Sendable {
     }
 }
 
-/// A reader that answered, saying the window server in its session would not: told apart
-/// from a reader that failed so the log names the window server.
+/// A reader that answered, saying what it was asked could not be read in its session, and
+/// why: told apart from a reader that failed so the log names the reason.
 struct WindowServerRefused: Error, CustomStringConvertible {
     let session: FrontScreen.Session
     let question: ScreenQuestion
-    var description: String { "the window server in \(session) would not answer '\(question.rawValue)'" }
+    let why: String
+    var description: String { "'\(question.rawValue)' could not be read in \(session): \(why)" }
 }
 
 /// Where the cursor is and where the displays are, as the daemon answers them.
@@ -242,13 +243,13 @@ final class ChildReader: FrontScreen.Reader {
         }
     }
 
-    /// `question` sent as its line, and the line answering it: `WindowServerRefused` when
-    /// the child says the window server would not answer.
+    /// `question` sent as its line, and the line answering it: `WindowServerRefused`, with
+    /// the child's why, when the child says it could not read it.
     private func ask(_ question: ScreenQuestion) throws -> String {
         let line = question.rawValue + "\n"
         guard Darwin.write(requests, line, line.utf8.count) == line.utf8.count else { throw Failed(session: session, what: "could not be asked: errno \(errno)") }
         let answer = try answerLine(within: patience, to: "answer")
-        guard answer != refusedAnswer else { throw WindowServerRefused(session: session, question: question) }
+        guard !answer.hasPrefix(refusedAnswer) else { throw WindowServerRefused(session: session, question: question, why: String(answer.dropFirst(refusedAnswer.count))) }
         return answer
     }
 

@@ -24,13 +24,13 @@ struct ClickCommand: AsyncParsableCommand {
     /// Asked before any `run`, which is what makes the refusal arrive as this verb's own
     /// usage rather than the root command's - and before anything is connected.
     func validate() throws {
-        _ = try places(place, count: 1)
+        _ = try onePlace(place)
     }
 
     func run() async throws {
-        let asked = try places(place, count: 1)[0]
+        let asked = try onePlace(place)
         print(try await Devices.using(try service.installation()) {
-            try await Self.click(at: try await $0.placed(asked)[0], button: button, times: times, holding: modifiers, with: $0.pointer, $0.keyboard)
+            try await Self.click(at: try await $0.placed(asked), button: button, times: times, holding: modifiers, with: $0.pointer, $0.keyboard)
         })
     }
 

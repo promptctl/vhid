@@ -76,9 +76,16 @@ public struct Found: Sendable, Hashable {
         self.init(first: first, rest: rest, source: source, placed: placed)
     }
 
-    /// One run the reader places as a whole - what the accessibility tree reports.
+    /// One run placed as a whole, from its own frame.
     public init(text: Text, frame: ScreenRect, source: Source, within bound: ScreenRect, on displays: Displays) throws(Unshown) {
         try self.init(first: Word(text: text, frame: frame), rest: [], source: source, within: bound, on: displays)
+    }
+
+    /// One run already placed as a whole - what the accessibility tree reports, whose frame
+    /// is placed before its text is read. Its word's frame is the box `placed` was placed
+    /// from, so the two cannot disagree. [LAW:one-source-of-truth]
+    public init(text: Text, source: Source, placed: Placed<Shown>) {
+        self.init(first: Word(text: text, frame: placed.value.box), rest: [], source: source, placed: placed)
     }
 
     /// Other words of `row` - a stretch narrowed to, pieces joined, a merge's split - placed
@@ -115,7 +122,7 @@ public struct Found: Sendable, Hashable {
 }
 
 /// Why a row's words were not placed: together they make no box, or no display shows a
-/// part of them a point a side within their bound. Counted `unshown`: text read, not placed.
+/// part of them a point a side within their bound. Counted by `reason`: text read, not placed.
 public enum Unshown: Error, Hashable, CustomStringConvertible {
     case notABox(NotABox)
     case unplaced(Unplaced)
@@ -124,6 +131,14 @@ public enum Unshown: Error, Hashable, CustomStringConvertible {
         switch self {
         case .notABox(let why): "the words together make no box: \(why)"
         case .unplaced(let why): "\(why)"
+        }
+    }
+
+    /// The reason a reading counts the words by.
+    public var reason: Exclusion.Reason {
+        switch self {
+        case .notABox: .notABox
+        case .unplaced: .unshown
         }
     }
 }
@@ -155,13 +170,7 @@ public enum Source: Sendable, Hashable {
 
     /// The element's role, when a reader that knows roles saw it: what tells a page's
     /// button from a browser bookmark of the same name, or a field from its label.
-    public var role: Role? {
-        switch self {
-        case .tree(let role, _, _): role
-        case .pixels: nil
-        case .merged(let a, let b): a.role ?? b.role
-        }
-    }
+    public var role: Role? { element?.role }
 
     /// The element the tree read it from, by its role and the frame it claimed, when a
     /// reader that reads elements saw it.

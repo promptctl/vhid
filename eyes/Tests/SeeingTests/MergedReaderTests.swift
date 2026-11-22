@@ -205,6 +205,31 @@ import Testing
         #expect(r.scope.excluded.isEmpty)
     }
 
+    /// A stretch is the row seen again only where one of its own words meets the part the row
+    /// shows: a row in the gap between two words says the same, and is another thing.
+    @Test func aStretchMergesOnlyWhereOneOfItsWordsMeetsTheRow() async throws {
+        let between = try await read(
+            Fake(source: .tree, found: [at("Save As", 46, 0, .tree, width: 3)]),
+            Fake(source: .pixels, found: [run("Save As", 0, 0)])
+        )
+        #expect(all(between).map(\.source.kind).sorted { "\($0)" < "\($1)" } == [.pixels, .tree])
+        #expect(between.scope.excluded.isEmpty)
+        let over = try await read(
+            Fake(source: .tree, found: [at("Save As", 40, 0, .tree, width: 8)]),
+            Fake(source: .pixels, found: [run("Save As", 0, 0)])
+        )
+        #expect(all(over).map(\.source.kind) == [.merged])
+        #expect(over.scope.excluded == [Exclusion(reason: .duplicate, count: 1)])
+    }
+
+    /// Readers that looked at regions sharing no area have no place both looked, and the
+    /// merge says so rather than naming one reader's region for both.
+    @Test func readersThatLookedApartAreRefused() async {
+        var apart = Fake(source: .pixels, found: [])
+        apart.region = ScreenRect.at(2000, 0, 100, 100)
+        await #expect(throws: ReadersApart.self) { try await read(Fake(source: .tree, found: []), apart) }
+    }
+
     @Test func theRegionIsWhereBothLooked() async throws {
         var clipped = Fake(source: .pixels, found: [])
         clipped.region = ScreenRect.at(0, 0, 500, 800)

@@ -46,6 +46,7 @@ struct PlayCommand: AsyncParsableCommand {
         let placed = try schedule.placed(on: try await devices.layout().online)
         let played = try await Player(pointer: devices.pointer, keyboard: devices.keyboard, wall: epochMicroseconds, layout: devices.layout, lead: lead).play(placed)
         Telemetry.note(.layout, .string(played.layout.word))
+        Telemetry.note(.layoutUnread, played.layout.unread.map(JSON.string))
         return played
     }
 
@@ -57,16 +58,6 @@ struct PlayCommand: AsyncParsableCommand {
     /// arms did the printing, which is why nothing could check it without a daemon and a
     /// stoppage to provoke. Here it is a property of the value: a stopped play carries no
     /// `Played`, so there is no done line to be made and no path that makes one.
-    ///
-    /// **`finished` holds a play that sent something, and the type system is what says
-    /// so.** `Played`'s initialiser is internal to `Input`, so the only one this target
-    /// can hold is one `Player.play` returned, and a `Schedule` carries at least one report by
-    /// construction - which is the precondition `Lateness` documents and relies on. There
-    /// is therefore no guard here against an empty finished play: it cannot be spelled
-    /// from outside `Input`, and a guard would have to invent a meaning for a done line
-    /// with no lateness in it. [LAW:no-defensive-null-guards] [LAW:comments-carry-meaning]
-    /// A test reaching through `@testable import Input` can of course build one, and that
-    /// is the test stepping outside the guarantee rather than the guarantee being weak.
     enum Ending {
         case finished(Played)
         case stopped([Played.Report])
@@ -102,11 +93,11 @@ struct PlayCommand: AsyncParsableCommand {
     /// context and a harness reads from the command line instead.
     ///
     /// It says whether the layout still pressed as it did when the script was placed on it:
-    /// `kept`, `changed`, or `unread` with `layout_unread` saying why.
+    /// `kept`, `changed`, or `unread` with `layout_unread` saying why. A play whose every
+    /// report was a step of no distance sent none, and has no `late_us`.
     static func done(_ played: Played) throws -> String {
-        let unread: String? = if case .unread(let why) = played.layout { why } else { nil }
-        return try line(DoneLine(done: .init(reports: played.reports.count, startReports: played.startReports, lateUs: played.lateness,
-                                             layout: played.layout.word, layoutUnread: unread)))
+        try line(DoneLine(done: .init(reports: played.reports.count, startReports: played.startReports, lateUs: played.lateness,
+                                      layout: played.layout.word, layoutUnread: played.layout.unread)))
     }
 
     /// How early each report is woken for. `Player` sleeps until this much before the
@@ -175,7 +166,7 @@ struct PlayCommand: AsyncParsableCommand {
         struct Done: Encodable {
             let reports: Int
             let startReports: Int
-            let lateUs: Lateness
+            let lateUs: Lateness?
             let layout: String
             let layoutUnread: String?
         }

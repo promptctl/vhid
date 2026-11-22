@@ -134,12 +134,13 @@ public struct Hit: AsyncParsableCommand {
 
     /// The hit test and the window server, in the process. The window, and the front look a
     /// landing is judged by, come from the one desk read before the climb, so they are one moment.
-    /// A point no active display holds is refused by the one pressing rule, by name: a click
-    /// there hits nothing. [LAW:single-enforcer]
+    /// A point is placed as a click is pressed, on the online displays, by the one pressing
+    /// rule: one no display holds is refused by name, since a click there hits nothing, and
+    /// one on a sleeping display stands as a display look does not read. [LAW:single-enforcer]
     @MainActor
     static func land(at point: ScreenPoint) async throws -> Struck {
         let desk = try await Desk.now()
-        let placed = try desk.layout.active.place(point)
+        let placed = try desk.layout.online.place(point)
         let climb: Landing.Climb
         switch try await TreeReader(granted: SourceKind.granted).climb(from: point, within: hitTesting) {
         case .nothing(let calls): return .nothing(calls: calls, window: desk.listing.windows.first { $0.frame.contains(point) })

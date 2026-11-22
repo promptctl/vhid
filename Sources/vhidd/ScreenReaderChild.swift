@@ -17,9 +17,9 @@ enum ScreenQuestion: String {
     case layout
 }
 
-/// The answer to either question when the window server would not give one: said apart
-/// from a garbled answer so the daemon's log names the window server.
-let refusedAnswer = "refused"
+/// What begins the answer to either question when none could be read, followed by why: said
+/// apart from a garbled answer so the daemon's log names the reason. [LAW:no-silent-failure]
+let refusedAnswer = "refused "
 
 /// The child `FrontScreen` starts: joins `session` and says so, and which build it is,
 /// then answers each question on stdin on a line of stdout, until stdin closes.
@@ -43,7 +43,7 @@ func readScreen(in session: au_asid_t) -> Never {
     }
     while let line = readLine() {
         switch ScreenQuestion(rawValue: line) {
-        case .cursor: print(CGEvent(source: nil).map { "\($0.location.x) \($0.location.y)" } ?? refusedAnswer)
+        case .cursor: print(CGEvent(source: nil).map { "\($0.location.x) \($0.location.y)" } ?? refusedAnswer + "the window server made no event to read the cursor from")
         case .layout: print(layout())
         case nil: print("asked '\(line)', which is no question")
         }
@@ -52,11 +52,11 @@ func readScreen(in session: au_asid_t) -> Never {
 }
 
 /// The layout as `DisplayLayout.read` finds it in this session, as `layout` is answered;
-/// `refusedAnswer` when the window server would not list the displays.
+/// `refusedAnswer` and the refusal when the displays could not be read as a layout.
 private func layout() -> String {
     do {
         return try DisplayLayout.read().record.map { "\($0)" }.joined(separator: " ")
     } catch {
-        return refusedAnswer
+        return refusedAnswer + error.description
     }
 }

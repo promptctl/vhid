@@ -130,10 +130,10 @@ struct Devices {
     static func cursor(_ helper: HelperConnection, on queue: DeviceQueue) -> @Sendable () async throws -> ScreenPoint {
         {
             let at = try await queue.run { try helper.cursor() }
-            do {
+            do throws(NotAPlace) {
                 return try ScreenPoint(x: at.x, y: at.y)
             } catch {
-                throw CursorUnreadable()
+                throw CursorUnreadable(error)
             }
         }
     }
@@ -143,12 +143,17 @@ struct Devices {
         { try await queue.run { try helper.layout() } }
     }
 
-    /// The places a verb was given, placed by the one rule on one read of the layout's online
-    /// displays, where the cursor moves: an act reads its layout once, so all its places and
-    /// every path between them are decided on one. [LAW:one-source-of-truth]
-    func placed(_ asked: Target.Asked...) async throws -> [Target] {
+    /// The place a verb was given, placed by the one rule on one read of the layout's online
+    /// displays, where the cursor moves. [LAW:one-source-of-truth]
+    func placed(_ asked: Target.Asked) async throws -> Target {
+        try asked.placed(on: try await layout().online)
+    }
+
+    /// A drag's two places, placed on one read: an act reads its layout once, so both its
+    /// places and the path between them are decided on one. [LAW:one-source-of-truth]
+    func placed(_ from: Target.Asked, _ to: Target.Asked) async throws -> (from: Target, to: Target) {
         let online = try await layout().online
-        return try asked.map { asked throws(Unplaced) in try asked.placed(on: online) }
+        return (try from.placed(on: online), try to.placed(on: online))
     }
 }
 

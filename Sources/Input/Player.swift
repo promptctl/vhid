@@ -335,9 +335,9 @@ public struct Player {
             // Read once the last report is out, apart from the play: what it reads cannot
             // undo a report, so a read that fails is said rather than failing the play.
             // [LAW:no-silent-failure]
-            let after: Result<DisplayLayout, any Error>
-            do { after = .success(try await layout()) } catch { after = .failure(error) }
-            return Played(startReports: reports, reports: went, layout: Played.Layout(placedOn: play.start.displays, after: after))
+            let after: Played.Layout
+            do { after = Played.Layout(placedOn: play.start.displays, after: try await layout()) } catch { after = .unread(error.reported) }
+            return Played(startReports: reports, reports: went, layout: after)
         } catch {
             // Both devices, whatever either answers, because a stop can land with a key and
             // a button both held. [LAW:no-silent-failure] A script that holds no key has no
@@ -391,11 +391,13 @@ public struct Played: Hashable, Sendable {
         /// The layout could not be read, and why.
         case unread(String)
 
-        init(placedOn displays: Displays, after: Result<DisplayLayout, any Error>) {
-            switch after {
-            case .success(let layout): self = displays.pressesAlike(layout.online) ? .kept : .changed
-            case .failure(let error): self = .unread(error.reported)
-            }
+        init(placedOn displays: Displays, after layout: DisplayLayout) {
+            self = displays.pressesAlike(layout.online) ? .kept : .changed
+        }
+
+        /// Why the layout went unread, when it did.
+        public var unread: String? {
+            if case .unread(let why) = self { why } else { nil }
         }
 
         /// The one word a done line and a record say it with.
@@ -419,7 +421,9 @@ public struct Played: Hashable, Sendable {
         public let acked: Int64
     }
 
-    public var lateness: Lateness { Lateness(of: reports.map { $0.sent - $0.scheduled }) }
+    /// How late the reports went out, or nil when none did: every `at` line of a script can
+    /// be a step of no distance, which sends nothing.
+    public var lateness: Lateness? { Lateness(of: reports.map { $0.sent - $0.scheduled }) }
 }
 
 /// How late reports went out, in microseconds, by nearest rank.
@@ -429,9 +433,10 @@ public struct Lateness: Hashable, Sendable, Encodable {
     public let p99: Int64
     public let max: Int64
 
-    /// [LAW:parse-dont-validate] A `Schedule` has at least one report, so a played one does too
-    /// and there is always a rank to read; the empty case is the caller's precondition.
-    init(of lateness: [Int64]) {
+    /// [LAW:parse-dont-validate] At least one lateness, so there is always a rank to read;
+    /// nil for none, which has no ranks.
+    init?(of lateness: [Int64]) {
+        guard !lateness.isEmpty else { return nil }
         let sorted = lateness.sorted()
         func rank(_ fraction: Double) -> Int64 { sorted[Swift.max(0, Int((fraction * Double(sorted.count)).rounded(.up)) - 1)] }
         p50 = rank(0.5)

@@ -92,9 +92,11 @@ public enum Pressed: Sendable, Hashable {
 public enum Unchecked: String, Sendable, Hashable, CaseIterable {
     /// The hit test, or a read of what it hit, did not answer.
     case unanswered
-    /// A click at the row's own point lands on something other than the element it names,
-    /// or the part a click presses it in is too thin for a display to show a point of.
+    /// A click at the row's own point lands on something other than the element it names.
     case elsewhere
+    /// No display shows a point a side of the part a click presses it in, within what the
+    /// row is drawn in: a control pressed only along a line through its middle.
+    case unshown
     /// The time for checking the reading's boxes ran out first.
     case overTime = "over_time"
 }

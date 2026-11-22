@@ -90,9 +90,21 @@ public struct ScreenRect: Hashable, Sendable, CustomStringConvertible {
     }
 
     /// The smallest box holding both, refused when it is wider or taller than a Double holds.
+    ///
+    /// On each axis, a box that gives both of the outer edges gives its own side, as given,
+    /// as `intersection` keeps one. [LAW:one-source-of-truth]
     public func union(_ other: ScreenRect) throws(NotABox) -> ScreenRect {
-        let (left, top) = (min(x, other.x), min(y, other.y))
-        return try ScreenRect(x: left, y: top, width: max(maxX, other.maxX) - left, height: max(maxY, other.maxY) - top)
+        let across = Self.spanned((x, width, maxX), (other.x, other.width, other.maxX))
+        let down = Self.spanned((y, height, maxY), (other.y, other.height, other.maxY))
+        return try ScreenRect(x: across.start, y: down.start, width: across.length, height: down.length)
+    }
+
+    /// The span on one axis holding both, as its start and its length.
+    private static func spanned(_ a: (start: Double, length: Double, end: Double), _ b: (start: Double, length: Double, end: Double)) -> (start: Double, length: Double) {
+        let (start, end) = (min(a.start, b.start), max(a.end, b.end))
+        if start == a.start, end == a.end { return (start, a.length) }
+        if start == b.start, end == b.end { return (start, b.length) }
+        return (start, end - start)
     }
 
     /// The smallest box of whole points holding this one: rounded outward, as

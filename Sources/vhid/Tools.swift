@@ -176,14 +176,14 @@ enum Tools {
         return VerbTool(Help.click, [x, y, box, button, times, modifiers]) { arguments, installation in
             let (at, button, times, held) = (try target(arguments), try arguments[button], try arguments[times], try arguments[modifiers])
             return try await Devices.using(installation) {
-                try await ClickCommand.click(at: try await $0.placed(at)[0], button: button, times: times, holding: held, with: $0.pointer, $0.keyboard)
+                try await ClickCommand.click(at: try await $0.placed(at), button: button, times: times, holding: held, with: $0.pointer, $0.keyboard)
             }
         }
     }()
 
     static let move: VerbTool = VerbTool(Help.move, [x, y, box]) { arguments, installation in
         let to = try target(arguments)
-        return try await Devices.using(installation) { try await MoveCommand.move(to: try await $0.placed(to)[0], with: $0.pointer) }
+        return try await Devices.using(installation) { try await MoveCommand.move(to: try await $0.placed(to), with: $0.pointer) }
     }
 
     static let scroll: VerbTool = {
@@ -192,7 +192,7 @@ enum Tools {
         return VerbTool(Help.scroll, [x, y, box, vertical, horizontal, modifiers]) { arguments, installation in
             let (at, vertical, horizontal, held) = (try target(arguments), try arguments[vertical], try arguments[horizontal], try arguments[modifiers])
             return try await Devices.using(installation) {
-                try await ScrollCommand.scroll(at: try await $0.placed(at)[0], vertical: vertical, horizontal: horizontal, holding: held, with: $0.pointer, $0.keyboard)
+                try await ScrollCommand.scroll(at: try await $0.placed(at), vertical: vertical, horizontal: horizontal, holding: held, with: $0.pointer, $0.keyboard)
             }
         }
     }()
@@ -205,7 +205,7 @@ enum Tools {
             let (from, to, button, held) = (try arguments[from], try arguments[to], try arguments[button], try arguments[modifiers])
             return try await Devices.using(installation) {
                 let ends = try await $0.placed(from, to)
-                return try await DragCommand.drag(from: ends[0], to: ends[1], button: button, holding: held, with: $0.pointer, $0.keyboard)
+                return try await DragCommand.drag(from: ends.from, to: ends.to, button: button, holding: held, with: $0.pointer, $0.keyboard)
             }
         }
     }()

@@ -80,6 +80,8 @@ extension Telemetry {
         /// Whether the displays still pressed as they did when a play was placed on them:
         /// `kept`, `changed` or `unread`. Absent for a verb that played nothing.
         case layout
+        /// Why a play's layout went unread. Absent when it was read.
+        case layoutUnread = "layout_unread"
         /// How a recording ended - `stop`, `end`, `tap_off`, `hour`, `devices_lost` or
         /// `layout_lost` - and what it left out, by reason, zeros included. Absent for a
         /// verb that recorded nothing.
