@@ -172,8 +172,8 @@ the tap off, `hour`, `devices_lost` when vhid's devices came back and could not 
 apart again, or `layout_lost` when the displays changed and could not be read), and
 `attributes.left_out`, what it left out by reason, zeros included: `unmapped_keys`, key
 presses with no HID usage, fn among them; `off_display`, the moves to a point no display
-holds; `unlocated`, the events the tap gave at a point that is not a place on the screen;
-and `layout_changes`, how many times the displays came to be laid out otherwise.
+holds; `unlocated`, the moves the tap gave to a point that is not a place on the screen;
+and `layout_changes`, how many times the displays came to be laid out otherwise. `attributes.vhid_at_edge` counts the times vhid's own motion ended on a screen edge while recording, after which the points written may be off.
 
 With `OTEL_EXPORTER_OTLP_ENDPOINT` set, the record goes to that OpenTelemetry collector
 instead, as an OTLP/HTTP JSON log on `/v1/logs`, and the file is not written.

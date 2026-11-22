@@ -118,8 +118,9 @@ let package = Package(
         // the framing is proven without root and without the driver.
         .testTarget(name: "VirtualHIDTests", dependencies: ["VirtualHID", "DriverExtension", "Keystrokes", "Pointing", "OwnThread"]),
         // What crosses the privilege boundary, and the client's side of it. It links the
-        // vocabularies - the keys, the pointing and the screen space - and nothing else: not the layout, because a root daemon must
-        // never read one, and not the device, because a client must never open one.
+        // vocabularies - the keys, the pointing and the screen space - and nothing else: not
+        // the layout's reading, which happens in the session in front and not across the
+        // boundary, and not the device, because a client must never open one.
         // [LAW:one-way-deps]
         .target(name: "Helper", dependencies: ["Installations", "Keystrokes", "Pointing", "ScreenSpace"]),
         .testTarget(name: "HelperTests", dependencies: ["Helper", "Installations", "Keystrokes", "Pointing", "ScreenSpace", "ScreenSpaceTesting", "OwnThread"]),
@@ -173,8 +174,8 @@ let package = Package(
         // The root daemon that owns the devices. It links DriverExtension for the identity
         // the keyboard files its Keyboard Setup Assistant answer under, and deliberately
         // not KeyboardLayouts: text never reaches this process. [LAW:one-way-deps] It
-        // links ScreenSpace and DisplayReading for the layout it reads in the session in
-        // front, which `cursor`'s points are placed on.
+        // links ScreenSpace and DisplayReading for the child it runs in the session in front,
+        // which reads the layout there - the root process itself reads none.
         .executableTarget(
             name: "vhidd",
             dependencies: ["Helper", "VirtualHID", "DriverExtension", "ChildProcess", "Keystrokes", "Pointing", "Signals", "Installations", "ScreenSpace", "DisplayReading"]

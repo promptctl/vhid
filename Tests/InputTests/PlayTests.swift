@@ -196,6 +196,8 @@ import InputTesting
         #expect(stopped.causes.contains { $0 is CancellationError })
         #expect(clock.now.offset == Player.slice)
         #expect(fake.log == ["hold [1]", "up"])
+        // A play that stopped says the layout it ended on, as one that finished does.
+        #expect(stopped.layout.word == "kept")
     }
 
     /// A lead, watched out on a clock that only moves when something sleeps on it.

@@ -114,11 +114,15 @@ public extension Candidates {
         let firsts = kept.count
         var merged = Set<Int>()
         var extra: [Found] = []
-        var duplicates = 0, unshown = 0
+        var set: [Exclusion.Reason: Int] = [:]
         // What is left of `run` between its seen-twice stretches, placed as the run was.
         func split(_ loose: [Word], of run: Found) {
             guard let head = loose.first else { return }
-            do { extra.append(try Found(first: head, rest: Array(loose.dropFirst()), source: run.source, placedAs: run)) } catch { unshown += 1 }
+            do throws(Unshown) {
+                extra.append(try Found(first: head, rest: Array(loose.dropFirst()), source: run.source, placedAs: run))
+            } catch {
+                set[error.reason, default: 0] += 1
+            }
         }
         for run in b.seen?.found ?? [] {
             var loose: [Word] = []
@@ -139,7 +143,7 @@ public extension Candidates {
                 if merged.insert(index).inserted {
                     kept[index] = kept[index].seen(by: .merged(kept[index].source, run.source))
                 }
-                duplicates += 1
+                set[.duplicate, default: 0] += 1
                 split(loose, of: run)
                 loose = []
                 i = end + 1
@@ -152,7 +156,7 @@ public extension Candidates {
             found: (kept + extra).inReadingOrder,
             region: both,
             examined: seen.map(\.examined).reduce(0, +),
-            excluded: (seen.flatMap(\.excluded) + [Exclusion(reason: .duplicate, count: duplicates), Exclusion(reason: .unshown, count: unshown)]).summed,
+            excluded: (seen.flatMap(\.excluded) + [Exclusion](counts: set)).summed,
             reach: a.part.isWhole && b.part.isWhole ? .whole : .stopped(.merged(a.part, b.part)),
             // A reader that could not look took in nobody's windows.
             owners: seen.map(\.owners).reduce(.only([])) { $0.union($1) }

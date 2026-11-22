@@ -5,7 +5,7 @@ import Pointing
 import ScreenSpace
 
 /// One event as the session tap delivered it, reduced to what a recording reads: when,
-/// from which device, where the cursor was, and what happened.
+/// from which device, and what happened - for motion, where the cursor came to.
 ///
 /// [LAW:effects-at-boundaries] The tap is the effect and this is its value, so the
 /// `Recorder` that reads these runs in a test on events a test made.
@@ -15,8 +15,6 @@ public struct TapEvent: Hashable, Sendable {
     /// The event's tap field 87: the registry ID of the pqrs service that sent it, or 0
     /// for an event from a device of the person's own.
     public let sender: UInt64
-    /// Where the cursor was, which every event carries.
-    public let location: ScreenPoint
     public let kind: Kind
 
     public enum Kind: Hashable, Sendable {
@@ -24,16 +22,17 @@ public struct TapEvent: Hashable, Sendable {
         case keyUp(keyCode: UInt16)
         /// A modifier or Caps Lock changed; `flags` is every modifier bit after it.
         case flagsChanged(keyCode: UInt16, flags: UInt64)
-        /// The cursor moved, with or without a button held.
-        case motion
+        /// The cursor moved, with or without a button held, to `to`. [LAW:types-are-the-program]
+        /// Only motion carries a point, the one thing a recording reads a point from: a key
+        /// or a button is taken whatever the tap says of where the cursor was.
+        case motion(to: ScreenPoint)
         case buttonDown(Button)
         case buttonUp(Button)
     }
 
-    public init(at: Duration, sender: UInt64, location: ScreenPoint, kind: Kind) {
+    public init(at: Duration, sender: UInt64, kind: Kind) {
         self.at = at
         self.sender = sender
-        self.location = location
         self.kind = kind
     }
 }
@@ -66,7 +65,7 @@ public struct Recorder {
     /// How far vhid's motion has carried the cursor, which the person's points are
     /// written without.
     private var offset = (x: 0.0, y: 0.0)
-    /// Where the cursor was at the last event from anyone.
+    /// Where the cursor came to at the last motion from anyone.
     private var last: ScreenPoint
 
     /// Key presses with no usage, fn above all, left out of the recording.
@@ -74,7 +73,7 @@ public struct Recorder {
     /// The person's moves to a point no display holds, left out of the recording: a point
     /// written without vhid's motion that lands off every display.
     public private(set) var offDisplay = 0
-    /// Events the tap gave at a point that is not a place on the screen, and moves that come
+    /// Motion the tap gave to a point that is not a place on the screen, and moves that come
     /// to one once vhid's motion is taken out: left out of the recording.
     public private(set) var unlocated = 0
     /// How many times the layout came to press otherwise while recording, by
@@ -121,8 +120,8 @@ public struct Recorder {
         displays.covers((point.x, point.y), by: 0) && !displays.covers((point.x, point.y), by: 1)
     }
 
-    /// An event the tap gave at a point that is not a place on the screen, left out and
-    /// counted. [LAW:no-silent-failure]
+    /// Motion the tap gave to a point that is not a place on the screen, left out and
+    /// counted. [LAW:no-silent-failure] The cursor is taken to be where it last was.
     public mutating func takeUnlocated() {
         unlocated += 1
     }
@@ -132,7 +131,7 @@ public struct Recorder {
     public mutating func take(_ event: TapEvent) {
         // Never before the line before it: the tap can hand two devices' events over a
         // hair out of order, and a script's times may not go backwards.
-        let event = TapEvent(at: max(event.at, lines.last?.at ?? .zero), sender: event.sender, location: event.location, kind: event.kind)
+        let event = TapEvent(at: max(event.at, lines.last?.at ?? .zero), sender: event.sender, kind: event.kind)
         let held = self.held
         if vhid.contains(event.sender) {
             takeVhid(event)
@@ -142,7 +141,7 @@ public struct Recorder {
         // A modifier vhid let go of while the person held it stays down in the session;
         // once its bit clears it is nobody's, and the person's next press of it is theirs.
         vhidModifiers.formIntersection(session)
-        last = event.location
+        if case .motion(let to) = event.kind { last = to }
         if self.held != held { lines.append(.keys(event.at, self.held)) }
     }
 
@@ -165,9 +164,9 @@ public struct Recorder {
 
     private mutating func takeVhid(_ event: TapEvent) {
         switch event.kind {
-        case .motion:
-            offset = (offset.x + event.location.x - last.x, offset.y + event.location.y - last.y)
-            vhidAtEdge += atEdge(event.location) ? 1 : 0
+        case .motion(let to):
+            offset = (offset.x + to.x - last.x, offset.y + to.y - last.y)
+            vhidAtEdge += atEdge(to) ? 1 : 0
         case .flagsChanged(let code, let flags):
             session = Self.modifiers(in: flags)
             if let modifier = Usage(virtualKeyCode: code), let bit = Self.deviceBits[modifier] {
@@ -198,11 +197,11 @@ public struct Recorder {
             session = Self.modifiers(in: flags)
         case .flagsChanged(_, let flags):
             session = Self.modifiers(in: flags)
-        case .motion:
+        case .motion(let to):
             // Placed as written, so a line a play would refuse is left out here and counted.
             // [LAW:no-silent-failure]
             do {
-                let written = try ScreenPoint(x: event.location.x - offset.x, y: event.location.y - offset.y)
+                let written = try ScreenPoint(x: to.x - offset.x, y: to.y - offset.y)
                 do { lines.append(.at(event.at, try displays.place(written).value)) } catch { offDisplay += 1 }
             } catch {
                 unlocated += 1

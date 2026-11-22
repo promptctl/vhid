@@ -60,6 +60,7 @@ struct RecordCommand: AsyncParsableCommand {
                     Telemetry.note(.ending, .string(ended.ending.rawValue))
                     Telemetry.note(.leftOut, .object(["unmapped_keys": .int(ended.unmappedKeys), "off_display": .int(ended.offDisplay),
                                                       "unlocated": .int(ended.unlocated), "layout_changes": .int(ended.layoutChanges)]))
+                    Telemetry.note(.vhidAtEdge, .int(ended.vhidAtEdge))
                     print(script, terminator: "")
                     return
                 case .recording, .refused: throw TieFailure("the tap app said \(message) while recording")

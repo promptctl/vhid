@@ -99,6 +99,13 @@ import Testing
         #expect(seen == ScreenRect.at(0, 10, 10, 50))
     }
 
+    /// A mirror set's members share a frame, so a rectangle on it lies on one frame, and is
+    /// captured, not refused as spanning displays.
+    @Test func aRectOnAMirrorSetIsOnOneDisplay() throws {
+        let seen = try PixelReader.onOneDisplay(ScreenRect.at(10, 10, 100, 50), displays: DisplayLayout.at([Self.main, Self.main]).active)
+        #expect(seen == ScreenRect.at(10, 10, 100, 50))
+    }
+
     @Test func aRectOnNoDisplayIsRefusedNotReadAsBlank() {
         #expect(throws: PixelsError.self) {
             try PixelReader.onOneDisplay(ScreenRect.at(9000, 9000, 40, 30), displays: DisplayLayout.at([Self.main, Self.left]).active)

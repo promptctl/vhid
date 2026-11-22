@@ -149,13 +149,13 @@ func sinceStart() -> Duration { .nanoseconds(Int64(clock_gettime_nsec_np(CLOCK_U
             var said = notes
             if recorder.unmapped > 0 { said.append("\(recorder.unmapped) key presses with no HID usage, fn among them, are not in the recording") }
             if recorder.offDisplay > 0 { said.append("\(recorder.offDisplay) moves to a point on no display are not in the recording") }
-            if recorder.unlocated > 0 { said.append("\(recorder.unlocated) events at a point that is not a place on the screen are not in the recording") }
+            if recorder.unlocated > 0 { said.append("\(recorder.unlocated) moves to a point that is not a place on the screen are not in the recording") }
             if recorder.layoutChanges > 0 { said.append("the displays changed \(recorder.layoutChanges) times while recording, so a point recorded after a change may be on no display when it plays") }
             if recorder.vhidAtEdge > 0 { said.append("vhid's motion reached a screen edge \(recorder.vhidAtEdge) times while recording, so the pointer points after it may be off") }
             do {
                 for note in said { try command.send(FromApp.note(note)) }
                 let ended = RecordingEnd(ending: ending, unmappedKeys: recorder.unmapped, offDisplay: recorder.offDisplay, unlocated: recorder.unlocated,
-                                         layoutChanges: recorder.layoutChanges)
+                                         layoutChanges: recorder.layoutChanges, vhidAtEdge: recorder.vhidAtEdge)
                 try command.send(FromApp.script(recorder.script(stoppedAt: stoppedAt, stopKeys: ending.isStopChord ? stopKeys : []), ended))
                 exit(0)
             } catch {
@@ -208,27 +208,23 @@ do {
 /// A tap event as the recorder reads it: nil for a kind it does not record, and the refusal
 /// for one at a point that is not a place on the screen, which the recorder counts.
 func tapEvent(_ type: CGEventType, _ event: CGEvent) -> Result<TapEvent, NotAPlace>? {
-    let location = event.location
     let button = { Button(rawValue: UInt8(event.getIntegerValueField(.mouseEventButtonNumber) + 1)) }
     let code = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
-    let kind: TapEvent.Kind?
+    let kind: Result<TapEvent.Kind, NotAPlace>?
     switch type {
-    case .keyDown: kind = .keyDown(keyCode: code, autorepeat: event.getIntegerValueField(.keyboardEventAutorepeat) != 0)
-    case .keyUp: kind = .keyUp(keyCode: code)
-    case .flagsChanged: kind = .flagsChanged(keyCode: code, flags: event.flags.rawValue)
-    case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged: kind = .motion
-    case .leftMouseDown, .rightMouseDown, .otherMouseDown: kind = button().map { .buttonDown($0) }
-    case .leftMouseUp, .rightMouseUp, .otherMouseUp: kind = button().map { .buttonUp($0) }
+    case .keyDown: kind = .success(.keyDown(keyCode: code, autorepeat: event.getIntegerValueField(.keyboardEventAutorepeat) != 0))
+    case .keyUp: kind = .success(.keyUp(keyCode: code))
+    case .flagsChanged: kind = .success(.flagsChanged(keyCode: code, flags: event.flags.rawValue))
+    case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
+        kind = Result { () throws(NotAPlace) in .motion(to: try ScreenPoint(x: event.location.x, y: event.location.y)) }
+    case .leftMouseDown, .rightMouseDown, .otherMouseDown: kind = button().map { .success(.buttonDown($0)) }
+    case .leftMouseUp, .rightMouseUp, .otherMouseUp: kind = button().map { .success(.buttonUp($0)) }
     default: kind = nil
     }
     // Field 87: the registry ID of the service that sent it; not a published CGEventField.
     let at = Duration.nanoseconds(Int64(event.timestamp) - Int64(startedAt))
-    return kind.map { kind in
-        Result { () throws(NotAPlace) in
-            TapEvent(at: max(at, .zero), sender: UInt64(bitPattern: event.getIntegerValueField(CGEventField(rawValue: 87)!)),
-                     location: try ScreenPoint(x: location.x, y: location.y), kind: kind)
-        }
-    }
+    let sender = UInt64(bitPattern: event.getIntegerValueField(CGEventField(rawValue: 87)!))
+    return kind.map { $0.map { TapEvent(at: max(at, .zero), sender: sender, kind: $0) } }
 }
 
 let kinds: [CGEventType] = [
@@ -288,10 +284,15 @@ DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(Int(Play.longest)
 try? command.send(FromApp.recording)
 Thread.detachNewThread {
     // The command's messages, and its end: a socket closed without a word is the command
-    // gone, and so is the app.
-    while let message = try? command.receive(ToApp.self) {
-        DispatchQueue.main.async { MainActor.assumeIsolated { session.finish(message.ending) } }
+    // gone, and so is the app. One it cannot read is refused, saying what was wrong, since
+    // the app's own stderr goes nowhere a person sees. [LAW:no-silent-failure]
+    do {
+        while let message = try command.receive(ToApp.self) {
+            DispatchQueue.main.async { MainActor.assumeIsolated { session.finish(message.ending) } }
+        }
+        DispatchQueue.main.async { exit(1) }
+    } catch {
+        refuse("the command's messages could not be read: \(error)")
     }
-    DispatchQueue.main.async { exit(1) }
 }
 withExtendedLifetime(watch) { CFRunLoopRun() }

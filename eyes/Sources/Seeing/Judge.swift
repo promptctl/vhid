@@ -76,8 +76,9 @@ public extension Reading {
         }
         let anchors = anchored.map { $0.flatMap(\.found) }
         // Each stretch no display shows is text read and not placed, counted once whether
-        // the match or the anchor narrowed to it. [LAW:no-silent-failure]
-        let unshown = Set((matched + (anchored ?? [])).flatMap(\.unshown)).count
+        // the match or the anchor narrowed to it, by the reason it was not. [LAW:no-silent-failure]
+        let unshown = Dictionary((matched + (anchored ?? [])).flatMap(\.unshown), uniquingKeysWith: { first, _ in first })
+            .values.map { Exclusion(reason: $0, count: 1) }
         // The rows a miss shows: the asked-for text's of the asked-for role, the anchor's of any.
         func misses(among pool: [(found: Found, fit: Fit)]) -> [Near] {
             distinct(pool.sorted { $0.fit.distance < $1.fit.distance }, by: \.found).kept
@@ -101,8 +102,7 @@ public extension Reading {
         let set: [Exclusion] = [Exclusion(reason: .duplicate, count: admitted.dropped),
                                 Exclusion(reason: .otherRole, count: distinct(cast[.other] ?? [], by: \.found).kept.count),
                                 Exclusion(reason: .roleUnknown, count: distinct(cast[.unknown] ?? [], by: \.found).kept.count),
-                                Exclusion(reason: .ranked, count: cut),
-                                Exclusion(reason: .unshown, count: unshown)]
+                                Exclusion(reason: .ranked, count: cut)] + unshown
         let scope = Scope(
             region: region,
             examined: examined,
@@ -123,14 +123,14 @@ extension Optional where Wrapped == Match {
     /// [LAW:dataflow-not-control-flow]
     public func fit(_ found: Found) -> Fit { map { $0.fit(found) } ?? .drawn(0) }
     func tolerates(_ distance: Int) -> Bool { map { $0.tolerates(distance) } ?? true }
-    func narrowing(_ found: Found, by fit: Fit) -> Narrowed { map { $0.narrowing(found, by: fit) } ?? Narrowed(found: [found], unshown: []) }
+    func narrowing(_ found: Found, by fit: Fit) -> Narrowed { map { $0.narrowing(found, by: fit) } ?? Narrowed(found: [found], unshown: [:]) }
 }
 
 /// What narrowing a row to the words that match gave: each stretch placed within the row's
 /// bound, and the stretches no display shows there.
 struct Narrowed {
     let found: [Found]
-    let unshown: Set<[Word]>
+    let unshown: [[Word]: Exclusion.Reason]
 }
 
 /// Which of a row's texts a match fits best, and how many edits off: its own text, or one of
@@ -211,7 +211,7 @@ extension Match {
     /// shows no display that word, and it is unshown rather than pressed in the list's edge.
     func narrowing(_ found: Found, by fit: Fit) -> Narrowed {
         switch (self, fit) {
-        case (.exact, _), (_, .also): Narrowed(found: [found], unshown: [])
+        case (.exact, _), (_, .also): Narrowed(found: [found], unshown: [:])
         case (.contains, .drawn), (.within, .drawn): narrowed(found)
         }
     }
@@ -225,13 +225,13 @@ extension Match {
         for span in spans where !chosen.contains(where: { $0.overlaps(span) }) {
             chosen.append(span)
         }
-        guard !chosen.isEmpty else { return Narrowed(found: [found], unshown: []) }
-        var placed: [Found] = [], unshown: Set<[Word]> = []
+        guard !chosen.isEmpty else { return Narrowed(found: [found], unshown: [:]) }
+        var placed: [Found] = [], unshown: [[Word]: Exclusion.Reason] = [:]
         for span in chosen.sorted(by: { $0.lowerBound < $1.lowerBound }) {
-            do {
+            do throws(Unshown) {
                 placed.append(try Found(first: words[span.lowerBound], rest: Array(words[span].dropFirst()), source: found.source, placedAs: found))
             } catch {
-                unshown.insert(Array(words[span]))
+                unshown[Array(words[span])] = error.reason
             }
         }
         return Narrowed(found: placed, unshown: unshown)

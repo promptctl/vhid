@@ -44,10 +44,22 @@ struct PlayCommand: AsyncParsableCommand {
     /// played. [LAW:decomposition]
     static func play(_ schedule: Schedule<ScreenPoint>, with devices: Devices) async throws -> Played {
         let placed = try schedule.placed(on: try await devices.layout().online)
-        let played = try await Player(pointer: devices.pointer, keyboard: devices.keyboard, wall: epochMicroseconds, layout: devices.layout, lead: lead).play(placed)
-        Telemetry.note(.layout, .string(played.layout.word))
-        Telemetry.note(.layoutUnread, played.layout.unread.map(JSON.string))
+        let played: Played
+        do {
+            played = try await Player(pointer: devices.pointer, keyboard: devices.keyboard, wall: epochMicroseconds, layout: devices.layout, lead: lead).play(placed)
+        } catch let stopped as PlayStopped {
+            note(stopped.layout)
+            throw stopped
+        }
+        note(played.layout)
         return played
+    }
+
+    /// The layout a placed play ended on, finished or stopped: so the record has it whenever
+    /// a play was placed, and its absence means nothing was. [LAW:nothing-unseen]
+    private static func note(_ layout: Played.Layout) {
+        Telemetry.note(.layout, .string(layout.word))
+        Telemetry.note(.layoutUnread, layout.unread.map(JSON.string))
     }
 
     /// What a play left behind: the reports that went out, and - only when it finished -

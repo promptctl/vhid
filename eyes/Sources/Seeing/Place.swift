@@ -13,10 +13,12 @@ public extension Region {
     func bounds(on layout: DisplayLayout) throws -> ScreenRect {
         switch self {
         case .rect(let rect):
-            // A rectangle on no display has nothing in it to read, and a reader that walked
-            // it would report a blank screen. [LAW:no-silent-failure]
+            // A rectangle no display shows a point a side of has nothing in it to read, and a
+            // reader that walked it would report a blank screen. [LAW:no-silent-failure] What
+            // a display shows is the pressing rule's, so every reader is handed a region it
+            // can read or none. [LAW:single-enforcer]
             guard !rect.isEmpty else { throw NoSuchPlace.empty(rect) }
-            guard layout.active.frames.contains(where: { $0.intersects(rect) }) else { throw NoSuchPlace.offScreen(rect) }
+            guard !layout.active.parts(of: rect).isEmpty else { throw NoSuchPlace.offScreen(rect) }
             return rect
         case .display(let id):
             // The displays `eyes displays` lists, so an id it did not list is refused here.

@@ -26,13 +26,11 @@ public struct OnlineDisplay: Hashable, Sendable {
 /// was placed on still holds.
 public struct DisplayLayout: Hashable, Sendable {
     public let displays: [OnlineDisplay]
-    /// The box holding every display: finite, which is what lets any box drawn on them be
-    /// joined with another without running past a Double.
-    public let extent: ScreenRect
 
     /// [LAW:parse-dont-validate] At least one online display, each with an id of its own and
-    /// a side of at least a point, and a finite extent; refused by name otherwise. An empty
-    /// frame is a read that went wrong, not a display.
+    /// a side of at least a point, all within a box that is finite - which is what lets any
+    /// box drawn on them be joined with another without running past a Double; refused by
+    /// name otherwise. An empty frame is a read that went wrong, not a display.
     public init(_ displays: [OnlineDisplay]) throws(LayoutUnreadable) {
         guard let first = displays.first else { throw .noDisplay }
         if let empty = displays.first(where: { $0.frame.width < 1 || $0.frame.height < 1 }) { throw .empty(empty.id, empty.frame) }
@@ -43,7 +41,6 @@ public struct DisplayLayout: Hashable, Sendable {
             do { extent = try extent.union(display.frame) } catch { throw .tooWide(error) }
         }
         self.displays = displays
-        self.extent = extent
     }
 
     /// Where a press can be made: every online display.

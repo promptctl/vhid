@@ -332,12 +332,7 @@ public struct Player {
                 let played = Played.Report(line: event.line, scheduled: at(due), sent: at(sent), acked: at(timeline.now() - started))
                 went += event.report.isReport && sentReports > 0 ? [played] : []
             }
-            // Read once the last report is out, apart from the play: what it reads cannot
-            // undo a report, so a read that fails is said rather than failing the play.
-            // [LAW:no-silent-failure]
-            let after: Played.Layout
-            do { after = Played.Layout(placedOn: play.start.displays, after: try await layout()) } catch { after = .unread(error.reported) }
-            return Played(startReports: reports, reports: went, layout: after)
+            return Played(startReports: reports, reports: went, layout: await after(play))
         } catch {
             // Both devices, whatever either answers, because a stop can land with a key and
             // a button both held. [LAW:no-silent-failure] A script that holds no key has no
@@ -347,9 +342,18 @@ public struct Player {
             // that were sent, as `Pointer.holding` chooses its own.
             let letGo: () async throws -> Void = play.holdsKeys(in: reached) ? { try await keyboard.releaseAll() } : {}
             let keys = await failure(of: letGo)
-            throw PlayStopped(played: went, of: play.reports, line: line,
-                              cause: error, unreleasedKeys: keys, unreleasedButtons: await pointer.release())
+            let buttons = await pointer.release()
+            throw PlayStopped(played: went, of: play.reports, line: line, cause: error, unreleasedKeys: keys, unreleasedButtons: buttons,
+                              layout: await after(play))
         }
+    }
+
+    /// The layout once the last report is out, finished or stopped, apart from the play: what
+    /// it reads cannot undo a report, so a read that fails is said rather than failing the
+    /// play. [LAW:no-silent-failure] [LAW:single-enforcer] One read for both ends, so a play
+    /// that stopped says it as one that finished does.
+    private func after(_ play: Schedule<Placed<ScreenPoint>>) async -> Played.Layout {
+        do { return Played.Layout(placedOn: play.start.displays, after: try await layout()) } catch { return .unread(error.reported) }
     }
 
     /// Where the table thinks the cursor is, the table, and the pace it was measured at.
@@ -459,6 +463,8 @@ public struct PlayStopped: StoppedPartWay, CustomStringConvertible {
     /// that device holds nothing; anything else says a key or a button may be held.
     public let unreleasedKeys: (any Error)?
     public let unreleasedButtons: (any Error)?
+    /// Whether the displays were laid out as the play was placed on once it stopped.
+    public let layout: Played.Layout
 
     public var description: String {
         let place = line.map { " at line \($0)" } ?? ""

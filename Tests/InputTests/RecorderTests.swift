@@ -17,8 +17,8 @@ import InputTesting
     /// A display whose right edge is the point column at 150.
     static let edgeAt150 = DisplayLayout.at([.at(0, 0, 151, 1000)]).online
 
-    private func event(_ ms: Int, _ kind: TapEvent.Kind, at location: ScreenPoint = start, from sender: UInt64 = 0) -> TapEvent {
-        TapEvent(at: .milliseconds(ms), sender: sender, location: location, kind: kind)
+    private func event(_ ms: Int, _ kind: TapEvent.Kind, from sender: UInt64 = 0) -> TapEvent {
+        TapEvent(at: .milliseconds(ms), sender: sender, kind: kind)
     }
 
     private func point(_ x: Double, _ y: Double) -> ScreenPoint { ScreenPoint.at(x, y) }
@@ -50,9 +50,9 @@ import InputTesting
             event(40, .keyDown(keyCode: 34, autorepeat: false)),
             event(45, .keyUp(keyCode: 34)),
             event(50, .buttonDown(.left)),
-            event(58, .motion, at: point(110, 105.5)),
-            event(66, .motion, at: point(120, 110)),
-            event(70, .buttonUp(.left), at: point(120, 110)),
+            event(58, .motion(to: point(110, 105.5))),
+            event(66, .motion(to: point(120, 110))),
+            event(70, .buttonUp(.left)),
         ] { recorder.take(event) }
         expect(try replayed(recorder, stoppedAt: 80), [
             (0, keys()), (10, keys(0xE1)), (20, keys(0x0B, 0xE1)), (30, keys(0xE1)), (35, keys()),
@@ -92,13 +92,13 @@ import InputTesting
     /// points; its modifiers are in the session's flags, and are taken out of their keys.
     @Test func vhidsOwnEventsAreNotThePersons() throws {
         var recorder = try Recorder(start: Self.start, on: Self.edgeAt150, flags: 0, vhid: [Self.vhid])
-        recorder.take(event(10, .motion, at: point(150, 100), from: Self.vhid))
-        recorder.take(event(20, .motion, at: point(160, 102)))
-        recorder.take(event(30, .flagsChanged(keyCode: 56, flags: 0x20002), at: point(160, 102), from: Self.vhid))
-        recorder.take(event(40, .keyDown(keyCode: 0, autorepeat: false), at: point(160, 102)))
-        recorder.take(event(50, .flagsChanged(keyCode: 56, flags: 0), at: point(160, 102), from: Self.vhid))
-        recorder.take(event(60, .keyDown(keyCode: 4, autorepeat: false), at: point(160, 102), from: Self.vhid))
-        recorder.take(event(70, .keyUp(keyCode: 0), at: point(160, 102)))
+        recorder.take(event(10, .motion(to: point(150, 100)), from: Self.vhid))
+        recorder.take(event(20, .motion(to: point(160, 102))))
+        recorder.take(event(30, .flagsChanged(keyCode: 56, flags: 0x20002), from: Self.vhid))
+        recorder.take(event(40, .keyDown(keyCode: 0, autorepeat: false)))
+        recorder.take(event(50, .flagsChanged(keyCode: 56, flags: 0), from: Self.vhid))
+        recorder.take(event(60, .keyDown(keyCode: 4, autorepeat: false), from: Self.vhid))
+        recorder.take(event(70, .keyUp(keyCode: 0)))
         expect(try replayed(recorder, stoppedAt: 80), [
             (0, keys()), (20, .at(point(110, 102))), (40, keys(0x04)), (70, keys()), (80, keys()), (80, .buttons([])),
         ])
@@ -113,7 +113,7 @@ import InputTesting
         earlier.take(event(11, .keyDown(keyCode: 8, autorepeat: false)))
         earlier.take(event(12, .keyUp(keyCode: 8)))
         earlier.take(event(13, .flagsChanged(keyCode: 59, flags: 0)))
-        earlier.take(event(20, .motion, at: point(101, 100)))
+        earlier.take(event(20, .motion(to: point(101, 100))))
         earlier.take(event(30, .flagsChanged(keyCode: 59, flags: 0x40001)))
         earlier.take(event(31, .keyDown(keyCode: 8, autorepeat: false)))
         expect(try replayed(earlier, stoppedAt: 40), [
@@ -167,10 +167,10 @@ import InputTesting
     /// not at its edge, and vhid's motion there is not counted as stopped by one.
     @Test func aMoveOffEveryDisplayIsLeftOutAndCounted() throws {
         var recorder = try Recorder(start: Self.start, on: Self.edgeAt150, flags: 0, vhid: [Self.vhid])
-        recorder.take(event(10, .motion, at: point(120, 100)))
-        recorder.take(event(20, .motion, at: point(400, 100)))
-        recorder.take(event(30, .motion, at: point(130, 100)))
-        recorder.take(event(40, .motion, at: point(300, 100), from: Self.vhid))
+        recorder.take(event(10, .motion(to: point(120, 100))))
+        recorder.take(event(20, .motion(to: point(400, 100))))
+        recorder.take(event(30, .motion(to: point(130, 100))))
+        recorder.take(event(40, .motion(to: point(300, 100)), from: Self.vhid))
         let script = recorder.script(stoppedAt: .milliseconds(50), stopKeys: Self.stopKeys)
         expect(try replayed(recorder, stoppedAt: 50), [
             (0, keys()), (10, .at(point(120, 100))), (30, .at(point(130, 100))), (50, keys()), (50, .buttons([])),
@@ -185,11 +185,11 @@ import InputTesting
     /// are not a change.
     @Test func aChangedLayoutPlacesTheLaterPointsAndIsCounted() throws {
         var recorder = try Recorder(start: Self.start, on: Self.edgeAt150, flags: 0, vhid: [])
-        recorder.take(event(10, .motion, at: point(400, 100)))
+        recorder.take(event(10, .motion(to: point(400, 100))))
         recorder.displaysChanged(to: Self.edgeAt150)
         #expect(recorder.layoutChanges == 0)
         recorder.displaysChanged(to: DisplayLayout.single.online)
-        recorder.take(event(20, .motion, at: point(400, 100)))
+        recorder.take(event(20, .motion(to: point(400, 100))))
         expect(try replayed(recorder, stoppedAt: 30), [(0, keys()), (20, .at(point(400, 100))), (30, keys()), (30, .buttons([]))])
         #expect(recorder.offDisplay == 1)
         #expect(recorder.layoutChanges == 1)
@@ -203,9 +203,9 @@ import InputTesting
     /// A recording is a script `vhid play` schedules whole: at lines and all.
     @Test func aRecordingSchedules() throws {
         var recorder = try Recorder(start: Self.start, on: .vast, flags: 0, vhid: [])
-        recorder.take(event(8, .motion, at: point(104, 100)))
-        recorder.take(event(16, .buttonDown(.left), at: point(104, 100)))
-        recorder.take(event(24, .buttonUp(.left), at: point(104, 100)))
+        recorder.take(event(8, .motion(to: point(104, 100))))
+        recorder.take(event(16, .buttonDown(.left)))
+        recorder.take(event(24, .buttonUp(.left)))
         let schedule = try Schedule(Play.parse(recorder.script(stoppedAt: .milliseconds(30), stopKeys: Self.stopKeys)))
         #expect(schedule.calibration != nil)
         #expect(schedule.reports == 3)

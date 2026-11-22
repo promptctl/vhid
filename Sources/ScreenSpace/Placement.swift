@@ -38,16 +38,20 @@ public struct Displays: Hashable, Sendable {
         return Placed(Shown(box: box, bound: bound, part: part), on: self)
     }
 
-    /// The parts of `box` each display shows that are at least a point a side, with the
-    /// display showing each, in the layout's order. [LAW:single-enforcer] The one statement
-    /// of what a display shows of a box, which placement and a capture's cut both ask.
+    /// The parts of `box` the displays show that are at least a point a side, one per frame,
+    /// with the first display listed at that frame, in the layout's order. A mirror set's
+    /// members share a frame and so show a box once. [LAW:single-enforcer] The one statement
+    /// of what the displays show of a box, which placement, a region's check and a capture's
+    /// cut all ask.
     public func parts(of box: ScreenRect) -> [(display: OnlineDisplay, part: ScreenRect)] {
-        displays.compactMap { display in box.intersection(display.frame).map { (display, $0) } }.filter { $0.part.width >= 1 && $0.part.height >= 1 }
+        var frames: Set<ScreenRect> = []
+        return displays.filter { frames.insert($0.frame).inserted }
+            .compactMap { display in box.intersection(display.frame).map { (display, $0) } }
+            .filter { $0.part.width >= 1 && $0.part.height >= 1 }
     }
 
-    /// The largest of `parts` by area, and of equals the first: a mirror set's members share
-    /// a frame, so the one pressed is the first the layout lists, whatever order a sort or
-    /// `max` would leave equals in.
+    /// The largest of `parts` by area, and of equals the first the layout lists, whatever
+    /// order a sort or `max` would leave equals in.
     private static func largest(_ parts: [ScreenRect]) -> ScreenRect? {
         parts.indices.min { (-parts[$0].area, $0) < (-parts[$1].area, $1) }.map { parts[$0] }
     }

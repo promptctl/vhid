@@ -42,17 +42,21 @@ public struct RecordingEnd: Codable, Equatable, Sendable {
     public let unmappedKeys: Int
     /// The person's moves to a point no display holds.
     public let offDisplay: Int
-    /// Events at a point that is not a place on the screen.
+    /// Motion to a point that is not a place on the screen.
     public let unlocated: Int
     /// How many times the layout came to press otherwise while recording.
     public let layoutChanges: Int
+    /// How many times vhid's own motion ended on a screen edge, after which the points
+    /// written may be off: not left out, but not exact.
+    public let vhidAtEdge: Int
 
-    public init(ending: Ending, unmappedKeys: Int, offDisplay: Int, unlocated: Int, layoutChanges: Int) {
+    public init(ending: Ending, unmappedKeys: Int, offDisplay: Int, unlocated: Int, layoutChanges: Int, vhidAtEdge: Int) {
         self.ending = ending
         self.unmappedKeys = unmappedKeys
         self.offDisplay = offDisplay
         self.unlocated = unlocated
         self.layoutChanges = layoutChanges
+        self.vhidAtEdge = vhidAtEdge
     }
 
     /// What ended it: the person's stop, the command's end, or the app's own.

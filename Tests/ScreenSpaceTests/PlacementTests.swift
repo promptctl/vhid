@@ -116,6 +116,15 @@ import Testing
         #expect(try twins.online.place(Self.box(900, 0, 200, 40)).value.part == (try Self.box(900, 0, 100, 40)))
     }
 
+    /// A mirror set's members share one frame, so a box on it is one part, shown once.
+    @Test func aMirrorSetShowsABoxOnce() throws {
+        let mirrored = try DisplayLayout([OnlineDisplay(id: 1, frame: Self.box(0, 0, 1600, 900), active: true),
+                                          OnlineDisplay(id: 2, frame: Self.box(0, 0, 1600, 900), active: true)])
+        let parts = mirrored.online.parts(of: try Self.box(10, 10, 100, 40))
+        #expect(parts.map(\.display.id) == [1])
+        #expect(parts.map(\.part) == [try Self.box(10, 10, 100, 40)])
+    }
+
     /// A box with a side of zero is refused saying so, not as a box on no display.
     @Test func aBoxWithASideOfZeroIsRefusedSayingSo() throws {
         let flat = #expect(throws: Unplaced.self) { try Self.layout().online.place(Self.box(10, 10, 0, 30)) }
