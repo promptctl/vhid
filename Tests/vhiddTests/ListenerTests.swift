@@ -70,7 +70,7 @@ import Waiting
     /// going away does.
     private func client(of served: Served) -> (helper: HelperConnection, connection: NSXPCConnection) {
         let connection = NSXPCConnection(listenerEndpoint: served.listener.endpoint)
-        return (HelperConnection(connection: connection, service: "ai.promptctl.vhid.tests.far", replyTimeout: .seconds(20)), connection)
+        return (HelperConnection(connection: connection, service: "ai.promptctl.vhid.tests.far", replyTimeout: hangGuard), connection)
     }
 
     /// Whether a fresh client pressing `usage` was served. A client refused as busy hears

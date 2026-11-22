@@ -1,9 +1,9 @@
-import Dispatch
 import Keystrokes
 import Pointing
 import Synchronization
 import Testing
 import Input
+import Waiting
 
 /// What reached the devices, in the order it arrived.
 private final class Journal: Sendable {
@@ -17,25 +17,21 @@ private final class Journal: Sendable {
 /// A device that holds the thread a key-down is made on until the test acknowledges it,
 /// as vhidd's round trip holds it until the report is posted.
 private final class BlockingKeyPress: KeyPress {
-    struct Unacknowledged: Error {}
-
     private let journal: Journal
-    private let acknowledged = DispatchSemaphore(value: 0)
-    private let held = Mutex(false)
+    private let acknowledged = Latch(false)
+    private let held = Latch(false)
 
     init(journal: Journal) { self.journal = journal }
 
     /// Whether a key-down is holding its thread right now.
-    var blocking: Bool { held.withLock { $0 } }
+    var blocking: Bool { held.current }
 
-    func acknowledge() { acknowledged.signal() }
+    func acknowledge() { acknowledged.update { $0 = true } }
 
-    /// Bounded, so a key-down made where it should not be fails the test rather than
-    /// holding the suite: the deadline is past any the test itself waits for.
     func down(_ usage: Usage) throws {
-        held.withLock { $0 = true }
-        defer { held.withLock { $0 = false } }
-        guard acknowledged.wait(timeout: .now() + .seconds(30)) == .success else { throw Unacknowledged() }
+        held.update { $0 = true }
+        defer { held.update { $0 = false } }
+        try acknowledged.wait(for: "the test to acknowledge the key-down") { $0 }
         journal.record("down \(usage.rawValue)")
     }
 
@@ -55,19 +51,20 @@ private struct JournalPointing: PointingDevice {
 }
 
 /// Where a queued device waits for its answer.
-@Suite @MainActor struct DeviceQueueTests {
+@Suite(.hangGuarded) @MainActor struct DeviceQueueTests {
     /// A key-down must not hold the actor it was asked on while the device answers: a
     /// report blocks the thread it is made on until the far side replies, and that wait
     /// belongs nowhere anything else runs. The device is read from the main actor while it
     /// is still holding the key-down's thread; a key-down made on the main actor would
-    /// leave nothing to read it until the hold was over, and the hold only ends at the
-    /// deadline.
+    /// leave nothing to read it until the hold was over, and the hold ends only when the
+    /// test acknowledges it. The task asking is this actor's, so it is waited for by
+    /// yielding to it, with no clock.
     @Test func aKeyDownWaitsForTheDeviceOffTheCallersActor() async throws {
         let journal = Journal()
         let device = BlockingKeyPress(journal: journal)
         let keyboard = QueuedKeyboard(keyboard: device, queue: DeviceQueue())
         let pressed = Task { try await keyboard.down(Usage(rawValue: 0x04)) }
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { device.blocking })
+        while !device.blocking { await Task.yield() }
         device.acknowledge()
         try await pressed.value
         #expect(journal.log == ["down 4"])
@@ -88,13 +85,13 @@ private struct JournalPointing: PointingDevice {
         let keyboard = QueuedKeyboard(keyboard: device, queue: queue)
         let mouse = QueuedMouse(pointing: JournalPointing(journal: journal), queue: queue)
         let pressed = Task { try await keyboard.down(Usage(rawValue: 0x04)) }
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { device.blocking })
+        while !device.blocking { await Task.yield() }
         var asked = false
         let moved = Task {
             asked = true
             try await mouse.move(by: Move(x: Count(clamping: 3), y: Count(clamping: 4)))
         }
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { asked })
+        while !asked { await Task.yield() }
         device.acknowledge()
         try await pressed.value
         try await moved.value

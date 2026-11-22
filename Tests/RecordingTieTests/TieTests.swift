@@ -2,16 +2,17 @@ import ChildProcess
 import Foundation
 import OwnThread
 import Testing
+import Waiting
 @testable import RecordingTie
 
 /// The tie between `vhid record` and its tap app, over a real socket and real processes.
-@Suite(.ownThread) struct TieTests {
+@Suite(.ownThread, .hangGuarded) struct TieTests {
     /// Messages cross both ways whole, a script's newlines included, and a closed end
     /// reads as the end.
     @Test func messagesCrossAndACloseEndsThem() throws {
         let listener = try TieListener()
         let app = try TieEnd.connect(to: listener.path)
-        let command = try listener.accept(within: .seconds(1))
+        let command = try listener.accept(within: hangGuard)
         let ended = RecordingEnd(ending: .layoutLost, unmappedKeys: 1, offDisplay: 2, unlocated: 4, layoutChanges: 3, vhidAtEdge: 5)
         try app.send(FromApp.recording)
         try app.send(FromApp.script("{\"to\":{\"x\":1,\"y\":2}}\n{\"t_ms\":0,\"keys\":[]}\n", ended))
@@ -42,15 +43,19 @@ import Testing
         #expect(throws: TieFailure.self) { try TieEnd.connect(to: "/tmp/vhid-record-no-such-socket") }
     }
 
-    /// The command killed while the app records: the watch fires.
-    @Test func theWatchFiresWhenTheCommandEnds() async throws {
-        let command = try Process.run(URL(fileURLWithPath: "/bin/sleep"), arguments: ["30"])
-        let ended = Ended()
-        let watch = CommandWatch(pid: command.processIdentifier, queue: DispatchQueue(label: "watch")) { ended.signal() }
-        #expect(!ended.wait(.milliseconds(100)))
+    /// The command killed while the app records: the watch fires, and not before. Whatever
+    /// the watch does on being set is done on its queue, so the queue drained is the watch
+    /// having looked at a command still running.
+    @Test func theWatchFiresWhenTheCommandEnds() throws {
+        let command = try Process.run(URL(fileURLWithPath: "/bin/sleep"), arguments: ["600"])
+        let ended = Latch(false)
+        let queue = DispatchQueue(label: "watch")
+        let watch = CommandWatch(pid: command.processIdentifier, queue: queue) { ended.update { $0 = true } }
+        queue.sync {}
+        #expect(!ended.current)
         kill(command.processIdentifier, SIGKILL)
         command.waitUntilExit()
-        #expect(ended.wait(.seconds(5)))
+        try ended.wait(for: "the watch to fire") { $0 }
         withExtendedLifetime(watch) {}
     }
 
@@ -70,17 +75,9 @@ import Testing
         #expect(waitid(P_PID, id_t(pid), &info, WEXITED | WNOWAIT) == 0)
         #expect(kill(pid, 0) == 0)
         #expect(CommandWatch.ended(pid))
-        let ended = Ended()
-        let watch = CommandWatch(pid: pid, queue: DispatchQueue(label: "watch")) { ended.signal() }
-        #expect(ended.wait(.seconds(5)))
+        let ended = Latch(false)
+        let watch = CommandWatch(pid: pid, queue: DispatchQueue(label: "watch")) { ended.update { $0 = true } }
+        try ended.wait(for: "the watch to fire") { $0 }
         withExtendedLifetime(watch) {}
-    }
-
-    private final class Ended: @unchecked Sendable {
-        private let semaphore = DispatchSemaphore(value: 0)
-        func signal() { semaphore.signal() }
-        func wait(_ limit: Duration) -> Bool {
-            semaphore.wait(timeout: .now() + .milliseconds(Int(limit.components.seconds * 1000 + limit.components.attoseconds / 1_000_000_000_000_000))) == .success
-        }
     }
 }

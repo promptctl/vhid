@@ -5,13 +5,14 @@ import Pointing
 import ScreenSpace
 import ScreenSpaceTesting
 import Testing
+import Waiting
 @testable import Helper
 
 /// The client's side of the privilege seam, driven against a service of the test's own
 /// on the far end of a real XPC connection: an anonymous listener in this process, so
 /// what is exercised is the round trip and every way it ends, with nothing mocked but
 /// who answers. [LAW:behavior-not-structure]
-@Suite(.ownThread) struct HelperKeyboardTests {
+@Suite(.ownThread, .hangGuarded) struct HelperKeyboardTests {
     /// What the service on the far end does with a call. One type, three behaviours as
     /// values. [LAW:one-type-per-behavior]
     enum Answer: Sendable {
@@ -113,7 +114,7 @@ import Testing
 
     /// The bound ends a test whose far end is broken; it measures nothing, so it sits far
     /// above any round trip. [LAW:no-ambient-temporal-coupling]
-    private func helper(_ answer: Answer, failure: (String?, Date?) = (nil, nil), replyTimeout: Duration = .seconds(20)) -> (HelperConnection, FarEnd) {
+    private func helper(_ answer: Answer, failure: (String?, Date?) = (nil, nil), replyTimeout: Duration = hangGuard) -> (HelperConnection, FarEnd) {
         let service = Service(answer, failure: failure)
         let listener = NSXPCListener.anonymous()
         listener.delegate = service

@@ -74,7 +74,14 @@ enum DaemonProcess {
         var launch: () throws -> pid_t
         var terminate: (pid_t) -> Void
         var say: (Said) -> Void
+        /// The clock the connect loop's deadline is made on.
+        var timeline: Timeline
+        /// The pause before a daemon started here is dialed again, on `timeline`.
+        var redialPause: (Duration) -> Void
     }
+
+    /// How long a daemon started here is given between dials, while it comes up.
+    static let redialEvery: Duration = .milliseconds(100)
 
     /// The effects done for real. The daemon outlives any one connection on purpose, and
     /// only `stop` ends it.
@@ -97,7 +104,9 @@ enum DaemonProcess {
                 case .happened(let what): log(what)
                 case .failed(let what): logFailure(what)
                 }
-            }
+            },
+            timeline: .suspending,
+            redialPause: { Thread.sleep(forTimeInterval: $0.seconds) }
         )
     }
 
@@ -134,7 +143,7 @@ extension DaemonProcess.Effects {
     /// moment the stop is decided. [LAW:no-silent-failure]
     func reach(within limit: Duration, whenLost: @escaping @Sendable (DaemonError, DaemonProcess.Origin) -> Void) throws -> DaemonProcess.Reached<Device> {
         let stopping = Mutex(false)
-        let (devices, origin) = try connection(by: Timeline.suspending.deadline(within: limit)) { error, origin in
+        let (devices, origin) = try connection(by: timeline.deadline(within: limit)) { error, origin in
             if !stopping.withLock({ $0 }) { whenLost(error, origin) }
         }
         do {
@@ -161,7 +170,7 @@ extension DaemonProcess.Effects {
                 return (try connect { whenLost($0, origin) }, origin)
             } catch let unreachable as DaemonError {
                 guard !deadline.passed else { stop(origin); throw unreachable }
-                Thread.sleep(forTimeInterval: 0.1)
+                redialPause(DaemonProcess.redialEvery)
             }
         }
     }

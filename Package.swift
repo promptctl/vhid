@@ -129,7 +129,7 @@ let package = Package(
         // boundary, and not the device, because a client must never open one.
         // [LAW:one-way-deps]
         .target(name: "Helper", dependencies: ["Timeline", "Installations", "Keystrokes", "Pointing", "ScreenSpace"]),
-        .testTarget(name: "HelperTests", dependencies: ["Helper", "Installations", "Keystrokes", "Pointing", "ScreenSpace", "ScreenSpaceTesting", "OwnThread"]),
+        .testTarget(name: "HelperTests", dependencies: ["Helper", "Installations", "Keystrokes", "Pointing", "ScreenSpace", "ScreenSpaceTesting", "OwnThread", "Waiting"]),
         // What a caller asks the devices for, said in a caller's terms: text lowered to
         // keystrokes, a chord, a place on the screen to click. It links the two
         // vocabularies and the layout, and deliberately not Helper or VirtualHID: which
@@ -141,7 +141,7 @@ let package = Package(
         // The pointer's loop against a fake screen with an acceleration curve of its own,
         // and the typist against a keyboard that can be made to fail at the third keystroke
         // of four: no device, no window server, no grant.
-        .testTarget(name: "InputTests", dependencies: ["Timeline", "Input", "InputTesting", "KeyboardLayouts", "Keystrokes", "OwnThread", "Pointing", "ScreenSpace", "ScreenSpaceTesting", "TestClock", "Telemetry"]),
+        .testTarget(name: "InputTests", dependencies: ["Timeline", "Input", "InputTesting", "KeyboardLayouts", "Keystrokes", "OwnThread", "Pointing", "ScreenSpace", "ScreenSpaceTesting", "TestClock", "Telemetry", "Waiting"]),
         // Targets placed as a verb places them, for the tests of the devices and of the
         // verbs over them. No product names it, so nothing shipped carries it.
         .target(name: "InputTesting", dependencies: ["Input", "ScreenSpace", "ScreenSpaceTesting"], path: "Tests/InputTesting"),
@@ -170,7 +170,7 @@ let package = Package(
         // app's watch on the command. It links only Timeline, which links nothing, so both ends speak one vocabulary
         // without either linking the other. [LAW:one-way-deps]
         .target(name: "RecordingTie", dependencies: ["Timeline"]),
-        .testTarget(name: "RecordingTieTests", dependencies: ["RecordingTie", "ChildProcess", "OwnThread"]),
+        .testTarget(name: "RecordingTieTests", dependencies: ["RecordingTie", "ChildProcess", "OwnThread", "Waiting"]),
         // The tap app `vhid record` launches, shipped as a signed bundle so Input
         // Monitoring can be granted to it once. It reads the tap, the I/O Registry and,
         // through DisplayReading, the display layout every point it writes is placed on,
@@ -221,7 +221,7 @@ let package = Package(
         // its own because the suites that wait are in many test targets, and one test
         // target cannot link another. No product names it, so nothing shipped carries it.
         .target(name: "OwnThread", path: "Tests/OwnThread"),
-        .testTarget(name: "OwnThreadTests", dependencies: ["OwnThread"]),
+        .testTarget(name: "OwnThreadTests", dependencies: ["OwnThread", "Waiting"]),
         // A clock that moves only when a test moves it or something sleeps on it, so a
         // verb that rests between reports is tested without waiting. A target of its own
         // for OwnThread's reason: InputTests, vhidCLITests and SeeingTests all sleep on it.
@@ -259,7 +259,7 @@ let package = Package(
         // vocabulary stays linking nothing and the tree reader sits beside it unlinked.
         .target(name: "Pixels", dependencies: ["Seeing", "ScreenSpace", "Grants", "ChildProcess", "Telemetry", "Timeline", "Turns"], path: "eyes/Sources/Pixels"),
         // How a capture is cut into pieces and put back together, with no capture at all.
-        .testTarget(name: "PixelsTests", dependencies: ["Pixels", "Seeing", "ScreenSpace", "ScreenSpaceTesting", "Grants", "ChildProcess", "Turns"], path: "eyes/Tests/PixelsTests"),
+        .testTarget(name: "PixelsTests", dependencies: ["Pixels", "Seeing", "ScreenSpace", "ScreenSpaceTesting", "Grants", "ChildProcess", "Turns", "Waiting"], path: "eyes/Tests/PixelsTests"),
         // The tree reader: the accessibility grant and the element reads, apart from Pixels
         // for the same reason.
         .target(name: "Tree", dependencies: ["Seeing", "ScreenSpace", "Grants"], path: "eyes/Sources/Tree"),
@@ -275,7 +275,7 @@ let package = Package(
         // One piece of work at a time, for what serves one: the daemon, and Vision. It links
         // neither half, so each half's gate is the same rule.
         .target(name: "Turns", path: "eyes/Sources/Turns"),
-        .testTarget(name: "TurnsTests", dependencies: ["Turns"], path: "eyes/Tests/TurnsTests"),
+        .testTarget(name: "TurnsTests", dependencies: ["Turns", "Waiting"], path: "eyes/Tests/TurnsTests"),
         // One record per unit of work, and the one edge every record leaves a process by.
         // It links neither half, so both record through it. [LAW:nothing-unseen]
         .target(name: "Telemetry", path: "eyes/Sources/Telemetry"),

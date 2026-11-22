@@ -1,7 +1,9 @@
 import DriverExtension
 import Foundation
 import OwnThread
+import TestClock
 import Testing
+import Timeline
 import VirtualHID
 @testable import vhidd
 
@@ -21,6 +23,9 @@ import VirtualHID
         var terminated: [pid_t] = []
         var limitGiven: Duration?
         var lost: (@Sendable (DaemonError) -> Void)?
+        /// The pauses before each redial; the only thing that moves the connect loop's clock.
+        var redials: [Duration] = []
+        let clock = ManualClock()
 
         init(connections: [Result<Device, DaemonError>], bringUp: Result<DaemonProcess.Startups, DaemonError> = .success(World.up)) {
             self.connections = connections
@@ -49,7 +54,12 @@ import VirtualHID
                     // A stopped daemon closes its connection on the way down.
                     self.lost?(.closed)
                 },
-                say: { _ in }
+                say: { _ in },
+                timeline: Timeline(clock),
+                redialPause: {
+                    self.redials.append($0)
+                    self.clock.advance(by: $0)
+                }
             )
         }
     }
@@ -88,6 +98,7 @@ import VirtualHID
         #expect(reached.devices === device)
         #expect(reached.daemon == .startedHere(World.pid))
         #expect(world.launched == 1)
+        #expect(world.redials == [DaemonProcess.redialEvery])
         #expect(world.terminated.isEmpty)
         let whenLost = try #require(world.lost)
         whenLost(.closed)
@@ -104,12 +115,13 @@ import VirtualHID
         #expect(world.limitGiven == .milliseconds(300))
     }
 
-    /// A daemon started here that never answers is stopped before the failure leaves, and
-    /// the failure is the daemon's last refusal.
+    /// A daemon started here that never answers is dialed again until the limit has passed,
+    /// then stopped before the failure leaves, and the failure is the daemon's last refusal.
     @Test func aStartedDaemonThatNeverAnswersIsStoppedAndTheRefusalThrown() throws {
         let world = World(connections: [.failure(.noSocket(path: "nowhere"))])
         #expect(throws: DaemonError.noSocket(path: "nowhere")) { try world.effects.reach(within: .milliseconds(150)) { _, _ in } }
         #expect(world.launched == 1)
+        #expect(world.redials == [DaemonProcess.redialEvery, DaemonProcess.redialEvery])
         #expect(world.terminated == [World.pid])
     }
 
@@ -175,18 +187,26 @@ import VirtualHID
     /// stopped, and after a wait they are reached and served again - the process never
     /// ends over it. Devices lost as soon as they came up count as failures, so the wait
     /// grows rather than restarting the daemon every two seconds.
+    ///
+    /// Lost at the loop's word that it is serving: said once the devices are up and before
+    /// it waits on them, so the loss lands on devices that are up at any pace.
     @Test func lostDevicesAreStoppedAndBroughtUpAgain() {
         let world = World(connections: [.failure(.noSocket(path: "nowhere")), .success(Device())])
         let readiness = Readiness(driver: { .running })
         var served = 0
+        var upWhenLost: [Bool] = []
         var downWhileWaiting: [Bool] = []
         var waits: [Duration] = []
         let clock = HandClock()
+        var losing = world.effects
+        losing.say = {
+            guard $0 == .happened("serving") else { return }
+            upWhenLost.append((try? readiness.devices()) != nil)
+            world.lost!(.closed)
+        }
         #expect(throws: Stop.self) {
-            try world.effects.keepUp(within: .seconds(1), backoff: Backoff(first: .seconds(2), most: .seconds(60)), lookingEvery: .seconds(60), readiness: readiness, serve: { _ in
+            try losing.keepUp(within: .seconds(1), backoff: Backoff(first: .seconds(2), most: .seconds(60)), lookingEvery: .seconds(60), readiness: readiness, serve: { _ in
                 served += 1
-                let lose = world.lost!
-                DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(20)) { lose(.closed) }
                 return RecordingDevices()
             }, driver: { nil }, now: { clock.now }) { wait in
                 clock.advance(wait)
@@ -196,6 +216,7 @@ import VirtualHID
             }
         }
         #expect(served == 2)
+        #expect(upWhenLost == [true, true])
         #expect(waits == [.seconds(2), .seconds(4)])
         #expect(downWhileWaiting == [true, true])
         #expect(world.terminated == [World.pid])

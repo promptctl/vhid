@@ -118,7 +118,7 @@ struct GrantMappingTests {
 }
 
 /// Every gate of a process answers from one reading while it is fresh, and takes a new one after.
-@Suite(.eventsKept, .timeLimit(.minutes(1))) struct SharedReadingTests {
+@Suite(.eventsKept, .hangGuarded) struct SharedReadingTests {
     actor Takes {
         var count = 0
         func take() -> GrantReading { count += 1; return GrantReading { $0 == .accessibility } }

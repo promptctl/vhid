@@ -278,7 +278,7 @@ import InputTesting
         let outbox = Outbox(Edge(collector: .init(endpoint: .base("http://c:4318")),
                                  file: FileManager.default.temporaryDirectory.appending(path: "vhid-tests-\(UUID().uuidString)/events.jsonl"),
                                  deliver: { _ in
-                                     while !answered.withLock({ $0 }) { try await Task.sleep(for: .milliseconds(5)) }
+                                     while !answered.withLock({ $0 }) { await Task.yield() }
                                      sawAnswer.withLock { $0 = true }
                                  }))
         let click = VerbTool(Help.click, []) { _, _ in "clicked" }
@@ -437,7 +437,7 @@ import InputTesting
         session.cancel()
         let ended = await withTaskGroup(of: Result<Void, any Error>?.self) { race in
             race.addTask { await session.result }
-            race.addTask { try? await Task.sleep(for: .seconds(10)); return nil }
+            race.addTask { try? await Task.sleep(for: hangGuard); return nil }
             defer { race.cancelAll() }
             return await race.next() ?? nil
         }
@@ -453,7 +453,7 @@ import InputTesting
     /// A stopped session ends only once the call it withdrew has finished stopping: a
     /// withdrawn verb hands the devices back and lets go of what it holds on its way out,
     /// and its record says what it sent by then.
-    @Test(.timeLimit(.minutes(1))) func aStoppedSessionWaitsForItsWithdrawnCallToFinishStopping() async throws {
+    @Test(.hangGuarded) func aStoppedSessionWaitsForItsWithdrawnCallToFinishStopping() async throws {
         let (began, begin) = AsyncStream<Void>.makeStream()
         let (handedBack, handBack) = AsyncStream<Void>.makeStream()
         let holding = VerbTool(Help.click, []) { _, _ in
@@ -508,7 +508,7 @@ import InputTesting
         }
         // A server that never answers is ended, which ends the read below at end of file.
         let watchdog = Task {
-            try await Task.sleep(for: .seconds(10))
+            try await Task.sleep(for: hangGuard)
             process.terminate()
         }
         defer { watchdog.cancel() }

@@ -3,12 +3,13 @@ import Helper
 import OwnThread
 import Security
 import Testing
+import Waiting
 @testable import vhidd
 
 /// The authorization boundary of the root keystroke service, checked against the one
 /// process whose identity and audit token this test can hold: its own.
 /// [LAW:behavior-not-structure]
-@Suite(.ownThread) struct CallerIdentityTests {
+@Suite(.ownThread, .hangGuarded) struct CallerIdentityTests {
     @Test func aStringThatIsNotARequirementIsRefused() throws {
         let refusal = #expect(throws: CallerIdentity.Refused.self) { try CallerIdentity(requirement: "this is not a requirement") }
         guard case .malformedRequirement("this is not a requirement", _)? = refusal else {
@@ -56,7 +57,7 @@ import Testing
         connection.resume()
         let proxy = try #require(connection.remoteObjectProxyWithErrorHandler { _ in } as? HelperService)
         proxy.releaseAll { _ in }
-        let token = try #require(reader.await())
+        let token = try reader.awaitToken()
         let identity = try CallerIdentity(requirement: try OwnProcess.requirement())
         try identity.check(auditToken: token)
         connection.invalidate()
@@ -66,19 +67,14 @@ import Testing
 
 /// A listener delegate that keeps the token of whoever connects and admits nobody.
 private final class TokenReader: NSObject, NSXPCListenerDelegate, @unchecked Sendable {
-    private let arrived = DispatchSemaphore(value: 0)
-    private let lock = NSLock()
-    private var token: audit_token_t?
+    private let token = Latch<audit_token_t?>(nil)
 
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
-        lock.lock(); token = connection.callerAuditToken; lock.unlock()
-        arrived.signal()
+        token.update { $0 = connection.callerAuditToken }
         return false
     }
 
-    func await() -> audit_token_t? {
-        guard arrived.wait(timeout: .now() + .seconds(2)) == .success else { return nil }
-        lock.lock(); defer { lock.unlock() }
-        return token
+    func awaitToken() throws -> audit_token_t {
+        try token.wait(for: "the caller to connect") { $0 }
     }
 }

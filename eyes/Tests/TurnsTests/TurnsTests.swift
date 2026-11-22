@@ -1,5 +1,6 @@
 import Synchronization
 import Testing
+import Waiting
 @testable import Turns
 
 @Suite struct TurnsTests {
@@ -26,7 +27,7 @@ import Testing
 
     /// A caller cancelled while it waits behind running work leaves at once, while that work
     /// is still running, and never runs its own; the turn after it still comes.
-    @Test(.timeLimit(.minutes(1))) func aWaiterCancelledBehindRunningWorkLeavesAtOnce() async throws {
+    @Test(.hangGuarded) func aWaiterCancelledBehindRunningWorkLeavesAtOnce() async throws {
         let turns = Turns()
         let (gate, open) = AsyncStream<Void>.makeStream()
         let (began, begin) = AsyncStream<Void>.makeStream()
@@ -48,7 +49,7 @@ import Testing
 
     /// A caller cancelled as the turn ahead of it ends never runs its work, whichever comes
     /// first to this actor: the turn handed on, or the caller's withdrawal from the queue.
-    @Test(.timeLimit(.minutes(1))) func aWaiterCancelledAsTheTurnReachesItNeverRuns() async throws {
+    @Test(.hangGuarded) func aWaiterCancelledAsTheTurnReachesItNeverRuns() async throws {
         let turns = Turns(), ran = Mutex(false)
         let (gate, open) = AsyncStream<Void>.makeStream()
         let (began, begin) = AsyncStream<Void>.makeStream()

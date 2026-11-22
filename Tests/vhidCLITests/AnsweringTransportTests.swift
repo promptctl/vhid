@@ -4,6 +4,7 @@ import Logging
 import MCP
 import TelemetryTesting
 import Testing
+import Waiting
 @testable import vhid
 
 /// What the transport holds the session open for, driven through a stand-in for stdio.
@@ -30,8 +31,10 @@ import Testing
     }
 
     /// A session stopped while an answer is owed lets go of its transport rather than
-    /// waiting on an answer nothing will now send.
-    @Test func aStoppedSessionDoesNotWaitOnWhatIsOwed() async throws {
+    /// waiting on an answer nothing will now send. Its letting go has no event of its own,
+    /// so the test yields until it comes, with no clock: a relay that never lets go holds
+    /// the test to its whole limit and fails it there.
+    @Test(.hangGuarded) func aStoppedSessionDoesNotWaitOnWhatIsOwed() async throws {
         let stdio = Stdio()
         weak var held: AnsweringTransport?
         do {
@@ -46,13 +49,12 @@ import Testing
             session.cancel()
             _ = try? await session.value
         }
-        for _ in 0..<200 where held != nil { try await Task.sleep(for: .milliseconds(10)) }
-        #expect(held == nil, "the relay is still waiting on the owed answer")
+        while held != nil { await Task.yield() }
     }
 
     /// Stopped after stdin has ended, when the relay is already parked on what is owed, the
     /// session still ends, and says which answers it gave up on.
-    @Test(.timeLimit(.minutes(1))) func aSessionStoppedWhileParkedEndsAndSaysWhatWasOwed() async throws {
+    @Test(.hangGuarded) func aSessionStoppedWhileParkedEndsAndSaysWhatWasOwed() async throws {
         let stdio = Stdio(), said = Said()
         let transport = AnsweringTransport(stdio, logger: Logger(label: "test") { _ in said })
         let (read, next) = AsyncStream<Void>.makeStream()
@@ -76,7 +78,7 @@ import Testing
 
     /// A withdrawn call whose handler pays the withdrawal no mind holds the end of stdin
     /// until its handler is over, and its answer is never written.
-    @Test(.timeLimit(.minutes(1))) func aWithdrawnCallHoldsTheSessionUntilItsHandlerIsOver() async throws {
+    @Test(.hangGuarded) func aWithdrawnCallHoldsTheSessionUntilItsHandlerIsOver() async throws {
         let (finish, done) = AsyncStream<Void>.makeStream()
         let (began, begin) = AsyncStream<Void>.makeStream()
         let stubborn = VerbTool(Help.click, []) { _, _ in
@@ -106,7 +108,7 @@ import Testing
     }
 
     /// A call cancelled twice is withdrawn once: a later call that reuses its id is answered.
-    @Test(.timeLimit(.minutes(1))) func aCancelSentTwiceWithdrawsOnlyTheCallItNames() async throws {
+    @Test(.hangGuarded) func aCancelSentTwiceWithdrawsOnlyTheCallItNames() async throws {
         let stdio = Stdio(), transport = AnsweringTransport(stdio)
         let (read, next) = AsyncStream<Void>.makeStream()
         let session = Task {
@@ -168,7 +170,7 @@ import Testing
         stdio.call(4, then: [.cancel(4), .end])
         let ended = await withTaskGroup(of: Bool.self) { race in
             race.addTask { _ = try? await session.value; return true }
-            race.addTask { try? await Task.sleep(for: .seconds(10)); return false }
+            race.addTask { try? await Task.sleep(for: hangGuard); return false }
             defer { race.cancelAll() }
             return await race.next() ?? false
         }
