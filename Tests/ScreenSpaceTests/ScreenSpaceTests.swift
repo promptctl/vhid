@@ -4,6 +4,17 @@ import Testing
 
 /// The point, the box, their spelling and the layout record, as values.
 @Suite struct ScreenSpaceTests {
+    /// A side no cut touches is the side as given, so a part prints as the box it is part
+    /// of on that axis; a side that is cut is what is left of it.
+    @Test func anUncutSideIsTheSideAsGiven() throws {
+        let row = try ScreenRect(x: 10.9, y: 20, width: 10, height: 10)
+        let list = try ScreenRect(x: 0, y: 24, width: 100, height: 100)
+        let part = try #require(row.intersection(list))
+        #expect(part.description == "10.9,24,10,6")
+        #expect(try #require(list.intersection(row)).description == "10.9,24,10,6")
+        #expect(try #require(row.intersection(row)) == row)
+    }
+
     /// [LAW:parse-dont-validate] A pair that is not a place is refused where it is made.
     /// The NaN is the one that matters: every comparison against it is false, so it would
     /// pass the pointer's arrival test on both axes and a click would land wherever the

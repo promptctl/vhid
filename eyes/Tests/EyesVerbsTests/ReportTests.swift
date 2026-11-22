@@ -134,7 +134,7 @@ import Testing
         (ScreenRect.at(10.4, 20.6, 80.3, 23.9), "10.4,20.6,80.3,23.9", "51,33"),
         (ScreenRect.at(-1900.7, -60.2, 40.5, 19.4), "-1900.7,-60.2,40.5,19.4", "-1880,-51"),
         (ScreenRect.at(0, 0, 40, 20), "0,0,40,20", "20,10"),
-        (ScreenRect.at(10.5, 20, 10, 10), "10.5,20,10,10", "16,25"),
+        (ScreenRect.at(10.9, 20, 10, 10), "10.9,20,10,10", "16,25"),
         (ScreenRect.at(10.5, 20, 1, 10), "10.5,20,1,10", "11,25"),
     ])
     func aRowsBoxIsItsDrawnPartAndHoldsItsPoint(frame: ScreenRect, box: String, point: String) throws {

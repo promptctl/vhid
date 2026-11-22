@@ -69,11 +69,24 @@ public struct ScreenRect: Hashable, Sendable, CustomStringConvertible {
 
     /// The area the two share, or nil when they share none: two boxes edge to edge share an
     /// edge and no area.
+    ///
+    /// On each axis, a box that gives both of the shared edges gives its own side, as given:
+    /// a box cut on one axis alone keeps the other side exactly, where `right - left` would
+    /// say 9.999999999999998 for a side of 10 at 10.9. [LAW:one-source-of-truth]
     public func intersection(_ other: ScreenRect) -> ScreenRect? {
-        let (left, top) = (max(x, other.x), max(y, other.y))
-        let (right, bottom) = (min(maxX, other.maxX), min(maxY, other.maxY))
-        guard right > left, bottom > top else { return nil }
-        return ScreenRect(finite: left, top, right - left, bottom - top)
+        guard let across = Self.shared((x, width, maxX), (other.x, other.width, other.maxX)),
+              let down = Self.shared((y, height, maxY), (other.y, other.height, other.maxY)) else { return nil }
+        return ScreenRect(finite: across.start, down.start, across.length, down.length)
+    }
+
+    /// What two spans on one axis share, each as its start, its length and its end: nil
+    /// when they share no length.
+    private static func shared(_ a: (start: Double, length: Double, end: Double), _ b: (start: Double, length: Double, end: Double)) -> (start: Double, length: Double)? {
+        let (start, end) = (max(a.start, b.start), min(a.end, b.end))
+        guard end > start else { return nil }
+        if start == a.start, end == a.end { return (start, a.length) }
+        if start == b.start, end == b.end { return (start, b.length) }
+        return (start, end - start)
     }
 
     /// The smallest box holding both, refused when it is wider or taller than a Double holds.

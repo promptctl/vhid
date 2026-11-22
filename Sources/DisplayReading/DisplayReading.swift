@@ -1,6 +1,10 @@
 import CoreGraphics
 import ScreenSpace
 
+/// The shape of `CGGetOnlineDisplayList` and `CGGetActiveDisplayList`: room for so many ids,
+/// where to put them, and how many there are.
+typealias DisplayList = (UInt32, UnsafeMutablePointer<CGDirectDisplayID>?, UnsafeMutablePointer<UInt32>?) -> CGError
+
 public extension DisplayLayout {
     /// The displays as the window server lists them now, in this process's session: every
     /// online one, each marked active or asleep. [LAW:effects-at-boundaries] The one read of
@@ -22,8 +26,9 @@ public extension DisplayLayout {
 
     /// One display list, read whole: asked with room for one more than it last held, until
     /// it holds less than the room, so a display that came online between the count and the
-    /// list is not cut off it.
-    private static func list(_ name: String, _ read: (UInt32, UnsafeMutablePointer<CGDirectDisplayID>?, UnsafeMutablePointer<UInt32>?) -> CGError) throws(LayoutUnreadable) -> [CGDirectDisplayID] {
+    /// list is not cut off it. A list the window server would not give is said, at either
+    /// ask, and never read as no display. [LAW:no-silent-failure]
+    internal static func list(_ name: String, _ read: DisplayList) throws(LayoutUnreadable) -> [CGDirectDisplayID] {
         var count: UInt32 = 0
         let counted = read(0, nil, &count)
         guard counted == .success else { throw .windowServer(list: name, code: counted.rawValue) }

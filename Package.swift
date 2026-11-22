@@ -75,6 +75,7 @@ let package = Package(
         // The one window-server read of the layout, apart from the space so the space stays
         // values a test makes. [LAW:effects-at-boundaries]
         .target(name: "DisplayReading", dependencies: ["ScreenSpace"]),
+        .testTarget(name: "DisplayReadingTests", dependencies: ["DisplayReading", "ScreenSpace"]),
         // Starting a child of this process, with what every child of vhidd needs - every
         // signal at its default and no descriptor it was not given - collecting one that
         // has ended, and running a command to its end, its deadline or its stop. Both halves
