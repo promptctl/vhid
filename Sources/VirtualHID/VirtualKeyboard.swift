@@ -1,7 +1,6 @@
 import DriverExtension
 import Foundation
 import Keystrokes
-import Synchronization
 
 /// The keyboard input report as the driver's packed `keyboard_input` lays it out: report
 /// id 1, one byte of modifier bits, one reserved byte, then 32 little-endian usages for
@@ -72,16 +71,17 @@ public final class VirtualKeyboard: KeyPress {
 
     /// Nothing outside this type may set it, and every report is a reading of it - taken
     /// under the lock the report is posted under, so a press made from one thread reads
-    /// what a press from another left.
-    private let held = Mutex(Held())
+    /// what a press from another left. The lock is waited for by the report's deadline.
+    private let held: TimedMutex<Held>
 
-    public var keysDown: Set<Usage> { held.withLock { $0.keysDown } }
+    public var keysDown: Set<Usage> { held.read { $0.keysDown } }
 
 
     /// Over a connection the mouse may share, for the reason `VirtualPointing` gives.
     public init(daemon: DaemonConnection, reportTimeout: Duration = .seconds(2)) {
         self.daemon = daemon
         self.reportTimeout = reportTimeout
+        held = TimedMutex(Held(), now: daemon.now)
     }
 
     /// Brings the device up and waits for the daemon's word that it is ready, in at most
@@ -123,9 +123,10 @@ public final class VirtualKeyboard: KeyPress {
     /// set always posts, as `releaseAll` does. The skip needs the set settled, which a
     /// failed request unsettles, so the retry of a `hold` that threw always posts.
     public func hold(_ keys: HeldKeys) throws {
-        try held.withLock { held in
+        let deadline = daemon.now() + reportTimeout
+        try held.withLock(by: deadline) { held in
             if keys.usages.isEmpty || !held.settled || held.keysDown != keys.usages {
-                try post(&held) { _ in keys.usages }
+                try post(&held, by: deadline) { _ in keys.usages }
             }
         }
     }
@@ -134,9 +135,10 @@ public final class VirtualKeyboard: KeyPress {
     /// daemon offers for the case where the two might have drifted apart. The record is
     /// emptied on the daemon's answer and not before, for the reason `post` gives.
     public func reset() throws {
-        try held.withLock { held in
+        let deadline = daemon.now() + reportTimeout
+        try held.withLock(by: deadline) { held in
             held.settled = false
-            try daemon.request(.keyboardReset, within: reportTimeout)
+            try daemon.request(.keyboardReset, by: deadline)
             held = Held(keysDown: [], settled: true)
         }
     }
@@ -156,18 +158,20 @@ public final class VirtualKeyboard: KeyPress {
     ///
     /// The lock is held across the round trip: a change read from a record another post
     /// has yet to settle would be a report missing that post's key, which the driver reads
-    /// as a release nobody sent.
+    /// as a release nobody sent. The report's limit counts from this call, so the wait for
+    /// the post ahead of it is spent from it too. [LAW:no-ambient-temporal-coupling]
     private func post(_ change: (Set<Usage>) -> Set<Usage>) throws {
-        try held.withLock { try post(&$0, change) }
+        let deadline = daemon.now() + reportTimeout
+        try held.withLock(by: deadline) { try post(&$0, by: deadline, change) }
     }
 
-    /// The post itself, under a lock the caller already holds.
-    private func post(_ held: inout Held, _ change: (Set<Usage>) -> Set<Usage>) throws {
+    /// The post itself, under a lock the caller already holds, by the caller's deadline.
+    private func post(_ held: inout Held, by deadline: Duration, _ change: (Set<Usage>) -> Set<Usage>) throws {
         let next = change(held.keysDown)
         let report = try KeyboardReport(held: next)
         held.keysDown.formUnion(next)
         held.settled = false
-        try daemon.request(.postKeyboardInputReport, report.bytes, within: reportTimeout)
+        try daemon.request(.postKeyboardInputReport, report.bytes, by: deadline)
         held = Held(keysDown: next, settled: true)
     }
 }

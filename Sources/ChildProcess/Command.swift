@@ -1,5 +1,6 @@
 import Foundation
 import Synchronization
+import Timeline
 
 /// One command run against the machine, and everything it said.
 ///
@@ -255,7 +256,7 @@ public struct Command: Sendable {
             let ran = SuspendingClock.now - started
             throw Overran(
                 command: said,
-                ran: .milliseconds(ran.components.seconds * 1000 + ran.components.attoseconds / 1_000_000_000_000_000),
+                ran: .milliseconds(ran.wholeMilliseconds),
                 limit: deadline.limit
             )
         case .stopped:
@@ -319,7 +320,7 @@ public struct Command: Sendable {
         while !(exited && open.isEmpty) {
             let left = deadline.left
             guard left > .zero else { return .overran }
-            var patience = timespec(tv_sec: Int(left.components.seconds), tv_nsec: Int(left.components.attoseconds / 1_000_000_000))
+            var patience = left.timespec
             let ready = kevent(queue, nil, 0, &events, Int32(events.count), &patience)
             if ready < 0, errno == EINTR { continue }
             guard ready >= 0 else { throw unheard("could not be watched") }

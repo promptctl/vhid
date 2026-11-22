@@ -203,3 +203,15 @@ final class FakeDaemon: @unchecked Sendable {
 func requestSent(_ payload: [UInt8]) -> (version: UInt16, request: UInt8, bytes: [UInt8]) {
     (UInt16(payload[0]) | UInt16(payload[1]) << 8, payload[2], Array(payload.dropFirst(3)))
 }
+
+/// A test asks with a limit, made into the deadline at the call, as a device makes it at
+/// its own.
+extension DaemonConnection {
+    func request(_ request: Request, _ payload: [UInt8] = [], within limit: Duration) throws {
+        try self.request(request, payload, by: now() + limit)
+    }
+
+    func wait(for status: Status, within limit: Duration) throws {
+        try wait(for: status, by: now() + limit)
+    }
+}

@@ -19,11 +19,14 @@ public enum DaemonProbe {
     ///
     /// Each call is let start by `admit`, which answers how long it may wait for the reply
     /// or throws where it is not to be made at all - a reading's limit spent, or its stop
-    /// pulled - and that is `unasked`, with nothing asked.
+    /// pulled - and that is `unasked`, with nothing asked. A second call never made says
+    /// nothing against the first, so the refusal heard stands. [LAW:no-silent-failure]
     static func reading(admit: () throws -> Duration, _ connect: (Duration) -> HelperConnection) -> DaemonReading {
         let first = asked(admit, connect)
         guard first == .refusedThisVhid else { return first }
-        return asked(admit, connect)
+        let second = asked(admit, connect)
+        if case .unasked = second { return first }
+        return second
     }
 
     private static func asked(_ admit: () throws -> Duration, _ connect: (Duration) -> HelperConnection) -> DaemonReading {

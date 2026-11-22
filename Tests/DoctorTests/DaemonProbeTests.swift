@@ -143,4 +143,23 @@ import Testing
         #expect(read == .answered(holder: nil))
         withExtendedLifetime((refusing, answering, no, yes)) {}
     }
+
+    /// A refusal whose second call its reading does not admit stays the refusal: the call
+    /// never made has nothing to say against the one that was.
+    @Test func aRefusalWhoseRetryIsNotAdmittedStaysTheRefusal() {
+        let refusing = NSXPCListener.anonymous()
+        let no = FarEnd(.refuseTheConnection)
+        refusing.delegate = no
+        refusing.resume()
+        var admitted = 0
+        let read = DaemonProbe.reading(admit: {
+            defer { admitted += 1 }
+            guard admitted == 0 else { throw Command.Unstarted(command: "the daemon's status call", limit: .seconds(30)) }
+            return .seconds(20)
+        }) {
+            HelperConnection(connection: NSXPCConnection(listenerEndpoint: refusing.endpoint), service: "ai.promptctl.vhid.tests.far", replyTimeout: $0)
+        }
+        #expect(read == .refusedThisVhid)
+        withExtendedLifetime((refusing, no)) {}
+    }
 }

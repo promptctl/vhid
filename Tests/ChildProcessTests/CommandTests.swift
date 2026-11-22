@@ -61,7 +61,7 @@ import Waiting
     /// A command given up on is stopped and collected by the time it is thrown: nothing of
     /// it is left running or left to collect. In a process of its own, where it is the only
     /// child there could be.
-    @Test func aCommandGivenUpOnLeavesNoChild() async {
+    @Test(.hangLimit) func aCommandGivenUpOnLeavesNoChild() async {
         await #expect(processExitsWith: .success) {
             _ = try? Command("/bin/sh", "-c", "exec sleep 3600").run(by: .within(.milliseconds(200)))
             exit(waitpid(-1, nil, WNOHANG) == -1 && errno == ECHILD ? 0 : 1)

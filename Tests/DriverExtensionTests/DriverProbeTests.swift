@@ -179,12 +179,18 @@ import Testing
         }
     }
 
-    /// A reading stopped while pkgutil runs, or whose limit was spent before it started, is
-    /// not a receipt that could not be read: it goes on up, so the facts end with it rather
-    /// than as a reading it cut short.
-    @Test func aStoppedOrUnstartedKarabinerElementsReadIsThrownNotUnreadable() {
+    /// A reading stopped while pkgutil runs is not a receipt that could not be read: the
+    /// cancel goes on up, so the facts end with it rather than as a reading it cut short.
+    @Test func aStoppedKarabinerElementsReadIsThrownNotUnreadable() {
         #expect(throws: CancellationError.self) { try DriverProbe.elementsReceipt { throw CancellationError() } }
+    }
+
+    /// The reading's limit spent reads one way, whenever it lands: before pkgutil started
+    /// and while it ran are both unreadable, with what spent it.
+    @Test func aSpentLimitIsUnreadableBeforeOrDuringTheRead() throws {
         let unstarted = Command.Unstarted(command: "pkgutil --pkg-info org.pqrs.Karabiner-Elements", limit: .seconds(2))
-        #expect(throws: unstarted) { try DriverProbe.elementsReceipt { throw unstarted } }
+        let overran = Command.Overran(command: "pkgutil --pkg-info org.pqrs.Karabiner-Elements", ran: .seconds(2), limit: .seconds(2))
+        #expect(try DriverProbe.elementsReceipt { throw unstarted } == .unreadable(reason: unstarted.description))
+        #expect(try DriverProbe.elementsReceipt { throw overran } == .unreadable(reason: overran.description))
     }
 }

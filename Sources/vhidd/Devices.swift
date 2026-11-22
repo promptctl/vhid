@@ -78,7 +78,7 @@ final class Devices: NSObject, ServedDevices, @unchecked Sendable {
     private var lastReport: Duration
 
     init(keyboard: any HeldKeyboard, mouse: any PointingDevice, limit: Duration = keyLimit,
-         now: @escaping () -> Duration = Timeline(ContinuousClock()).now) {
+         now: @escaping () -> Duration) {
         self.keyboard = keyboard
         self.mouse = mouse
         self.limit = limit

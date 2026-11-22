@@ -2,6 +2,7 @@ import ChildProcess
 import Darwin
 import OwnThread
 import Testing
+import Timeline
 import Waiting
 
 /// What `spawn` promises of a child: what a signal does to it, and what of this process's
@@ -56,7 +57,7 @@ import Waiting
         defer { kill(pid, SIGKILL); _ = try? collect(pid) }
         close(ends[1])
         var ended = pollfd(fd: ends[0], events: Int16(POLLIN), revents: 0)
-        #expect(poll(&ended, 1, Int32(hangGuard.components.seconds * 1_000)) == 1)
+        #expect(poll(&ended, 1, hangGuard.wholeMilliseconds) == 1)
         #expect(ended.revents & Int16(POLLHUP) != 0)
     }
 

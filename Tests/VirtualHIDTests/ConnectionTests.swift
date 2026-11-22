@@ -215,15 +215,15 @@ import Waiting
     /// A daemon that stops draining its socket without hanging up - and keeps talking, so
     /// its silence never shows on the reading side - stalls a write once the kernel's
     /// buffers are full. The write is bounded by the patience like a read, and past it the
-    /// connection ends in the same loss, and every request on it with it, rather than
-    /// holding the writer, and every writer behind it, for good.
+    /// connection ends, named for the write side it stalled on, and every request on it
+    /// with it, rather than holding the writer, and every writer behind it, for good.
     /// [LAW:no-ambient-temporal-coupling]
     ///
     /// The frames are the largest this side sends, 4100 bytes, three of them against the
     /// 8 KB of send space the test sets on the pair: the fake reads one, the space holds one
     /// more, and the third finds it full part way through. The requests' clock is held
     /// still, so none of them ends but by the loss.
-    @Test func aWriteThePeerStopsDrainingEndsAsSilenceWithinThePatience() throws {
+    @Test func aWriteThePeerStopsDrainingEndsAsAStalledWriteWithinThePatience() throws {
         // Reads one frame, then talks without listening: a heartbeat every 20 ms until the
         // client hangs up, and not one more read.
         let fake = FakeDaemon { _, daemon in
@@ -251,9 +251,9 @@ import Waiting
             }
         }
         let ended = try thrown.wait(for: "the three requests to end") { $0.count == 3 }
-        #expect(try lost.first() == .silent)
+        #expect(try lost.first() == .writeStalled)
         #expect(lost.count == 1)
-        #expect(ended == [.silent, .silent, .silent])
+        #expect(ended == [.writeStalled, .writeStalled, .writeStalled])
     }
 
     /// A request its limit kept from going out costs the connection nothing: no byte of it
@@ -270,15 +270,17 @@ import Waiting
     }
 
     /// A request whose frame the peer stopped draining part way ends at its own limit,
-    /// however long the daemon's patience: the limit is the caller's, and the patience is
-    /// the connection's. A request behind it whose limit ends while it waits its turn is
-    /// taken back unsent, on the thread that asked, while the write is still stuck. Neither
-    /// is the connection's loss. [LAW:no-ambient-temporal-coupling]
+    /// however long the daemon's patience, as a stalled write: the limit is the caller's,
+    /// and the patience is the connection's. A request asked behind it goes into the outbox
+    /// behind the stuck frame and, its limit ended there, is taken back unsent on the
+    /// thread that asked, while the write is still stuck: one that waited for the write
+    /// instead would never end. Neither is the connection's loss.
+    /// [LAW:no-ambient-temporal-coupling]
     @Test func aRequestStalledPartWayEndsAtItsLimitAndOneBehindItIsUnsent() throws {
         let stalled = try StalledWrite(within: .milliseconds(200))
         #expect(throws: DaemonError.unsent) { try stalled.connection.request(.keyboardReset, within: .zero) }
         stalled.fake.clock.advance(by: .milliseconds(200))
-        #expect(try stalled.ended() == .silent)
+        #expect(try stalled.ended() == .writeStalled)
         #expect(stalled.lost.count == 0)
     }
 

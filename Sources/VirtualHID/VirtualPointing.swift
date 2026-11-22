@@ -1,6 +1,5 @@
 import Foundation
 import Pointing
-import Synchronization
 
 /// The pointing input report as the driver's packed `pointing_input` lays it out: a
 /// 32-bit little-endian button field, then x, y, vertical wheel and horizontal wheel as
@@ -41,9 +40,9 @@ public final class VirtualPointing: PointingDevice {
     private let reportTimeout: Duration
     /// The buttons the device is holding, under the lock its reports are posted under, for
     /// the reason `VirtualKeyboard` gives.
-    private let held = Mutex<Set<Button>>([])
+    private let held: TimedMutex<Set<Button>>
 
-    public var buttonsDown: Set<Button> { held.withLock { $0 } }
+    public var buttonsDown: Set<Button> { held.read { $0 } }
 
     /// Over a connection the keyboard may share: pqrs's daemon keeps one keyboard and one
     /// pointing device per client connection, so the two devices of one client ride one
@@ -51,6 +50,7 @@ public final class VirtualPointing: PointingDevice {
     public init(daemon: DaemonConnection, reportTimeout: Duration = .seconds(2)) {
         self.daemon = daemon
         self.reportTimeout = reportTimeout
+        held = TimedMutex([], now: daemon.now)
     }
 
     /// Brings the device up and waits for the daemon's word that it is ready, in at most
@@ -94,8 +94,9 @@ public final class VirtualPointing: PointingDevice {
     /// might have drifted apart. The record is emptied on the daemon's answer and not
     /// before, for the reason `post` gives.
     public func reset() throws {
-        try held.withLock { buttonsDown in
-            try daemon.request(.pointingReset, within: reportTimeout)
+        let deadline = daemon.now() + reportTimeout
+        try held.withLock(by: deadline) { buttonsDown in
+            try daemon.request(.pointingReset, by: deadline)
             buttonsDown.removeAll()
         }
     }
@@ -108,11 +109,12 @@ public final class VirtualPointing: PointingDevice {
     /// request that threw after reaching the driver leaves a button `releaseAll` can still
     /// see. [LAW:dataflow-not-control-flow]
     private func post(move: Move, scroll: Scroll, holding change: (Set<Button>) -> Set<Button>) throws {
-        try held.withLock { buttonsDown in
+        let deadline = daemon.now() + reportTimeout
+        try held.withLock(by: deadline) { buttonsDown in
             let next = change(buttonsDown)
             let report = PointingReport(held: next, move: move, scroll: scroll)
             buttonsDown.formUnion(next)
-            try daemon.request(.postPointingInputReport, report.bytes, within: reportTimeout)
+            try daemon.request(.postPointingInputReport, report.bytes, by: deadline)
             buttonsDown = next
         }
     }

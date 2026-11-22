@@ -14,6 +14,10 @@ public enum DaemonError: Error, CustomStringConvertible, Equatable {
     /// asked, or while the frames ahead of it went out. Nothing of it reached the daemon, so
     /// the daemon is not the one that was silent, and the connection goes on.
     case unsent
+    /// The daemon stopped taking what was written to it: a request was still going out when
+    /// its limit ended, or a frame took no more bytes in the connection's patience. The
+    /// stall is on the write side, which a silence of the daemon's is not.
+    case writeStalled
     case closed
     /// A frame that is not one. The message names no sender: the framing is read from both
     /// ends of a socketpair in the tests, and an error that says "the daemon sent" about
@@ -38,6 +42,8 @@ public enum DaemonError: Error, CustomStringConvertible, Equatable {
             "the driver's daemon did not answer in time"
         case .unsent:
             "a request to the driver's daemon was not sent: its limit ended before its turn to be written"
+        case .writeStalled:
+            "the driver's daemon stopped taking what was written to it"
         case .closed:
             "the driver's daemon closed the connection"
         case .malformed(let what):

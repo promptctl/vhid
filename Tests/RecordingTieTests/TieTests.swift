@@ -43,13 +43,16 @@ import Waiting
         #expect(throws: TieFailure.self) { try TieEnd.connect(to: "/tmp/vhid-record-no-such-socket") }
     }
 
-    /// The command killed while the app records: the watch fires.
+    /// The command killed while the app records: the watch fires, and not before. Its
+    /// queue is drained before the kill, so a fire made as the watch was set has landed by
+    /// then, and a latch still shut is a watch that did not fire on a running command.
     @Test func theWatchFiresWhenTheCommandEnds() async throws {
         let command = try Process.run(URL(fileURLWithPath: "/bin/sleep"), arguments: ["3600"])
-        // What the watch asks of a command it is set on, which says a running one has not ended.
-        #expect(!CommandWatch.ended(command.processIdentifier))
         let ended = Latch<Bool>()
-        let watch = CommandWatch(pid: command.processIdentifier, queue: DispatchQueue(label: "watch")) { ended.open() }
+        let queue = DispatchQueue(label: "watch")
+        let watch = CommandWatch(pid: command.processIdentifier, queue: queue) { ended.open() }
+        queue.sync {}
+        #expect(!ended.state, "the watch fired on a command still running")
         kill(command.processIdentifier, SIGKILL)
         command.waitUntilExit()
         try ended.waitOpen("the watch to fire")

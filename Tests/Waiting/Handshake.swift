@@ -10,7 +10,9 @@ import Foundation
 /// end it holds, whenever it is called.
 public final class Handshake: Sendable {
     public let path: String
-    /// Held so the read sees no end of file between children, and closed by `remove`.
+    /// Held so the read sees no end of file before the child's line, and closed by `remove`,
+    /// which is how a read nobody wrote to ends. One child's line is read: a handshake is
+    /// made for each child.
     private let writer: Int32
     private let heard = Latch<Result<String, Failure>?>(nil)
 
@@ -23,17 +25,21 @@ public final class Handshake: Sendable {
     }
 
     public init() throws(Failure) {
-        path = FileManager.default.temporaryDirectory.appending(path: "handshake-\(UUID().uuidString)").path
+        let path = FileManager.default.temporaryDirectory.appending(path: "handshake-\(UUID().uuidString)").path
         guard mkfifo(path, 0o600) == 0 else { throw Failure(call: "mkfifo \(path)", code: errno) }
         // The reading end opens without a writer only when it does not wait for one, and the
         // writing end opens without waiting only once there is a reader: so the reader
         // first, then the writer, then the read made to wait for the child's line.
+        // A handshake not made leaves nothing behind: every end opened is closed, and the
+        // FIFO removed.
         let reader = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC)
-        guard reader >= 0 else { throw Failure(call: "open \(path) to read", code: errno) }
-        writer = open(path, O_WRONLY | O_CLOEXEC)
-        guard writer >= 0 else { defer { close(reader) }; throw Failure(call: "open \(path) to write", code: errno) }
-        guard fcntl(reader, F_SETFL, 0) == 0 else { defer { close(reader); close(writer) }; throw Failure(call: "fcntl \(path)", code: errno) }
-        Thread.detachNewThread { [path, heard] in
+        guard reader >= 0 else { defer { unlink(path) }; throw Failure(call: "open \(path) to read", code: errno) }
+        let writer = open(path, O_WRONLY | O_CLOEXEC)
+        guard writer >= 0 else { defer { close(reader); unlink(path) }; throw Failure(call: "open \(path) to write", code: errno) }
+        guard fcntl(reader, F_SETFL, 0) == 0 else { defer { close(reader); close(writer); unlink(path) }; throw Failure(call: "fcntl \(path)", code: errno) }
+        self.path = path
+        self.writer = writer
+        Thread.detachNewThread { [heard] in
             heard.update { $0 = Self.readLine(reader, path) }
         }
     }

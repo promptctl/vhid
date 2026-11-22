@@ -1,6 +1,7 @@
 import ScreenSpace
 import Installations
 import Foundation
+import Timeline
 
 /// One connection to vhidd, and the two devices reached over it.
 ///
@@ -227,8 +228,7 @@ public final class HelperConnection: @unchecked Sendable {
 
         /// The word, or nil when none came in time.
         func await(_ timeout: Duration) -> Word<Answer>? {
-            let nanoseconds = timeout.components.seconds * 1_000_000_000 + timeout.components.attoseconds / 1_000_000_000
-            guard spoken.wait(timeout: .now() + .nanoseconds(Int(nanoseconds))) == .success else { return nil }
+            guard spoken.wait(timeout: .now() + .nanoseconds(Int(timeout.nanoseconds))) == .success else { return nil }
             lock.lock(); defer { lock.unlock() }
             return word
         }

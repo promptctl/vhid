@@ -68,14 +68,14 @@ import Timeline
     /// refused by name and never reaches the device. [LAW:parse-dont-validate]
     @Test func valuesTheDeviceCannotCarryAreRefusedBeforeItSeesThem() {
         let mouse = RecordingMouse()
-        let devices = Devices(keyboard: RecordingKeyboard(), mouse: mouse)
+        let devices = Devices(keyboard: RecordingKeyboard(), mouse: mouse, now: Timeline(ManualClock()).now)
         #expect(answer { devices.buttonDown(0, reply: $0) }?.localizedDescription == "button 0 is not one of the 32 the device has a bit for")
         #expect(answer { devices.buttonDown(33, reply: $0) }?.localizedDescription == "button 33 is not one of the 32 the device has a bit for")
         #expect(answer { devices.move(x: -128, y: 0, reply: $0) }?.localizedDescription == "-128 is outside the -127 through 127 a report carries")
         #expect(answer { devices.scroll(vertical: 1, horizontal: -128, reply: $0) }?.localizedDescription == "-128 is outside the -127 through 127 a report carries")
         #expect(mouse.log.isEmpty)
         let keyboard = RecordingKeyboard()
-        let typing = Devices(keyboard: keyboard, mouse: RecordingMouse())
+        let typing = Devices(keyboard: keyboard, mouse: RecordingMouse(), now: Timeline(ManualClock()).now)
         #expect(answer { typing.down(usage: 3, reply: $0) }?.localizedDescription == "usage 3 is not one of the keys 4 through 231")
         #expect(answer { typing.hold(usages: [0xE1, 0xE8], reply: $0) }?.localizedDescription == "usage 232 is not one of the keys 4 through 231")
         #expect(keyboard.log.isEmpty)
@@ -85,7 +85,7 @@ import Timeline
     @Test func valuesTheDeviceCanCarryReachIt() {
         let keyboard = RecordingKeyboard()
         let mouse = RecordingMouse()
-        let devices = Devices(keyboard: keyboard, mouse: mouse)
+        let devices = Devices(keyboard: keyboard, mouse: mouse, now: Timeline(ManualClock()).now)
         #expect(answer { devices.down(usage: 0x04, reply: $0) } == nil)
         #expect(answer { devices.buttonDown(3, reply: $0) } == nil)
         #expect(answer { devices.move(x: 127, y: -127, reply: $0) } == nil)
@@ -98,7 +98,7 @@ import Timeline
 
     /// A refusal crosses as the one error a client can decode, carrying the words.
     @Test func aRefusalCrossesAsAnNSErrorCarryingItsDescription() throws {
-        let devices = Devices(keyboard: RecordingKeyboard(), mouse: RecordingMouse())
+        let devices = Devices(keyboard: RecordingKeyboard(), mouse: RecordingMouse(), now: Timeline(ManualClock()).now)
         let error = try #require(answer { devices.buttonDown(0, reply: $0) }) as NSError
         #expect(error.domain == "ai.promptctl.vhid.vhidd.refusal")
         #expect(error.localizedDescription == "button 0 is not one of the 32 the device has a bit for")
@@ -108,7 +108,7 @@ import Timeline
     @Test func releasingEverythingReleasesBothDevicesWhateverTheKeyboardAnswers() {
         let keyboard = RecordingKeyboard(refusesRelease: true)
         let mouse = RecordingMouse()
-        Devices(keyboard: keyboard, mouse: mouse).releaseEverything(because: "the client went away")
+        Devices(keyboard: keyboard, mouse: mouse, now: Timeline(ManualClock()).now).releaseEverything(because: "the client went away")
         #expect(keyboard.log == ["up"])
         #expect(mouse.log == ["up"])
     }
@@ -220,7 +220,7 @@ import Timeline
     @Test func heldSetsReachTheDevicesAsSets() {
         let keyboard = RecordingKeyboard()
         let mouse = RecordingMouse()
-        let devices = Devices(keyboard: keyboard, mouse: mouse)
+        let devices = Devices(keyboard: keyboard, mouse: mouse, now: Timeline(ManualClock()).now)
         #expect(answer { devices.hold(usages: [0xE1, 0x04, 0x04], reply: $0) } == nil)
         #expect(answer { devices.hold(usages: [], reply: $0) } == nil)
         #expect(answer { devices.holdButtons(0b101, reply: $0) } == nil)
@@ -232,7 +232,7 @@ import Timeline
     /// More keys than one report carries is refused by name, and the device never sees it.
     @Test func aSetNoReportCarriesIsRefusedByName() {
         let keyboard = RecordingKeyboard()
-        let devices = Devices(keyboard: keyboard, mouse: RecordingMouse())
+        let devices = Devices(keyboard: keyboard, mouse: RecordingMouse(), now: Timeline(ManualClock()).now)
         let refusal = answer { devices.hold(usages: Array(0x04...0x24), reply: $0) }
         #expect(refusal?.localizedDescription == "33 keys are down, and one HID keyboard report carries 32")
         #expect(keyboard.log.isEmpty)
@@ -258,7 +258,7 @@ import Timeline
         let keyboard = RecordingKeyboard()
         let mouse = RecordingMouse()
         let client = NSObject()
-        let seat = Seat(ObjectIdentifier(client), pid: 41, holder: Holder(), readiness: .serving(Devices(keyboard: keyboard, mouse: mouse)), screen: FixedScreen())
+        let seat = Seat(ObjectIdentifier(client), pid: 41, holder: Holder(), readiness: .serving(Devices(keyboard: keyboard, mouse: mouse, now: Timeline(ManualClock()).now)), screen: FixedScreen())
         seat.hold(usages: [0xE1, 0x04]) { #expect($0 == nil) }
         seat.holdButtons(1) { #expect($0 == nil) }
         seat.end(because: "a client went away")

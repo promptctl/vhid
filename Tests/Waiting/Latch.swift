@@ -1,5 +1,6 @@
 import Dispatch
 import Synchronization
+import Timeline
 
 /// How long a test waits for something that is going to happen before it calls the wait a
 /// hang. Far past anything a loaded runner takes, so reaching it says the awaited event
@@ -25,17 +26,24 @@ public struct Hung: Error, CustomStringConvertible {
 /// wakes the waiters whose condition it makes hold, so a wait ends the moment the event is
 /// there, and only `hangGuard` ends one whose event never comes.
 public final class Latch<State: Sendable>: Sendable {
+    /// A wait still waiting: `offer` is handed each new state, keeps the value it finds in
+    /// it for the waiter, and says whether it found one.
     private struct Waiter {
-        let holds: @Sendable (State) -> Bool
+        let offer: @Sendable (State) -> Bool
         let woken: DispatchSemaphore
     }
 
-    /// The state, the waiters still waiting, and the state each woken waiter was woken by,
-    /// until it takes it.
-    private let guarded: Mutex<(state: State, waiting: [Int: Waiter], woken: [Int: State], next: Int)>
+    /// Where a woken waiter's value is kept until it takes it, read and written under the
+    /// latch's lock only.
+    private final class Slot<Value>: @unchecked Sendable {
+        var found: Value?
+    }
+
+    /// The state, and the waiters still waiting.
+    private let guarded: Mutex<(state: State, waiting: [Int: Waiter], next: Int)>
 
     public init(_ state: State) {
-        guarded = Mutex((state, [:], [:], 0))
+        guarded = Mutex((state, [:], 0))
     }
 
     public var state: State { guarded.withLock { $0.state } }
@@ -44,9 +52,8 @@ public final class Latch<State: Sendable>: Sendable {
     public func update(_ change: (inout State) -> Void) {
         guarded.withLock { guarded in
             change(&guarded.state)
-            for (id, waiter) in guarded.waiting where waiter.holds(guarded.state) {
+            for (id, waiter) in guarded.waiting where waiter.offer(guarded.state) {
                 guarded.waiting.removeValue(forKey: id)
-                guarded.woken[id] = guarded.state
                 waiter.woken.signal()
             }
         }
@@ -60,41 +67,32 @@ public final class Latch<State: Sendable>: Sendable {
     }
 
     /// Blocks until `taking` finds a value in the state, and returns it. Throws `Hung`,
-    /// naming `what`, at the guard. [LAW:types-are-the-program] The wait hands back what
-    /// its condition found, so no caller unwraps what the condition already proved is there.
+    /// naming `what`, at the guard. [LAW:parse-dont-validate] The value `taking` found is
+    /// the one handed back, kept as it was found, so nothing proves it twice.
     public func wait<Value>(for what: String, taking: @escaping @Sendable (State) -> Value?) throws(Hung) -> Value {
         let woken = DispatchSemaphore(value: 0)
-        let asked: Asked<Value> = guarded.withLock { guarded in
-            if let found = taking(guarded.state) { return .found(found) }
+        let slot = Slot<Value>()
+        let id: Int? = guarded.withLock { guarded in
+            if let found = taking(guarded.state) {
+                slot.found = found
+                return nil
+            }
             guarded.next += 1
-            guarded.waiting[guarded.next] = Waiter(holds: { taking($0) != nil }, woken: woken)
-            return .waiting(guarded.next)
+            guarded.waiting[guarded.next] = Waiter(offer: { state in
+                slot.found = taking(state)
+                return slot.found != nil
+            }, woken: woken)
+            return guarded.next
         }
-        let id: Int
-        switch asked {
-        case .found(let found): return found
-        case .waiting(let waiting): id = waiting
-        }
-        let timedOut = woken.wait(timeout: .now() + .nanoseconds(Int(hangGuard.nanoseconds))) == .timedOut
+        if let id { _ = woken.wait(timeout: .now() + .nanoseconds(Int(hangGuard.nanoseconds))) }
         // A change can land between the timeout and this lock: a waiter it already woke is
-        // answered with what woke it.
-        let seen: State? = guarded.withLock { guarded in
-            guarded.waiting.removeValue(forKey: id)
-            return guarded.woken.removeValue(forKey: id)
+        // answered with what it found.
+        let found: Value? = guarded.withLock { guarded in
+            if let id { guarded.waiting.removeValue(forKey: id) }
+            return slot.found
         }
-        guard let seen else {
-            precondition(timedOut, "a latch's waiter woke with nothing to take")
-            throw Hung(waitingFor: what)
-        }
-        // Woken only by a state `taking` found a value in, and `taking` reads nothing else.
-        guard let found = taking(seen) else { preconditionFailure("a latch's waiter woke on a state its condition does not hold of") }
+        guard let found else { throw Hung(waitingFor: what) }
         return found
-    }
-
-    /// A wait as it is asked: answered by the state as it was, or waiting under its id.
-    private enum Asked<Value> {
-        case found(Value)
-        case waiting(Int)
     }
 
     /// `wait(for:until:)` from a task, blocking a thread of its own rather than the task's:
@@ -122,6 +120,3 @@ extension Latch where State == Bool {
     public func opened(_ what: String) async throws(Hung) { try await value(for: what) { $0 } }
 }
 
-private extension Duration {
-    var nanoseconds: Int64 { components.seconds * 1_000_000_000 + components.attoseconds / 1_000_000_000 }
-}

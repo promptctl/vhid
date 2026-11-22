@@ -83,10 +83,10 @@ let package = Package(
         // grant reading alike, so every child is started, heard and stopped one way.
         // [LAW:single-enforcer] It links Telemetry, which links nothing, for the record of
         // what a stopped reading ended, so the screen half can stand on it. [LAW:one-way-deps]
-        .target(name: "ChildProcess", dependencies: ["Telemetry"]),
+        .target(name: "ChildProcess", dependencies: ["Telemetry", "Timeline"]),
         // Against /bin/sh as the child: what it was left holding, and what a signal does
         // to it under a parent that ignores that signal.
-        .testTarget(name: "ChildProcessTests", dependencies: ["ChildProcess", "OwnThread", "Waiting"]),
+        .testTarget(name: "ChildProcessTests", dependencies: ["ChildProcess", "OwnThread", "Timeline", "Waiting"]),
         // Where the Karabiner-DriverKit-VirtualHIDDevice driver extension stands on this
         // Mac, and the four readings that answer is derived from. It links ChildProcess
         // for the commands those readings run and nothing else, so the CLI, the daemon and
@@ -127,7 +127,7 @@ let package = Package(
         // the layout's reading, which happens in the session in front and not across the
         // boundary, and not the device, because a client must never open one.
         // [LAW:one-way-deps]
-        .target(name: "Helper", dependencies: ["Installations", "Keystrokes", "Pointing", "ScreenSpace"]),
+        .target(name: "Helper", dependencies: ["Installations", "Keystrokes", "Pointing", "ScreenSpace", "Timeline"]),
         .testTarget(name: "HelperTests", dependencies: ["Helper", "Installations", "Keystrokes", "Pointing", "ScreenSpace", "ScreenSpaceTesting", "OwnThread"]),
         // What a caller asks the devices for, said in a caller's terms: text lowered to
         // keystrokes, a chord, a place on the screen to click. It links the two
@@ -168,7 +168,7 @@ let package = Package(
         // What `vhid record` and its tap app say over the socket between them, and the
         // app's watch on the command. It links nothing, so both ends speak one vocabulary
         // without either linking the other. [LAW:one-way-deps]
-        .target(name: "RecordingTie"),
+        .target(name: "RecordingTie", dependencies: ["Timeline"]),
         .testTarget(name: "RecordingTieTests", dependencies: ["RecordingTie", "ChildProcess", "OwnThread", "Waiting"]),
         // The tap app `vhid record` launches, shipped as a signed bundle so Input
         // Monitoring can be granted to it once. It reads the tap, the I/O Registry and,
@@ -224,7 +224,7 @@ let package = Package(
         // How a test waits for what the code under test does: a latch over a state, a FIFO a
         // child says it started through, and the one bound past which a wait is a hang. A
         // target of its own for OwnThread's reason. No product names it.
-        .target(name: "Waiting", path: "Tests/Waiting"),
+        .target(name: "Waiting", dependencies: ["Timeline"], path: "Tests/Waiting"),
         .testTarget(name: "WaitingTests", dependencies: ["Waiting", "OwnThread"]),
         // A clock that moves only when a test moves it or something sleeps on it, so a
         // verb that rests between reports is tested without waiting. A target of its own

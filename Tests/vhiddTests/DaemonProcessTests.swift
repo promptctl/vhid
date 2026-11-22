@@ -495,14 +495,15 @@ import VirtualHID
 }
 
 private extension DaemonProcess.Effects {
-    /// The first `count` turns of `keepUp`, with every pause handed to `pausing`, which is
-    /// how a test watches the waits.
+    /// The first `count` of `keepUp`'s own turns, with every pause handed to `pausing`,
+    /// which is how a test watches the waits.
     func turns(_ count: Int, within limit: Duration, backoff: Backoff, lookingEvery look: Duration, readiness: Readiness, serve: (DaemonProcess.Reached<Device>) -> any ServedDevices, driver: () -> DriverState?, pausing: @escaping (Duration) -> Void) {
         var paused = self
         paused.pause = pausing
-        var retry = DaemonProcess.Retry()
-        for _ in 0..<count {
-            retry = paused.turn(after: retry, within: limit, backoff: backoff, lookingEvery: look, readiness: readiness, serve: serve, driver: driver)
+        withoutActuallyEscaping(serve) { serve in
+            withoutActuallyEscaping(driver) { driver in
+                for _ in paused.turns(DaemonProcess.Upkeep(limit: limit, backoff: backoff, look: look, readiness: readiness, serve: serve, driver: driver)).prefix(count) {}
+            }
         }
     }
 }
