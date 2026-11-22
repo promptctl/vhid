@@ -1,42 +1,36 @@
-import Dispatch
+import Foundation
 import OwnThread
 import Testing
-
-/// Whether `ran` was signalled within `bound`, holding the calling thread until then.
-private func signalled(_ ran: DispatchSemaphore, within bound: DispatchTimeInterval) -> Bool {
-    ran.wait(timeout: .now() + bound) == .success
-}
 
 /// The trait as a test meets it: its thread is not one of the pool's.
 @Suite(.ownThread) struct OwnThreadTests {
     /// A test that stands still until the pool has run something for it. Under
     /// `make test` the pool is one thread wide, so without the trait the task below has
-    /// nowhere to run while this waits on it. The bound only ends that hang as a failure.
-    @Test func aTestHoldingItsThreadLeavesThePoolFree() {
-        let ran = DispatchSemaphore(value: 0)
-        Task { ran.signal() }
-        #expect(signalled(ran, within: .seconds(10)), "the pool ran nothing while the test waited")
+    /// nowhere to run while this waits on it, and the wait ends at the hang guard.
+    @Test func aTestHoldingItsThreadLeavesThePoolFree() throws {
+        let ran = Gate()
+        Task { ran.open() }
+        try ran.wait(for: "the pool to run a task while the test holds its thread")
     }
 
     /// A child task is run where its parent is, off the pool, and the parent may be
     /// standing still waiting for it. The child is given a thread of its own as well.
-    @Test func aTestHoldingItsThreadLeavesItsChildrenFree() async {
-        let ran = DispatchSemaphore(value: 0)
-        async let child = ran.signal()
-        #expect(signalled(ran, within: .seconds(10)), "the child did not run while the test waited")
+    @Test func aTestHoldingItsThreadLeavesItsChildrenFree() async throws {
+        let ran = Gate()
+        async let child: Void = ran.open()
+        try ran.wait(for: "the child to run while the test holds its thread")
         _ = await child
     }
 }
 
-/// The pool the trait takes a test off, as `make test` sets it. This suite has no trait.
+/// The pool the trait takes a test off, as `make test` sets it. With the pool one thread
+/// wide, a test that holds that thread leaves a task nowhere to run; on a wider pool the
+/// tests above would pass without the trait, and a test that needs the trait and lacks it
+/// would stop nothing. What narrows the pool is read, not raced: a task that has not run
+/// within some wait says nothing on a machine busy enough.
 struct PoolTests {
-    /// With the pool one thread wide, the task below has nowhere to run while this holds
-    /// that thread, however long it waits. On a wider pool it runs at once: the test above
-    /// would then pass without the trait, and a test that needs the trait and lacks it
-    /// would stop nothing here.
     @Test func thePoolIsOneThreadWide() {
-        let ran = DispatchSemaphore(value: 0)
-        Task { ran.signal() }
-        #expect(!signalled(ran, within: .milliseconds(100)), "the pool has more than one thread, so a test that holds one goes unseen: run `make test`")
+        #expect(ProcessInfo.processInfo.environment["LIBDISPATCH_COOPERATIVE_POOL_STRICT"] == "1",
+                "the pool has more than one thread, so a test that holds one goes unseen: run `make test`")
     }
 }

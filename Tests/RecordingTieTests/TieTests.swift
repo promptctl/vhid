@@ -42,15 +42,19 @@ import Testing
         #expect(throws: TieFailure.self) { try TieEnd.connect(to: "/tmp/vhid-record-no-such-socket") }
     }
 
-    /// The command killed while the app records: the watch fires.
+    /// The command killed while the app records: the watch fires, and not before. The
+    /// command sleeps for an hour, so only the kill ends it; whatever the watch had queued
+    /// by the time it was set has run once its queue has.
     @Test func theWatchFiresWhenTheCommandEnds() async throws {
-        let command = try Process.run(URL(fileURLWithPath: "/bin/sleep"), arguments: ["30"])
-        let ended = Ended()
-        let watch = CommandWatch(pid: command.processIdentifier, queue: DispatchQueue(label: "watch")) { ended.signal() }
-        #expect(!ended.wait(.milliseconds(100)))
+        let command = try Process.run(URL(fileURLWithPath: "/bin/sleep"), arguments: ["3600"])
+        let ended = Gate()
+        let queue = DispatchQueue(label: "watch")
+        let watch = CommandWatch(pid: command.processIdentifier, queue: queue) { ended.open() }
+        queue.sync {}
+        #expect(!ended.now, "the watch fired for a command still running")
         kill(command.processIdentifier, SIGKILL)
         command.waitUntilExit()
-        #expect(ended.wait(.seconds(5)))
+        try ended.wait(for: "the watch to fire once the command was killed")
         withExtendedLifetime(watch) {}
     }
 
@@ -70,17 +74,9 @@ import Testing
         #expect(waitid(P_PID, id_t(pid), &info, WEXITED | WNOWAIT) == 0)
         #expect(kill(pid, 0) == 0)
         #expect(CommandWatch.ended(pid))
-        let ended = Ended()
-        let watch = CommandWatch(pid: pid, queue: DispatchQueue(label: "watch")) { ended.signal() }
-        #expect(ended.wait(.seconds(5)))
+        let ended = Gate()
+        let watch = CommandWatch(pid: pid, queue: DispatchQueue(label: "watch")) { ended.open() }
+        try ended.wait(for: "the watch to fire for a command already ended")
         withExtendedLifetime(watch) {}
-    }
-
-    private final class Ended: @unchecked Sendable {
-        private let semaphore = DispatchSemaphore(value: 0)
-        func signal() { semaphore.signal() }
-        func wait(_ limit: Duration) -> Bool {
-            semaphore.wait(timeout: .now() + .milliseconds(Int(limit.components.seconds * 1000 + limit.components.attoseconds / 1_000_000_000_000_000))) == .success
-        }
     }
 }

@@ -55,16 +55,15 @@ import Testing
         }
         // Given up on at its deadline as every command is, and said as `Command` says it.
         let stuck = await #expect(throws: GrantReadingFailure.self) {
-            try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/sleep"), ["5"], within: .milliseconds(200))
+            try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/sleep"), ["3600"], within: .milliseconds(200))
         }
-        #expect(stuck?.description.hasPrefix("`sleep 5` had not ended") == true)
+        #expect(stuck?.description.hasPrefix("`sleep 3600` had not ended") == true)
         #expect(stuck?.description.hasSuffix("at the limit of 0.2 seconds, and was given up on") == true)
-        // A grandchild holding the pipe does not hold the call past its deadline.
-        let start = ContinuousClock.now
+        // A grandchild holding the pipe does not hold the call past its deadline: it holds
+        // it for the half minute a hung test is given, so returning is the give-up.
         await #expect(throws: GrantReadingFailure.self) {
-            try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/sh"), ["-c", "sleep 5"], within: .milliseconds(200))
+            try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/sh"), ["-c", "sleep 30; exit"], within: .milliseconds(200))
         }
-        #expect(ContinuousClock.now - start < .seconds(2))
     }
 
     /// A reading withdrawn while its child runs is a cancellation, recorded as one, and its
@@ -78,19 +77,19 @@ import Testing
         defer { try? FileManager.default.removeItem(at: started) }
         let reading = Task {
             try await Telemetry.$export.withValue(events.export) {
-                try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/sh"), ["-c", "echo > \"$0\"; exec sleep 5", started.path])
+                try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/sh"), ["-c", "echo > \"$0\"; exec sleep 3600", started.path])
             }
         }
         await withCheckedContinuation { running in
-            DispatchQueue.global().async {
+            // A queue of its own: the shared pool is the one the reading's waits use.
+            DispatchQueue(label: "GrantsTests.started").async {
                 _ = FileHandle(forReadingAtPath: started.path)?.readDataToEndOfFile()
                 running.resume()
             }
         }
-        let start = ContinuousClock.now
+        // The child sleeps for an hour, so a reading that ends was ended by the cancel.
         reading.cancel()
         await #expect(throws: CancellationError.self) { try await reading.value }
-        #expect(ContinuousClock.now - start < .seconds(2))
         #expect(events.all.map(\.outcome) == [.cancelled])
     }
 

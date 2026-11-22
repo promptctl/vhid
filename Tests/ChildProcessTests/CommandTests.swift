@@ -185,23 +185,3 @@ private func noChildLeft() -> Bool {
     var status: Int32 = 0
     return waitpid(-1, &status, WNOHANG) == -1 && errno == ECHILD
 }
-
-/// A named pipe a child writes to say it runs: reading it waits for the child's word, so
-/// the test acts once the child is there and never on a guess about how long that takes.
-final class FIFO: Sendable {
-    let path: String
-
-    init() throws {
-        path = FileManager.default.temporaryDirectory.appending(path: "vhid-fifo-\(UUID().uuidString)").path
-        guard mkfifo(path, 0o600) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
-    }
-
-    deinit { unlink(path) }
-
-    /// The first line written, once a writer has written it.
-    func readLine() -> String {
-        let handle = FileHandle(forReadingAtPath: path)
-        let data = handle?.readDataToEndOfFile() ?? Data()
-        return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-}

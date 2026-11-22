@@ -2,6 +2,7 @@ import Foundation
 import Installations
 import Logging
 import MCP
+import OwnThread
 import TelemetryTesting
 import Testing
 @testable import vhid
@@ -30,12 +31,15 @@ import Testing
     }
 
     /// A session stopped while an answer is owed lets go of its transport rather than
-    /// waiting on an answer nothing will now send.
+    /// waiting on an answer nothing will now send. Its relay holds the transport and ends
+    /// after the session does, so the letting go is waited for as itself: the transport
+    /// alone holds its log, which says when it goes.
     @Test func aStoppedSessionDoesNotWaitOnWhatIsOwed() async throws {
         let stdio = Stdio()
+        let released = Gate()
         weak var held: AnsweringTransport?
         do {
-            let transport = AnsweringTransport(stdio)
+            let transport = AnsweringTransport(stdio, logger: Logger(label: "test") { _ in Released(released) })
             held = transport
             let (read, next) = AsyncStream<Void>.makeStream()
             let session = Task {
@@ -46,8 +50,8 @@ import Testing
             session.cancel()
             _ = try? await session.value
         }
-        for _ in 0..<200 where held != nil { try await Task.sleep(for: .milliseconds(10)) }
-        #expect(held == nil, "the relay is still waiting on the owed answer")
+        try await released.until(for: "the relay to let go of the transport, which it holds while it waits on the owed answer")
+        #expect(held == nil)
     }
 
     /// Stopped after stdin has ended, when the relay is already parked on what is owed, the
@@ -175,6 +179,19 @@ import Testing
         #expect(ended, "the session is still waiting on a withdrawn call")
         #expect(stdio.sent.isEmpty, "a withdrawn call's answer was written: \(stdio.sent)")
     }
+}
+
+/// A log that keeps nothing and opens a gate when the last holder lets go of it.
+private final class Released: LogHandler, @unchecked Sendable {
+    private let gate: Gate<Bool>
+    init(_ gate: Gate<Bool>) { self.gate = gate }
+    deinit { gate.open() }
+    var metadata: Logger.Metadata = [:]
+    var logLevel: Logger.Level = .trace
+    subscript(metadataKey key: String) -> Logger.Metadata.Value? {
+        get { metadata[key] } set { metadata[key] = newValue }
+    }
+    func log(level: Logger.Level, message: Logger.Message, metadata: Logger.Metadata?, source: String, file: String, function: String, line: UInt) {}
 }
 
 /// What a transport logged, one line per message with its metadata.

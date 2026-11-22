@@ -292,8 +292,11 @@ import Testing
         #expect(seen[0].attributes["boxes_unchecked"] == .object(checked))
         #expect(seen[1].attributes["excluded"] == .object(none))
         #expect(seen[1].attributes["boxes_unchecked"] == .object(checked.merging(["elsewhere": 2]) { $1 }))
-        #expect(seen[0].counts == ["reads": 1, "examined": 5, "matched": 0, "matched_also": 0, "nearest": 0, "boxes_narrowed": 0,
-                                   "box_calls": 0, "box_ms": 0])
+        // Its boxes were checked, in no time a test can promise: the count is there and
+        // what it reads is the clock's.
+        #expect(seen[0].counts.filter { $0.key != "box_ms" } == ["reads": 1, "examined": 5, "matched": 0, "matched_also": 0, "nearest": 0,
+                                                                  "boxes_narrowed": 0, "box_calls": 0])
+        #expect(seen[0].counts["box_ms"] != nil)
         #expect(seen[1].counts.filter { $0.key != "box_ms" } ==
             ["reads": 1, "examined": 9, "matched": 1, "matched_also": 0, "nearest": 0, "boxes_narrowed": 1, "box_calls": 41])
         #expect((seen[1].counts["box_ms"] ?? 0) >= 20)

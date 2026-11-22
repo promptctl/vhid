@@ -272,11 +272,11 @@ import InputTesting
     /// The answer goes out before the record does, and the record still lands once the
     /// outbox the process drains at exit is drained.
     @Test func anMcpCallIsAnsweredWithoutWaitingOnItsRecord() async throws {
-        let answered = Mutex(false), sawAnswer = Mutex<Bool?>(nil)
+        let answered = Gate(), sawAnswer = Mutex<Bool?>(nil)
         let outbox = Outbox(Edge(collector: .init(endpoint: .base("http://c:4318")),
                                  file: FileManager.default.temporaryDirectory.appending(path: "vhid-tests-\(UUID().uuidString)/events.jsonl"),
                                  deliver: { _ in
-                                     while !answered.withLock({ $0 }) { try await Task.sleep(for: .milliseconds(5)) }
+                                     try await answered.until(for: "the call to be answered")
                                      sawAnswer.withLock { $0 = true }
                                  }))
         let click = VerbTool(Help.click, []) { _, _ in "clicked" }
@@ -288,7 +288,7 @@ import InputTesting
             }
         }
         _ = await stdio.firstSent()
-        answered.withLock { $0 = true }
+        answered.open()
         stdio.feed([.end])
         try await session.value
         await outbox.drained()
@@ -540,38 +540,32 @@ import InputTesting
     /// running, the child with it, at once rather than at the command's limit, and the
     /// record says cancelled, names the command it ended, and how long it ran.
     ///
-    /// On a thread of its own, and timed from the cancel to the child's end: the test's
-    /// waits then queue behind no other test on the pool, and how long the child took to
-    /// start is the runner's load, not the claim. [LAW:no-ambient-temporal-coupling]
+    /// The child says it runs through a FIFO and then sleeps for an hour, so the cancel
+    /// lands while it runs and a verb that returns cancelled was ended by it: a command
+    /// that ran to its limit would say it overran. A command reaps its child before it
+    /// returns, so the child is gone by then. [LAW:no-ambient-temporal-coupling]
     @Test(.ownThread, .timeLimit(.minutes(1))) func aReadingCancelledMidCommandIsRecordedAsCancelledAndLeavesNoChild() async throws {
-        let pidFile = FileManager.default.temporaryDirectory.appending(path: "vhid-reading-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: pidFile) }
+        let started = try FIFO()
         let collected = Collected()
         let begun = ContinuousClock.now
         let verb = Task {
             try await Self.cli("driver state", into: collected) {
                 try await reading { stop in
-                    Result { try Command("/bin/sh", "-c", "echo $$ > \(pidFile.path); exec sleep 600").run(by: .within(Command.limit, or: stop)) }
+                    Result { try Command("/bin/sh", "-c", "echo $$ > \(started.path); exec sleep 3600").run(by: .within(Command.limit, or: stop)) }
                 }
             }
         }
-        func pid() -> pid_t? { (try? String(contentsOf: pidFile, encoding: .utf8)).flatMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) } }
-        while pid() == nil { try await Task.sleep(for: .milliseconds(10)) }
-        let child = try #require(pid())
-        // The clock the command's deadline is kept on.
-        let cancelled = SuspendingClock.now
+        let child = try #require(pid_t(await started.line()))
         verb.cancel()
-        while kill(child, 0) == 0 { try await Task.sleep(for: .milliseconds(10)) }
-        #expect(errno == ESRCH)
-        #expect(SuspendingClock.now - cancelled < Command.limit / 3)
         await #expect(throws: CancellationError.self) { try await verb.value }
+        #expect(kill(child, 0) == -1 && errno == ESRCH)
         let took = ContinuousClock.now - begun
         let record = try Self.only(collected)
         #expect(record["event"] as? String == "driver state")
         #expect(record["outcome"] as? String == "cancelled")
         #expect(try #require(record["duration_ms"] as? Double) <= took / .milliseconds(1))
         let stopped = try #require((record["attributes"] as? [String: Any])?["stopped"] as? [String])
-        #expect(stopped == ["sh -c echo $$ > \(pidFile.path); exec sleep 600"])
+        #expect(stopped == ["sh -c echo $$ > \(started.path); exec sleep 3600"])
     }
 
     /// `doctor` prints its own report and exits 1 with nothing more to say.

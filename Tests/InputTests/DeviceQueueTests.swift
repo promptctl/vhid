@@ -1,5 +1,6 @@
 import Dispatch
 import Keystrokes
+import OwnThread
 import Pointing
 import Synchronization
 import Testing
@@ -17,25 +18,20 @@ private final class Journal: Sendable {
 /// A device that holds the thread a key-down is made on until the test acknowledges it,
 /// as vhidd's round trip holds it until the report is posted.
 private final class BlockingKeyPress: KeyPress {
-    struct Unacknowledged: Error {}
-
     private let journal: Journal
-    private let acknowledged = DispatchSemaphore(value: 0)
-    private let held = Mutex(false)
+    private let acknowledged = Gate()
+    /// Opened once a key-down is holding its thread.
+    let blocking = Gate()
 
     init(journal: Journal) { self.journal = journal }
 
-    /// Whether a key-down is holding its thread right now.
-    var blocking: Bool { held.withLock { $0 } }
+    func acknowledge() { acknowledged.open() }
 
-    func acknowledge() { acknowledged.signal() }
-
-    /// Bounded, so a key-down made where it should not be fails the test rather than
-    /// holding the suite: the deadline is past any the test itself waits for.
+    /// Bounded by the hang guard, so a key-down made where it should not be fails the test
+    /// rather than holding the suite.
     func down(_ usage: Usage) throws {
-        held.withLock { $0 = true }
-        defer { held.withLock { $0 = false } }
-        guard acknowledged.wait(timeout: .now() + .seconds(30)) == .success else { throw Unacknowledged() }
+        blocking.open()
+        try acknowledged.wait(for: "the test to acknowledge the key-down")
         journal.record("down \(usage.rawValue)")
     }
 
@@ -67,7 +63,7 @@ private struct JournalPointing: PointingDevice {
         let device = BlockingKeyPress(journal: journal)
         let keyboard = QueuedKeyboard(keyboard: device, queue: DeviceQueue())
         let pressed = Task { try await keyboard.down(Usage(rawValue: 0x04)) }
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { device.blocking })
+        try await device.blocking.until(for: "the key-down to hold its thread")
         device.acknowledge()
         try await pressed.value
         #expect(journal.log == ["down 4"])
@@ -79,8 +75,8 @@ private struct JournalPointing: PointingDevice {
     /// The move is asked for once the key is on the device, and the key is acknowledged
     /// once the move is in line. A call is in line the moment it is asked for: the move's
     /// task marks that it has asked and calls the mouse in one stretch on this actor, with
-    /// nothing between them that could suspend - so a mark that can be seen is a move that
-    /// is queued.
+    /// nothing between them that could suspend - and the test sees the mark only back on
+    /// this actor, so after that stretch has run: a mark seen is a move queued.
     @Test func aKeyAndAMoveOnOneQueueArriveInTheOrderAsked() async throws {
         let journal = Journal()
         let device = BlockingKeyPress(journal: journal)
@@ -88,13 +84,13 @@ private struct JournalPointing: PointingDevice {
         let keyboard = QueuedKeyboard(keyboard: device, queue: queue)
         let mouse = QueuedMouse(pointing: JournalPointing(journal: journal), queue: queue)
         let pressed = Task { try await keyboard.down(Usage(rawValue: 0x04)) }
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { device.blocking })
-        var asked = false
+        try await device.blocking.until(for: "the key-down to hold its thread")
+        let asked = Gate()
         let moved = Task {
-            asked = true
+            asked.open()
             try await mouse.move(by: Move(x: Count(clamping: 3), y: Count(clamping: 4)))
         }
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { asked })
+        try await asked.until(for: "the move to be asked for")
         device.acknowledge()
         try await pressed.value
         try await moved.value
