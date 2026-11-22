@@ -172,7 +172,7 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
     private func request(_ ask: Requirement.Ask, for requirement: Requirement) {
         failure = nil
         let log = log
-        DispatchQueue.global(qos: .userInitiated).async {
+        DispatchQueue(label: "vhid-menubar.request", qos: .userInitiated).async {
             let started = Result { try Self.perform(ask, log: log) }
             DispatchQueue.main.async { MainActor.assumeIsolated { [weak self] in self?.requested(ask, for: requirement, started) } }
         }

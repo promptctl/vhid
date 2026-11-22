@@ -24,7 +24,7 @@ public struct SignalWatch {
     /// still two, the second of which can mean something the first did not.
     public init(
         on numbers: [Int32] = [SIGINT, SIGTERM],
-        answeringOn queue: DispatchQueue = .global(),
+        answeringOn queue: DispatchQueue = DispatchQueue(label: "Signals.SignalWatch"),
         answer: @escaping @Sendable (Int32) -> Void
     ) {
         sources = numbers.map { number in

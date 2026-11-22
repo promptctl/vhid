@@ -62,7 +62,7 @@ struct Vhid: AsyncParsableCommand {
         let watch = SignalWatch { number in
             guard first.take(number) else { die(by: number) }
             let task = running.withLock { $0 }
-            DispatchQueue.global().async { task?.cancel() }
+            DispatchQueue(label: "vhid.cancel").async { task?.cancel() }
         }
         let invocation = Task {
             try await $signals.withValue(first) { try await dispatched(_commandName) { try await Entry.commandLine(Self.self, nil) } }
