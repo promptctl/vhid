@@ -22,9 +22,12 @@ public struct SignalWatch {
     /// `answer` is handed the number on `queue`, once for each delivery: the source
     /// coalesces deliveries that land before it runs, and two signals sent together are
     /// still two, the second of which can mean something the first did not.
+    ///
+    /// [LAW:no-ambient-temporal-coupling] The queue has no default: an answer waits on
+    /// whatever else runs there, so the caller names the queue it waits behind.
     public init(
         on numbers: [Int32] = [SIGINT, SIGTERM],
-        answeringOn queue: DispatchQueue = .global(),
+        answeringOn queue: DispatchQueue,
         answer: @escaping @Sendable (Int32) -> Void
     ) {
         sources = numbers.map { number in
