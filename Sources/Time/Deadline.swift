@@ -34,8 +34,10 @@ public struct Deadline: Sendable, CustomStringConvertible {
     /// What is left of the limit, none once it has passed.
     public var left: Duration { max(.zero, at - timeline.now()) }
     public var passed: Bool { timeline.now() >= at }
+    /// When the request entered.
+    public var entered: Instant { at - limit }
     /// How long since the request entered.
-    public var spent: Duration { timeline.now() - (at - limit) }
+    public var spent: Duration { timeline.now() - entered }
 
     /// Waits on `condition`, which the caller holds locked, until it is signalled or this
     /// passes, and answers whether any of the limit is left. A caller loops on what it is

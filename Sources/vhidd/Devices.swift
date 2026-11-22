@@ -3,6 +3,7 @@ import Foundation
 import Helper
 import Keystrokes
 import Pointing
+import Time
 import VirtualHID
 
 /// The devices as the listener serves them: what a client is handed, and the release made
@@ -24,14 +25,29 @@ struct KeysLetGo: Equatable {
     let failure: String?
 }
 
-/// A keyboard that says which keys it holds. The device is the one record of that: it
-/// counts a key whose request threw after reaching the driver, which no caller can.
+/// A keyboard as vhidd drives it: every report by the deadline of the act that asked for
+/// it, and the keys it may be holding. The device is the one record of those: it counts a
+/// key whose request may have reached the driver unanswered, which no caller can.
 /// [LAW:one-source-of-truth]
-protocol HeldKeyboard: KeyPress {
+protocol HeldKeyboard: Sendable {
     var keysDown: Set<Usage> { get }
+    func down(_ usage: Usage, by deadline: Deadline) throws
+    func releaseAll(by deadline: Deadline) throws
+    func hold(_ keys: HeldKeys, by deadline: Deadline) throws
+}
+
+/// The mouse as vhidd drives it, by the same rule as the keyboard.
+protocol HeldMouse: Sendable {
+    var buttonsDown: Set<Button> { get }
+    func down(_ button: Button, by deadline: Deadline) throws
+    func releaseAll(by deadline: Deadline) throws
+    func hold(_ buttons: Set<Button>, by deadline: Deadline) throws
+    func move(_ delta: Move, by deadline: Deadline) throws
+    func scroll(_ delta: Scroll, by deadline: Deadline) throws
 }
 
 extension VirtualKeyboard: HeldKeyboard {}
+extension VirtualPointing: HeldMouse {}
 
 /// The keyboard and the mouse, held open for as long as their connection to the daemon
 /// lasts and served to one client at a time.
@@ -45,7 +61,7 @@ final class Devices: NSObject, ServedDevices, @unchecked Sendable {
     /// The seams and not the drivers, so a test hands in devices of its own and the
     /// daemon hands in the real ones. [LAW:composability]
     private let keyboard: any HeldKeyboard
-    private let mouse: any PointingDevice
+    private let mouse: any HeldMouse
     /// One report at a time, across both devices. [LAW:no-shared-mutable-globals] Each
     /// device keeps its own reports whole; this orders the two against each other, because
     /// they share the socket and the client: a keyboard report and a mouse report from one
@@ -71,31 +87,39 @@ final class Devices: NSObject, ServedDevices, @unchecked Sendable {
     /// nothing at all.
     static let keyLimit = HeldKeys.silenceLimit
 
-    private let limit: Duration
-    private let now: () -> ContinuousClock.Instant
-    /// When a client last asked for a report of either device; under `device`.
-    private var lastReport: ContinuousClock.Instant
+    /// How long one act, a sweep's release or a client's release has to be answered, from
+    /// when it was asked for.
+    static let reportLimit: Duration = .seconds(2)
 
-    init(keyboard: any HeldKeyboard, mouse: any PointingDevice, limit: Duration = keyLimit,
-         now: @escaping () -> ContinuousClock.Instant = { .now }) {
+    private let limit: Duration
+    private let timeline: Timeline
+    /// When a client last asked for a report of either device; under `device`.
+    private var lastReport: Instant
+
+    init(keyboard: any HeldKeyboard, mouse: any HeldMouse, timeline: Timeline, limit: Duration = keyLimit) {
         self.keyboard = keyboard
         self.mouse = mouse
         self.limit = limit
-        self.now = now
-        self.lastReport = now()
+        self.timeline = timeline
+        self.lastReport = timeline.now()
     }
 
     /// [LAW:dataflow-not-control-flow] Every call is the same act - take the devices, do
-    /// one thing to them, answer with what happened - so they are one function taking the
-    /// thing to do, not eight copies of the same locking and error handling.
-    private func attempt(_ act: () throws -> Void, _ reply: (Error?) -> Void) {
+    /// one thing to them by the act's deadline, answer with what happened - so they are one
+    /// function taking the thing to do, not eight copies of the same locking and error
+    /// handling.
+    ///
+    /// [LAW:no-ambient-temporal-coupling] The deadline is made here, as the client's call
+    /// arrives, and before the lock, so the wait for the lock is counted against it.
+    private func attempt(_ act: (Deadline) throws -> Void, _ reply: (Error?) -> Void) {
+        let deadline = Deadline.within(Self.reportLimit, on: timeline)
         device.lock()
         defer { device.unlock() }
         // Both ends: a report the driver took seconds to answer is the client being active
         // throughout, not idle.
-        lastReport = now()
-        let answered = outcome(of: act)
-        lastReport = now()
+        lastReport = timeline.now()
+        let answered = outcome { try act(deadline) }
+        lastReport = timeline.now()
         reply(answered)
     }
 
@@ -110,50 +134,52 @@ final class Devices: NSObject, ServedDevices, @unchecked Sendable {
     }
 
     func down(usage: UInt16, reply: @escaping (Error?) -> Void) {
-        attempt({ try keyboard.down(try Self.usage(usage)) }, reply)
+        attempt({ try keyboard.down(try Self.usage(usage), by: $0) }, reply)
     }
 
     func releaseAll(reply: @escaping (Error?) -> Void) {
-        attempt({ try keyboard.releaseAll() }, reply)
+        attempt({ try keyboard.releaseAll(by: $0) }, reply)
     }
 
     /// [LAW:single-enforcer] More than a report carries is refused by `HeldKeys`, by name,
     /// before the device sees it. A usage named twice on the wire is one key held.
     func hold(usages: [UInt16], reply: @escaping (Error?) -> Void) {
-        attempt({ try keyboard.hold(try HeldKeys(Set(usages.map(Self.usage)))) }, reply)
+        attempt({ try keyboard.hold(try HeldKeys(Set(usages.map(Self.usage))), by: $0) }, reply)
     }
 
     /// A release the keyboard refused is tried again one limit later, not on every sweep:
     /// a hung driver would otherwise hold every client's act behind a timed-out release
-    /// four times a second, and log each one.
+    /// four times a second, and log each one. The sweep's tick is where its deadline is
+    /// made.
     func releaseKeysHeldPastLimit() -> KeysLetGo? {
+        let deadline = Deadline.within(Self.reportLimit, on: timeline)
         device.lock()
         defer { device.unlock() }
         let held = keyboard.keysDown
-        guard !held.isEmpty, now() - lastReport >= limit else { return nil }
-        let failure = outcome(of: keyboard.releaseAll).map { "\($0)" }
-        if failure != nil { lastReport = now() }
+        guard !held.isEmpty, timeline.now() - lastReport >= limit else { return nil }
+        let failure = outcome { try keyboard.releaseAll(by: deadline) }.map { "\($0)" }
+        if failure != nil { lastReport = timeline.now() }
         return KeysLetGo(usages: held.sorted().map(\.rawValue), limit: limit, failure: failure)
     }
 
     func buttonDown(_ button: UInt8, reply: @escaping (Error?) -> Void) {
-        attempt({ try mouse.down(try Self.button(button)) }, reply)
+        attempt({ try mouse.down(try Self.button(button), by: $0) }, reply)
     }
 
     func releaseButtons(reply: @escaping (Error?) -> Void) {
-        attempt({ try mouse.releaseAll() }, reply)
+        attempt({ try mouse.releaseAll(by: $0) }, reply)
     }
 
     func holdButtons(_ buttons: UInt32, reply: @escaping (Error?) -> Void) {
-        attempt({ try mouse.hold(Button.buttons(in: buttons)) }, reply)
+        attempt({ try mouse.hold(Button.buttons(in: buttons), by: $0) }, reply)
     }
 
     func move(x: Int8, y: Int8, reply: @escaping (Error?) -> Void) {
-        attempt({ try mouse.move(by: Move(x: try Self.count(x), y: try Self.count(y))) }, reply)
+        attempt({ try mouse.move(Move(x: try Self.count(x), y: try Self.count(y)), by: $0) }, reply)
     }
 
     func scroll(vertical: Int8, horizontal: Int8, reply: @escaping (Error?) -> Void) {
-        attempt({ try mouse.scroll(by: Scroll(vertical: try Self.count(vertical), horizontal: try Self.count(horizontal))) }, reply)
+        attempt({ try mouse.scroll(Scroll(vertical: try Self.count(vertical), horizontal: try Self.count(horizontal)), by: $0) }, reply)
     }
 
     /// Releases everything the client that just went away had left held, on both devices.
@@ -166,13 +192,15 @@ final class Devices: NSObject, ServedDevices, @unchecked Sendable {
     /// way a connection can end - and on its own way out, for the same reason. Each device
     /// is released whatever the other answered, and the lock is held across both: a
     /// report landing between them would be a key set down after the keyboard was cleared,
-    /// with nothing left to catch it.
+    /// with nothing left to catch it. One deadline for both, made where the release is
+    /// asked.
     func releaseEverything(because reason: String) {
+        let deadline = Deadline.within(Self.reportLimit, on: timeline)
         device.lock()
         defer { device.unlock() }
-        let key = outcome(of: keyboard.releaseAll)
+        let key = outcome { try keyboard.releaseAll(by: deadline) }
         log(key.map { "\(reason), and the keyboard would not release: \($0)" } ?? "\(reason); every key is up")
-        let button = outcome(of: mouse.releaseAll)
+        let button = outcome { try mouse.releaseAll(by: deadline) }
         log(button.map { "\(reason), and the mouse would not release: \($0)" } ?? "\(reason); every button is up")
     }
 

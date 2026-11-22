@@ -1,6 +1,7 @@
 import ChildProcess
 import DriverExtension
 import Foundation
+import Time
 import Synchronization
 import VirtualHID
 
@@ -66,7 +67,8 @@ enum DaemonProcess {
         /// The devices on a connection to a daemon that is running, or `DaemonError` when
         /// none answers. `whenLost` is told when that connection ends underneath them.
         var connect: (_ whenLost: @escaping @Sendable (DaemonError) -> Void) throws -> Device
-        /// The devices brought up on their connection, each within the limit.
+        /// The devices brought up on their connection, each within the limit from when it is
+        /// asked to come up.
         var bringUp: (Device, Duration) throws -> Startups
         /// The daemon started as this process's child.
         var launch: () throws -> pid_t
@@ -74,15 +76,19 @@ enum DaemonProcess {
         var say: (Said) -> Void
     }
 
-    /// The effects done for real. The daemon outlives any one connection on purpose, and
-    /// only `stop` ends it.
-    static var real: Effects<HID> {
+    /// The effects done for real, on `timeline`. The daemon outlives any one connection on
+    /// purpose, and only `stop` ends it.
+    static func real(on timeline: Timeline) -> Effects<HID> {
         Effects(
             connect: { whenLost in
-                let daemon = try DaemonConnection(whenLost: whenLost)
+                let daemon = try DaemonConnection(timeline: timeline, whenLost: whenLost)
                 return HID(keyboard: VirtualKeyboard(daemon: daemon), mouse: VirtualPointing(daemon: daemon))
             },
-            bringUp: { Startups(keyboard: try $0.keyboard.start(within: $1), mouse: try $0.mouse.start(within: $1)) },
+            // [LAW:no-ambient-temporal-coupling] Each device's deadline is made as it is
+            // asked to come up, so the mouse is not charged for the keyboard's second.
+            bringUp: { hid, limit in
+                Startups(keyboard: try hid.keyboard.start(by: .within(limit, on: timeline)), mouse: try hid.mouse.start(by: .within(limit, on: timeline)))
+            },
             launch: { try spawn(executable, [], stdio: [:]) },
             terminate: end,
             say: {

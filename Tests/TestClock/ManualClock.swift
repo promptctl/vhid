@@ -23,8 +23,8 @@ public final class ManualClock: Clock, Sendable {
     /// What to do once something has slept here often enough, for a test that needs a
     /// stop to land inside a wait rather than at a report. [LAW:effects-at-boundaries]
     private let aim = Mutex<(after: Int, fire: (@Sendable () -> Void)?)>((.max, nil))
-    /// The blocking waits under way, each by what wakes it.
-    private let blocked = Mutex<[Int: @Sendable () -> Void]>([:])
+    /// The blocking waits under way, each by the instant it waits for and what wakes it.
+    private let blocked = Watched<[Int: (until: Instant, wake: @Sendable () -> Void)]>([:])
     private let nextWait = Mutex(0)
 
     public var now: Instant { current.withLock { $0 } }
@@ -46,6 +46,19 @@ public final class ManualClock: Clock, Sendable {
         move { $0 = $0.advanced(by: duration) }
     }
 
+    /// Waits until at least `count` blocking waits are under way on this clock: a thread
+    /// the test cannot see has reached a wait, and moving the clock now ends that wait and
+    /// not one before it.
+    public func awaitBlocked(_ count: Int, sourceLocation: SourceLocation = #_sourceLocation) {
+        blocked.wait("\(count) waits blocked on the test clock", until: { $0.count >= count }, sourceLocation: sourceLocation)
+    }
+
+    /// Waits until a blocking wait for `instant` is under way on this clock, for a test that
+    /// must tell one wait from another by the instant each waits for.
+    public func awaitBlocked(until instant: Instant, sourceLocation: SourceLocation = #_sourceLocation) {
+        blocked.wait("a wait for \(instant.offset) blocked on the test clock", until: { $0.values.contains { $0.until == instant } }, sourceLocation: sourceLocation)
+    }
+
     /// The process's one timeline, on this clock, for everything under test to be handed.
     public var timeline: Timeline {
         Timeline(
@@ -59,7 +72,7 @@ public final class ManualClock: Clock, Sendable {
     /// wakes by taking its own lock, whose holder may be reading the time.
     private func move(_ change: (inout Instant) -> Void) {
         current.withLock { change(&$0) }
-        blocked.withLock { Array($0.values) }.forEach { $0() }
+        blocked.withLock { $0.values.map(\.wake) }.forEach { $0() }
     }
 
     /// One blocking wait, woken by every move of the clock and otherwise held for at most
@@ -68,8 +81,8 @@ public final class ManualClock: Clock, Sendable {
     /// the deadline so the code under test ends as it would at its limit.
     private func block(until: Instant, _ wake: @escaping @Sendable () -> Void, _ sleep: (Duration) -> Bool) {
         let id = nextWait.withLock { $0 += 1; return $0 }
-        blocked.withLock { $0[id] = wake }
-        defer { _ = blocked.withLock { $0.removeValue(forKey: id) } }
+        blocked.withLock { $0[id] = (until, wake) }
+        defer { blocked.withLock { _ = $0.removeValue(forKey: id) } }
         guard now < until else { return }
         guard !sleep(hangGuard), now < until else { return }
         Issue.record("a wait for \(until.offset) on the test clock was still waiting \(hangGuard) later, with the clock at \(now.offset)")

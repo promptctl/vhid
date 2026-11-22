@@ -118,10 +118,10 @@ let package = Package(
         // Everything about the two virtual devices and nothing about what is typed on
         // them: the pqrs daemon socket, the two report layouts, and the keys and buttons
         // each device is holding. [LAW:one-way-deps]
-        .target(name: "VirtualHID", dependencies: ["DriverExtension", "Keystrokes", "Pointing"]),
+        .target(name: "VirtualHID", dependencies: ["DriverExtension", "Keystrokes", "Pointing", "Time"]),
         // The wire protocol against a fake daemon on the other end of a socketpair, so
         // the framing is proven without root and without the driver.
-        .testTarget(name: "VirtualHIDTests", dependencies: ["VirtualHID", "DriverExtension", "Keystrokes", "Pointing", "OwnThread"]),
+        .testTarget(name: "VirtualHIDTests", dependencies: ["VirtualHID", "DriverExtension", "Keystrokes", "Pointing", "OwnThread", "TestClock", "Time"]),
         // What crosses the privilege boundary, and the client's side of it. It links the
         // vocabularies - the keys, the pointing and the screen space - and nothing else: not
         // the layout's reading, which happens in the session in front and not across the

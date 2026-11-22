@@ -83,16 +83,9 @@ import Time
     /// lifted there are more slots than a test has time to ask about.
     @Sendable static func open() throws -> Int { try FileManager.default.contentsOfDirectory(atPath: "/dev/fd").count }
 
-    /// Runs `command` by `deadline` on a thread of its own, as a reading is taken, and
-    /// answers what it ended with once it has.
-    static func running(_ command: Command, by deadline: Deadline, or stop: Command.Stop = .never) -> () -> Result<Command.Output, any Error>? {
-        let ended = Latch()
-        nonisolated(unsafe) var result: Result<Command.Output, any Error>?
-        Thread.detachNewThread {
-            result = Result { try command.run(by: deadline, or: stop) }
-            ended.open()
-        }
-        return { ended.wait("the command to end") ? result : nil }
+    /// Runs `command` by `deadline` on a thread of its own, as a reading is taken.
+    static func running(_ command: Command, by deadline: Deadline, or stop: Command.Stop = .never) -> Pending<Command.Output> {
+        Pending { try command.run(by: deadline, or: stop) }
     }
 
     /// A command that never ends is given up on at its limit and said by name, with the
@@ -104,7 +97,7 @@ import Time
         let ended = Self.running(command, by: .within(.milliseconds(500), on: clock.timeline))
         let pid = try #require(running.said().flatMap { pid_t($0) })
         clock.advance(by: .milliseconds(500))
-        let overran = try #require(#expect(throws: Command.Overran.self) { try ended()?.get() })
+        let overran = try #require(#expect(throws: Command.Overran.self) { try ended.get() })
         #expect(overran.command == "sh -c echo $$ > \(running.path); exec sleep 600")
         #expect(overran.limit == .milliseconds(500))
         #expect(overran.ran == .milliseconds(500))
@@ -123,7 +116,7 @@ import Time
         let ended = Self.running(Command("/bin/sh", "-c", "sleep 600 & echo > \(started.path); exit 0"), by: .within(.milliseconds(500), on: clock.timeline))
         try #require(started.said() != nil)
         clock.advance(by: .milliseconds(500))
-        #expect(throws: Command.Overran.self) { try ended()?.get() }
+        #expect(throws: Command.Overran.self) { try ended.get() }
     }
 
     /// The limit is the reading's: a command run by a deadline another has used most of is
@@ -138,7 +131,7 @@ import Time
         let ended = Self.running(Command("/bin/sh", "-c", "echo > \(running.path); exec sleep 600"), by: deadline)
         try #require(running.said() != nil)
         clock.advance(by: .seconds(2))
-        let overran = try #require(#expect(throws: Command.Overran.self) { try ended()?.get() })
+        let overran = try #require(#expect(throws: Command.Overran.self) { try ended.get() })
         #expect(overran.ran == .seconds(2))
         #expect(overran.limit == .seconds(3))
     }
@@ -161,30 +154,21 @@ import Time
     /// overrunning: a child that never ends, whose streams end when it is stopped, and one
     /// that has ended and left its streams open in something it started, where giving up is
     /// all that lets go of them.
-    @Test(arguments: [("exec sleep 600", 50), ("sleep 600 & exit 0", 10)])
-    func aCommandGivenUpOnHoldsNoDescriptorOpen(script: String, runs: Int) throws {
-        let clock = ManualClock(), started = try Fifo(), done = Latch()
-        nonisolated(unsafe) var counted: Result<(overran: Int, grew: Int), any Error>?
-        Thread.detachNewThread {
-            counted = Result {
-                let before = try Self.open()
-                let overran = (0..<runs).count { _ in
-                    let command = Command("/bin/sh", "-c", "echo > \(started.path); \(script)")
-                    do { _ = try command.run(by: .within(.seconds(1), on: clock.timeline), or: .never); return false } catch { return error is Command.Overran }
-                }
-                return (overran, try Self.open() - before)
-            }
-            done.open()
-        }
-        // Each run's limit passes once its child has started, and not before.
-        for _ in 0..<runs {
-            try #require(started.said() != nil)
-            clock.advance(by: .seconds(1))
-        }
-        try #require(done.wait("every run to be given up on"))
-        let (overran, grew) = try #require(counted).get()
-        #expect(overran == runs)
-        #expect(grew < runs)
+    ///
+    /// What it started outlives the giving up and holds both streams: once the run has
+    /// returned it writes to each, SIGPIPE ignored, and says whether each write found the
+    /// end this side read from closed - a status of 1 for each.
+    @Test(arguments: ["exec sleep 600", "exit 0"])
+    func aCommandGivenUpOnHoldsNoDescriptorOpen(ending: String) throws {
+        let clock = ManualClock(), started = try Fifo(), go = try Fifo(), wrote = try Fifo()
+        let outliving = "(trap '' PIPE; read _ < \(go.path); /bin/echo x 2>/dev/null; out=$?; /bin/echo x >&2 2>/dev/null; echo \"$out $?\" > \(wrote.path)) &"
+        let command = Command("/bin/sh", "-c", "\(outliving) echo > \(started.path); \(ending)")
+        let running = Self.running(command, by: .within(.seconds(1), on: clock.timeline))
+        try #require(started.said() != nil)
+        clock.advance(by: .seconds(1))
+        #expect(throws: Command.Overran.self) { try running.get() }
+        go.say()
+        #expect(wrote.said() == "1 1")
     }
 
     /// A reading stopped while a command runs ends at once, the command with it: thrown as
@@ -195,7 +179,7 @@ import Time
         let ended = Self.running(Command("/bin/sh", "-c", "echo $$ > \(running.path); exec sleep 600"), by: Self.unhurried, or: stop)
         let pid = try #require(running.said().flatMap { pid_t($0) })
         stop.pull()
-        #expect(throws: CancellationError.self) { try ended()?.get() }
+        #expect(throws: CancellationError.self) { try ended.get() }
         #expect(kill(pid, 0) == -1 && errno == ESRCH)
     }
 

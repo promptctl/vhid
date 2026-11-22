@@ -123,13 +123,13 @@ do {
     // much as one serving - and a daemon somebody else runs stays theirs.
     let termination = SignalWatch(on: [SIGTERM], answeringOn: .main) { _ in
         readiness.releaseEverything(because: "asked to stop")
-        children.stopAll(DaemonProcess.real)
+        children.stopAll(DaemonProcess.real(on: timeline))
         log("asked to stop; exiting 0")
         exit(0)
     }
 
     Thread.detachNewThread {
-        children.tracking(DaemonProcess.real).keepUp(
+        children.tracking(DaemonProcess.real(on: timeline)).keepUp(
             within: .seconds(10),
             backoff: Backoff(first: .seconds(2), most: .seconds(60)),
             lookingEvery: .seconds(2),
@@ -137,7 +137,7 @@ do {
             serve: { reached in
                 log("the keyboard is up: the driver's daemon answered in \(reached.startup.keyboard.answered), ready after \(reached.startup.keyboard.ready)")
                 log("the mouse is up: the driver's daemon answered in \(reached.startup.mouse.answered), ready after \(reached.startup.mouse.ready)")
-                let devices = Devices(keyboard: reached.devices.keyboard, mouse: reached.devices.mouse)
+                let devices = Devices(keyboard: reached.devices.keyboard, mouse: reached.devices.mouse, timeline: timeline)
                 // Whatever the daemon was holding for its last occupant - a vhidd that
                 // exited while the daemon lived on, or a hand-run session - is up before
                 // any client is served: the devices are handed over only after.

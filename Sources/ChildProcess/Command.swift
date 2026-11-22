@@ -68,11 +68,11 @@ public struct Command: Sendable {
     /// A stop pulled stays pulled: a command the reading runs afterwards is not started, so
     /// a reading of several commands ends at the one running and runs no more.
     public final class Stop: Sendable {
-        /// Whether it has been pulled, the kqueues of the commands waiting on it now and
+        /// Whether it has been pulled, the queues of the commands waiting on it now and
         /// what each runs, and the commands it has ended. Changed under one lock, so a
         /// command that starts as the stop is pulled is woken either way: by the pull, or
         /// as it starts, by finding it pulled.
-        private let state = Mutex<(pulled: Bool, waiting: [Int32: String], ended: [String])>((false, [:], []))
+        private let state = Mutex<(pulled: Bool, waiting: [ObjectIdentifier: (queue: EventQueue, command: String)], ended: [String])>((false, [:], []))
 
         public init() {}
 
@@ -84,8 +84,8 @@ public struct Command: Sendable {
         public func pull() {
             state.withLock { state in
                 state.pulled = true
-                state.ended += state.waiting.values.sorted()
-                state.waiting.keys.forEach(Self.trigger)
+                state.ended += state.waiting.values.map(\.command).sorted()
+                state.waiting.values.forEach { $0.queue.trigger(Command.stopEvent) }
             }
         }
 
@@ -99,24 +99,19 @@ public struct Command: Sendable {
         fileprivate var pulled: Bool { state.withLock { $0.pulled } }
 
         /// Wakes `queue`, which is running `command`, when the stop is pulled, which can be
-        /// now. `queue` is watched for the wake already, and is not closed before `forget`
-        /// takes it back.
-        fileprivate func wake(_ queue: Int32, running command: String) {
+        /// now. `queue` is watched for the wake already.
+        fileprivate func wake(_ queue: EventQueue, running command: String) {
             state.withLock { state in
-                state.waiting[queue] = command
+                state.waiting[ObjectIdentifier(queue)] = (queue, command)
                 if state.pulled {
                     state.ended.append(command)
-                    Self.trigger(queue)
+                    queue.trigger(Command.stopEvent)
                 }
             }
         }
 
-        fileprivate func forget(_ queue: Int32) {
-            _ = state.withLock { $0.waiting.removeValue(forKey: queue) }
-        }
-
-        private static func trigger(_ queue: Int32) {
-            Command.trigger(queue, Command.stopEvent)
+        fileprivate func forget(_ queue: EventQueue) {
+            _ = state.withLock { $0.waiting.removeValue(forKey: ObjectIdentifier(queue)) }
         }
     }
 
@@ -242,15 +237,9 @@ public struct Command: Sendable {
         case stopped
     }
 
-    /// The two events a hearing's queue is woken by besides the child: its stop pulled, and
-    /// its timeline moved, which only a test's does.
+    /// The event a hearing's queue is woken by besides the child and the deadline: its stop
+    /// pulled.
     fileprivate static let stopEvent: UInt = 0
-    fileprivate static let timelineEvent: UInt = 1
-
-    fileprivate static func trigger(_ queue: Int32, _ event: UInt) {
-        var trigger = kevent(ident: event, filter: Int16(EVFILT_USER), flags: 0, fflags: UInt32(NOTE_TRIGGER), data: 0, udata: nil)
-        _ = kevent(queue, &trigger, 1, nil, 0, nil)
-    }
 
     /// Hears the child out, by `deadline`.
     ///
@@ -260,50 +249,33 @@ public struct Command: Sendable {
     /// end the read being waited on. [LAW:no-ambient-temporal-coupling] Watching all of it
     /// from the start leaves no order to get wrong.
     private func hear(_ pid: pid_t, _ streams: [Int32], by deadline: Deadline, or stop: Stop) throws -> Heard {
-        let queue = kqueue()
-        guard queue >= 0 else { throw unheard("could not be watched") }
-        defer { close(queue) }
-        func watch(_ ident: UInt, _ filter: Int32, _ flags: Int32, _ fflags: UInt32 = 0) -> Int32 {
-            var change = kevent(ident: ident, filter: Int16(filter), flags: UInt16(flags | EV_RECEIPT), fflags: fflags, data: 0, udata: nil)
-            var receipt = kevent()
-            return kevent(queue, &change, 1, &receipt, 1, nil) == 1 ? Int32(receipt.data) : errno
+        let queue: EventQueue
+        do { queue = try EventQueue() } catch { throw unheard("could not be watched", error.code) }
+        func watch(_ ident: UInt, _ filter: Int32, _ flags: Int32, _ fflags: UInt32 = 0) throws(Unheard) {
+            do { try queue.watch(ident, filter, flags, fflags) } catch { throw unheard("could not be watched", error.code) }
         }
         for stream in streams {
-            let refused = watch(UInt(stream), EVFILT_READ, EV_ADD)
-            guard refused == 0 else { throw unheard("could not be watched", refused) }
+            try watch(UInt(stream), EVFILT_READ, EV_ADD)
         }
         // A child that has ended already is not there to be watched, and that is its exit
         // said another way: its pid is this call's until it is collected, so no such
         // process is this child, ended.
-        let gone = watch(UInt(pid), EVFILT_PROC, EV_ADD, UInt32(NOTE_EXIT))
-        guard gone == 0 || gone == ESRCH else { throw unheard("could not be watched", gone) }
-        for event in [Self.stopEvent, Self.timelineEvent] {
-            let wakeable = watch(event, EVFILT_USER, EV_ADD | EV_CLEAR)
-            guard wakeable == 0 else { throw unheard("could not be watched", wakeable) }
+        var exited = false
+        do { try queue.watch(UInt(pid), EVFILT_PROC, EV_ADD, UInt32(NOTE_EXIT)) } catch where error.code == ESRCH { exited = true } catch {
+            throw unheard("could not be watched", error.code)
         }
+        try watch(Self.stopEvent, EVFILT_USER, EV_ADD | EV_CLEAR)
         stop.wake(queue, running: said)
         defer { stop.forget(queue) }
-        var exited = gone == ESRCH
         var open = Set(streams)
         var carried: [Int32: [UInt8]] = [:]
-        var events = Array(repeating: Darwin.kevent(), count: streams.count + 3)
         var buffer = [UInt8](repeating: 0, count: 65536)
         while !(exited && open.isEmpty) {
             guard !deadline.passed else { return .overran }
-            var ready: Int32 = 0
-            deadline.block(waking: { Self.trigger(queue, Self.timelineEvent) }) { span in
-                var patience = span.timespec
-                ready = kevent(queue, nil, 0, &events, Int32(events.count), &patience)
-                return ready != 0
-            }
-            if ready < 0, errno == EINTR { continue }
-            guard ready >= 0 else { throw unheard("could not be watched") }
-            for event in events.prefix(Int(ready)) {
-                if event.filter == Int16(EVFILT_USER) {
-                    // The timeline moved: around the loop, to look at the deadline again.
-                    guard event.ident == Self.stopEvent else { continue }
-                    return .stopped
-                }
+            let events: [kevent]
+            do { events = try queue.events(by: deadline, atMost: streams.count + 2) } catch { throw unheard("could not be watched", error.code) }
+            for event in events {
+                if event.filter == Int16(EVFILT_USER) { return .stopped }
                 guard event.filter == Int16(EVFILT_READ) else { exited = true; continue }
                 let stream = Int32(event.ident)
                 let count = read(stream, &buffer, buffer.count)
@@ -314,8 +286,7 @@ public struct Command: Sendable {
                 // says so. The watch goes with it: an ended stream is ready at every look.
                 if count == 0 {
                     open.remove(stream)
-                    let kept = watch(UInt(stream), EVFILT_READ, EV_DELETE)
-                    guard kept == 0 else { throw unheard("could not be watched", kept) }
+                    try watch(UInt(stream), EVFILT_READ, EV_DELETE)
                 }
             }
         }

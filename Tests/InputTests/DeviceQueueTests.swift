@@ -2,6 +2,7 @@ import Dispatch
 import Keystrokes
 import Pointing
 import Synchronization
+import TestClock
 import Testing
 import Input
 
@@ -22,11 +23,18 @@ private final class BlockingKeyPress: KeyPress {
     private let journal: Journal
     private let acknowledged = DispatchSemaphore(value: 0)
     private let held = Mutex(false)
+    private let (downs, down) = AsyncStream.makeStream(of: Void.self)
 
     init(journal: Journal) { self.journal = journal }
 
     /// Whether a key-down is holding its thread right now.
     var blocking: Bool { held.withLock { $0 } }
+
+    /// Waits, without holding the caller's actor, for a key-down to be holding its thread.
+    func awaitDown() async {
+        var arrivals = downs.makeAsyncIterator()
+        await arrivals.next()
+    }
 
     func acknowledge() { acknowledged.signal() }
 
@@ -35,6 +43,7 @@ private final class BlockingKeyPress: KeyPress {
     func down(_ usage: Usage) throws {
         held.withLock { $0 = true }
         defer { held.withLock { $0 = false } }
+        down.yield()
         guard acknowledged.wait(timeout: .now() + .seconds(30)) == .success else { throw Unacknowledged() }
         journal.record("down \(usage.rawValue)")
     }
@@ -67,7 +76,8 @@ private struct JournalPointing: PointingDevice {
         let device = BlockingKeyPress(journal: journal)
         let keyboard = QueuedKeyboard(keyboard: device, queue: DeviceQueue())
         let pressed = Task { try await keyboard.down(Usage(rawValue: 0x04)) }
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { device.blocking })
+        await device.awaitDown()
+        #expect(device.blocking)
         device.acknowledge()
         try await pressed.value
         #expect(journal.log == ["down 4"])
@@ -88,13 +98,13 @@ private struct JournalPointing: PointingDevice {
         let keyboard = QueuedKeyboard(keyboard: device, queue: queue)
         let mouse = QueuedMouse(pointing: JournalPointing(journal: journal), queue: queue)
         let pressed = Task { try await keyboard.down(Usage(rawValue: 0x04)) }
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { device.blocking })
+        await device.awaitDown()
         var asked = false
         let moved = Task {
             asked = true
             try await mouse.move(by: Move(x: Count(clamping: 3), y: Count(clamping: 4)))
         }
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { asked })
+        await yielding(until: { asked }, "the move to be asked for")
         device.acknowledge()
         try await pressed.value
         try await moved.value
