@@ -9,7 +9,13 @@ import Foundation
 public enum DaemonError: Error, CustomStringConvertible, Equatable {
     case noSocket(path: String)
     case socket(String, Int32)
+    /// The request was written and the daemon did not answer it in time.
     case silent
+    /// The request's deadline passed before it was written, and nothing of it was sent.
+    case unsent
+    /// The request's deadline passed while it was being written: the daemon had stopped
+    /// taking what this side wrote, and some of it may have reached the daemon.
+    case stalled
     case closed
     /// A frame that is not one. The message names no sender: the framing is read from both
     /// ends of a socketpair in the tests, and an error that says "the daemon sent" about
@@ -32,6 +38,10 @@ public enum DaemonError: Error, CustomStringConvertible, Equatable {
             "\(call) on the driver's daemon's socket failed: \(String(cString: strerror(code))) (\(code))"
         case .silent:
             "the driver's daemon did not answer in time"
+        case .unsent:
+            "the request was not sent to the driver's daemon in time, and none of it reached the daemon"
+        case .stalled:
+            "the driver's daemon stopped taking the request part way through it"
         case .closed:
             "the driver's daemon closed the connection"
         case .malformed(let what):

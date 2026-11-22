@@ -122,7 +122,7 @@ let package = Package(
         .target(name: "VirtualHID", dependencies: ["Timeline", "DriverExtension", "Keystrokes", "Pointing"]),
         // The wire protocol against a fake daemon on the other end of a socketpair, so
         // the framing is proven without root and without the driver.
-        .testTarget(name: "VirtualHIDTests", dependencies: ["VirtualHID", "DriverExtension", "Keystrokes", "Pointing", "OwnThread"]),
+        .testTarget(name: "VirtualHIDTests", dependencies: ["VirtualHID", "DriverExtension", "Keystrokes", "Pointing", "OwnThread", "TestClock", "Timeline", "Waiting"]),
         // What crosses the privilege boundary, and the client's side of it. It links the
         // vocabularies - the keys, the pointing and the screen space - and nothing else: not
         // the layout's reading, which happens in the session in front and not across the

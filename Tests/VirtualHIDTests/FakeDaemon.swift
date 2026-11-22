@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import Waiting
 @testable import VirtualHID
 
 /// Karabiner-VirtualHIDDevice-Daemon, faked at the only place worth faking it: the far end
@@ -17,9 +18,10 @@ final class FakeDaemon: @unchecked Sendable {
 
     private let descriptor: Int32
     private let lock = NSLock()
-    private var log: [Frame] = []
+    /// Every frame the client has sent, in order, for a test to wait on.
+    private let log = Latch<[Frame]>([])
     private var pushID: UInt64 = 10_000
-    private var clientGone = false
+    private let clientGone = Latch(false)
 
     /// `handling` runs on the daemon's own thread for every frame the client sends. The
     /// default answers each request with an empty response, which is what the daemon does
@@ -44,10 +46,10 @@ final class FakeDaemon: @unchecked Sendable {
             while true {
                 do {
                     let frame = try readFrame()
-                    lock.lock(); log.append(frame); lock.unlock()
+                    log.update { $0.append(frame) }
                     try answer(frame, self)
                 } catch is Closed {
-                    lock.lock(); clientGone = true; lock.unlock()
+                    clientGone.update { $0 = true }
                     break
                 } catch {
                     // The framing is what this suite exists to check, so a frame this
@@ -74,34 +76,24 @@ final class FakeDaemon: @unchecked Sendable {
     }
 
     /// Every frame the client has sent, in order.
-    var received: [Frame] {
-        lock.lock(); defer { lock.unlock() }
-        return log
+    var received: [Frame] { log.current }
+
+    /// Waits until what the client has sent holds `sent`. A frame the client sends without
+    /// waiting on anything itself - its answer to a health check, say - is one to wait for:
+    /// every other frame is logged before the response the client is blocked on, and
+    /// asserting on these straight after the call under test returns is a race.
+    func awaitSent(_ what: String, until sent: ([Frame]) -> Bool) throws {
+        try log.wait(for: what, until: sent)
     }
 
-    /// Waits for a frame the client sends without waiting on anything itself - its answer
-    /// to a health check, say. Every other frame is logged before the response the client
-    /// is blocked on, so only these need waiting for; asserting on them straight after the
-    /// call under test returns is a race, and one that passes most of the time.
-    func awaitFrame(_ wanted: Frame, within limit: Duration = .seconds(2)) -> Bool {
-        let deadline = ContinuousClock.now + limit
-        while ContinuousClock.now < deadline {
-            if received.contains(wanted) { return true }
-            Thread.sleep(forTimeInterval: 0.002)
-        }
-        return received.contains(wanted)
+    func awaitFrame(_ wanted: Frame) throws {
+        try awaitSent("\(wanted)") { $0.contains(wanted) }
     }
 
-    /// Whether the client ended the stream within `limit`, which is what tells the real
-    /// daemon to take down the devices it kept for that client.
-    func awaitClientHangUp(within limit: Duration = .seconds(2)) -> Bool {
-        let deadline = ContinuousClock.now + limit
-        repeat {
-            lock.lock(); let gone = clientGone; lock.unlock()
-            if gone { return true }
-            Thread.sleep(forTimeInterval: 0.002)
-        } while ContinuousClock.now < deadline
-        return false
+    /// Waits for the client to end the stream, which is what tells the real daemon to take
+    /// down the devices it kept for that client.
+    func awaitClientHangUp() throws {
+        try clientGone.wait(for: "the client to hang up") { $0 }
     }
 
     /// The payload of each request the client sent, which is where the version, the
@@ -174,4 +166,11 @@ final class FakeDaemon: @unchecked Sendable {
 /// client protocol version in front of them.
 func requestSent(_ payload: [UInt8]) -> (version: UInt16, request: UInt8, bytes: [UInt8]) {
     (UInt16(payload[0]) | UInt16(payload[1]) << 8, payload[2], Array(payload.dropFirst(3)))
+}
+
+/// Whether the client has sent `request` `times` times.
+func sent(_ request: DaemonConnection.Request, times: Int = 1) -> ([Frame]) -> Bool {
+    { frames in
+        frames.count { if case .request(_, let payload) = $0 { requestSent(payload).request == request.rawValue } else { false } } >= times
+    }
 }

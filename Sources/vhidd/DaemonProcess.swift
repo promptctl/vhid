@@ -2,6 +2,7 @@ import ChildProcess
 import DriverExtension
 import Foundation
 import Synchronization
+import Timeline
 import VirtualHID
 
 /// Karabiner-VirtualHIDDevice-Daemon, the root process that holds the driver open, and
@@ -66,7 +67,8 @@ enum DaemonProcess {
         /// The devices on a connection to a daemon that is running, or `DaemonError` when
         /// none answers. `whenLost` is told when that connection ends underneath them.
         var connect: (_ whenLost: @escaping @Sendable (DaemonError) -> Void) throws -> Device
-        /// The devices brought up on their connection, each within the limit.
+        /// The devices brought up on their connection, each within the limit, counted from
+        /// when its own start is asked for.
         var bringUp: (Device, Duration) throws -> Startups
         /// The daemon started as this process's child.
         var launch: () throws -> pid_t
@@ -82,7 +84,12 @@ enum DaemonProcess {
                 let daemon = try DaemonConnection(whenLost: whenLost)
                 return HID(keyboard: VirtualKeyboard(daemon: daemon), mouse: VirtualPointing(daemon: daemon))
             },
-            bringUp: { Startups(keyboard: try $0.keyboard.start(within: $1), mouse: try $0.mouse.start(within: $1)) },
+            bringUp: { hid, limit in
+                Startups(
+                    keyboard: try hid.keyboard.start(by: Timeline.suspending.deadline(within: limit)),
+                    mouse: try hid.mouse.start(by: Timeline.suspending.deadline(within: limit))
+                )
+            },
             launch: { try spawn(executable, [], stdio: [:]) },
             terminate: end,
             say: {

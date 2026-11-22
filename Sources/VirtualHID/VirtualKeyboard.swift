@@ -2,6 +2,7 @@ import DriverExtension
 import Foundation
 import Keystrokes
 import Synchronization
+import Timeline
 
 /// The keyboard input report as the driver's packed `keyboard_input` lays it out: report
 /// id 1, one byte of modifier bits, one reserved byte, then 32 little-endian usages for
@@ -38,11 +39,12 @@ struct KeyboardReport {
 ///
 /// It holds the set of keys that are down and derives every report from that set, so the
 /// caller never composes one and the two can never disagree. What a caller decides is
-/// *when* - this type posts a report and waits for the daemon's answer, and nothing here
-/// paces a burst, because the pacing a burst needs is not a fact about the device.
+/// *when*, and by when - this type posts a report and waits for the daemon's answer by the
+/// caller's deadline, and nothing here paces a burst, because the pacing a burst needs is
+/// not a fact about the device.
 ///
 /// **The calling process must be root**, for the reason `DaemonConnection` gives.
-public final class VirtualKeyboard: KeyPress {
+public final class VirtualKeyboard: Sendable {
     /// The device's identity, three uint64 in this order. All three are
     /// `strong_typedef`s over `uint64_t`, so the payload is 24 bytes; the
     /// reasonable-looking reading - two 16-bit ids and a byte - is five bytes long, well
@@ -58,24 +60,16 @@ public final class VirtualKeyboard: KeyPress {
     ].flatMap { (value: UInt64) in (0..<8).map { UInt8(truncatingIfNeeded: value >> (8 * $0)) } }
 
     private let daemon: DaemonConnection
-    private let reportTimeout: Duration
-    /// What the device is holding, and whether the driver acknowledged exactly that.
-    ///
-    /// `keysDown` may say a key is held that is not, for the reason `post` gives, so alone
-    /// it cannot say whether a report would repeat what the driver already has. `settled`
-    /// is false whenever a request is outstanding or threw, since the driver may then hold
-    /// the old set or the new one. [LAW:one-source-of-truth] One set, and one fact about it.
-    private struct Held {
-        var keysDown: Set<Usage> = []
-        var settled = false
-    }
 
-    /// Nothing outside this type may set it, and every report is a reading of it - taken
-    /// under the lock the report is posted under, so a press made from one thread reads
-    /// what a press from another left.
-    private let held = Mutex(Held())
+    /// What the device is holding, kept by the rule `Held` gives. Nothing outside this
+    /// type may set it, and every report is a reading of it - taken under the lock the
+    /// report is posted under, so a press made from one thread reads what a press from
+    /// another left. The lock is held across the round trip: a change read from a record
+    /// another post has yet to settle would be a report missing that post's key, which the
+    /// driver reads as a release nobody sent.
+    private let held = Mutex(Held<Usage>())
 
-    public var keysDown: Set<Usage> { held.withLock { $0.keysDown } }
+    public var keysDown: Set<Usage> { held.withLock { $0.down } }
 
     /// Connects to the daemon and takes nothing else on faith. The device is not up until
     /// `start` says so.
@@ -86,18 +80,17 @@ public final class VirtualKeyboard: KeyPress {
     /// that throws the same failure, so a caller that presses keys and stops can leave the
     /// default; a process holding the device open across silences is the one that needs to
     /// hear, because nothing it does in between would tell it.
-    public convenience init(reportTimeout: Duration = .seconds(2), whenLost: @escaping @Sendable (DaemonError) -> Void = { _ in }) throws {
-        self.init(daemon: try DaemonConnection(whenLost: whenLost), reportTimeout: reportTimeout)
+    public convenience init(whenLost: @escaping @Sendable (DaemonError) -> Void = { _ in }) throws {
+        self.init(daemon: try DaemonConnection(whenLost: whenLost))
     }
 
     /// Over a connection the mouse may share, for the reason `VirtualPointing` gives.
-    public init(daemon: DaemonConnection, reportTimeout: Duration = .seconds(2)) {
+    public init(daemon: DaemonConnection) {
         self.daemon = daemon
-        self.reportTimeout = reportTimeout
     }
 
-    /// Brings the device up and waits for the daemon's word that it is ready, in at most
-    /// `limit` altogether.
+    /// Brings the device up and waits for the daemon's word that it is ready, by
+    /// `deadline`.
     ///
     /// Expect close to a second of that even on a device that came up at once: the daemon
     /// asks the driver whether the keyboard is ready on a one-second timer, so readiness
@@ -106,24 +99,24 @@ public final class VirtualKeyboard: KeyPress {
     /// held open rather than made per call - a client that connects for each call pays it
     /// every time.
     @discardableResult
-    public func start(within limit: Duration) throws -> Startup {
-        try daemon.initialize(.keyboardInitialize, Self.parameters, until: .keyboardReady, within: limit)
+    public func start(by deadline: Deadline) throws -> Startup {
+        try daemon.initialize(.keyboardInitialize, Self.parameters, until: .keyboardReady, by: deadline)
     }
 
     /// Holds `usage` down.
-    public func down(_ usage: Usage) throws {
-        try post { $0.union([usage]) }
+    public func down(_ usage: Usage, by deadline: Deadline) throws {
+        try post(by: deadline) { $0.union([usage]) }
     }
 
-    public func up(_ usage: Usage) throws {
-        try post { $0.subtracting([usage]) }
+    public func up(_ usage: Usage, by deadline: Deadline) throws {
+        try post(by: deadline) { $0.subtracting([usage]) }
     }
 
     /// Every key up, which is what a report of nothing held says. This is the line between
     /// a run that ends and a key the driver goes on reporting for macOS to repeat, so it
     /// posts unconditionally rather than only when something is recorded as down.
-    public func releaseAll() throws {
-        try post { _ in [] }
+    public func releaseAll(by deadline: Deadline) throws {
+        try post(by: deadline) { _ in [] }
     }
 
     /// Holds exactly `keys`, releasing whatever else is down.
@@ -133,53 +126,38 @@ public final class VirtualKeyboard: KeyPress {
     /// would reach macOS as nothing at best. The client was marked alive by the call
     /// before it got here, which is what keeps the keys past the daemon's limit. An empty
     /// set always posts, as `releaseAll` does. The skip needs the set settled, which a
-    /// failed request unsettles, so the retry of a `hold` that threw always posts.
-    public func hold(_ keys: HeldKeys) throws {
+    /// request that may have reached the driver unanswered unsettles, so the retry of such
+    /// a `hold` always posts.
+    public func hold(_ keys: HeldKeys, by deadline: Deadline) throws {
         try held.withLock { held in
-            if keys.usages.isEmpty || !held.settled || held.keysDown != keys.usages {
-                try post(&held) { _ in keys.usages }
+            if keys.usages.isEmpty || !held.settled || held.down != keys.usages {
+                try post(&held, keys.usages, by: deadline)
             }
         }
     }
 
     /// Clears the device's own state as well as this side's. `keyboardReset` is what the
     /// daemon offers for the case where the two might have drifted apart. The record is
-    /// emptied on the daemon's answer and not before, for the reason `post` gives.
-    public func reset() throws {
+    /// kept by `Held`'s rule, as a report of nothing held is.
+    public func reset(by deadline: Deadline) throws {
         try held.withLock { held in
-            held.settled = false
-            try daemon.request(.keyboardReset, by: .now + reportTimeout)
-            held = Held(keysDown: [], settled: true)
+            try held.post([]) { () throws(DaemonConnection.Unanswered) in try daemon.request(.keyboardReset, by: deadline) }
         }
     }
 
-    /// Posts the report for what `change` makes of the keys held, and makes that the record.
-    ///
-    /// `keysDown` may say a key is held that is not; it may never say a key is up that is.
-    /// So the record widens before the request and narrows only on the answer to it: a
-    /// request that throws may still have reached the driver, and a record that already
-    /// forgot the key is one `releaseAll` cannot get back up. A press and a release keep
-    /// that one bias between them rather than each choosing an order.
-    /// [LAW:dataflow-not-control-flow]
+    /// Posts the report for what `change` makes of the keys held, and keeps the record by
+    /// how far it got.
+    private func post(by deadline: Deadline, _ change: (Set<Usage>) -> Set<Usage>) throws {
+        try held.withLock { held in try post(&held, change(held.down), by: deadline) }
+    }
+
+    /// The post itself, under a lock the caller already holds.
     ///
     /// The report is built first because `TooManyKeys` is this side refusing with nothing
     /// on the wire - the driver did not see that key, and a record that claims otherwise
     /// re-encodes the same over-capacity set and throws again on every later post.
-    ///
-    /// The lock is held across the round trip: a change read from a record another post
-    /// has yet to settle would be a report missing that post's key, which the driver reads
-    /// as a release nobody sent.
-    private func post(_ change: (Set<Usage>) -> Set<Usage>) throws {
-        try held.withLock { try post(&$0, change) }
-    }
-
-    /// The post itself, under a lock the caller already holds.
-    private func post(_ held: inout Held, _ change: (Set<Usage>) -> Set<Usage>) throws {
-        let next = change(held.keysDown)
+    private func post(_ held: inout Held<Usage>, _ next: Set<Usage>, by deadline: Deadline) throws {
         let report = try KeyboardReport(held: next)
-        held.keysDown.formUnion(next)
-        held.settled = false
-        try daemon.request(.postKeyboardInputReport, report.bytes, by: .now + reportTimeout)
-        held = Held(keysDown: next, settled: true)
+        try held.post(next) { () throws(DaemonConnection.Unanswered) in try daemon.request(.postKeyboardInputReport, report.bytes, by: deadline) }
     }
 }

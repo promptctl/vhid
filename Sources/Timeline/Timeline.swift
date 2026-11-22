@@ -63,6 +63,9 @@ public struct Deadline: Sendable {
 
     public var passed: Bool { timeline.now() >= at }
 
+    /// How long since it was made, on its own clock: what a wait it bounded cost.
+    public var spent: Duration { timeline.now() - (at - limit) }
+
     /// The deadline as a moment on the wall clock, for the system waits that take one:
     /// `NSLock.lock(before:)`, `NSCondition.wait(until:)`.
     public var date: Date { Date(timeIntervalSinceNow: left.seconds) }

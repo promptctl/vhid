@@ -4,6 +4,7 @@ import Keystrokes
 import Pointing
 import Synchronization
 import Testing
+import Timeline
 @testable import vhidd
 
 /// The devices as vhidd serves them, over recording devices of the test's own: what
@@ -25,32 +26,32 @@ import Testing
         var log: [String] { recorded.withLock { $0 } }
         var keysDown: Set<Usage> { held.withLock { $0 } }
 
-        func down(_ usage: Usage) throws {
+        func down(_ usage: Usage, by deadline: Deadline) throws {
             recorded.withLock { $0.append("down \(usage.rawValue)") }
             held.withLock { _ = $0.insert(usage) }
             if refusesDown { throw Refused() }
         }
-        func releaseAll() throws {
+        func releaseAll(by deadline: Deadline) throws {
             recorded.withLock { $0.append("up") }
             if refusesRelease { throw Refused() }
             held.withLock { $0 = [] }
         }
-        func hold(_ keys: HeldKeys) throws {
+        func hold(_ keys: HeldKeys, by deadline: Deadline) throws {
             recorded.withLock { $0.append("hold \(keys.usages.map(\.rawValue).sorted())") }
             held.withLock { $0 = keys.usages }
         }
     }
 
-    final class RecordingMouse: PointingDevice {
+    final class RecordingMouse: HeldPointing {
         private let recorded = Mutex<[String]>([])
 
         var log: [String] { recorded.withLock { $0 } }
 
-        func down(_ button: Button) throws { recorded.withLock { $0.append("down \(button.rawValue)") } }
-        func releaseAll() throws { recorded.withLock { $0.append("up") } }
-        func hold(_ buttons: Set<Button>) throws { recorded.withLock { $0.append("hold \(buttons.map(\.rawValue).sorted())") } }
-        func move(by delta: Move) throws { recorded.withLock { $0.append("move \(delta.x.value) \(delta.y.value)") } }
-        func scroll(by delta: Scroll) throws { recorded.withLock { $0.append("scroll \(delta.vertical.value) \(delta.horizontal.value)") } }
+        func down(_ button: Button, by deadline: Deadline) throws { recorded.withLock { $0.append("down \(button.rawValue)") } }
+        func releaseAll(by deadline: Deadline) throws { recorded.withLock { $0.append("up") } }
+        func hold(_ buttons: Set<Button>, by deadline: Deadline) throws { recorded.withLock { $0.append("hold \(buttons.map(\.rawValue).sorted())") } }
+        func move(_ delta: Move, by deadline: Deadline) throws { recorded.withLock { $0.append("move \(delta.x.value) \(delta.y.value)") } }
+        func scroll(_ delta: Scroll, by deadline: Deadline) throws { recorded.withLock { $0.append("scroll \(delta.vertical.value) \(delta.horizontal.value)") } }
     }
 
     struct Refused: Error {}

@@ -2,7 +2,10 @@ import Foundation
 import Keystrokes
 import Synchronization
 import OwnThread
+import TestClock
 import Testing
+import Timeline
+import Waiting
 @testable import VirtualHID
 
 /// A daemon that answers every request and, once the keyboard is initialized, pushes the
@@ -16,9 +19,11 @@ import Testing
     }
 }
 
-private func keyboard(on fake: FakeDaemon, reportTimeout: Duration = .seconds(2)) throws -> VirtualKeyboard {
-    VirtualKeyboard(daemon: try DaemonConnection(fileDescriptor: fake.clientDescriptor), reportTimeout: reportTimeout)
+private func keyboard(on fake: FakeDaemon) throws -> VirtualKeyboard {
+    VirtualKeyboard(daemon: try DaemonConnection(fileDescriptor: fake.clientDescriptor))
 }
+
+private let post = DaemonConnection.Request.postKeyboardInputReport
 
 /// The reports the device actually put on the wire, in order.
 private func reports(_ fake: FakeDaemon) -> [[UInt8]] {
@@ -30,13 +35,13 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
     return [1, modifiers, 0] + padded.flatMap { [UInt8($0 & 0xff), UInt8($0 >> 8)] }
 }
 
-@Suite(.ownThread) struct StartupTests {
+@Suite(.ownThread, .hangGuarded) struct StartupTests {
     /// The parameters are three uint64, little-endian, vendor then product then country.
     /// The plausible reading - two 16-bit ids and a byte - is five bytes long, well formed,
     /// and initializes a device that is not the one asked for.
     @Test func initializeCarriesTheClientVersionAndThreeLittleEndianUInt64Parameters() throws {
         let fake = FakeDaemon(handling: daemonThatComesUp)
-        try keyboard(on: fake).start(within: .seconds(2))
+        try keyboard(on: fake).start(by: guarded())
         let sent = requestSent(fake.requestPayloads[0])
         #expect(sent.version == 7)
         #expect(sent.request == DaemonConnection.Request.keyboardInitialize.rawValue)
@@ -45,24 +50,40 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
                                0, 0, 0, 0, 0, 0, 0, 0])
     }
 
-    /// Readiness is a value the daemon sends and this waits for, never a sleep. A daemon
-    /// that takes its time is waited out; one that answers sooner is not waited on longer.
+    /// Readiness is a value the daemon sends and this waits for, never a sleep: start
+    /// returns on the daemon's word, on a deadline that cannot pass because nothing moves
+    /// its clock. What it cost is told in two parts: the answer to the initialize, and the
+    /// word that the keyboard is ready.
+    ///
+    /// The daemon answers at once and says the driver is up, then takes its time before
+    /// saying the keyboard is ready: the clock moves only once this side has answered that
+    /// push, which it reads after the initialize's answer, so the answer was taken before
+    /// the time passed. A startup that timed its answer at the first thing the daemon said
+    /// after it would report the stall as the answer.
     @Test func startWaitsForTheDaemonsWordAndReturnsWhenItComes() throws {
+        let ready = Latch(false)
         let fake = FakeDaemon { frame, fake in
             guard case .request(let id, let payload) = frame else { return }
             try fake.send(.response(id: id, payload: []))
             if requestSent(payload).request == DaemonConnection.Request.keyboardInitialize.rawValue {
-                Thread.sleep(forTimeInterval: 0.2)
-                try fake.push([(.keyboardReady, true)])
+                try fake.push([(.driverConnected, true)])
+                // Off the fake's thread, which goes on reading what the client says.
+                Thread.detachNewThread {
+                    guard (try? ready.wait(for: "the clock to move") { $0 }) != nil else { return }
+                    try? fake.push([(.keyboardReady, true)])
+                }
             }
         }
-        let startup = try keyboard(on: fake).start(within: .seconds(5))
-        #expect(startup.ready > .milliseconds(180))
-        // Well inside the five seconds it was given: it returned when told, not on a timer.
-        #expect(startup.ready < .seconds(2))
-        // The daemon answered the initialize at once and only then slept; a startup that
-        // reported this stall would be timing the next thing the daemon said, not its answer.
-        #expect(startup.answered < .milliseconds(100))
+        let clock = ManualClock()
+        let deadline = Timeline(clock).deadline(within: .seconds(5))
+        let started = Latch<Startup?>(nil)
+        let device = try keyboard(on: fake)
+        Thread.detachNewThread { started.update { $0 = try? device.start(by: deadline) } }
+        try fake.awaitFrame(.response(id: 10_001, payload: []))
+        clock.advance(by: .milliseconds(200))
+        ready.update { $0 = true }
+        let startup = try started.wait(for: "the keyboard to start") { $0 }
+        #expect(startup == Startup(answered: .zero, ready: .milliseconds(200)))
     }
 
     /// A driver built for another protocol accepts reports and then does something other
@@ -74,18 +95,21 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
             try fake.send(.response(id: id, payload: []))
             try fake.push([(.driverVersionMismatched, true)])
         }
-        #expect(throws: DaemonError.driverVersionMismatched) { try keyboard(on: fake).start(within: .seconds(2)) }
+        #expect(throws: DaemonError.driverVersionMismatched) { try keyboard(on: fake).start(by: guarded()) }
     }
 
     /// A daemon that says nothing is a named failure at the deadline, not a wait without
     /// end. [LAW:no-silent-failure]
-    @Test func aDaemonThatNeverAnswersIsAFailureWithAName() {
+    @Test func aDaemonThatNeverAnswersIsAFailureWithAName() throws {
         let fake = FakeDaemon { _, _ in }
-        #expect(throws: DaemonError.silent) { try keyboard(on: fake).start(within: .milliseconds(200)) }
+        let device = try keyboard(on: fake)
+        let miss = try missed(once: fake, has: sent(.keyboardInitialize)) { try device.start(by: $0) }
+        #expect(miss as? DaemonError == .silent)
     }
 
     /// A daemon that answered and then never said the keyboard is ready is not silent: the
-    /// failure is what it did say, which is how an unapproved driver gets named.
+    /// failure is what it did say, which is how an unapproved driver gets named. The
+    /// deadline passes once this side has answered what was pushed, so all of it was heard.
     @Test(arguments: [
         ([], "nothing about the driver"),
         ([(.driverActivated, false)], "driver activated: no"),
@@ -98,7 +122,9 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
             try fake.send(.response(id: id, payload: []))
             try fake.push(pushed)
         }
-        let error = try #require(throws: DaemonError.self) { try keyboard(on: fake).start(within: .milliseconds(300)) }
+        let device = try keyboard(on: fake)
+        let miss = try missed(once: fake, has: { $0.contains(.response(id: 10_001, payload: [])) }) { try device.start(by: $0) }
+        let error = try #require(miss as? DaemonError)
         guard case .notReady(.keyboardReady, _) = error else { Issue.record("threw \(error)"); return }
         #expect(error.description == "the driver's daemon never said keyboard ready; it last said \(named)")
     }
@@ -112,24 +138,24 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
             try fake.send(.response(id: id, payload: []))
             try fake.push([(.keyboardReady, true)])
         }
-        try keyboard(on: fake).start(within: .seconds(2))
-        #expect(fake.awaitFrame(.control(.healthCheckResponse, payload: [])))
+        try keyboard(on: fake).start(by: guarded())
+        try fake.awaitFrame(.control(.healthCheckResponse, payload: []))
     }
 }
 
-@Suite(.ownThread) struct KeysDownTests {
+@Suite(.ownThread, .hangGuarded) struct KeysDownTests {
     /// Every report is a reading of the keys that are down, and a caller never composes
     /// one. [LAW:one-source-of-truth] A report that could disagree with what is held has
     /// exactly one failure mode, and it is the one this whole epic is about.
     @Test func everyReportIsTheKeysDownAndNothingElse() throws {
         let fake = FakeDaemon(handling: daemonThatComesUp)
         let device = try keyboard(on: fake)
-        try device.start(within: .seconds(2))
-        try device.down(Usage(rawValue: 0x04))
-        try device.down(Usage(rawValue: 0x05))
+        try device.start(by: guarded())
+        try device.down(Usage(rawValue: 0x04), by: guarded())
+        try device.down(Usage(rawValue: 0x05), by: guarded())
         #expect(device.keysDown == [Usage(rawValue: 0x04), Usage(rawValue: 0x05)])
-        try device.up(Usage(rawValue: 0x04))
-        try device.releaseAll()
+        try device.up(Usage(rawValue: 0x04), by: guarded())
+        try device.releaseAll(by: guarded())
         #expect(device.keysDown.isEmpty)
         #expect(reports(fake) == [
             report(modifiers: 0, [0x04]),
@@ -145,11 +171,11 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
     @Test func aModifierIsAUsageAndItsBitComesFromTheUsage() throws {
         let fake = FakeDaemon(handling: daemonThatComesUp)
         let device = try keyboard(on: fake)
-        try device.start(within: .seconds(2))
-        try device.down(.leftShift)
-        try device.down(Usage(rawValue: 0x04))
-        try device.up(Usage(rawValue: 0x04))
-        try device.up(.leftShift)
+        try device.start(by: guarded())
+        try device.down(.leftShift, by: guarded())
+        try device.down(Usage(rawValue: 0x04), by: guarded())
+        try device.up(Usage(rawValue: 0x04), by: guarded())
+        try device.up(.leftShift, by: guarded())
         #expect(reports(fake) == [
             report(modifiers: 0x02),
             report(modifiers: 0x02, [0x04]),
@@ -210,18 +236,35 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
         #expect(throws: Never.self) { try KeyboardReport(held: thirtyTwo.union([.leftShift, .rightCommand])) }
     }
 
-    /// A key recorded as down before the report goes out, deliberately: if the post fails
-    /// after the driver saw it, a record that already says so is the one releaseAll can
-    /// act on. The other order forgets keys that are really held.
-    @Test func aKeyIsRecordedDownEvenWhenItsReportFails() throws {
+    /// A key whose report reached the daemon unanswered is recorded as down, deliberately:
+    /// the driver may have seen it, and a record that says so is the one releaseAll can act
+    /// on. The other way forgets keys that are really held.
+    @Test func aKeyIsRecordedDownWhenItsReportReachedTheDaemonUnanswered() throws {
         let fake = FakeDaemon { frame, fake in
             guard case .request(let id, let payload) = frame else { return }
-            guard requestSent(payload).request != DaemonConnection.Request.postKeyboardInputReport.rawValue else { return }
+            guard requestSent(payload).request != post.rawValue else { return }
             try fake.send(.response(id: id, payload: []))
         }
-        let device = try keyboard(on: fake, reportTimeout: .milliseconds(200))
-        #expect(throws: DaemonError.silent) { try device.down(.leftShift) }
+        let device = try keyboard(on: fake)
+        let miss = try missed(once: fake, has: sent(post)) { try device.down(.leftShift, by: $0) }
+        #expect(miss as? DaemonError == .silent)
         #expect(device.keysDown == [.leftShift])
+    }
+
+    /// A report that was never sent changed nothing on the driver, so it changes nothing in
+    /// the record: the key it named is not held, the set the driver acknowledged is still
+    /// acknowledged, and no later report carries the key.
+    @Test func aReportThatWasNotSentLeavesTheRecordAsItWas() throws {
+        let fake = FakeDaemon(handling: daemonThatComesUp)
+        let device = try keyboard(on: fake)
+        try device.start(by: guarded())
+        try device.down(.leftShift, by: guarded())
+        #expect(throws: DaemonError.unsent) { try device.down(Usage(rawValue: 0x04), by: spent()) }
+        #expect(device.keysDown == [.leftShift])
+        // Still acknowledged, so holding it again is a keep-alive and posts nothing.
+        try device.hold(HeldKeys([.leftShift]), by: guarded())
+        try device.up(.leftShift, by: guarded())
+        #expect(reports(fake) == [report(modifiers: 0x02), report(modifiers: 0)])
     }
 
     /// The mirror of the rule above, and the half that had it backwards: a release the
@@ -241,13 +284,13 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
             guard !releasing else { return }
             try fake.send(.response(id: id, payload: []))
         }
-        let device = try keyboard(on: fake, reportTimeout: .milliseconds(200))
-        try device.down(.leftShift)
-        #expect(throws: DaemonError.silent) { try device.up(.leftShift) }
+        let device = try keyboard(on: fake)
+        try device.down(.leftShift, by: guarded())
+        #expect(try missed(once: fake, has: sent(post, times: 2)) { try device.up(.leftShift, by: $0) } as? DaemonError == .silent)
         #expect(device.keysDown == [.leftShift])
-        #expect(throws: DaemonError.silent) { try device.releaseAll() }
+        #expect(try missed(once: fake, has: sent(post, times: 3)) { try device.releaseAll(by: $0) } as? DaemonError == .silent)
         #expect(device.keysDown == [.leftShift])
-        #expect(throws: DaemonError.silent) { try device.reset() }
+        #expect(try missed(once: fake, has: sent(.keyboardReset)) { try device.reset(by: $0) } as? DaemonError == .silent)
         #expect(device.keysDown == [.leftShift])
     }
 
@@ -259,24 +302,24 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
     @Test func aKeyNoReportCanCarryIsNotRecordedAsHeld() throws {
         let fake = FakeDaemon(handling: daemonThatComesUp)
         let device = try keyboard(on: fake)
-        try device.start(within: .seconds(2))
+        try device.start(by: guarded())
         let full = (0x04...0x23).map { Usage(rawValue: UInt16($0)) }
-        for usage in full { try device.down(usage) }
+        for usage in full { try device.down(usage, by: guarded()) }
         #expect(device.keysDown == Set(full))
-        #expect(throws: TooManyKeys.self) { try device.down(Usage(rawValue: 0x24)) }
+        #expect(throws: TooManyKeys.self) { try device.down(Usage(rawValue: 0x24), by: guarded()) }
         #expect(device.keysDown == Set(full))
         // Unchanged means still usable: the next post encodes the same 32 keys it always
         // could, where a recorded 33rd would have refused this one too.
-        #expect(throws: Never.self) { try device.down(full[0]) }
+        #expect(throws: Never.self) { try device.down(full[0], by: guarded()) }
     }
 
     /// reset clears the device's own idea of what is held as well as this side's.
     @Test func resetAsksTheDaemonToClearTheDeviceAndForgetsWhatWasHeld() throws {
         let fake = FakeDaemon(handling: daemonThatComesUp)
         let device = try keyboard(on: fake)
-        try device.start(within: .seconds(2))
-        try device.down(.leftShift)
-        try device.reset()
+        try device.start(by: guarded())
+        try device.down(.leftShift, by: guarded())
+        try device.reset(by: guarded())
         #expect(device.keysDown.isEmpty)
         let sent = fake.requestPayloads.map(requestSent)
         #expect(sent.last?.request == DaemonConnection.Request.keyboardReset.rawValue)
@@ -287,9 +330,7 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
 /// A player's held sets: each `hold` is the report of exactly that set, a repeat of the set
 /// the driver acknowledged is a keep-alive that posts nothing, and none may be skipped that
 /// the driver has not acknowledged.
-@Suite(.ownThread) struct HoldTests {
-    private let post = DaemonConnection.Request.postKeyboardInputReport.rawValue
-
+@Suite(.ownThread, .hangGuarded) struct HoldTests {
     /// Whether the fake answers keyboard reports, turned by the test between calls.
     final class Answering: Sendable {
         private let on = Mutex(true)
@@ -301,11 +342,11 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
     @Test func aHoldIsTheReportOfExactlyThatSet() throws {
         let fake = FakeDaemon(handling: daemonThatComesUp)
         let device = try keyboard(on: fake)
-        try device.start(within: .seconds(2))
-        try device.down(Usage(rawValue: 0x04))
-        try device.hold(HeldKeys([.leftShift, Usage(rawValue: 0x05)]))
+        try device.start(by: guarded())
+        try device.down(Usage(rawValue: 0x04), by: guarded())
+        try device.hold(HeldKeys([.leftShift, Usage(rawValue: 0x05)]), by: guarded())
         #expect(device.keysDown == [.leftShift, Usage(rawValue: 0x05)])
-        try device.hold(HeldKeys([.leftShift]))
+        try device.hold(HeldKeys([.leftShift]), by: guarded())
         #expect(reports(fake) == [
             report(modifiers: 0, [0x04]),
             report(modifiers: 0x02, [0x05]),
@@ -319,13 +360,13 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
     @Test func aRepeatedSetPostsNothingAndAnEmptyOneAlwaysPosts() throws {
         let fake = FakeDaemon(handling: daemonThatComesUp)
         let device = try keyboard(on: fake)
-        try device.start(within: .seconds(2))
+        try device.start(by: guarded())
         let shift = try HeldKeys([.leftShift])
-        try device.hold(shift)
-        try device.hold(shift)
-        try device.hold(shift)
-        try device.hold(.none)
-        try device.hold(.none)
+        try device.hold(shift, by: guarded())
+        try device.hold(shift, by: guarded())
+        try device.hold(shift, by: guarded())
+        try device.hold(.none, by: guarded())
+        try device.hold(.none, by: guarded())
         #expect(reports(fake) == [report(modifiers: 0x02), report(modifiers: 0), report(modifiers: 0)])
     }
 
@@ -334,9 +375,9 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
     @Test func aSetReachedByDownIsAcknowledgedToo() throws {
         let fake = FakeDaemon(handling: daemonThatComesUp)
         let device = try keyboard(on: fake)
-        try device.start(within: .seconds(2))
-        try device.down(.leftShift)
-        try device.hold(HeldKeys([.leftShift]))
+        try device.start(by: guarded())
+        try device.down(.leftShift, by: guarded())
+        try device.hold(HeldKeys([.leftShift]), by: guarded())
         #expect(reports(fake) == [report(modifiers: 0x02)])
     }
 
@@ -345,22 +386,21 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
     /// be skipped and its key never pressed.
     @Test func theRetryOfAHoldThatThrewPosts() throws {
         let answering = Answering()
-        let post = post
         let fake = FakeDaemon { frame, fake in
             guard case .request(let id, let payload) = frame else { return }
-            guard requestSent(payload).request != post || answering.isOn else { return }
+            guard requestSent(payload).request != post.rawValue || answering.isOn else { return }
             try fake.send(.response(id: id, payload: []))
         }
-        let device = try keyboard(on: fake, reportTimeout: .milliseconds(200))
+        let device = try keyboard(on: fake)
         let shift = try HeldKeys([.leftShift])
         let shiftB = try HeldKeys([.leftShift, Usage(rawValue: 0x05)])
-        try device.hold(shift)
+        try device.hold(shift, by: guarded())
         answering.set(false)
-        #expect(throws: DaemonError.silent) { try device.hold(shiftB) }
+        #expect(try missed(once: fake, has: sent(post, times: 2)) { try device.hold(shiftB, by: $0) } as? DaemonError == .silent)
         #expect(device.keysDown == shiftB.usages)
         answering.set(true)
-        try device.hold(shiftB)
-        try device.hold(shiftB)
+        try device.hold(shiftB, by: guarded())
+        try device.hold(shiftB, by: guarded())
         #expect(reports(fake) == [report(modifiers: 0x02), report(modifiers: 0x02, [0x05]), report(modifiers: 0x02, [0x05])])
     }
 
@@ -368,11 +408,11 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
     @Test func aHoldAfterAResetPosts() throws {
         let fake = FakeDaemon(handling: daemonThatComesUp)
         let device = try keyboard(on: fake)
-        try device.start(within: .seconds(2))
+        try device.start(by: guarded())
         let shift = try HeldKeys([.leftShift])
-        try device.hold(shift)
-        try device.reset()
-        try device.hold(shift)
+        try device.hold(shift, by: guarded())
+        try device.reset(by: guarded())
+        try device.hold(shift, by: guarded())
         #expect(reports(fake) == [report(modifiers: 0x02), report(modifiers: 0x02)])
     }
 }
