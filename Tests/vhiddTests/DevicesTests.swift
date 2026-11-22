@@ -9,8 +9,8 @@ import Time
 @testable import vhidd
 
 /// The devices as vhidd serves them, over recording devices of the test's own: what
-/// the wire may carry that the device cannot, when an act's turn comes, and what a client
-/// leaving lets go of.
+/// the wire may carry that the device cannot, what a request that cannot acquire the lock
+/// in time does, and what a client leaving lets go of.
 @Suite struct DevicesTests {
     /// Holds keys the way the device does: noted before the request, which may throw
     /// having reached the driver, and cleared only by a release that succeeds. A key-down
@@ -20,9 +20,9 @@ import Time
         private let held = Mutex<Set<Usage>>([])
         let refusesRelease: Mutex<Bool>
         let refusesDown: Bool
-        let gate: Handshake?
+        let gate: Gate?
 
-        init(refusesRelease: Bool = false, refusesDown: Bool = false, gate: Handshake? = nil) {
+        init(refusesRelease: Bool = false, refusesDown: Bool = false, gate: Gate? = nil) {
             self.refusesRelease = Mutex(refusesRelease)
             self.refusesDown = refusesDown
             self.gate = gate
@@ -63,10 +63,10 @@ import Time
 
     struct Refused: Error {}
 
-    /// What parsing `act` threw, in the words a client reads.
-    private func refused(_ act: () throws -> Act) -> String? {
+    /// What parsing a command threw, in the words a client reads.
+    private func refused(_ parse: () throws -> DeviceCommand) -> String? {
         do {
-            _ = try act()
+            _ = try parse()
             return nil
         } catch {
             return refusal(error).localizedDescription
@@ -74,9 +74,9 @@ import Time
     }
 
     /// A button the device has no bit for, or a count the descriptor does not admit, is
-    /// refused by name as the act is read off the wire, before any device sees it.
+    /// refused by name as the command is parsed off the wire, before any device sees it.
     /// [LAW:parse-dont-validate]
-    @Test func valuesTheDeviceCannotCarryAreRefusedAsTheActIsRead() {
+    @Test func valuesTheDeviceCannotCarryAreRefusedAsTheCommandIsParsed() {
         #expect(refused { try .buttonDown(0) } == "button 0 is not one of the 32 the device has a bit for")
         #expect(refused { try .buttonDown(33) } == "button 33 is not one of the 32 the device has a bit for")
         #expect(refused { try .move(x: -128, y: 0) } == "-128 is outside the -127 through 127 a report carries")
@@ -98,53 +98,56 @@ import Time
         return (Devices(keyboard: keyboard, mouse: mouse, timeline: clock.timeline, limit: .seconds(2)), clock)
     }
 
-    /// An act with no seat to admit, by a deadline five seconds off.
-    private func act(_ act: Act, on devices: Devices, _ clock: ManualClock) throws {
-        try devices.act(act, by: .within(.seconds(5), on: clock.timeline)) {}
+    /// A command with no seat to acquire the devices, by a deadline five seconds off.
+    private func perform(_ command: DeviceCommand, on devices: Devices, _ clock: ManualClock) throws {
+        try devices.perform(command, by: .within(.seconds(5), on: clock.timeline)) {}
     }
 
     /// What the device can carry reaches it as asked.
-    @Test func actsReachTheDeviceAsAsked() throws {
+    @Test func commandsReachTheDeviceAsAsked() throws {
         let (keyboard, mouse) = (RecordingKeyboard(), RecordingMouse())
         let (devices, clock) = devices(keyboard, mouse)
-        try act(.down(.a), on: devices, clock)
-        try act(.buttonDown(try #require(Button(rawValue: 3))), on: devices, clock)
-        try act(try .move(x: 127, y: -127), on: devices, clock)
-        try act(try .scroll(vertical: 1, horizontal: -1), on: devices, clock)
-        try act(.releaseButtons, on: devices, clock)
-        try act(.releaseKeys, on: devices, clock)
-        try act(try .hold(usages: [0xE1, 0x04, 0x04]), on: devices, clock)
-        try act(.holdButtons(0b101), on: devices, clock)
-        try act(.holdButtons(1 << 31), on: devices, clock)
+        try perform(.down(.a), on: devices, clock)
+        try perform(.buttonDown(try #require(Button(rawValue: 3))), on: devices, clock)
+        try perform(try .move(x: 127, y: -127), on: devices, clock)
+        try perform(try .scroll(vertical: 1, horizontal: -1), on: devices, clock)
+        try perform(.releaseButtons, on: devices, clock)
+        try perform(.releaseKeys, on: devices, clock)
+        try perform(try .hold(usages: [0xE1, 0x04, 0x04]), on: devices, clock)
+        try perform(.holdButtons(0b101), on: devices, clock)
+        try perform(.holdButtons(1 << 31), on: devices, clock)
         #expect(keyboard.log == ["down 4", "up", "hold [4, 225]"])
         #expect(mouse.log == ["down 3", "move 127 -127", "scroll 1 -1", "up", "hold [1, 3]", "hold [32]"])
     }
 
-    /// An act whose turn at the devices comes after its client stopped waiting is refused
-    /// for its deadline, having claimed nothing and sent nothing: the client was told it
-    /// failed, so the devices must not do it later. [LAW:no-ambient-temporal-coupling]
-    @Test func anActWhoseTurnComesAfterItsDeadlineIsRefusedHavingDoneNothing() throws {
-        let gate = Handshake()
+    /// A request that cannot acquire the devices' lock before its deadline is refused for
+    /// it, having acquired nothing and sent nothing: the client was told it failed, so the
+    /// devices must not do it later. The first request blocks at a gate inside the fake
+    /// keyboard, holding the lock, while the clock passes the second one's deadline.
+    /// [LAW:no-ambient-temporal-coupling]
+    @Test func aRequestThatCannotAcquireTheLockBeforeItsDeadlineIsRefusedHavingDoneNothing() throws {
+        let gate = Gate()
         let keyboard = RecordingKeyboard(gate: gate)
         let (devices, clock) = devices(keyboard)
-        let ahead = Pending { try devices.act(.down(.a), by: .within(.seconds(5), on: clock.timeline)) {} }
-        try #require(gate.reached.wait("the act ahead to hold the devices"))
-        let admitted = Mutex(false)
-        let late = Pending { try devices.act(.down(.b), by: .within(.seconds(1), on: clock.timeline)) { admitted.withLock { $0 = true } } }
+        let ahead = Pending { try devices.perform(.down(.a), by: .within(.seconds(5), on: clock.timeline)) {} }
+        try #require(gate.arrived.wait("the first request to hold the lock"))
+        let acquired = Mutex(false)
+        let late = Pending { try devices.perform(.down(.b), by: .within(.seconds(1), on: clock.timeline)) { acquired.withLock { $0 = true } } }
         clock.awaitBlocked(1)
         clock.advance(by: .seconds(1))
         #expect(throws: Deadline.Passed.self) { try late.get() }
-        gate.released.open()
+        gate.open()
         try ahead.get()
-        #expect(!admitted.withLock { $0 })
+        #expect(!acquired.withLock { $0 })
         #expect(keyboard.log == ["down 4"])
     }
 
-    /// An act the seat does not admit sends nothing.
-    @Test func anActTheSeatRefusesSendsNothing() {
+    /// A command the seat may not perform, because another client holds the devices,
+    /// sends nothing.
+    @Test func aCommandTheSeatRefusesSendsNothing() {
         let keyboard = RecordingKeyboard()
         let (devices, clock) = devices(keyboard)
-        #expect(throws: Holder.Busy.self) { try devices.act(.down(.a), by: .within(.seconds(5), on: clock.timeline)) { throw Holder.Busy(pid: 41) } }
+        #expect(throws: Holder.Busy.self) { try devices.perform(.down(.a), by: .within(.seconds(5), on: clock.timeline)) { throw Holder.Busy(pid: 41) } }
         #expect(keyboard.log.isEmpty)
     }
 
@@ -194,8 +197,8 @@ import Time
     @Test func aKeyHeldPastTheLimitIsReleased() throws {
         let keyboard = RecordingKeyboard()
         let (devices, clock) = devices(keyboard)
-        try act(.down(.leftCommand), on: devices, clock)
-        try act(.down(.a), on: devices, clock)
+        try perform(.down(.leftCommand), on: devices, clock)
+        try perform(.down(.a), on: devices, clock)
         clock.advance(by: .milliseconds(1999))
         #expect(devices.sweep(holding: { nil }) == nil)
         clock.advance(by: .milliseconds(1))
@@ -211,13 +214,13 @@ import Time
         let keyboard = RecordingKeyboard()
         let (devices, clock) = devices(keyboard)
         for _ in 0..<20 {
-            try act(.down(.leftShift), on: devices, clock)
+            try perform(.down(.leftShift), on: devices, clock)
             clock.advance(by: .milliseconds(900))
             #expect(devices.sweep(holding: { nil }) == nil)
-            try act(.down(.b), on: devices, clock)
+            try perform(.down(.b), on: devices, clock)
             clock.advance(by: .milliseconds(900))
             #expect(devices.sweep(holding: { nil }) == nil)
-            try act(.releaseKeys, on: devices, clock)
+            try perform(.releaseKeys, on: devices, clock)
             clock.advance(by: .seconds(10))
             #expect(devices.sweep(holding: { nil }) == nil)
         }
@@ -228,7 +231,7 @@ import Time
     @Test func aButtonHeldPastTheLimitIsNotReleased() throws {
         let mouse = RecordingMouse()
         let (devices, clock) = devices(RecordingKeyboard(), mouse)
-        try act(.buttonDown(.left), on: devices, clock)
+        try perform(.buttonDown(.left), on: devices, clock)
         clock.advance(by: .seconds(30))
         #expect(devices.sweep(holding: { nil }) == nil)
         #expect(mouse.log == ["down 1"])
@@ -237,7 +240,7 @@ import Time
     /// A key release the keyboard refused is reported and tried again one limit later.
     @Test func aRefusedReleaseIsReportedAndRetriedAfterTheLimit() throws {
         let (devices, clock) = devices(RecordingKeyboard(refusesRelease: true))
-        try act(.down(.a), on: devices, clock)
+        try perform(.down(.a), on: devices, clock)
         clock.advance(by: .seconds(2))
         guard case .keysPastLimit(let first, _) = devices.sweep(holding: { nil }) else { Issue.record("nothing was let go"); return }
         #expect(first.failure != nil)
@@ -252,7 +255,7 @@ import Time
     /// and the sweep releases it.
     @Test func aKeyWhoseRequestThrewIsStillReleased() throws {
         let (devices, clock) = devices(RecordingKeyboard(refusesDown: true))
-        #expect(throws: Refused.self) { try act(.down(.a), on: devices, clock) }
+        #expect(throws: Refused.self) { try perform(.down(.a), on: devices, clock) }
         clock.advance(by: .seconds(2))
         #expect(devices.sweep(holding: { nil }) == .keysPastLimit(KeysLetGo(usages: [0x04], limit: .seconds(2), failure: nil), by: nil))
     }
@@ -261,11 +264,11 @@ import Time
     /// report counts, and the modifier stays down.
     @Test func aModifierHeldThroughAPacedDragIsNotCut() throws {
         let (devices, clock) = devices()
-        try act(.down(.leftOption), on: devices, clock)
-        try act(.buttonDown(.left), on: devices, clock)
+        try perform(.down(.leftOption), on: devices, clock)
+        try perform(.buttonDown(.left), on: devices, clock)
         for _ in 0..<30 {
             clock.advance(by: .milliseconds(200))
-            try act(try .move(x: 5, y: 0), on: devices, clock)
+            try perform(try .move(x: 5, y: 0), on: devices, clock)
             #expect(devices.sweep(holding: { nil }) == nil)
         }
     }
@@ -275,7 +278,7 @@ import Time
     @Test func aRepeatedHoldKeepsItsKeysPastTheLimit() throws {
         let (devices, clock) = devices()
         for _ in 0..<5 {
-            try act(try .hold(usages: [0xE1]), on: devices, clock)
+            try perform(try .hold(usages: [0xE1]), on: devices, clock)
             clock.advance(by: .seconds(1))
             #expect(devices.sweep(holding: { nil }) == nil)
         }
@@ -292,11 +295,11 @@ import Time
         // Kept alive, so the two identifiers cannot share a freed address.
         let (first, second) = (NSObject(), NSObject())
         let attempt = try readiness.devices().attempt
-        try devices.act(.down(.a), by: .within(.seconds(5), on: clock.timeline)) { try holder.claim(for: ObjectIdentifier(first), by: 4242, on: attempt) }
+        try devices.perform(.down(.a), by: .within(.seconds(5), on: clock.timeline)) { try holder.acquire(for: ObjectIdentifier(first), by: 4242, on: attempt) }
         clock.advance(by: .seconds(3))
         #expect(sweep(readiness, holder) == "pid 4242 held 0x04 past 2.0 seconds with no report; released")
         #expect(holder.pid(on: attempt) == 4242)
-        #expect(throws: Holder.Busy.self) { try holder.claim(for: ObjectIdentifier(second), by: 1, on: attempt) }
+        #expect(throws: Holder.Busy.self) { try holder.acquire(for: ObjectIdentifier(second), by: 1, on: attempt) }
         withExtendedLifetime((first, second)) {}
     }
 

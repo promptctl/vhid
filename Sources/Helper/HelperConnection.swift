@@ -32,7 +32,7 @@ public final class HelperConnection: @unchecked Sendable {
     private let service: String
 
     /// What this connection has been through, under one lock: whether anything has been
-    /// sent over it, whether the daemon has ever run an act of it, and whether it was given up
+    /// sent over it, whether the daemon has ever run a command of it, and whether it was given up
     /// on after the daemon went silent. The connection is lazy, so until something is sent
     /// the daemon has never seen it and holds nothing for it.
     private let history = NSLock()
@@ -101,13 +101,14 @@ public final class HelperConnection: @unchecked Sendable {
         public var description: String { "\(service) refused: \(reason)" }
     }
 
-    /// An act whose outcome is not known: nothing came back by its deadline, or vhidd itself
-    /// could not tell whether its report reached the driver. Never a failure - a client told
-    /// an act failed relies on it never having reached the devices, and this one may have.
+    /// A command whose outcome is not known: nothing came back by its deadline, or vhidd
+    /// itself could not tell whether its report reached the driver. Never a failure - a
+    /// client told a command failed relies on it never having reached the devices, and this
+    /// one may have.
     /// [LAW:types-are-the-program]
     public struct OutcomeUnknown: Error, Equatable, CustomStringConvertible {
         public enum Cause: Sendable, Hashable {
-            /// No answer came before the act's deadline.
+            /// No answer came before the command's deadline.
             case silence(Duration)
             /// vhidd answered that it could not tell, in its words.
             case daemon(String)
@@ -118,13 +119,13 @@ public final class HelperConnection: @unchecked Sendable {
 
         public var description: String {
             switch cause {
-            case .silence(let limit): "\(service) did not answer within \(limit), so whether the act reached the devices is unknown"
-            case .daemon(let reason): "\(service) could not tell whether the act reached the devices: \(reason)"
+            case .silence(let limit): "\(service) did not answer within \(limit), so whether the command reached the devices is unknown"
+            case .daemon(let reason): "\(service) could not tell whether the command reached the devices: \(reason)"
             }
         }
     }
 
-    /// How long a client waits for vhidd's reply, unless it says otherwise: an act's limit,
+    /// How long a client waits for vhidd's reply, unless it says otherwise: a command's limit,
     /// counted from when it is asked, and a read's, within the deadline of whatever asked it.
     public static let replyTimeout: Duration = .seconds(5)
 
@@ -132,7 +133,7 @@ public final class HelperConnection: @unchecked Sendable {
     /// job on the first call, not here - so a vhidd that is not installed is discovered
     /// when a key is first pressed rather than at construction.
     ///
-    /// `replyTimeout` bounds each act, counted from when it is asked: a vhidd that neither
+    /// `replyTimeout` bounds each command, counted from when it is asked: a vhidd that neither
     /// answers nor drops the connection is unreachable at the deadline rather than a caller
     /// blocked for good.
     /// `installation` says whose daemon this reaches. It has no default: installations run
@@ -177,9 +178,9 @@ public final class HelperConnection: @unchecked Sendable {
     /// held" is only true when the daemon could have set one down for this connection.
     /// Two failures prove it did not, and are the release having nothing to do:
     /// - the daemon turned the call away at the seat (`Installation.turnedAway`), which
-    ///   it does only for a connection whose acts never reach the devices;
-    /// - the connection never got through (4099, 4097) and the daemon never ran an act of
-    ///   it.
+    ///   it does only for a connection whose commands never reach the devices;
+    /// - the connection never got through (4099, 4097) and the daemon never ran a command
+    ///   of it.
     /// [LAW:single-enforcer] Read here, once, for the keyboard, the mouse and leaving.
     func release(_ body: (HelperService, UInt64, @escaping (Error?) -> Void) -> Void) throws {
         do {
@@ -273,12 +274,12 @@ public final class HelperConnection: @unchecked Sendable {
         case failed(Error)
     }
 
-    /// One act on the devices: the connection has spoken from here on, and the reply is an
-    /// acknowledgement, a refusal, or word that its outcome is unknown.
+    /// One command to the devices: the connection has spoken from here on, and the reply is
+    /// an acknowledgement, a refusal, or word that its outcome is unknown.
     ///
-    /// [LAW:no-ambient-temporal-coupling] The act's deadline is made here, as it is asked,
-    /// and crosses the wire with it, so vhidd and this side wait on one instant: an act
-    /// vhidd refuses for its deadline is one this side stopped waiting for.
+    /// [LAW:no-ambient-temporal-coupling] The command's deadline is made here, as it is
+    /// asked, and crosses the wire with it, so vhidd and this side wait on one instant: a
+    /// command vhidd refuses for its deadline is one this side stopped waiting for.
     func call(_ body: (HelperService, UInt64, @escaping (Error?) -> Void) -> Void) throws {
         history.lock()
         hasSpoken = true
@@ -294,9 +295,9 @@ public final class HelperConnection: @unchecked Sendable {
                 throw OutcomeUnknown(service: service, cause: .daemon(refused.reason))
             }
         }
-        // The daemon may have run this act: it acknowledged it, or cannot say. Not a
-        // refusal, which vhidd makes only for an act that sent nothing, the connection's
-        // failure, or the deadline passing before the act was asked.
+        // The daemon may have run this command: it acknowledged it, or cannot say. Not a
+        // refusal, which vhidd makes only for a command that sent nothing, the connection's
+        // failure, or the deadline passing before the command was asked.
         let ran = switch outcome {
         case .success, .failure(is OutcomeUnknown): true
         case .failure: false
@@ -318,7 +319,7 @@ public final class HelperConnection: @unchecked Sendable {
         history.unlock()
         if let gaveUp { throw Unreachable(service: service, cause: .abandoned(gaveUp)) }
         // Not asked at all once its asker's limit has passed, so a reading that ran out
-        // before its turn says so and is never taken for a daemon that did not answer.
+        // before it was asked says so and is never taken for a daemon that did not answer.
         guard !deadline.passed else { throw deadline.refusal }
         let outcome = Outcome<Answer>()
         let proxy = connection.remoteObjectProxyWithErrorHandler { error in

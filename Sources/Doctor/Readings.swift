@@ -70,7 +70,7 @@ public enum DaemonReading: Sendable, Hashable {
     /// into the nearest of them: a reading this build cannot classify is shown as what it
     /// said. [LAW:no-silent-failure]
     case failed(reason: String)
-    /// The reading's limit had passed before the daemon's turn to be asked, by what was
+    /// The reading's limit had passed before the daemon could be asked, spent by what was
     /// read before it, so it was not asked. Says nothing of the daemon. [LAW:no-silent-failure]
     case unasked(Deadline.Passed)
 

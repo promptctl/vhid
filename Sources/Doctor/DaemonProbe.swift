@@ -6,7 +6,7 @@ import Time
 /// Asking the daemon who holds the devices, and reading what came back.
 ///
 /// [LAW:effects-at-boundaries] One `holding` call is the effect, made over the connection
-/// every verb dials. It claims nothing and sends no report, so asking it never takes the
+/// every verb dials. It acquires nothing and sends no report, so asking it never takes the
 /// devices from a client that holds them. What it came back as is read by a pure function
 /// beside it, which a test drives with every failure a connection can end in.
 public enum DaemonProbe {
@@ -44,8 +44,8 @@ public enum DaemonProbe {
     /// [LAW:types-are-the-program] By the domain and code the connection failed with, never
     /// by its words, which NSXPC makes the same for all of them. A daemon that refuses a
     /// connection ends it before it opens, which the client hears as an interrupted
-    /// connection (4097); admission refuses only on the signature - a busy daemon is
-    /// refused at the first act, which a `holding` call never makes. A service nobody holds
+    /// connection (4097); accepting a connection checks only the signature - a busy daemon
+    /// refuses the first command, which a `holding` call never sends. A service nobody holds
     /// is an invalid one (4099). Anything else is shown as what it said.
     /// [LAW:no-silent-failure]
     ///

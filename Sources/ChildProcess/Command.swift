@@ -129,8 +129,8 @@ public struct Command: Sendable {
         public var description: String { "`\(command)` had not ended \(ran) after it was started, at the limit of \(limit), and was given up on" }
     }
 
-    /// A command not started, because its reading's limit had passed before its turn: what
-    /// ran before it in the reading, or the wait for a thread to read on, had spent it.
+    /// A command not started, because its reading's limit had passed before it could start:
+    /// what ran before it in the reading, or the wait for a thread to read on, had spent it.
     public struct Unstarted: Error, CustomStringConvertible, Equatable {
         public let command: String
         public let limit: Duration
@@ -244,9 +244,9 @@ public struct Command: Sendable {
     /// Hears the child out, by `deadline`.
     ///
     /// The exit and the streams are waited for at once, on one queue. A child whose pipe
-    /// fills blocks in `write(2)` until someone reads it, so a stream that waits its turn
-    /// is a stream whose turn can never come: the child cannot reach the exit that would
-    /// end the read being waited on. [LAW:no-ambient-temporal-coupling] Watching all of it
+    /// fills blocks in `write(2)` until someone reads it, so a stream left to be read after
+    /// another is never read: the child cannot reach the exit that would end the read being
+    /// waited on. [LAW:no-ambient-temporal-coupling] Watching all of it
     /// from the start leaves no order to get wrong.
     private func hear(_ pid: pid_t, _ streams: [Int32], by deadline: Deadline, or stop: Stop) throws -> Heard {
         let queue: EventQueue

@@ -256,14 +256,14 @@ import Time
     /// way through. Which wait has been reached is read off the test clock: the reader's,
     /// then each asker's, then the stalled writer's.
     @Test func aWriteThePeerStopsDrainingHoldsNoAskerPastItsDeadlineAndEndsAsSilenceAtThePatience() throws {
-        let stopped = Handshake()
+        let stopped = Gate()
         let fake = FakeDaemon { _, _ in stopped.arrive() }
-        defer { stopped.released.open() }
+        defer { stopped.open() }
         try fake.limitSendSpace(to: 8192)
         let clock = ManualClock(), lost = Lost()
         let connection = try DaemonConnection(fileDescriptor: fake.clientDescriptor, timeline: clock.timeline, heartbeatEvery: .seconds(60), patience: .seconds(1), whenLost: lost.record)
         let first = Pending { try connection.request(.keyboardInitialize, by: .within(.seconds(10), on: clock.timeline)) }
-        stopped.reached.wait("the fake to read the first request and stop")
+        stopped.arrived.wait("the fake to read the first request and stop")
         clock.awaitBlocked(2)
 
         let largest = [UInt8](repeating: 0, count: Frame.largestBody - 12)

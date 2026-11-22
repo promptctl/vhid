@@ -7,18 +7,19 @@ import Synchronization
 import Time
 import VirtualHID
 
-/// The devices as a seat serves them: an act by its client's deadline, the one release of
-/// both, and the sweep. [LAW:decomposition] Admitting and letting go are the listener's
-/// and the seat's; what an act and a release are belongs to the devices, and devices of a
+/// The devices as a seat serves them: a command by its client's deadline, the one release
+/// of both, and the sweep. [LAW:decomposition] Who holds the devices is the seat's and the
+/// holder's; what a command and a release are belongs to the devices, and devices of a
 /// test's own stand behind the real listener through this. One object per bring-up: the
-/// devices a seat acted on are these, or they are gone.
+/// devices a seat holds are these, or they are gone.
 protocol ServedDevices: AnyObject, Sendable {
-    /// Does `act` by `deadline`, once `admit` - the seat's check and claim - has let it,
-    /// both under the devices' lock taken by that deadline: an act whose turn comes after
-    /// it is refused having claimed nothing and sent nothing. Throws what refused it.
-    func act(_ act: Act, by deadline: Deadline, admitting admit: () throws -> Void) throws
-    /// Releases both devices if `owed` says the release is still owed when its turn
-    /// comes, then runs `after`, both under the lock: what a release frees is freed only
+    /// Performs `command` once `acquire` - the seat's check, and its becoming the holder -
+    /// has let it, both under the devices' lock, acquired with `deadline` as its timeout: a
+    /// request that cannot acquire the lock before its deadline is refused having acquired
+    /// nothing and sent nothing. Throws what refused it.
+    func perform(_ command: DeviceCommand, by deadline: Deadline, acquiring acquire: () throws -> Void) throws
+    /// Releases both devices if `owed` says the release is still owed once the lock is
+    /// acquired, then runs `after`, both under the lock: what a release frees is freed only
     /// once everything is up. Answers how it ended, or nil when it was not owed.
     func release(because reason: String, when owed: () -> Bool, then after: () -> Void) -> Released?
     /// Whether a release failed and none has succeeded since: keys or buttons a client
@@ -73,8 +74,8 @@ struct KeysLetGo: Equatable {
     let failure: String?
 }
 
-/// A keyboard as vhidd drives it: every report by the deadline of the act that asked for
-/// it, and the keys it may be holding. The device is the one record of those: it counts a
+/// A keyboard as vhidd drives it: every report by the deadline of the request that asked
+/// for it, and the keys it may be holding. The device is the one record of those: it counts a
 /// key whose request may have reached the driver unanswered, which no caller can.
 /// [LAW:one-source-of-truth]
 protocol HeldKeyboard: Sendable {
@@ -114,12 +115,13 @@ final class Devices: ServedDevices, @unchecked Sendable {
     /// device keeps its own reports whole; this orders the two against each other, because
     /// they share the socket and the client: a keyboard report and a mouse report from one
     /// client are one sequence, and ordering them is cheaper than reasoning about two. It
-    /// is also what holds a release of both as one act, which neither device can.
+    /// is also what makes a release of both one step, which neither device can.
     ///
     /// A lock and not a queue, because every call here is a round trip the client is
     /// already waiting on: hopping to another thread to do synchronous work would add a
-    /// hop and take away the ability to answer on the thread that asked. Taken by the act's
-    /// deadline, so an act whose turn comes too late does nothing. [LAW:single-enforcer]
+    /// hop and take away the ability to answer on the thread that asked. Acquired with the
+    /// request's deadline as its timeout, so a request that cannot acquire it in time does
+    /// nothing. [LAW:single-enforcer]
     private let device = TimedLock()
 
     /// How long a key may stay down with no keyboard report before the daemon lets it go.
@@ -137,7 +139,7 @@ final class Devices: ServedDevices, @unchecked Sendable {
     static let keyLimit = HeldKeys.silenceLimit
 
     /// How long a release vhidd makes of its own accord - a sweep's, or one a seat's
-    /// ending owes - has, from when it is asked. A client's act has the client's deadline.
+    /// ending owes - has, from when it is asked. A client's request has the client's deadline.
     static let releaseLimit: Duration = .seconds(2)
 
     private let limit: Duration
@@ -159,17 +161,18 @@ final class Devices: ServedDevices, @unchecked Sendable {
 
     var leftHeld: Bool { owed.withLock { $0 } }
 
-    /// [LAW:dataflow-not-control-flow] Every act is the same act - take the devices by the
-    /// deadline, admit it, do the one thing, answer with what happened - so the act is a
-    /// value and this is one function, not eight copies of the same locking.
-    func act(_ act: Act, by deadline: Deadline, admitting admit: () throws -> Void) throws {
+    /// [LAW:dataflow-not-control-flow] Every command is performed the same way - acquire the
+    /// lock by the deadline, acquire the devices, do the one thing, answer with what
+    /// happened - so the command is a value and this is one function, not eight copies of
+    /// the same locking.
+    func perform(_ command: DeviceCommand, by deadline: Deadline, acquiring acquire: () throws -> Void) throws {
         try device.withLock(by: deadline) {
-            try admit()
+            try acquire()
             // Both ends: a report the driver took seconds to answer is the client being
             // active throughout, not idle.
             lastReport = timeline.now()
             defer { lastReport = timeline.now() }
-            switch act {
+            switch command {
             case .down(let usage): try keyboard.down(usage, by: deadline)
             case .releaseKeys: try keyboard.releaseAll(by: deadline)
             case .hold(let keys): try keyboard.hold(keys, by: deadline)
@@ -203,16 +206,16 @@ final class Devices: ServedDevices, @unchecked Sendable {
     }
 
     /// A release the keyboard refused is tried again one limit later, not on every sweep:
-    /// a hung driver would otherwise hold every client's act behind a timed-out release
-    /// four times a second, and log each one. Only while the devices are free: the sweep
-    /// waits behind nobody's act. The tick is where its deadline is made.
+    /// a hung driver would otherwise hold every client's request behind a timed-out release
+    /// four times a second, and log each one. Only while the lock is free: the sweep waits
+    /// behind no request. The tick is where its deadline is made.
     func sweep(holding: () -> pid_t?) -> Swept? {
         let deadline = Deadline.within(Self.releaseLimit, on: timeline)
         return device.whenFree { () -> Swept? in
             guard timeline.now() - lastReport >= limit else { return nil }
             let pid = holding()
             // [LAW:single-enforcer] What a failed release left is released here, while
-            // nobody holds the devices, and never as part of another client's act.
+            // nobody holds the devices, and never as part of another client's request.
             if pid == nil, leftHeld { return .leftHeld(releaseBoth(because: "releasing what a client left held", by: deadline)) }
             let held = keyboard.keysDown
             guard !held.isEmpty else { return nil }
@@ -261,11 +264,11 @@ final class Devices: ServedDevices, @unchecked Sendable {
 /// written to make. [LAW:decomposition]
 ///
 /// Devices that are not up cross under their own code, which is how doctor tells that
-/// refusal from the rest; an act the seat turned away crosses under another, which is how
-/// a client knows no key of its is held. [LAW:types-are-the-program]
+/// refusal from the rest; a request the seat turned away crosses under another, which is
+/// how a client knows no key of its is held. [LAW:types-are-the-program]
 ///
-/// An act's failure is said as failed only when nothing was sent: refused before its turn,
-/// a value no report carries, or a report that never left. Anything else - a report that
+/// A request is said as failed only when nothing was sent: its deadline passed before it
+/// acquired the lock, a value no report carries, or a report that never left. Anything else - a report that
 /// may have reached the driver, or a failure this does not know the reach of - is said as
 /// an outcome unknown, because a client told "failed" takes it that nothing happened.
 func refusal(_ error: any Error) -> NSError {

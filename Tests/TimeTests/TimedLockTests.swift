@@ -4,16 +4,16 @@ import Testing
 import TestClock
 import Time
 
-/// A request's turn at a lock, judged by its deadline on a test clock: what waits behind a
+/// Acquiring a lock with a deadline as the timeout, on a test clock: what waits behind a
 /// held lock, and what it is told when its limit passes there.
 @Suite(.ownThread)
 struct TimedLockTests {
     @Test func aWaiterWhoseLimitPassesBehindTheLockRunsNothing() async {
-        let clock = ManualClock(), lock = TimedLock(), holding = Handshake(), refused = Latch()
+        let clock = ManualClock(), lock = TimedLock(), holding = Gate(), refused = Latch()
         let ran = Ran()
         let deadline = Deadline.within(.seconds(1), on: clock.timeline)
         Thread.detachNewThread { lock.whenFree { holding.arrive() } }
-        holding.reached.wait()
+        holding.arrived.wait()
         Thread.detachNewThread {
             #expect(throws: Deadline.Passed.self) { try lock.withLock(by: deadline) { ran.mark() } }
             refused.open()
@@ -22,21 +22,21 @@ struct TimedLockTests {
         clock.advance(by: .milliseconds(999))
         clock.advance(by: .milliseconds(1))
         refused.wait("the waiter to be refused")
-        holding.released.open()
+        holding.open()
         #expect(!ran.marked)
     }
 
     @Test func aWaiterWhoseLimitHoldsRunsWhenTheLockIsLetGo() async {
-        let clock = ManualClock(), lock = TimedLock(), holding = Handshake(), served = Latch()
+        let clock = ManualClock(), lock = TimedLock(), holding = Gate(), served = Latch()
         let deadline = Deadline.within(.seconds(1), on: clock.timeline)
         Thread.detachNewThread { lock.whenFree { holding.arrive() } }
-        holding.reached.wait()
+        holding.arrived.wait()
         Thread.detachNewThread {
             #expect(throws: Never.self) { try lock.withLock(by: deadline) {} }
             served.open()
         }
         clock.advance(by: .milliseconds(500))
-        holding.released.open()
+        holding.open()
         served.wait("the waiter to be served")
     }
 
@@ -48,11 +48,11 @@ struct TimedLockTests {
     }
 
     @Test func theSweepRunsNothingWhileTheLockIsHeld() {
-        let lock = TimedLock(), holding = Handshake(), letGo = Latch()
+        let lock = TimedLock(), holding = Gate(), letGo = Latch()
         Thread.detachNewThread { lock.whenFree { holding.arrive() }; letGo.open() }
-        holding.reached.wait()
+        holding.arrived.wait()
         #expect(lock.whenFree { true } == nil)
-        holding.released.open()
+        holding.open()
         letGo.wait()
         #expect(lock.whenFree { true } == true)
     }

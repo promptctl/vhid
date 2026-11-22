@@ -10,8 +10,8 @@ import Testing
 
 /// The listener as a client meets it: the real `Listener` on an anonymous listener in this
 /// process, with a requirement this process satisfies, and devices of the test's own
-/// behind it. Every client is admitted; the first to act holds the devices, a second's
-/// act is refused while it does, and the first going away releases everything and frees
+/// behind it. Every client's connection is accepted; the first to send a command holds the
+/// devices, a second's command is refused while it does, and the first going away releases everything and frees
 /// them. A client that only asks who holds them takes nothing.
 /// [LAW:behavior-not-structure]
 @Suite(.ownThread) struct ListenerTests {
@@ -21,7 +21,7 @@ import Testing
         let listener: NSXPCListener
         let delegate: Listener
         let devices: RecordingDevices
-        /// The one clock its clients and its seats share, never moved: no act's deadline
+        /// The one clock its clients and its seats share, never moved: no request's deadline
         /// passes here.
         let clock: ManualClock
     }
@@ -45,7 +45,7 @@ import Testing
     /// Whether a fresh client pressing `usage` was served. A client refused as busy hears
     /// the daemon's own refusal; anything else it hears is not an answer to this, and is
     /// thrown.
-    private func admitted(_ served: Served, pressing usage: Usage) throws -> Bool {
+    private func isServed(_ served: Served, pressing usage: Usage) throws -> Bool {
         do {
             try client(of: served).helper.keyboard.down(usage)
             return true
@@ -61,7 +61,7 @@ import Testing
         let keyboard = first.helper.keyboard
         try keyboard.down(.leftShift)
         #expect(served.devices.done == ["down 225"])
-        #expect(try admitted(served, pressing: .space) == false)
+        #expect(try isServed(served, pressing: .space) == false)
         #expect(served.devices.done == ["down 225"])
         withExtendedLifetime((served, first)) {}
     }
@@ -75,7 +75,7 @@ import Testing
         try first.helper.keyboard.down(.leftShift)
         first.connection.invalidate()
         try #require(served.devices.await(["down 225", "a client went away"]))
-        #expect(try admitted(served, pressing: .space))
+        #expect(try isServed(served, pressing: .space))
         #expect(served.devices.done == ["down 225", "a client went away", "down 44"])
         withExtendedLifetime((served, first)) {}
     }
@@ -110,8 +110,8 @@ import Testing
     }
 
     /// A client asking who holds the devices is answered with the holder's pid, and takes
-    /// nothing from it: the holder goes on acting, and a third client's act is still
-    /// refused as the holder's. Before anyone acts, nobody holds them.
+    /// nothing from it: the holder goes on sending, and a third client's command is still
+    /// refused as the holder's. Before anyone sends one, nobody holds them.
     @Test func holdingAnswersTheHolderWithoutTakingTheDevices() throws {
         let served = try serve()
         let asker = client(of: served).helper
@@ -123,14 +123,14 @@ import Testing
         #expect(try asker.holding(by: .within(.seconds(5), on: asker.timeline)) == .client(pid: getpid()))
 
         try keyboard.down(.space)
-        #expect(try admitted(served, pressing: .tab) == false)
+        #expect(try isServed(served, pressing: .tab) == false)
         #expect(served.devices.done == ["down 225", "down 44"])
         withExtendedLifetime((served, first)) {}
     }
 
-    /// An act after `leave` is refused, and does not take the devices back: nobody holds
+    /// A command after `leave` is refused, and does not acquire the devices back: nobody holds
     /// them afterwards.
-    @Test func anActAfterLeavingTakesNothingBack() throws {
+    @Test func aCommandAfterLeavingAcquiresNothing() throws {
         let served = try serve()
         let first = client(of: served)
         let (leaver, keyboard) = (first.helper, first.helper.keyboard)

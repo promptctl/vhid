@@ -1,11 +1,12 @@
 import Foundation
 
-/// A lock a request takes by its deadline.
+/// A lock acquired with a deadline as its timeout, as C++'s `timed_mutex` is with
+/// `try_lock_until`.
 ///
-/// [LAW:single-enforcer] The one place a request's turn is judged: a waiter whose deadline
-/// passed while it slept is refused before it runs anything, so work that comes too late to
-/// be answered is never done. A plain lock lets it through whenever its turn comes, and its
-/// caller has been told it failed by then.
+/// [LAW:single-enforcer] The one place a waiter's deadline is checked as it acquires the
+/// lock: a waiter whose deadline passed while it slept is refused before it runs anything,
+/// so work that comes too late to be answered is never done. A plain lock lets it through
+/// whenever the lock comes free, and its caller has been told it failed by then.
 public final class TimedLock: @unchecked Sendable {
     private let condition = NSCondition()
     /// Under `condition`.
@@ -41,7 +42,7 @@ public final class TimedLock: @unchecked Sendable {
     }
 
     /// Runs `body` holding the lock if nobody holds it now, and runs nothing otherwise: for
-    /// the sweep, which never waits behind a client's act.
+    /// the sweep, which never waits behind a client's request.
     public func whenFree<T>(_ body: () throws -> T) rethrows -> T? {
         condition.lock()
         guard !held else { condition.unlock(); return nil }

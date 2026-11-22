@@ -7,13 +7,13 @@ import Time
 @testable import vhidd
 
 /// A seat that has ended - its client left, or its connection went - serves nothing and
-/// claims nothing, whichever way it ended. [LAW:behavior-not-structure]
+/// acquires nothing, whichever way it ended. [LAW:behavior-not-structure]
 @Suite struct SeatTests {
 
     private let one = NSObject()
     private let clock = ManualClock()
 
-    /// The instant an act's client stops waiting, as the wire carries it: never reached,
+    /// The instant a request's client stops waiting, as the wire carries it: never reached,
     /// since nothing here moves the clock.
     private var by: UInt64 { Deadline.within(.seconds(5), on: clock.timeline).at.nanoseconds }
 
@@ -21,10 +21,10 @@ import Time
         Seat(ObjectIdentifier(connection ?? one), pid: pid, holder: holder, readiness: readiness, screen: FixedScreen(), timeline: clock.timeline)
     }
 
-    /// The crash the ending exists for: the client's connection goes while an act of its
-    /// is still on its way, and the act arrives after. It must not take the devices for a
+    /// The crash the ending exists for: the client's connection goes while a request of its
+    /// is still on its way, and the request arrives after. It must not take the devices for a
     /// connection nobody is left to free.
-    @Test func anActArrivingAfterTheConnectionWentTakesNothing() {
+    @Test func aRequestArrivingAfterTheConnectionWentAcquiresNothing() {
         let (holder, devices) = (Holder(), RecordingDevices())
         let seat = seat(holder: holder, readiness: .serving(devices))
         seat.down(usage: 4, by: by) { #expect($0 == nil) }
@@ -36,8 +36,9 @@ import Time
         #expect(devices.done == ["down 4", "a client went away"])
     }
 
-    /// A seat that ends without ever acting releases nothing: it never held the devices.
-    @Test func aSeatThatNeverActedReleasesNothingWhenItEnds() {
+    /// A seat that ends without ever sending a command releases nothing: it never held the
+    /// devices.
+    @Test func aSeatThatNeverSentACommandReleasesNothingWhenItEnds() {
         let (holder, devices) = (Holder(), RecordingDevices())
         let seat = seat(holder: holder, readiness: .serving(devices))
         #expect(seat.end(because: "a client went away") == nil)
@@ -60,9 +61,9 @@ import Time
         #expect(holder.pid(on: 1) == 41)
     }
 
-    /// While the devices are down an act is refused with why, and claims nothing: the next
+    /// While the devices are down a request is refused with why, and acquires nothing: the next
     /// client is told the same reason, not that the first is in the way.
-    @Test func anActWhileTheDevicesAreDownIsRefusedWithWhyAndClaimsNothing() {
+    @Test func aRequestWhileTheDevicesAreDownIsRefusedWithWhyAndAcquiresNothing() {
         let (holder, readiness) = (Holder(), Readiness(driver: { .running }))
         let other = NSObject()
         let first = seat(holder: holder, readiness: readiness)
@@ -74,9 +75,9 @@ import Time
         #expect(holder.pid(on: 1) == nil)
     }
 
-    /// An act whose values the devices cannot take is refused before its turn and claims
-    /// nothing: the next client is not refused over it.
-    @Test func anActTheDevicesCannotTakeClaimsNothing() {
+    /// A command whose values the devices cannot take is refused as it is parsed, before any
+    /// lock, and acquires nothing: the next client is not refused over it.
+    @Test func aCommandTheDevicesCannotTakeAcquiresNothing() {
         let (holder, devices) = (Holder(), RecordingDevices())
         let seat = seat(holder: holder, readiness: .serving(devices))
         var refused: NSError?
@@ -89,7 +90,7 @@ import Time
 
     /// The refusal a client receives names the driver's step, under the code that says
     /// the devices are down.
-    @Test func anActRefusedWhileTheDriverIsOffCarriesItsStep() throws {
+    @Test func aRequestRefusedWhileTheDriverIsOffCarriesItsStep() throws {
         let seat = seat(readiness: Readiness(driver: { .awaitingApproval }))
         var refused: NSError?
         seat.down(usage: 4, by: by) { refused = $0 as NSError? }
@@ -126,8 +127,8 @@ import Time
         #expect(answer?.1 == true)
     }
 
-    /// A client whose devices were lost is told so on its next act, and on every act
-    /// after, rather than acting on fresh devices as if what it held were still held.
+    /// A client whose devices were lost is told so on its next request, and on every request
+    /// after, rather than sending to fresh devices as if what it held were still held.
     @Test func aSeatWhoseDevicesWereLostEnds() {
         let (holder, readiness) = (Holder(), Readiness(driver: { .running }))
         let first = readiness.begin()

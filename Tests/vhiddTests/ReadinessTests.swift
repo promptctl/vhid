@@ -68,7 +68,7 @@ import VirtualHID
         #expect(refusal(readiness) == "devices not up: \(DaemonError.closed)\nThe driver extension could not be read: systemextensionsctl list exited 1")
     }
 
-    /// The step named is the one for the driver as it reads when the act is refused, with
+    /// The step named is the one for the driver as it reads when the request is refused, with
     /// nothing told in between: a person who asked for the activation is told of the
     /// switch on their next call, and one who turned it on is told of no step, with the
     /// failure standing all the while.
@@ -100,9 +100,9 @@ import VirtualHID
         #expect(refusal(readiness) == (try naming(.disabled, after: .failed(DaemonError.closed))))
     }
 
-    /// The driver is read to refuse an act and for nothing else: what is done only on
+    /// The driver is read to refuse a request and for nothing else: what is done only on
     /// devices that are up - the sweep for keys held too long, a release - reads none,
-    /// and nor does an act that is served.
+    /// and nor does a request that is served.
     @Test func theDriverIsReadOnlyToRefuse() throws {
         var read = 0
         let readiness = Readiness(driver: { read += 1; return .awaitingApproval })

@@ -5,11 +5,12 @@ import Time
 ///
 /// [LAW:types-are-the-program] Both halves, because every pairing of them happens and each
 /// says something of its own. A request never written was not seen by the driver and never
-/// will be, which is the one case a caller may report as an act that did not happen; every
-/// other is an act whose outcome is unknown.
+/// will be, which is the one case a caller may report as a command that did not happen;
+/// every other is a command whose outcome is unknown.
 public struct Unanswered: Error, Equatable, CustomStringConvertible {
     public enum Reach: Equatable, Sendable {
-        /// Never written: it waited its turn behind other frames until the wait ended.
+        /// Never written: it waited in the write queue behind other frames until the wait
+        /// ended.
         case unsent
         /// Being written: the writer had taken it, and the socket had not taken all of it.
         case writing
@@ -33,7 +34,7 @@ public struct Unanswered: Error, Equatable, CustomStringConvertible {
     }
 
     /// Whether the driver may hold what the request asked for, then or later.
-    /// [LAW:single-enforcer] The one reading of `reach` that a record and a caller act on.
+    /// [LAW:single-enforcer] The one reading of `reach` that a record and a caller decide by.
     public var mayHaveReachedTheDriver: Bool { reach != .unsent }
 
     public var description: String {
@@ -41,7 +42,7 @@ public struct Unanswered: Error, Equatable, CustomStringConvertible {
         case (.unsent, .connection(let lost)):
             "\(lost), and the request was not sent"
         case (.unsent, .deadline(let passed)):
-            "the request was not sent: its limit of \(passed.limit) had passed while it waited its turn on the driver's daemon's socket"
+            "the request was not sent: its limit of \(passed.limit) had passed while it waited in the write queue for the driver's daemon's socket"
         case (.writing, .deadline(let passed)):
             "the driver's daemon had not taken the whole request when its limit of \(passed.limit) passed; the rest is still going, and the driver may yet act on it"
         case (.written, .deadline(let passed)):

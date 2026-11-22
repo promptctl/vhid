@@ -181,17 +181,17 @@ func requestSent(_ payload: [UInt8]) -> (version: UInt16, request: UInt8, bytes:
     (UInt16(payload[0]) | UInt16(payload[1]) << 8, payload[2], Array(payload.dropFirst(3)))
 }
 
-/// What `act` threw, given a deadline of `limit` on `clock` and run against a fake that does
+/// What `call` threw, given a deadline of `limit` on `clock` and run against a fake that does
 /// not answer it: once the fake has `request` requests and the client has written the last
 /// of them whole, the clock is moved past the limit.
-func givenUpOn(_ fake: FakeDaemon, _ clock: ManualClock, atRequest request: Int, limit: Duration = .milliseconds(200), _ act: @escaping @Sendable (Deadline) throws -> Void) throws -> Unanswered? {
+func givenUpOn(_ fake: FakeDaemon, _ clock: ManualClock, atRequest request: Int, limit: Duration = .milliseconds(200), _ call: @escaping @Sendable (Deadline) throws -> Void) throws -> Unanswered? {
     let deadline = Deadline.within(limit, on: clock.timeline)
-    let acting = Pending { try act(deadline) }
+    let calling = Pending { try call(deadline) }
     fake.awaitRequests(request)
     try fake.settle()
     clock.advance(by: limit)
     do {
-        try acting.get()
+        try calling.get()
         return nil
     } catch let unanswered as Unanswered {
         return unanswered

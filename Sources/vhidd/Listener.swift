@@ -6,7 +6,8 @@ import Time
 /// otherwise, saying why.
 ///
 /// Whether the devices are free is not asked here: a connection holds them from its
-/// first act, which its `Seat` claims. Refusing a busy daemon at admission would say
+/// first request, with which its `Seat` acquires them. Refusing the connection to a busy
+/// daemon would say
 /// "busy" in the same NSError a refused signature says it in, and would turn away a
 /// client that only wanted to ask who holds them. [LAW:single-enforcer]
 final class Listener: NSObject, NSXPCListenerDelegate {
@@ -52,8 +53,8 @@ final class Listener: NSObject, NSXPCListenerDelegate {
         // first has already been released, and by the time its connection ends the devices
         // may be another client's, whose keys are not this ending's to release.
         //
-        // Invalidation ends the seat and does not only free the holder: an act of this
-        // client's still in flight would otherwise find the devices free and claim them
+        // Invalidation ends the seat and does not only free the holder: a request of this
+        // client's still in flight would otherwise find the devices free and acquire them
         // for a connection with no handler left to give them back.
         connection.invalidationHandler = { seat.end(because: "a client went away") }
         connection.interruptionHandler = { seat.interrupted() }
@@ -65,10 +66,11 @@ final class Listener: NSObject, NSXPCListenerDelegate {
 
 /// Lets go of what has been held too long and says what it was: keys a client held past
 /// the limit, and whose they were, or what a failed release left down while nobody holds
-/// the devices. The holder keeps the devices: the client's next act still works, and its
+/// the devices. The holder keeps the devices: the client's next request still works, and its
 /// own key-up is harmless.
 ///
-/// The holder is read under the devices' lock, as a client's act claims it, so the pid
+/// The holder is read under the devices' lock, as a client's request acquires the devices,
+/// so the pid
 /// named is the one whose keys these were. A release of what was left held says its own
 /// outcome as it is made, so it adds no line here.
 func sweep(_ readiness: Readiness, _ holder: Holder) -> String? {

@@ -3,21 +3,22 @@ import Helper
 import Synchronization
 import Time
 
-/// One admitted connection's way to the devices, which closes when it leaves.
+/// One accepted connection's way to the devices, which closes when it leaves.
 ///
 /// The listener used to hand every connection the devices themselves, which was right
 /// while the only way to stop holding them was to disconnect. Now a client can leave and
 /// keep its connection for a moment afterwards, so what it is handed has to know whose
 /// seat it is. [LAW:single-enforcer]
 ///
-/// The seat takes the devices on its first act, and an act while another seat holds them
-/// is refused naming that client's pid. Admission checks only the signature, so a
-/// connection that asks nothing but `status` sits here and holds nothing.
+/// The seat acquires the devices with its first request, and a request while another seat
+/// holds them is refused naming that client's pid. Accepting the connection checks only
+/// the signature, so a connection that asks nothing but `holding` sits here and holds
+/// nothing.
 ///
-/// A seat ends once - its client leaves, or its connection ends - and every act after
-/// that is refused by name and takes nothing. Both ways out go through `end`, so an act
-/// already in flight when a client crashed cannot claim the devices for a connection with
-/// nobody left to free them. [LAW:single-enforcer]
+/// A seat ends once - its client leaves, or its connection ends - and every request after
+/// that is refused by name and acquires nothing. Both ways out go through `end`, so a
+/// request already in flight when a client crashed cannot acquire the devices for a
+/// connection with nobody left to free them. [LAW:single-enforcer]
 final class Seat: NSObject, HelperService, @unchecked Sendable {
     private let connection: ObjectIdentifier
     private let pid: pid_t
@@ -25,11 +26,12 @@ final class Seat: NSObject, HelperService, @unchecked Sendable {
     private let readiness: Readiness
     private let screen: any ScreenSource
     private let timeline: Timeline
-    /// Whether this seat has ended, and the attempt whose devices it has acted on. Devices
-    /// lost and brought up again hold nothing this client set down, so a seat that held
-    /// the lost ones ends rather than carrying on as if its keys were still down.
-    /// [LAW:no-silent-failure] Read and changed by an act only under the devices' lock, so
-    /// an act cannot pass the check and then claim after `end` has freed the devices.
+    /// Whether this seat has ended, and the attempt whose devices it holds. Devices lost and
+    /// brought up again hold nothing this client set down, so a seat that held the lost
+    /// ones ends rather than carrying on as if its keys were still down.
+    /// [LAW:no-silent-failure] Read and changed by a request only while it holds the
+    /// devices' lock, so a request cannot pass the check and then acquire the devices
+    /// after `end` has freed them.
     private let state = Mutex<(ended: Bool, heldOn: Int?)>((false, nil))
 
     init(_ connection: ObjectIdentifier, pid: pid_t, holder: Holder, readiness: Readiness, screen: any ScreenSource, timeline: Timeline) {
@@ -41,31 +43,31 @@ final class Seat: NSObject, HelperService, @unchecked Sendable {
         self.timeline = timeline
     }
 
-    /// [LAW:dataflow-not-control-flow] Every act is the same act: the client's deadline,
-    /// the act parsed from the wire, the devices if they are up, and the act done once its
-    /// turn comes and the seat is admitted to them - or the refusal. Nothing is claimed
-    /// before the turn, so an act refused for its deadline, its values or the devices being
-    /// down holds nothing, and the next client is told why too, not that the first one is
-    /// in the way.
+    /// [LAW:dataflow-not-control-flow] Every request is served the same way: the client's
+    /// deadline, the command parsed from the wire, the devices if they are up, and the
+    /// command performed once the devices' lock is acquired and the seat holds the devices -
+    /// or the refusal. The devices are acquired only under that lock, so a request refused
+    /// for its deadline, its values or the devices being down holds nothing, and the next
+    /// client is told why too, not that the first one is in the way.
     ///
     /// [LAW:no-ambient-temporal-coupling] The deadline is the instant the client's call
-    /// carries, made before anything is taken: vhidd makes no limit of its own for an act,
-    /// and the wait for the devices counts against the client's.
-    private func serve(by instant: UInt64, _ reply: (Error?) -> Void, _ asked: () throws -> Act) {
+    /// carries, made before any lock is acquired: vhidd sets no timeout of its own for a
+    /// request, and the wait for the devices' lock counts against the client's.
+    private func serve(by instant: UInt64, _ reply: (Error?) -> Void, _ asked: () throws -> DeviceCommand) {
         let deadline = Deadline.at(Instant(nanoseconds: instant), on: timeline)
         do {
-            let act = try asked()
+            let command = try asked()
             let up = try readiness.devices()
-            try up.devices.act(act, by: deadline) { try admit(on: up.attempt) }
+            try up.devices.perform(command, by: deadline) { try acquireDevices(on: up.attempt) }
             reply(nil)
         } catch {
             reply(refusal(error))
         }
     }
 
-    /// This seat admitted to `attempt`'s devices and holding them, or the refusal. Run
-    /// under the devices' lock, once the act's turn has come.
-    private func admit(on attempt: Int) throws {
+    /// Makes this seat the holder of `attempt`'s devices, or throws why it cannot. Run while
+    /// the request holds the devices' lock.
+    private func acquireDevices(on attempt: Int) throws {
         try state.withLock { state in
             guard !state.ended else { throw Ended() }
             if let heldOn = state.heldOn, heldOn != attempt {
@@ -73,7 +75,7 @@ final class Seat: NSObject, HelperService, @unchecked Sendable {
                 holder.free(connection, on: heldOn)
                 throw Lost()
             }
-            try holder.claim(for: connection, by: pid, on: attempt)
+            try holder.acquire(for: connection, by: pid, on: attempt)
             state.heldOn = attempt
         }
     }
@@ -96,7 +98,7 @@ final class Seat: NSObject, HelperService, @unchecked Sendable {
         reply(released.flatMap { $0.failed ? refusal(LeftHeld(released: $0)) : nil })
     }
 
-    /// Ends this seat: no act after this is served, and the devices, if this seat holds
+    /// Ends this seat: no request after this is served, and the devices, if this seat holds
     /// them, are released and then freed for the next client. Answers how the release
     /// ended, or nil when this seat held nothing that is still there to release.
     @discardableResult
@@ -121,7 +123,7 @@ final class Seat: NSObject, HelperService, @unchecked Sendable {
         _ = up.devices.release(because: "a client was interrupted", when: { holder.holds(connection, on: heldOn) }, then: {})
     }
 
-    /// Who holds the devices, read and not claimed, or why they are not up.
+    /// Who holds the devices, read without acquiring them, or why they are not up.
     func holding(reply: @escaping (NSNumber?, Bool, Error?) -> Void) {
         do {
             let up = try readiness.devices()
@@ -138,8 +140,8 @@ final class Seat: NSObject, HelperService, @unchecked Sendable {
         reply(last?.text, last?.at)
     }
 
-    /// Where the cursor is in the session in front. Claims nothing, like `status`, and
-    /// needs no devices: a read is not an act.
+    /// Where the cursor is in the session in front. Acquires nothing, like `holding`, and
+    /// needs no devices: a read is not a device command.
     func cursor(reply: @escaping (Double, Double, Error?) -> Void) {
         do {
             let at = try screen.cursor()
@@ -149,7 +151,7 @@ final class Seat: NSObject, HelperService, @unchecked Sendable {
         }
     }
 
-    /// The display layout in the session in front, as its record. Claims nothing, like
+    /// The display layout in the session in front, as its record. Acquires nothing, like
     /// `cursor`.
     func layout(reply: @escaping ([NSNumber], Error?) -> Void) {
         do {

@@ -1,19 +1,19 @@
 import Foundation
 import Synchronization
 
-/// Which connection may act on which bring-up's devices: both of them, the keyboard and
-/// the mouse, whichever of them its verbs use. One holder for both, because a release
-/// frees both as one act (see `Devices`): two clients acting at once would each post
+/// Which connection holds which bring-up's devices: both of them, the keyboard and the
+/// mouse, whichever of them its verbs use. One holder for both, because a release frees
+/// both in one step (see `Devices`): two clients sending at once would each post
 /// reports missing the other's, and the first to leave would release the keys and buttons
 /// the other held. [LAW:types-are-the-program] Refusal is the truthful answer to a second
-/// client, and a client that wants to share can connect per act - the connection is lazy,
+/// client, and a client that wants to share can connect per request - the connection is lazy,
 /// and vhidd paid for readiness once.
 ///
 /// Bookkeeping and nothing else: it never runs or waits on a device, so its lock is held
 /// for a comparison and an assignment, and whoever asks it is answered at once. The
 /// devices own what may be held and every release of it. [LAW:decomposition]
 ///
-/// Every claim and free is judged against the bring-up it is asked about: a hold on an
+/// Every acquire and free is judged against the bring-up it is asked about: a hold on an
 /// earlier bring-up's devices is no hold, since those devices are gone.
 ///
 /// Connections are named by identifier and not held: a holder that kept the connection
@@ -26,10 +26,11 @@ final class Holder: Sendable {
 
     private let holding = Mutex<(connection: ObjectIdentifier, pid: pid_t, attempt: Int)?>(nil)
 
-    /// Claims `attempt`'s devices for `connection` when nobody holds them, or throws `Busy`
-    /// naming whose they are. Claimed by the first act and not at admission, so a
-    /// connection that only asks who holds them never holds them. [LAW:single-enforcer]
-    func claim(for connection: ObjectIdentifier, by pid: pid_t, on attempt: Int) throws(Busy) {
+    /// Acquires `attempt`'s devices for `connection` when nobody holds them, or throws
+    /// `Busy` naming whose they are. Acquired by the first request and not when the
+    /// connection is accepted, so a connection that only asks who holds them never holds
+    /// them. [LAW:single-enforcer]
+    func acquire(for connection: ObjectIdentifier, by pid: pid_t, on attempt: Int) throws(Busy) {
         try holding.withLock { (holding) throws(Busy) in
             if let holding, holding.connection != connection, holding.attempt == attempt { throw Busy(pid: holding.pid) }
             holding = (connection, pid, attempt)

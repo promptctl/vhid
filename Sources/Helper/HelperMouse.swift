@@ -1,6 +1,6 @@
 import Pointing
 
-/// The mouse as a client reaches it: the acts of `PointingDevice`, each one report vhidd
+/// The mouse as a client reaches it: the operations of `PointingDevice`, each one report vhidd
 /// posts and acknowledges. A `Count` is already inside the descriptor's range, so what
 /// crosses is its byte and nothing is checked on the way. [LAW:parse-dont-validate]
 public struct HelperMouse: PointingDevice {

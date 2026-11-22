@@ -6,7 +6,7 @@ import Foundation
 /// verb, a client's call to vhidd, a sweep tick, the release a seat's ending owes - and
 /// handed to everything below it. A lock, a condition, a poll or a kevent under it takes
 /// this and never a span of its own, so the time a request spends waiting for a thread, a
-/// lock or a turn is counted against the limit its caller gave, not started afresh after.
+/// lock or a queue is counted against the limit its caller gave, not started afresh after.
 public struct Deadline: Sendable, CustomStringConvertible {
     /// What the request was given where it entered.
     public let limit: Duration
@@ -57,7 +57,8 @@ public struct Deadline: Sendable, CustomStringConvertible {
         timeline.block(until: at, waking: wake, sleep)
     }
 
-    /// A request refused because its limit had passed before its turn came.
+    /// A request refused because its limit had passed before it could start: while it waited
+    /// for a lock, a queue or a thread.
     public var refusal: Passed { Passed(limit: limit, spent: spent) }
 
     public var description: String { "\(limit), \(left) left" }
@@ -72,7 +73,7 @@ public struct Deadline: Sendable, CustomStringConvertible {
             self.spent = spent
         }
 
-        public var description: String { "its limit of \(limit) had passed when its turn came, \(spent.milliseconds) ms after it was asked" }
+        public var description: String { "its limit of \(limit) had passed before it could start, \(spent.milliseconds) ms after it was asked" }
     }
 }
 

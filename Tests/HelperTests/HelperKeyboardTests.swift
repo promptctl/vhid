@@ -143,7 +143,7 @@ import Time
         #expect(far.service.asked == [Usage.leftShift.rawValue])
     }
 
-    /// The mouse's four acts cross the same connection as the keyboard's, each as the
+    /// The mouse's four commands cross the same connection as the keyboard's, each as the
     /// wire's own integers: a button by number, a count by its signed byte.
     @Test func theMouseRidesTheSameConnectionAsTheKeyboard() throws {
         let (helper, far) = helper(.acknowledge)
@@ -195,7 +195,7 @@ import Time
         #expect([NSXPCConnectionInvalid, NSXPCConnectionInterrupted].contains(code))
     }
 
-    /// `holding` answers who holds the devices and is no act on them: the connection has
+    /// `holding` answers who holds the devices and is no command to them: the connection has
     /// still not spoken, so a `leave` after it sends nothing. It was `status`, a pid alone,
     /// and that name is gone, so a mismatched pair fails at the lookup.
     @Test func holdingAnswersTheHolderAndLeavesTheConnectionUnspoken() throws {
@@ -206,9 +206,9 @@ import Time
         #expect(protocol_getMethodDescription(HelperService.self, NSSelectorFromString("statusWithReply:"), true, true).name == nil)
     }
 
-    /// An act carries its deadline across the wire, as the uptime instant the client stops
+    /// A command carries its deadline across the wire, as the uptime instant the client stops
     /// waiting at: when it was asked, and the reply's limit after.
-    @Test func anActCarriesTheInstantItsClientStopsWaiting() throws {
+    @Test func aCommandCarriesTheInstantItsClientStopsWaiting() throws {
         let clock = ManualClock()
         clock.advance(by: .seconds(7))
         let (helper, far) = helper(.acknowledge, replyTimeout: .milliseconds(1500), clock: clock)
@@ -216,9 +216,9 @@ import Time
         #expect(far.service.carried == [Instant(sinceBoot: .milliseconds(8500)).nanoseconds])
     }
 
-    /// vhidd saying it cannot tell whether an act reached the devices is no refusal: the
+    /// vhidd saying it cannot tell whether a command reached the devices is no refusal: the
     /// caller is told the outcome is unknown, in vhidd's words.
-    @Test func anActWhoseOutcomeVhiddCannotTellIsUnknownNotRefused() throws {
+    @Test func aCommandWhoseOutcomeVhiddCannotTellIsUnknownNotRefused() throws {
         let (helper, far) = helper(.refuse(domain: Installation.refusalDomain, code: Installation.outcomeUnknownCode))
         #expect(throws: HelperConnection.OutcomeUnknown(service: "ai.promptctl.vhid.tests.far", cause: .daemon("refused by the fake"))) { try helper.keyboard.down(.space) }
         withExtendedLifetime(far) {}
@@ -252,10 +252,10 @@ import Time
         #expect(protocol_getMethodDescription(HelperService.self, #selector(HelperService.layout(reply:)), true, true).name != nil)
     }
 
-    /// An act a service neither answers nor hangs up on ends at its deadline, rather than
+    /// A command a service neither answers nor hangs up on ends at its deadline, rather than
     /// a caller blocked for good, and its outcome is unknown: the service may have done it.
     /// [LAW:no-ambient-temporal-coupling]
-    @Test func anActAServiceNeverAnswersEndsAtTheDeadlineWithItsOutcomeUnknown() throws {
+    @Test func aCommandAServiceNeverAnswersEndsAtTheDeadlineWithItsOutcomeUnknown() throws {
         let clock = ManualClock(), ended = Latch()
         let (helper, far) = helper(.never, replyTimeout: .milliseconds(200), clock: clock)
         nonisolated(unsafe) var said: (any Error)?

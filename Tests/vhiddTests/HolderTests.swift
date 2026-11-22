@@ -11,35 +11,35 @@ import Testing
     private var first: ObjectIdentifier { ObjectIdentifier(one) }
     private var second: ObjectIdentifier { ObjectIdentifier(other) }
 
-    /// The first act claims the devices; a second client's claim is refused naming the
-    /// holder, and the holder's next claim is its own again.
-    @Test func aSecondClientsClaimIsRefusedNamingTheHolder() throws {
+    /// The first client acquires the devices; a second client is refused naming the
+    /// holder, and the holder acquiring them again keeps them its own.
+    @Test func aSecondClientIsRefusedNamingTheHolder() throws {
         let holder = Holder()
         #expect(holder.pid(on: 1) == nil)
-        try holder.claim(for: first, by: 41, on: 1)
-        let refusal = #expect(throws: Holder.Busy.self) { try holder.claim(for: second, by: 42, on: 1) }
+        try holder.acquire(for: first, by: 41, on: 1)
+        let refusal = #expect(throws: Holder.Busy.self) { try holder.acquire(for: second, by: 42, on: 1) }
         #expect(refusal?.pid == 41)
-        try holder.claim(for: first, by: 41, on: 1)
+        try holder.acquire(for: first, by: 41, on: 1)
         #expect(holder.pid(on: 1) == 41)
         #expect(holder.holds(first, on: 1))
         #expect(!holder.holds(second, on: 1))
     }
 
-    @Test func freeingFreesTheDevicesForTheNextClaim() throws {
+    @Test func freeingFreesTheDevicesForTheNextClient() throws {
         let holder = Holder()
-        try holder.claim(for: first, by: 41, on: 1)
+        try holder.acquire(for: first, by: 41, on: 1)
         holder.free(first, on: 1)
         #expect(holder.pid(on: 1) == nil)
-        try holder.claim(for: second, by: 42, on: 1)
+        try holder.acquire(for: second, by: 42, on: 1)
     }
 
     /// A refused connection never held the devices, and a connection that left no longer
     /// does: either one ending leaves the holder holding.
     @Test func freeingByOneThatDoesNotHoldThemChangesNothing() throws {
         let holder = Holder()
-        try holder.claim(for: first, by: 41, on: 1)
+        try holder.acquire(for: first, by: 41, on: 1)
         holder.free(second, on: 1)
-        let refusal = #expect(throws: Holder.Busy.self) { try holder.claim(for: second, by: 42, on: 1) }
+        let refusal = #expect(throws: Holder.Busy.self) { try holder.acquire(for: second, by: 42, on: 1) }
         #expect(refusal?.pid == 41)
     }
 
@@ -47,7 +47,7 @@ import Testing
     /// not freed by a free of the devices an earlier bring-up had.
     @Test func aFreeOfAnEarlierBringUpLeavesTheCurrentHoldAlone() throws {
         let holder = Holder()
-        try holder.claim(for: first, by: 41, on: 2)
+        try holder.acquire(for: first, by: 41, on: 2)
         holder.free(first, on: 1)
         #expect(holder.pid(on: 2) == 41)
         #expect(holder.holds(first, on: 2))
@@ -63,8 +63,8 @@ import Testing
     /// next client is not refused over them.
     @Test func aHoldOnLostDevicesDoesNotRefuseTheNextClient() throws {
         let holder = Holder()
-        try holder.claim(for: first, by: 41, on: 1)
-        try holder.claim(for: second, by: 42, on: 2)
+        try holder.acquire(for: first, by: 41, on: 1)
+        try holder.acquire(for: second, by: 42, on: 2)
         #expect(holder.pid(on: 2) == 42)
         #expect(holder.pid(on: 3) == nil)
         #expect(!holder.holds(first, on: 1))

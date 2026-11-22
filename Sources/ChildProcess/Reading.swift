@@ -8,7 +8,7 @@ import Time
 ///
 /// [LAW:no-ambient-temporal-coupling] The deadline is made here, where the reading is asked,
 /// and handed to `read`, so the wait for a thread to read on is counted against the limit
-/// too: a command whose turn comes after the limit is not started. On a serial queue of the
+/// too: a command still queued when the limit passes is not started. On a serial queue of the
 /// reading's own and not on the cooperative pool, whose few threads the MCP server's
 /// transport runs on too, nor on `DispatchQueue.global()`, whose bounded pool a busy process
 /// fills: dispatch gives a queue of its own a thread whenever it has work.

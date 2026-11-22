@@ -20,7 +20,7 @@ import Foundation
 /// **It cannot express a place on the screen either, for the same shape of reason.** The
 /// device knows deltas, and macOS accelerates them: where the pointer lands after a report
 /// is known only by reading it back. So absolute motion is the client's loop - post a
-/// delta, read the cursor back, repeat - and only deltas cross as acts. The read crosses
+/// delta, read the cursor back, repeat - and only deltas cross as commands. The read crosses
 /// too, as `HelperService.cursor`, because only the daemon can make it in the session in
 /// front when that session is not the client's.
 ///
@@ -43,11 +43,11 @@ import Foundation
 /// device has no bit or count for - button 0 and 33 upward, and -128 - and vhidd
 /// refuses those by name rather than folding them. [LAW:parse-dont-validate]
 ///
-/// **Every act carries its caller's deadline**, `by`, as nanoseconds of the Mac's uptime:
-/// the instant the client stops waiting, which means the same moment in both processes.
-/// vhidd runs the act by it and makes no limit of its own, so an act whose turn comes after
-/// its client gave up is refused with nothing sent, and a client told an act failed can
-/// rely on it never reaching the devices. [LAW:one-source-of-truth]
+/// **Every request carries its caller's deadline**, `by`, as nanoseconds of the Mac's
+/// uptime: the instant the client stops waiting, which means the same moment in both
+/// processes. vhidd serves the request by it and sets no timeout of its own, so a request
+/// still waiting for the devices' lock when its client gave up is refused with nothing
+/// sent, and a client told a request failed can rely on it never reaching the devices. [LAW:one-source-of-truth]
 @objc public protocol DeviceService {
     /// Holds `usage` down, and answers when the daemon has acknowledged the report.
     ///
@@ -84,7 +84,7 @@ import Foundation
     func scroll(vertical: Int8, horizontal: Int8, by deadline: UInt64, reply: @escaping (Error?) -> Void)
 }
 
-/// What a client is served: the device acts, and handing them back.
+/// What a client is served: the device commands, and handing the devices back.
 ///
 /// **Leaving is a call and not only a disconnection, because a disconnection is not
 /// acknowledged.** The daemon serves one client at a time and frees the devices from the
@@ -99,23 +99,23 @@ import Foundation
 /// Disconnecting without leaving still releases everything, because a client that
 /// crashes cannot leave; `leave` is how a client that can goes without racing.
 ///
-/// **The devices are claimed by the first act, not by connecting.** A connection is
-/// admitted on its signature alone, so a client that only asks `status` reaches the daemon
-/// while another client holds the devices, and takes nothing from it. A second client's
-/// first act is what is refused as busy. [LAW:single-enforcer]
+/// **The devices are acquired by the first command, not by connecting.** A connection is
+/// accepted on its signature alone, so a client that only asks `holding` reaches the
+/// daemon while another client holds the devices, and takes nothing from it. A second
+/// client's first command is what is refused as busy. [LAW:single-enforcer]
 @objc public protocol HelperService: DeviceService {
     /// Releases every key and button this client left held, and frees the devices for the
-    /// next client. Every device act after it on this connection is refused. Answered with
+    /// next client. Every device command after it on this connection is refused. Answered with
     /// the release's failure when it had one: the devices are then left held, and vhidd
     /// releases them again on its own while nobody holds them.
     func leave(reply: @escaping (Error?) -> Void)
 
     /// Who holds the devices: a pid, or nil and whether a client that went left them held
-    /// - a release that failed, which vhidd is still making. Claims nothing and sends no
-    /// report, so asking it is never an act on the devices.
+    /// - a release that failed, which vhidd is still making. Acquires nothing and sends no
+    /// report, so asking it is never a command to the devices.
     ///
     /// The answer is also the proof the devices are up: while they are down, this is
-    /// refused with the reason, as every act is. It was `status(reply:)`, a pid alone,
+    /// refused with the reason, as every command is. It was `status(reply:)`, a pid alone,
     /// renamed for the reason `layout` was.
     func holding(reply: @escaping (NSNumber?, Bool, Error?) -> Void)
 

@@ -6,11 +6,11 @@ import Foundation
 ///
 /// A daemon that cannot bring the devices up used to exit, and launchd started it again,
 /// so the reason lived only in a log nobody reading a client's error would think to look
-/// in. Now the reason is the answer every act gets from a listener that is already up.
+/// in. Now the reason is the answer every request gets from a listener that is already up.
 /// [LAW:no-silent-failure]
 ///
 /// [LAW:parse-dont-validate] `devices()` is the one crossing: it hands back devices that
-/// are up or throws why not, so a seat asks before it claims the holder, and a client
+/// are up or throws why not, so a seat asks before it acquires the devices, and a client
 /// turned away while the devices are down holds nothing.
 final class Readiness: @unchecked Sendable {
     /// Why the devices are not up, as the bring-up loop tells it.
@@ -29,7 +29,7 @@ final class Readiness: @unchecked Sendable {
         }
     }
 
-    /// What a client whose act is refused is told: why the devices are not up, and the
+    /// What a client whose request is refused is told: why the devices are not up, and the
     /// driver extension as it read for this refusal, or why it could not be read.
     ///
     /// pqrs's status says only "not activated" for an extension awaiting approval, one
@@ -55,7 +55,7 @@ final class Readiness: @unchecked Sendable {
         }
     }
 
-    /// [LAW:types-are-the-program] Down carries why and up carries the devices: an act is
+    /// [LAW:types-are-the-program] Down carries why and up carries the devices: a request is
     /// either refused with a reason or served.
     private enum State {
         case down(Down)
@@ -98,7 +98,7 @@ final class Readiness: @unchecked Sendable {
     }
 
     /// The devices, or the refusal a client is told. The driver is read outside the lock,
-    /// so one client's refusal holds up nobody else's act.
+    /// so one client's refusal holds up nobody else's request.
     func devices() throws -> Up {
         switch current {
         case .down(let why): throw Refused(why: why, driver: Result { try driver() })
@@ -138,7 +138,7 @@ final class Readiness: @unchecked Sendable {
         state = .down(.failed(error))
     }
 
-    /// Serves `devices` from the next act on, unless the current attempt's connection was
+    /// Serves `devices` from the next request on, unless the current attempt's connection was
     /// lost before they were handed over, in which case they stay down on that loss.
     func up(_ devices: any ServedDevices) {
         condition.lock(); defer { condition.unlock() }

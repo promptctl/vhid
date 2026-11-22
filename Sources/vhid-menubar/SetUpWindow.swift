@@ -180,7 +180,7 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
     private func request(_ ask: Requirement.Ask, for requirement: Requirement) {
         failure = nil
         let log = log, timeline = timeline
-        // The limit is counted from the press, so a request whose turn comes late is not made.
+        // The limit is counted from the press, so a request still queued when it passes is not made.
         let deadline = Deadline.within(Command.limit, on: timeline)
         requests.async {
             let started = Result { try Self.perform(ask, by: deadline, log: log) }

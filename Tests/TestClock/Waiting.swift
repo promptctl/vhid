@@ -34,19 +34,22 @@ public final class Latch: Sendable {
     }
 }
 
-/// Two latches in a row, for a fake that stands at a step: the code under test says it has
-/// reached the step, and waits there until the test lets it go.
-public final class Handshake: Sendable {
-    public let reached = Latch()
-    public let released = Latch()
+/// A gate the code under test blocks at until the test opens it, as a latch is a gate in
+/// Goetz's *Java Concurrency in Practice*; `arrived` opens as it gets there, so the test
+/// knows it is blocked before it moves on.
+public final class Gate: Sendable {
+    public let arrived = Latch()
+    private let opened = Latch()
 
     public init() {}
 
-    /// Called by the code under test at the step.
+    /// Called by the code under test at the gate: blocks until the test opens it.
     public func arrive() {
-        reached.open()
-        released.wait("the test to let the step go")
+        arrived.open()
+        opened.wait("the test to open the gate")
     }
+
+    public func open() { opened.open() }
 }
 
 /// A value under a lock, changed by the code under test and waited on by the test until it

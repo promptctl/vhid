@@ -17,7 +17,7 @@ extension Readiness {
     }
 }
 
-/// Devices that record every act they admit and every release they owe, in one log a test
+/// Devices that record every command they perform and every release they owe, in one log a test
 /// can wait on. Every release ends as `releasing` says: done, or left held.
 final class RecordingDevices: ServedDevices, @unchecked Sendable {
     private let log = Watched<[String]>([])
@@ -38,10 +38,10 @@ final class RecordingDevices: ServedDevices, @unchecked Sendable {
         log.wait("the devices to have done \(expected)", until: { $0 == expected }, sourceLocation: sourceLocation)
     }
 
-    func act(_ act: Act, by deadline: Deadline, admitting admit: () throws -> Void) throws {
+    func perform(_ command: DeviceCommand, by deadline: Deadline, acquiring acquire: () throws -> Void) throws {
         try log.withLock { log in
-            try admit()
-            log.append(Self.said(act))
+            try acquire()
+            log.append(Self.said(command))
         }
     }
 
@@ -57,8 +57,8 @@ final class RecordingDevices: ServedDevices, @unchecked Sendable {
 
     func sweep(holding: () -> pid_t?) -> Swept? { nil }
 
-    private static func said(_ act: Act) -> String {
-        switch act {
+    private static func said(_ command: DeviceCommand) -> String {
+        switch command {
         case .down(let usage): "down \(usage.rawValue)"
         case .releaseKeys: "release keys"
         case .hold(let keys): "hold \(keys.usages.map(\.rawValue).sorted())"

@@ -221,7 +221,7 @@ private final class Link: @unchecked Sendable {
     private let guarded = NSCondition()
     private var nextRequestID: UInt64 = 1
 
-    /// How far a request has got: waiting its turn, being written, written, or answered,
+    /// How far a request has got: queued, being written, written, or answered,
     /// and when. [LAW:one-source-of-truth] One table rather than a set of the asked and a
     /// set of the answered: an id is here while its asker waits on it and nowhere once it
     /// does not, which is also what keeps a request whose asker has gone from being written.
@@ -286,7 +286,7 @@ private final class Link: @unchecked Sendable {
     /// says how far the request got.
     ///
     /// A deadline that has passed before the request is queued writes nothing, and one that
-    /// passes while it waits its turn takes it out of the queue: the writer takes a request
+    /// passes while it is queued takes it out of the queue: the writer takes a request
     /// only while its asker still waits on it and its deadline has not passed, under the
     /// lock the asker decides under, so a request said to be unsent is never written.
     func ask(_ body: [UInt8], by deadline: Deadline) throws(Unanswered) -> Instant {
@@ -392,8 +392,8 @@ private final class Link: @unchecked Sendable {
     }
 
     /// The next frame to write, or nil once the connection has ended. A request is taken
-    /// only while its asker waits on it and before its deadline: one whose turn came late
-    /// is left unsent, then and for good.
+    /// only while its asker waits on it and before its deadline: one dequeued too late is
+    /// left unsent, then and for good.
     private func nextToWrite() -> Outgoing? {
         guarded.lock(); defer { guarded.unlock() }
         while true {

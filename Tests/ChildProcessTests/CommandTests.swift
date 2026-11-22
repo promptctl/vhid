@@ -10,7 +10,7 @@ import Time
 /// back. The payload is deliberately past the ~64KB a kernel pipe buffer holds, because
 /// that is the only size at which an unread child blocks in `write(2)` and the reading
 /// order can matter at all. [LAW:behavior-not-structure] - nothing here knows how the
-/// streams are drained, only that a stream never has to wait its turn.
+/// streams are drained, only that no stream is left to be read after another.
 ///
 /// Every limit is on a test clock, which moves only when a test moves it: a command the
 /// test does not give up on is never given up on however slowly the Mac runs it, and one it
@@ -136,7 +136,7 @@ import Time
         #expect(overran.limit == .seconds(3))
     }
 
-    /// A command whose reading's limit has passed before its turn is not started, and says
+    /// A command whose reading's limit has passed before it could start is not started, and says
     /// so with the limit and how long the reading had run.
     @Test func aCommandWhoseLimitHasPassedIsNeverStarted() throws {
         let marker = FileManager.default.temporaryDirectory.appending(path: "vhid-started-\(UUID().uuidString)")
@@ -198,17 +198,17 @@ import Time
     }
 
     /// A reading's limit counts the wait for a thread to read on: one whose queue was held
-    /// past its limit starts no command when its turn comes.
-    @Test func aReadingWhoseTurnComesPastItsLimitStartsNothing() async throws {
-        let clock = ManualClock(), queue = DispatchQueue(label: "CommandTests.held"), held = Handshake()
+    /// past its limit starts no command once the queue runs it.
+    @Test func aReadingDequeuedPastItsLimitStartsNothing() async throws {
+        let clock = ManualClock(), queue = DispatchQueue(label: "CommandTests.held"), held = Gate()
         queue.async { held.arrive() }
-        held.reached.wait()
+        held.arrived.wait()
         let deadline = Deadline.within(.seconds(1), on: clock.timeline)
         let read = Task {
             try await reading(by: deadline, on: queue) { deadline, stop in Result { try Command("/usr/bin/true").run(by: deadline, or: stop) } }
         }
         clock.advance(by: .seconds(1))
-        held.released.open()
+        held.open()
         await #expect(throws: Command.Unstarted.self) { try await read.value.get() }
     }
 }

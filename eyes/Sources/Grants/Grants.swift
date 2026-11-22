@@ -187,7 +187,7 @@ public struct GrantReading: Sendable, Equatable {
     /// credits it to the same responsible app and it queries tccd anew.
     ///
     /// - Parameter limit: past this, counted from the call, the child is stuck and is killed,
-    ///   or not started when the limit passed before its turn. A read takes milliseconds; a
+    ///   or not started when the limit passed before it could start. A read takes milliseconds; a
     ///   new binary's first launch is checked by macOS first.
     /// One event per child, however its gates end: how long the child took and why it failed,
     /// apart from how long any gate waited on it. [LAW:nothing-unseen]

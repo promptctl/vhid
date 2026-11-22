@@ -157,7 +157,7 @@ import VirtualHID
 
     /// A daemon started for devices that will not come up is stopped before each wait, and
     /// not started again until the whole wait has passed: one spawn per backoff window.
-    /// Every failure is told to readiness as the reason acts are refused.
+    /// Every failure is told to readiness as the reason requests are refused.
     @Test func eachFailedAttemptStopsTheDaemonItStartedAndWaitsOutTheBackoff() {
         let world = World(connections: [.failure(.noSocket(path: "nowhere"))])
         var events: [String] = []

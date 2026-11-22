@@ -146,21 +146,21 @@ public extension Installation {
 
     /// The code a refusal crosses under when the devices are not up, so a client reads that
     /// by its code and not its words. A refusal with no code of its own is code 1: the
-    /// daemon knows what happened, and for an act that is that nothing was sent.
+    /// daemon knows what happened, and for a command that is that nothing was sent.
     static let devicesDownCode = 2
 
-    /// The code a refusal crosses under when this connection's seat turned the act away
+    /// The code a refusal crosses under when this connection's seat turned the command away
     /// before it reached the devices: another client holds them, this connection already
     /// handed them back, or the devices it held were lost and everything released.
     static let seatRefusedCode = 3
 
-    /// The code an act's failure crosses under when the daemon cannot say whether it
+    /// The code a command's failure crosses under when the daemon cannot say whether it
     /// reached the devices: its report may have reached the driver, which did not answer.
     /// [LAW:types-are-the-program] A client tells "failed" from "unknown" by this, never
     /// by the words.
     static let outcomeUnknownCode = 4
 
-    /// Whether a refusal says the act never reached the devices, so nothing is held for
+    /// Whether a refusal says the command never reached the devices, so nothing is held for
     /// the connection it refused: the devices are down, or the seat turned it away.
     /// [LAW:single-enforcer] The one reading of the codes a client makes this decision by.
     public static func turnedAway(domain: String, code: Int) -> Bool {

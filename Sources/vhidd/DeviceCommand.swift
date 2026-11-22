@@ -1,15 +1,15 @@
 import Keystrokes
 import Pointing
 
-/// One act a client asks of the devices, in the devices' own values.
+/// One command a client asks of the devices, in the devices' own values.
 ///
 /// [LAW:parse-dont-validate] The wire is wider than the device on every count - a usage
 /// outside the keyboard page's keys names no key, button 0 and 33 upward have no bit, and
 /// -128 is below the descriptor's minimum, and more keys than a report carries are no
-/// report. A seat makes its act here, before it takes any lock or claims the devices, so a
-/// value the device cannot carry is refused by name with nothing claimed, and nothing past
-/// this point checks a value again.
-enum Act: Equatable {
+/// report. A seat parses its command here, before it acquires any lock or the devices, so a
+/// value the device cannot carry is refused by name with nothing acquired, and nothing
+/// past this point checks a value again.
+enum DeviceCommand: Equatable {
     case down(Usage)
     case releaseKeys
     case hold(HeldKeys)
@@ -19,22 +19,22 @@ enum Act: Equatable {
     case move(Move)
     case scroll(Scroll)
 
-    static func down(usage: UInt16) throws -> Act { .down(try key(usage)) }
+    static func down(usage: UInt16) throws -> DeviceCommand { .down(try key(usage)) }
 
     /// A usage named twice on the wire is one key held; more than a report carries is
     /// refused by `HeldKeys`, by name. [LAW:single-enforcer]
-    static func hold(usages: [UInt16]) throws -> Act { .hold(try HeldKeys(Set(usages.map(key)))) }
+    static func hold(usages: [UInt16]) throws -> DeviceCommand { .hold(try HeldKeys(Set(usages.map(key)))) }
 
-    static func buttonDown(_ number: UInt8) throws -> Act {
+    static func buttonDown(_ number: UInt8) throws -> DeviceCommand {
         guard let button = Button(rawValue: number) else { throw NotOnTheDevice.button(number) }
         return .buttonDown(button)
     }
 
-    static func holdButtons(_ field: UInt32) -> Act { .holdButtons(Button.buttons(in: field)) }
+    static func holdButtons(_ field: UInt32) -> DeviceCommand { .holdButtons(Button.buttons(in: field)) }
 
-    static func move(x: Int8, y: Int8) throws -> Act { .move(Move(x: try count(x), y: try count(y))) }
+    static func move(x: Int8, y: Int8) throws -> DeviceCommand { .move(Move(x: try count(x), y: try count(y))) }
 
-    static func scroll(vertical: Int8, horizontal: Int8) throws -> Act {
+    static func scroll(vertical: Int8, horizontal: Int8) throws -> DeviceCommand {
         .scroll(Scroll(vertical: try count(vertical), horizontal: try count(horizontal)))
     }
 
