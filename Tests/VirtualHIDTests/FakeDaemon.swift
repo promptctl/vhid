@@ -1,4 +1,6 @@
 import Foundation
+import OwnThread
+import TestClock
 import Testing
 @testable import VirtualHID
 
@@ -11,15 +13,20 @@ import Testing
 /// with whatever the code under test believed. Everything below the wire is real: the
 /// client's own poll loop, its deadline, its request/response matching, its answers to
 /// what the daemon pushes. What is fake is only who is on the other end.
+///
+/// The connection's clock is the fake's, and it stands still unless the fake moves it: an
+/// answered request is answered in no time, and an unanswered one misses only when the
+/// fake says so, by `withhold`. No limit is ever raced. [LAW:no-ambient-temporal-coupling]
 final class FakeDaemon: @unchecked Sendable {
     /// The descriptor to hand `DaemonConnection`, which is why that seam exists.
     let clientDescriptor: Int32
+    let clock = HandClock()
 
     private let descriptor: Int32
     private let lock = NSLock()
-    private var log: [Frame] = []
     private var pushID: UInt64 = 10_000
-    private var clientGone = false
+    /// Every frame the client has sent, and whether it has hung up.
+    private let log = Gate<(frames: [Frame], clientGone: Bool)>(([], false))
 
     /// `handling` runs on the daemon's own thread for every frame the client sends. The
     /// default answers each request with an empty response, which is what the daemon does
@@ -44,10 +51,10 @@ final class FakeDaemon: @unchecked Sendable {
             while true {
                 do {
                     let frame = try readFrame()
-                    lock.lock(); log.append(frame); lock.unlock()
+                    log.update { $0.frames.append(frame) }
                     try answer(frame, self)
                 } catch is Closed {
-                    lock.lock(); clientGone = true; lock.unlock()
+                    log.update { $0.clientGone = true }
                     break
                 } catch {
                     // The framing is what this suite exists to check, so a frame this
@@ -67,6 +74,25 @@ final class FakeDaemon: @unchecked Sendable {
         close(descriptor)
     }
 
+    /// A connection over this fake's socket, on its clock.
+    func connection(
+        heartbeatEvery interval: Duration = DaemonConnection.heartbeatInterval,
+        patience: Duration = DaemonConnection.patience,
+        drain: Duration = DaemonConnection.patience,
+        whenLost: @escaping @Sendable (DaemonError) -> Void = { _ in }
+    ) throws -> DaemonConnection {
+        try DaemonConnection(fileDescriptor: clientDescriptor, heartbeatEvery: interval, patience: patience, drain: drain, now: { [clock] in clock.now }, whenLost: whenLost)
+    }
+
+    /// Leaves the request in hand unanswered: the clock moves past `limit`, the one it was
+    /// given, and a heartbeat wakes the client to see it has missed. The client takes the
+    /// deadline before it writes the request, so a fake that has the request has the
+    /// deadline behind it.
+    func withhold(past limit: Duration = DaemonConnection.reportLimit) throws {
+        clock.advance(limit)
+        try send(.control(.heartbeat, payload: []))
+    }
+
     /// The daemon hangs up, as the real one does on a client silent for fifteen seconds,
     /// or when it exits. The client sees the end of the stream at once.
     func hangUp() {
@@ -74,34 +100,20 @@ final class FakeDaemon: @unchecked Sendable {
     }
 
     /// Every frame the client has sent, in order.
-    var received: [Frame] {
-        lock.lock(); defer { lock.unlock() }
-        return log
-    }
+    var received: [Frame] { log.now.frames }
 
     /// Waits for a frame the client sends without waiting on anything itself - its answer
     /// to a health check, say. Every other frame is logged before the response the client
     /// is blocked on, so only these need waiting for; asserting on them straight after the
     /// call under test returns is a race, and one that passes most of the time.
-    func awaitFrame(_ wanted: Frame, within limit: Duration = .seconds(2)) -> Bool {
-        let deadline = ContinuousClock.now + limit
-        while ContinuousClock.now < deadline {
-            if received.contains(wanted) { return true }
-            Thread.sleep(forTimeInterval: 0.002)
-        }
-        return received.contains(wanted)
+    func awaitFrame(_ wanted: Frame) throws(Hung) {
+        try log.wait(for: "the client to send \(wanted)") { $0.frames.contains(wanted) ? () : nil }
     }
 
-    /// Whether the client ended the stream within `limit`, which is what tells the real
-    /// daemon to take down the devices it kept for that client.
-    func awaitClientHangUp(within limit: Duration = .seconds(2)) -> Bool {
-        let deadline = ContinuousClock.now + limit
-        repeat {
-            lock.lock(); let gone = clientGone; lock.unlock()
-            if gone { return true }
-            Thread.sleep(forTimeInterval: 0.002)
-        } while ContinuousClock.now < deadline
-        return false
+    /// Waits for the client to end the stream, which is what tells the real daemon to take
+    /// down the devices it kept for that client.
+    func awaitClientHangUp() throws(Hung) {
+        try log.wait(for: "the client to hang up") { $0.clientGone ? () : nil }
     }
 
     /// The payload of each request the client sent, which is where the version, the

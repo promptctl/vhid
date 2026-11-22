@@ -15,8 +15,8 @@ import Testing
     }
 }
 
-private func mouse(on fake: FakeDaemon, reportTimeout: Duration = .seconds(2)) throws -> VirtualPointing {
-    VirtualPointing(daemon: try DaemonConnection(fileDescriptor: fake.clientDescriptor), reportTimeout: reportTimeout)
+private func mouse(on fake: FakeDaemon) throws -> VirtualPointing {
+    VirtualPointing(daemon: try fake.connection())
 }
 
 /// The pointing reports the device actually put on the wire, in order.
@@ -24,7 +24,7 @@ private func pointingReports(_ fake: FakeDaemon) -> [[UInt8]] {
     fake.requestPayloads.map(requestSent).filter { $0.request == DaemonConnection.Request.postPointingInputReport.rawValue }.map(\.bytes)
 }
 
-@Suite(.ownThread) struct PointingStartupTests {
+@Suite(.ownThread, .timeLimit(.minutes(1))) struct PointingStartupTests {
     /// `pointing_initialize` carries nothing after the request byte, and the wait is for
     /// the pointing device's own readiness: a daemon whose keyboard is ready has said
     /// nothing about its mouse.
@@ -35,20 +35,30 @@ private func pointingReports(_ fake: FakeDaemon) -> [[UInt8]] {
         #expect(sent.version == 7)
         #expect(sent.request == DaemonConnection.Request.pointingInitialize.rawValue)
         #expect(sent.bytes.isEmpty)
-        #expect(startup.ready < .seconds(2))
+        // The fake's clock stands still, so a startup that waited on nothing but the
+        // daemon's word took none of it.
+        #expect(startup == Startup(answered: .zero, ready: .zero))
     }
 
+    /// The limit passes once the client has answered the push, so the keyboard's
+    /// readiness is what it had heard.
     @Test func aKeyboardThatIsReadyIsNotAMouseThatIsReady() {
         let fake = FakeDaemon { frame, fake in
-            guard case .request(let id, _) = frame else { return }
-            try fake.send(.response(id: id, payload: []))
-            try fake.push([(.keyboardReady, true)])
+            switch frame {
+            case .request(let id, _):
+                try fake.send(.response(id: id, payload: []))
+                try fake.push([(.keyboardReady, true)])
+            case .response(10_001, _):
+                try fake.withhold(past: .seconds(2))
+            default:
+                break
+            }
         }
-        #expect(throws: DaemonError.notReady(awaiting: .pointingReady, said: [.keyboardReady: true])) { try mouse(on: fake).start(within: .milliseconds(200)) }
+        #expect(throws: DaemonError.notReady(awaiting: .pointingReady, said: [.keyboardReady: true])) { try mouse(on: fake).start(within: .seconds(2)) }
     }
 }
 
-@Suite(.ownThread) struct ButtonsDownTests {
+@Suite(.ownThread, .timeLimit(.minutes(1))) struct ButtonsDownTests {
     /// The 8 bytes of one report, placed by hand: the one place the layout is stated
     /// independently of the code that produces it. [LAW:one-source-of-truth]
     @Test func aReportIsEightBytesLaidOutTheWayTheDriverReadsThem() {
@@ -115,10 +125,10 @@ private func pointingReports(_ fake: FakeDaemon) -> [[UInt8]] {
             let sent = requestSent(payload)
             let releasing = sent.request == DaemonConnection.Request.pointingReset.rawValue
                 || (sent.request == DaemonConnection.Request.postPointingInputReport.rawValue && sent.bytes.allSatisfy { $0 == 0 })
-            guard !releasing else { return }
+            guard !releasing else { return try fake.withhold() }
             try fake.send(.response(id: id, payload: []))
         }
-        let device = try mouse(on: fake, reportTimeout: .milliseconds(200))
+        let device = try mouse(on: fake)
         try device.down(.right)
         #expect(throws: DaemonError.silent) { try device.releaseAll() }
         #expect(device.buttonsDown == [.right])
@@ -127,8 +137,10 @@ private func pointingReports(_ fake: FakeDaemon) -> [[UInt8]] {
     }
 
     @Test func aButtonIsRecordedDownEvenWhenItsReportFails() throws {
-        let fake = FakeDaemon { _, _ in }
-        let device = try mouse(on: fake, reportTimeout: .milliseconds(200))
+        let fake = FakeDaemon { frame, fake in
+            if case .request = frame { try fake.withhold() }
+        }
+        let device = try mouse(on: fake)
         #expect(throws: DaemonError.silent) { try device.down(.middle) }
         #expect(device.buttonsDown == [.middle])
     }

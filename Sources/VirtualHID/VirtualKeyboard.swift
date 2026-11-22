@@ -58,7 +58,6 @@ public final class VirtualKeyboard: KeyPress {
     ].flatMap { (value: UInt64) in (0..<8).map { UInt8(truncatingIfNeeded: value >> (8 * $0)) } }
 
     private let daemon: DaemonConnection
-    private let reportTimeout: Duration
     /// What the device is holding, and whether the driver acknowledged exactly that.
     ///
     /// `keysDown` may say a key is held that is not, for the reason `post` gives, so alone
@@ -86,14 +85,13 @@ public final class VirtualKeyboard: KeyPress {
     /// that throws the same failure, so a caller that presses keys and stops can leave the
     /// default; a process holding the device open across silences is the one that needs to
     /// hear, because nothing it does in between would tell it.
-    public convenience init(reportTimeout: Duration = .seconds(2), whenLost: @escaping @Sendable (DaemonError) -> Void = { _ in }) throws {
-        self.init(daemon: try DaemonConnection(whenLost: whenLost), reportTimeout: reportTimeout)
+    public convenience init(whenLost: @escaping @Sendable (DaemonError) -> Void = { _ in }) throws {
+        self.init(daemon: try DaemonConnection(whenLost: whenLost))
     }
 
     /// Over a connection the mouse may share, for the reason `VirtualPointing` gives.
-    public init(daemon: DaemonConnection, reportTimeout: Duration = .seconds(2)) {
+    public init(daemon: DaemonConnection) {
         self.daemon = daemon
-        self.reportTimeout = reportTimeout
     }
 
     /// Brings the device up and waits for the daemon's word that it is ready, in at most
@@ -148,7 +146,7 @@ public final class VirtualKeyboard: KeyPress {
     public func reset() throws {
         try held.withLock { held in
             held.settled = false
-            try daemon.request(.keyboardReset, by: .now + reportTimeout)
+            try daemon.request(.keyboardReset, within: DaemonConnection.reportLimit)
             held = Held(keysDown: [], settled: true)
         }
     }
@@ -179,7 +177,7 @@ public final class VirtualKeyboard: KeyPress {
         let report = try KeyboardReport(held: next)
         held.keysDown.formUnion(next)
         held.settled = false
-        try daemon.request(.postKeyboardInputReport, report.bytes, by: .now + reportTimeout)
+        try daemon.request(.postKeyboardInputReport, report.bytes, within: DaemonConnection.reportLimit)
         held = Held(keysDown: next, settled: true)
     }
 }

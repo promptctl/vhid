@@ -38,7 +38,6 @@ struct PointingReport {
 /// **The calling process must be root**, for the reason `DaemonConnection` gives.
 public final class VirtualPointing: PointingDevice {
     private let daemon: DaemonConnection
-    private let reportTimeout: Duration
     /// The buttons the device is holding, under the lock its reports are posted under, for
     /// the reason `VirtualKeyboard` gives.
     private let held = Mutex<Set<Button>>([])
@@ -48,9 +47,8 @@ public final class VirtualPointing: PointingDevice {
     /// Over a connection the keyboard may share: pqrs's daemon keeps one keyboard and one
     /// pointing device per client connection, so the two devices of one client ride one
     /// socket, and the daemon's `erase_client` takes both when it closes.
-    public init(daemon: DaemonConnection, reportTimeout: Duration = .seconds(2)) {
+    public init(daemon: DaemonConnection) {
         self.daemon = daemon
-        self.reportTimeout = reportTimeout
     }
 
     /// Brings the device up and waits for the daemon's word that it is ready, in at most
@@ -95,7 +93,7 @@ public final class VirtualPointing: PointingDevice {
     /// before, for the reason `post` gives.
     public func reset() throws {
         try held.withLock { buttonsDown in
-            try daemon.request(.pointingReset, by: .now + reportTimeout)
+            try daemon.request(.pointingReset, within: DaemonConnection.reportLimit)
             buttonsDown.removeAll()
         }
     }
@@ -112,7 +110,7 @@ public final class VirtualPointing: PointingDevice {
             let next = change(buttonsDown)
             let report = PointingReport(held: next, move: move, scroll: scroll)
             buttonsDown.formUnion(next)
-            try daemon.request(.postPointingInputReport, report.bytes, by: .now + reportTimeout)
+            try daemon.request(.postPointingInputReport, report.bytes, within: DaemonConnection.reportLimit)
             buttonsDown = next
         }
     }
