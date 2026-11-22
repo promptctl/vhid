@@ -176,6 +176,10 @@ import VirtualHID
     /// stopped, and after a wait they are reached and served again - the process never
     /// ends over it. Devices lost as soon as they came up count as failures, so the wait
     /// grows rather than restarting the daemon every two seconds.
+    ///
+    /// Lost at the line that says the devices are served, which is said once they are
+    /// handed over and before the loop waits on them: lost while up, at a point the loop
+    /// names rather than a moment later on another thread.
     @Test func lostDevicesAreStoppedAndBroughtUpAgain() {
         let world = World(connections: [.failure(.noSocket(path: "nowhere")), .success(Device())])
         let readiness = Readiness(driver: { .running })
@@ -183,11 +187,11 @@ import VirtualHID
         var downWhileWaiting: [Bool] = []
         var waits: [Duration] = []
         let clock = HandClock()
+        var lostWhenServing = world.effects
+        lostWhenServing.say = { if $0 == .happened("serving") { world.lost!(.closed) } }
         #expect(throws: Stop.self) {
-            try world.effects.keepUp(within: .seconds(1), backoff: Backoff(first: .seconds(2), most: .seconds(60)), lookingEvery: .seconds(60), readiness: readiness, serve: { _ in
+            try lostWhenServing.keepUp(within: .seconds(1), backoff: Backoff(first: .seconds(2), most: .seconds(60)), lookingEvery: .seconds(60), readiness: readiness, serve: { _ in
                 served += 1
-                let lose = world.lost!
-                DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(20)) { lose(.closed) }
                 return RecordingDevices()
             }, driver: { nil }, now: { clock.now }) { wait in
                 clock.advance(wait)

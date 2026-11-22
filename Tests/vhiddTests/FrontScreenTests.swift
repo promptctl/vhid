@@ -7,7 +7,7 @@ import Testing
 
 /// The screen is read by a child in the session in front, and a session that comes to the
 /// front gets a child of its own. [LAW:behavior-not-structure]
-@Suite(.ownThread) struct FrontScreenTests {
+@Suite(.ownThread, .timeLimit(.minutes(1))) struct FrontScreenTests {
 
     private final class Reader: FrontScreen.Reader {
         let session: FrontScreen.Session
@@ -162,13 +162,12 @@ import Testing
         #expect(throws: ChildReader.AnotherBuild.self) { try child("echo joined; while read _; do echo '12.5 40'; done") }
     }
 
+    /// The child sleeps for an hour, so the refusal is the give-up and not its ending, and
+    /// returning at all means it was reaped: `stop` waits for it.
     @Test func aChildThatNeverSaysItJoinedIsGivenUpOnAndEnded() {
-        let began = ContinuousClock.now
         #expect {
-            try child("trap '' TERM; sleep 30", joinWithin: .milliseconds(300))
+            try child("trap '' TERM; exec sleep 3600", joinWithin: .milliseconds(300))
         } throws: { "\($0)".contains("did not say it joined within 0.3 seconds") }
-        // Returning at all means the child was reaped: `stop` waits for it.
-        #expect(began.duration(to: .now) < .seconds(2))
     }
 
     @Test func aChildThatHasEndedFailsTheReadAndNotTheDaemon() throws {
@@ -193,20 +192,17 @@ import Testing
     }
 
     /// Stopping returns only once the child is reaped, even one that ignores SIGTERM and
-    /// never reads its stdin.
+    /// never reads its stdin: it sleeps for an hour, so a stop that returns ended it.
     @Test func stoppingEndsEvenAChildThatWillNotListen() throws {
-        let reader = try child("trap '' TERM; exec 0<&-; echo joined c0de; sleep 30")
-        let began = ContinuousClock.now
+        let reader = try child("trap '' TERM; exec 0<&-; echo joined c0de; exec sleep 3600")
         reader.stop()
-        #expect(began.duration(to: .now) < .seconds(2))
     }
 
+    /// The child never answers, so the refusal is the give-up at the patience it names.
     @Test func aChildThatDoesNotAnswerIsGivenUpOnInTime() throws {
-        let reader = try child("echo joined c0de; sleep 30", patience: .milliseconds(300))
+        let reader = try child("echo joined c0de; exec sleep 3600", patience: .milliseconds(300))
         defer { reader.stop() }
-        let began = ContinuousClock.now
         #expect { try reader.cursor() } throws: { "\($0)".contains("did not answer within 0.3 seconds") }
-        #expect(began.duration(to: .now) < .seconds(2))
     }
 
     @Test func theReaderFlagIsReadOnlyWithASession() {

@@ -56,7 +56,7 @@ import Testing
         connection.resume()
         let proxy = try #require(connection.remoteObjectProxyWithErrorHandler { _ in } as? HelperService)
         proxy.releaseAll { _ in }
-        let token = try #require(reader.await())
+        let token = try reader.await()
         let identity = try CallerIdentity(requirement: try OwnProcess.requirement())
         try identity.check(auditToken: token)
         connection.invalidate()
@@ -65,20 +65,15 @@ import Testing
 }
 
 /// A listener delegate that keeps the token of whoever connects and admits nobody.
-private final class TokenReader: NSObject, NSXPCListenerDelegate, @unchecked Sendable {
-    private let arrived = DispatchSemaphore(value: 0)
-    private let lock = NSLock()
-    private var token: audit_token_t?
+private final class TokenReader: NSObject, NSXPCListenerDelegate, Sendable {
+    private let token = Gate<audit_token_t?>(nil)
 
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
-        lock.lock(); token = connection.callerAuditToken; lock.unlock()
-        arrived.signal()
+        token.update { $0 = connection.callerAuditToken }
         return false
     }
 
-    func await() -> audit_token_t? {
-        guard arrived.wait(timeout: .now() + .seconds(2)) == .success else { return nil }
-        lock.lock(); defer { lock.unlock() }
-        return token
+    func await() throws(Hung) -> audit_token_t {
+        try token.wait(for: "a caller to connect") { $0 }
     }
 }

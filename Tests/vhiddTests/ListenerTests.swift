@@ -17,18 +17,14 @@ import Testing
     private final class FakeDevices: NSObject, ServedDevices, @unchecked Sendable {
         private let lock = NSLock()
         private var usages: [UInt16] = []
-        private var reasons: [String] = []
-        private let released = DispatchSemaphore(value: 0)
+        private let reasons = Gate<[String]>([])
 
         var asked: [UInt16] {
             lock.lock(); defer { lock.unlock() }
             return usages
         }
 
-        var releasedBecause: [String] {
-            lock.lock(); defer { lock.unlock() }
-            return reasons
-        }
+        var releasedBecause: [String] { reasons.now }
 
         func down(usage: UInt16, reply: @escaping (Error?) -> Void) {
             lock.lock(); usages.append(usage); lock.unlock()
@@ -45,15 +41,12 @@ import Testing
 
         func releaseKeysHeldPastLimit() -> KeysLetGo? { nil }
         func releaseEverything(because reason: String) {
-            lock.lock(); reasons.append(reason); lock.unlock()
-            released.signal()
+            reasons.update { $0.append(reason) }
         }
 
-        /// Blocks until the release or ten seconds. Ten because the bound only ends a hang:
-        /// at two, CI missed the release on both attempts of run 36336822361
-        /// (vhid-ci-flake-80e).
-        func awaitRelease() -> Bool {
-            released.wait(timeout: .now() + .seconds(10)) == .success
+        /// Why the devices were first released, once they have been.
+        func awaitRelease() throws(Hung) -> String {
+            try reasons.wait(for: "the devices to be released") { $0.first }
         }
     }
 
@@ -106,40 +99,23 @@ import Testing
     }
 
     /// The first client going away releases everything, and the devices are then another
-    /// client's. The release comes before the devices are let go, and the test can see
-    /// only the first of the two, so the next client's admission is asked for, a beat apart,
-    /// until it comes or ten seconds have passed - each ask itself bounded by the client's
-    /// own reply timeout.
-    @Test func aClientGoingAwayReleasesEverythingAndFreesTheDevices() async throws {
+    /// client's. The release runs under the holder's lock and the devices are let go
+    /// before that lock is, so a client that asks once the release is seen waits on the
+    /// lock and is admitted on its first try.
+    @Test func aClientGoingAwayReleasesEverythingAndFreesTheDevices() throws {
         let served = try serve()
         let first = client(of: served)
         let keyboard = first.helper.keyboard
         try keyboard.down(.leftShift)
-        let left = ContinuousClock.now
         first.connection.invalidate()
-        let released = served.devices.awaitRelease()
-        // How long the release took and why, printed whether or not it passes: on CI this
-        // test has run for six seconds, and which of that is the release is the question
-        // vhid-ci-flake-80e is open on. [LAW:nothing-unseen]
-        let seen = "release after \(ContinuousClock.now - left), because \(served.devices.releasedBecause)"
-        print("ListenerTests: \(seen)")
-        #expect(released, "\(seen)")
-        #expect(served.devices.releasedBecause.first == "a client went away", "\(seen)")
-
-        let deadline = ContinuousClock.now + .seconds(10)
-        var next = try admitted(served, pressing: .space)
-        while !next, ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(50))
-            next = try admitted(served, pressing: .space)
-        }
-        #expect(next, "no client was admitted after the first went away")
+        #expect(try served.devices.awaitRelease() == "a client went away")
+        #expect(try admitted(served, pressing: .space), "no client was admitted after the first went away")
         #expect(served.devices.asked == [Usage.leftShift.rawValue, Usage.space.rawValue])
         withExtendedLifetime((served, first)) {}
     }
 
     /// The race `leave` exists to close. A client that leaves is answered only once the
-    /// devices are free, so the next client is served on the first try - no retry loop,
-    /// unlike the test above. The leaver's connection is still open: it is refused if it
+    /// devices are free, so the next client is served on the first try. The leaver's connection is still open: it is refused if it
     /// calls again, and when it does end, its ending releases nothing, because the keys
     /// down by then are the next client's. [LAW:no-ambient-temporal-coupling]
     @Test func aClientThatLeavesFreesTheDevicesBeforeTheAnswer() throws {
