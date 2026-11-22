@@ -49,11 +49,40 @@ import Testing
             released.signal()
         }
 
-        /// Blocks until the release or ten seconds. Ten because the bound only ends a hang:
-        /// at two, CI missed the release on both attempts of run 36336822361
-        /// (vhid-ci-flake-80e).
+        /// Blocks until the release. XPC delivers it on a queue of its own, which a loaded
+        /// runner has taken seconds to run, so the bound only ends a hang: at two seconds CI
+        /// missed it (run 36336822361).
         func awaitRelease() -> Bool {
-            released.wait(timeout: .now() + .seconds(10)) == .success
+            released.wait(timeout: .now() + .seconds(60)) == .success
+        }
+    }
+
+    /// The real listener, and a word from each connection's far end once the ending the
+    /// listener gave it has run: the ending runs on the connection's own queue, so a test
+    /// that asks after what an ending did waits for this, not for its next request.
+    /// [LAW:no-ambient-temporal-coupling]
+    private final class Ending: NSObject, NSXPCListenerDelegate {
+        let listener: Listener
+        private let ended = DispatchSemaphore(value: 0)
+
+        init(_ listener: Listener) {
+            self.listener = listener
+        }
+
+        func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
+            let accepted = self.listener.listener(listener, shouldAcceptNewConnection: connection)
+            let ending = connection.invalidationHandler
+            connection.invalidationHandler = { [ended] in
+                ending?()
+                ended.signal()
+            }
+            return accepted
+        }
+
+        /// Blocks until a connection's ending has run, bounded only against a hang, as the
+        /// release is.
+        func awaitEnding() -> Bool {
+            ended.wait(timeout: .now() + .seconds(60)) == .success
         }
     }
 
@@ -61,13 +90,13 @@ import Testing
     /// a delegate held by nothing is gone before the first connection.
     private struct Served {
         let listener: NSXPCListener
-        let delegate: Listener
+        let delegate: Ending
         let devices: FakeDevices
     }
 
     private func serve(requiring requirement: String? = nil) throws -> Served {
         let devices = FakeDevices()
-        let delegate = Listener(readiness: .serving(devices), callers: try CallerIdentity(requirement: try requirement ?? OwnProcess.requirement()), screen: FixedScreen())
+        let delegate = Ending(Listener(readiness: .serving(devices), callers: try CallerIdentity(requirement: try requirement ?? OwnProcess.requirement()), screen: FixedScreen()))
         let listener = NSXPCListener.anonymous()
         listener.delegate = delegate
         listener.resume()
@@ -106,33 +135,18 @@ import Testing
     }
 
     /// The first client going away releases everything, and the devices are then another
-    /// client's. The release comes before the devices are let go, and the test can see
-    /// only the first of the two, so the next client's admission is asked for, a beat apart,
-    /// until it comes or ten seconds have passed - each ask itself bounded by the client's
-    /// own reply timeout.
-    @Test func aClientGoingAwayReleasesEverythingAndFreesTheDevices() async throws {
+    /// client's. The release runs under the holder's lock with the freeing after it, and a
+    /// claim takes that lock, so a client asking once the release is seen is admitted on
+    /// its first ask.
+    @Test func aClientGoingAwayReleasesEverythingAndFreesTheDevices() throws {
         let served = try serve()
         let first = client(of: served)
         let keyboard = first.helper.keyboard
         try keyboard.down(.leftShift)
-        let left = ContinuousClock.now
         first.connection.invalidate()
-        let released = served.devices.awaitRelease()
-        // How long the release took and why, printed whether or not it passes: on CI this
-        // test has run for six seconds, and which of that is the release is the question
-        // vhid-ci-flake-80e is open on. [LAW:nothing-unseen]
-        let seen = "release after \(ContinuousClock.now - left), because \(served.devices.releasedBecause)"
-        print("ListenerTests: \(seen)")
-        #expect(released, "\(seen)")
-        #expect(served.devices.releasedBecause.first == "a client went away", "\(seen)")
-
-        let deadline = ContinuousClock.now + .seconds(10)
-        var next = try admitted(served, pressing: .space)
-        while !next, ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(50))
-            next = try admitted(served, pressing: .space)
-        }
-        #expect(next, "no client was admitted after the first went away")
+        #expect(served.devices.awaitRelease())
+        #expect(served.devices.releasedBecause == ["a client went away"])
+        #expect(try admitted(served, pressing: .space), "no client was admitted after the first went away")
         #expect(served.devices.asked == [Usage.leftShift.rawValue, Usage.space.rawValue])
         withExtendedLifetime((served, first)) {}
     }
@@ -159,9 +173,7 @@ import Testing
         #expect(served.devices.asked == [Usage.leftShift.rawValue, Usage.space.rawValue])
 
         first.connection.invalidate()
-        // The ending runs on the connection's own queue, so it is waited for the only way
-        // the far end shows it: the next thing the holder serves comes after it.
-        try next.down(.tab)
+        #expect(served.delegate.awaitEnding())
         #expect(served.devices.releasedBecause == ["a client left"], "the leaver's ending released the next client's keys")
         withExtendedLifetime((served, first, second)) {}
     }

@@ -44,13 +44,16 @@ import Testing
 
     /// The command killed while the app records: the watch fires.
     @Test func theWatchFiresWhenTheCommandEnds() async throws {
-        let command = try Process.run(URL(fileURLWithPath: "/bin/sleep"), arguments: ["30"])
+        let command = try Process.run(URL(fileURLWithPath: "/bin/sleep"), arguments: ["3600"])
         let ended = Ended()
-        let watch = CommandWatch(pid: command.processIdentifier, queue: DispatchQueue(label: "watch")) { ended.signal() }
-        #expect(!ended.wait(.milliseconds(100)))
+        let queue = DispatchQueue(label: "watch")
+        let watch = CommandWatch(pid: command.processIdentifier, queue: queue) { ended.signal() }
+        // A watch that took the running command for ended has answered on its queue by now.
+        queue.sync {}
+        #expect(!ended.wait(.zero))
         kill(command.processIdentifier, SIGKILL)
         command.waitUntilExit()
-        #expect(ended.wait(.seconds(5)))
+        #expect(ended.wait(Ended.hangGuard))
         withExtendedLifetime(watch) {}
     }
 
@@ -72,11 +75,15 @@ import Testing
         #expect(CommandWatch.ended(pid))
         let ended = Ended()
         let watch = CommandWatch(pid: pid, queue: DispatchQueue(label: "watch")) { ended.signal() }
-        #expect(ended.wait(.seconds(5)))
+        #expect(ended.wait(Ended.hangGuard))
         withExtendedLifetime(watch) {}
     }
 
     private final class Ended: @unchecked Sendable {
+        /// How long a watch is waited on: it answers at once, and this only ends a hang on a
+        /// runner too loaded to run its queue.
+        static let hangGuard: Duration = .seconds(60)
+
         private let semaphore = DispatchSemaphore(value: 0)
         func signal() { semaphore.signal() }
         func wait(_ limit: Duration) -> Bool {

@@ -79,12 +79,13 @@ import VirtualHID
     }
 
     /// Nothing answers, so the daemon is started and reached once it comes up; the loss
-    /// handler is told the daemon is vhidd's, so it may stop it.
+    /// handler is told the daemon is vhidd's, so it may stop it. The limit is asked after
+    /// each refusal and only ends a hang: the daemon comes up on the next try.
     @Test func aDaemonThatDoesNotAnswerIsStartedAndReachedWhenItComesUp() throws {
         let device = Device()
         let world = World(connections: [.failure(.noSocket(path: "nowhere")), .failure(.socket("connect", ECONNREFUSED)), .success(device)])
         let told = Told()
-        let reached = try world.effects.reach(within: .seconds(1), whenLost: told.record)
+        let reached = try world.effects.reach(within: .seconds(60), whenLost: told.record)
         #expect(reached.devices === device)
         #expect(reached.daemon == .startedHere(World.pid))
         #expect(world.launched == 1)
@@ -174,7 +175,8 @@ import VirtualHID
     /// Devices whose connection is lost are taken down, the daemon started for them is
     /// stopped, and after a wait they are reached and served again - the process never
     /// ends over it. Devices lost as soon as they came up count as failures, so the wait
-    /// grows rather than restarting the daemon every two seconds.
+    /// grows rather than restarting the daemon every two seconds. Lost from inside `serve`,
+    /// for the reason `lostEachTime` gives.
     @Test func lostDevicesAreStoppedAndBroughtUpAgain() {
         let world = World(connections: [.failure(.noSocket(path: "nowhere")), .success(Device())])
         let readiness = Readiness(driver: { .running })
@@ -185,8 +187,7 @@ import VirtualHID
         #expect(throws: Stop.self) {
             try world.effects.keepUp(within: .seconds(1), backoff: Backoff(first: .seconds(2), most: .seconds(60)), lookingEvery: .seconds(60), readiness: readiness, serve: { _ in
                 served += 1
-                let lose = world.lost!
-                DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(20)) { lose(.closed) }
+                world.lost!(.closed)
                 return RecordingDevices()
             }, driver: { nil }, now: { clock.now }) { wait in
                 clock.advance(wait)

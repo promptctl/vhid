@@ -76,8 +76,10 @@ private final class TokenReader: NSObject, NSXPCListenerDelegate, @unchecked Sen
         return false
     }
 
+    /// Bounded only against a hang: XPC asks on a queue of its own, which a loaded runner
+    /// has taken seconds to run.
     func await() -> audit_token_t? {
-        guard arrived.wait(timeout: .now() + .seconds(2)) == .success else { return nil }
+        guard arrived.wait(timeout: .now() + .seconds(60)) == .success else { return nil }
         lock.lock(); defer { lock.unlock() }
         return token
     }
