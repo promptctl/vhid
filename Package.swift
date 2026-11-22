@@ -230,24 +230,25 @@ let package = Package(
         // and Turns, here under eyes/, and ChildProcess and Version, under Sources/, which
         // link neither half.
         //
-        // The vocabulary both readers speak and the protocol both conform to. It links
-        // nothing - not Vision, not ApplicationServices - so the tree and the pixels share one
-        // language without either linking the other.
-        .target(name: "Seeing", path: "eyes/Sources/Seeing"),
+        // The vocabulary both readers speak and the protocol both conform to. It links the
+        // screen space both halves speak and nothing else - not Vision, not
+        // ApplicationServices - so the tree and the pixels share one language without either
+        // linking the other, and every row is placed by the rule every act presses by.
+        .target(name: "Seeing", dependencies: ["ScreenSpace"], path: "eyes/Sources/Seeing"),
         // Every type there is a value, so the vocabulary is exercised with no display, no
         // capture and no grant. [LAW:effects-at-boundaries] The waits are kept on
         // a test's clock.
-        .testTarget(name: "SeeingTests", dependencies: ["Seeing", "TestClock"], path: "eyes/Tests/SeeingTests"),
+        .testTarget(name: "SeeingTests", dependencies: ["Seeing", "ScreenSpace", "ScreenSpaceTesting", "TestClock"], path: "eyes/Tests/SeeingTests"),
         // The pixel reader: the grant, the capture and Vision. Its own target, so the
         // vocabulary stays linking nothing and the tree reader sits beside it unlinked.
-        .target(name: "Pixels", dependencies: ["Seeing", "Grants", "ChildProcess", "Telemetry", "Turns"], path: "eyes/Sources/Pixels"),
+        .target(name: "Pixels", dependencies: ["Seeing", "ScreenSpace", "Grants", "ChildProcess", "Telemetry", "Turns"], path: "eyes/Sources/Pixels"),
         // How a capture is cut into pieces and put back together, with no capture at all.
-        .testTarget(name: "PixelsTests", dependencies: ["Pixels", "Seeing", "Grants", "ChildProcess", "Turns"], path: "eyes/Tests/PixelsTests"),
+        .testTarget(name: "PixelsTests", dependencies: ["Pixels", "Seeing", "ScreenSpace", "ScreenSpaceTesting", "Grants", "ChildProcess", "Turns"], path: "eyes/Tests/PixelsTests"),
         // The tree reader: the accessibility grant and the element reads, apart from Pixels
         // for the same reason.
-        .target(name: "Tree", dependencies: ["Seeing", "Grants"], path: "eyes/Sources/Tree"),
+        .target(name: "Tree", dependencies: ["Seeing", "ScreenSpace", "Grants"], path: "eyes/Sources/Tree"),
         // The element rules, the walk and the climb, over trees a test wrote.
-        .testTarget(name: "TreeTests", dependencies: ["Tree", "Seeing", "Grants"], path: "eyes/Tests/TreeTests"),
+        .testTarget(name: "TreeTests", dependencies: ["Tree", "Seeing", "ScreenSpace", "ScreenSpaceTesting", "Grants"], path: "eyes/Tests/TreeTests"),
         // Whether the readers' grants are held and which app holds them: about the process,
         // not any reading, so apart from both readers, each of which asks it before looking.
         .target(name: "Grants", dependencies: ["Seeing", "ChildProcess", "Telemetry", "Responsibility"], path: "eyes/Sources/Grants"),
@@ -268,11 +269,12 @@ let package = Package(
         .testTarget(name: "TelemetryTests", dependencies: ["Telemetry", "TelemetryTesting"], path: "eyes/Tests/TelemetryTests"),
         // What each verb does and says, for the eyes command line and vhid's `look` alike,
         // so the two cannot come to answer differently. [LAW:one-source-of-truth] It links
-        // the readers, and nothing of the devices' or of MCP's.
+        // the readers and the one read of the display layout, and nothing of the devices' or
+        // of MCP's.
         .target(
             name: "EyesVerbs",
             dependencies: [
-                "Seeing", "Pixels", "Tree", "Grants", "Telemetry",
+                "Seeing", "Pixels", "Tree", "Grants", "Telemetry", "ScreenSpace", "DisplayReading",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ],
             path: "eyes/Sources/Verbs"
@@ -281,7 +283,7 @@ let package = Package(
         // is checked here rather than read off a terminal. [LAW:verifiable-goals]
         .testTarget(
             name: "EyesVerbsTests",
-            dependencies: ["EyesVerbs", "Seeing", "Pixels", "Tree", "Grants", "Telemetry", "TelemetryTesting"],
+            dependencies: ["EyesVerbs", "Seeing", "Pixels", "Tree", "Grants", "Telemetry", "TelemetryTesting", "ScreenSpace", "ScreenSpaceTesting"],
             path: "eyes/Tests/EyesVerbsTests"
         ),
         // The eyes command line: the verbs, and the version every binary here is stamped with.

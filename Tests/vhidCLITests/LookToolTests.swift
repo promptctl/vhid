@@ -12,14 +12,14 @@ import ScreenSpaceTesting
 /// The `look` tool as `vhid mcp` serves it, on a screen a test wrote: one record of each
 /// call, and no wait behind the daemon. [LAW:behavior-not-structure]
 @Suite(.eventsKept) struct LookToolTests {
-    static let main = Display(id: 1, frame: ScreenRect(x: 0, y: 0, width: 1512, height: 982), isMain: true, scale: 2)
+    static let main = Display(OnlineDisplay(id: 1, frame: ScreenRect.at(0, 0, 1512, 982), active: true), isMain: true, scale: 2)
     static let safari = Front.App(pid: 400, name: "Safari")
     static let desk = Desk(frontmost: safari, own: Front.Passed(pids: [80], name: "iTerm2"),
                            running: [Desk.Running(app: safari, regular: true)],
-                           listing: WindowListing(windows: [Window(id: 4, owner: "Safari", pid: 400, frame: ScreenRect(x: 0, y: 40, width: 600, height: 400), layer: 0)],
+                           listing: WindowListing(windows: [Window(id: 4, owner: "Safari", pid: 400, frame: ScreenRect.at(0, 40, 600, 400), layer: 0)],
                                                   excluded: []),
-                           displays: [main])
-    static let screen = Screen(desk: { desk }) { _, _ in
+                           layout: .at([main.frame]), describe: { Display($0, isMain: true, scale: 2) })
+    static let screen = Screen(desk: { desk }, layouts: { .at([main.frame]) }) { _, _, _ in
         Judged(Reading(outcome: .nearest([]), scope: Scope(region: main.frame, examined: 0, reach: .whole))) { r, _ in r }
     }
 

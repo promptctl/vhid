@@ -1,16 +1,18 @@
+import ScreenSpace
+import ScreenSpaceTesting
 import Testing
 @testable import Seeing
 
 /// What a reader's candidates become, asked with a list a test wrote.
 @Suite struct JudgeTests {
-    static let region = ScreenRect(x: 0, y: 0, width: 1512, height: 982)
+    static let region = ScreenRect.at(0, 0, 1512, 982)
 
     /// A run as a reader places it: each word at its own spot along one line.
     private func found(_ text: String, y: Double = 0) -> Found {
         let words = text.split(separator: " ").enumerated().map { i, w in
-            Word(text: Text(String(w))!, frame: ScreenRect(x: 10 + Double(i) * 40, y: y, width: 30, height: 12))
+            Word(text: Text(String(w))!, frame: ScreenRect.at(10 + Double(i) * 40, y, 30, 12))
         }
-        return Found(first: words[0], rest: Array(words.dropFirst()), source: .pixels(confidence: Confidence(0.9)!))
+        return try! Found(first: words[0], rest: Array(words.dropFirst()), source: .pixels(confidence: Confidence(0.9)!), within: Self.region, on: .vast)
     }
 
     private func judge(_ texts: [String], _ match: Match?, limit: Limit = .default) -> Reading {
@@ -30,8 +32,9 @@ import Testing
     /// them edge to edge.
     private func rows(near: String, limit: Limit = .default, pitch: Double = 33, match: String = "Remove") -> Reading {
         let at = { (text: String, x: Double, row: Double, w: Double) in
-            Found(text: Text(text)!, frame: ScreenRect(x: x, y: 504 + row * pitch, width: w, height: 27),
-                  source: .tree(role: Role(rawValue: "AXStaticText"), also: []))
+            let frame = ScreenRect.at(x, 504 + row * pitch, w, 27)
+            return try! Found(text: Text(text)!, frame: frame, source: .tree(role: Role(rawValue: "AXStaticText"), frame: frame, also: []),
+                              within: Self.region, on: .vast)
         }
         let seen = [at("Alpha", 52, 0, 60), at("Remove", 192, 0, 84), at("Beta", 52, 1, 50),
                     at("Remove", 192, 1, 84), at("Gamma", 52, 2, 70), at("Remove", 192, 2, 84)]
@@ -42,29 +45,29 @@ import Testing
     /// The Remove in Beta's row comes first, then the rows either side in reading order.
     @Test func nearOrdersTheMatchesByTheRowTheyShare() {
         guard case .matched(let m) = rows(near: "beta").outcome else { Issue.record("no match"); return }
-        #expect(m.all.map(\.frame.y) == [537, 504, 570])
+        #expect(m.all.map(\.part.y) == [537, 504, 570])
         guard case .matched(let last) = rows(near: "Gamma", limit: Limit(1)!).outcome else { Issue.record("no match"); return }
-        #expect(last.all.map(\.frame.y) == [570])
+        #expect(last.all.map(\.part.y) == [570])
     }
 
     /// Rows packed edge to edge touch the row above as well as their own; the row's own
     /// shares the whole line, so it still comes first.
     @Test func rowsPackedEdgeToEdgeStillPutTheAnchorsRowFirst() {
         guard case .matched(let m) = rows(near: "Beta", limit: Limit(1)!, pitch: 27).outcome else { Issue.record("no match"); return }
-        #expect(m.all.map(\.frame.y) == [531])
+        #expect(m.all.map(\.part.y) == [531])
     }
 
     /// A label touching the link before it and the link after it names the one after:
     /// Safari reads "Release notes More · Pricing More" with " · Pricing " one run.
     @Test func ofTwoMatchesTouchingTheTextTheOneAfterItIsNearer() {
         let at = { (text: String, x: Double, w: Double) in
-            Found(text: Text(text)!, frame: ScreenRect(x: x, y: 368, width: w, height: 18), source: .tree(role: Role(rawValue: "AXLink"), also: []))
+            try! Found(text: Text(text)!, frame: .at(x, 368, w, 18), source: .tree(role: Role(rawValue: "AXLink"), frame: .at(x, 368, w, 18), also: []), within: Self.region, on: .vast)
         }
         let seen = [at("Release notes", 200, 110), at("More", 310, 36), at(" · Pricing ", 346, 79), at("More", 425, 36)]
         let read = Reading.judging(seen, query: Query(match: .exact("More"), region: .rect(Self.region), near: .contains("Pricing")),
                                    region: Self.region, examined: seen.count, excluded: [], reach: .whole, owners: .every)
         guard case .matched(let m) = read.outcome else { Issue.record("\(read)"); return }
-        #expect(m.all.map(\.frame.x) == [425, 310])
+        #expect(m.all.map(\.part.x) == [425, 310])
     }
 
     /// Text to be near that is not on screen leaves every Remove unplaced: neither found -
@@ -151,24 +154,41 @@ import Testing
     /// them. A `contains` match lands on the words that matched, not the run around them.
     @Test func aContainsMatchPointsAtTheWordsThatMatched() {
         let words = ["Shell", "Edit", "View"].enumerated().map { i, w in
-            Word(text: Text(w)!, frame: ScreenRect(x: Double(i) * 50, y: 0, width: 40, height: 20))
+            Word(text: Text(w)!, frame: ScreenRect.at(Double(i) * 50, 0, 40, 20))
         }
-        let run = Found(first: words[0], rest: Array(words.dropFirst()), source: .pixels(confidence: Confidence(1)!))
+        let run = try! Found(first: words[0], rest: Array(words.dropFirst()), source: .pixels(confidence: Confidence(1)!), within: Self.region, on: .vast)
         let read = Reading.judging([run], query: Query(match: .contains("edit"), region: .rect(Self.region)),
                                    region: Self.region, examined: 1, excluded: [], reach: .whole, owners: .every)
         guard case .matched(let m) = read.outcome else { Issue.record("nothing"); return }
         #expect(m.first.text.value == "Edit")
-        #expect(m.first.frame.centre == ScreenPoint(x: 70, y: 10))
+        #expect(m.first.press == .at(70, 10))
+    }
+
+    /// A run half under its list's bottom edge, narrowed to the word that matched: the word
+    /// is placed within the run's bound, so its box is the drawn part and its point is in
+    /// the list, never the middle of the word under the edge.
+    @Test func narrowingARowUnderItsListsEdgeKeepsThePressInTheBound() throws {
+        let list = ScreenRect.at(0, 0, 400, 30)
+        let words = ["Shell", "Edit", "View"].enumerated().map { i, w in
+            Word(text: Text(w)!, frame: ScreenRect.at(Double(i) * 50, 20, 40, 20))
+        }
+        let run = try Found(first: words[0], rest: Array(words.dropFirst()), source: .pixels(confidence: Confidence(1)!), within: list, on: .vast)
+        let read = Reading.judging([run], query: Query(match: .contains("edit"), region: .rect(list)),
+                                   region: list, examined: 1, excluded: [], reach: .whole, owners: .every)
+        guard case .matched(let m) = read.outcome else { Issue.record("\(read)"); return }
+        #expect(m.first.text.value == "Edit")
+        #expect(m.first.part == .at(50, 20, 40, 10))
+        #expect(list.contains(m.first.press))
     }
 
     /// Across two words the narrowing keeps both, and an exact match reports the whole run.
     @Test func narrowingSpansWordsAndLeavesWholeMatchesWhole() {
         let words = ["Save", "As…", "Cancel"].enumerated().map { i, w in
-            Word(text: Text(w)!, frame: ScreenRect(x: Double(i) * 50, y: 0, width: 40, height: 20))
+            Word(text: Text(w)!, frame: ScreenRect.at(Double(i) * 50, 0, 40, 20))
         }
-        let run = Found(first: words[0], rest: Array(words.dropFirst()), source: .pixels(confidence: Confidence(1)!))
-        #expect(Match.contains("save as").narrowing(run, by: .drawn(0)).map(\.text.value) == ["Save As…"])
-        #expect(Match.exact("Save As… Cancel").narrowing(run, by: .drawn(0)) == [run])
+        let run = try! Found(first: words[0], rest: Array(words.dropFirst()), source: .pixels(confidence: Confidence(1)!), within: Self.region, on: .vast)
+        #expect(Match.contains("save as").narrowing(run, by: .drawn(0)).found.map(\.text.value) == ["Save As…"])
+        #expect(Match.exact("Save As… Cancel").narrowing(run, by: .drawn(0)).found == [run])
     }
 
     /// A near miss printed one off must match when the caller widens by one edit - inside
@@ -202,15 +222,15 @@ import Testing
 
     // MARK: role and the element's other words
 
-    private static let at = ScreenRect(x: 160, y: 417, width: 18, height: 18)
+    private static let at = ScreenRect.at(160, 417, 18, 18)
     private static let button = Role(rawValue: "AXButton")
 
     private func tree(_ text: String, _ role: String = "AXButton", at frame: ScreenRect = at, also: [Words] = []) -> Found {
-        Found(text: Text(text)!, frame: frame, source: .tree(role: Role(rawValue: role), also: also))
+        try! Found(text: Text(text)!, frame: frame, source: .tree(role: Role(rawValue: role), frame: frame, also: also), within: Self.region, on: .vast)
     }
 
     private func pixels(_ text: String, at frame: ScreenRect) -> Found {
-        Found(text: Text(text)!, frame: frame, source: .pixels(confidence: Confidence(0.9)!))
+        try! Found(text: Text(text)!, frame: frame, source: .pixels(confidence: Confidence(0.9)!), within: Self.region, on: .vast)
     }
 
     private func judged(_ seen: [Found], _ match: Match?, role: Role? = nil, near: Match? = nil, excluded: [Exclusion] = []) -> Reading {
@@ -222,7 +242,7 @@ import Testing
     /// answers whole at its own place, its row still the "+" it shows.
     @Test func aButtonIsFoundByWhatItIsCalled() throws {
         let plus = tree("+", also: [Words(.description, Text("Add")!)])
-        guard case .matched(let m) = judged([tree("+", "AXStaticText", at: ScreenRect(x: 140, y: 435, width: 10, height: 15)), plus],
+        guard case .matched(let m) = judged([tree("+", "AXStaticText", at: ScreenRect.at(140, 435, 10, 15)), plus],
                                              .exact("Add")).outcome else { Issue.record("not found"); return }
         #expect(m.all == [plus])
         #expect(Match?.some(.exact("Add")).fit(plus) == .also(Words(.description, Text("Add")!), 0))
@@ -230,9 +250,10 @@ import Testing
 
     /// The row's own text wins a tie, and is narrowed to its words as ever.
     @Test func theRowsOwnTextWinsATie() {
-        let save = Found(first: Word(text: Text("Save")!, frame: ScreenRect(x: 0, y: 0, width: 30, height: 12)),
-                         rest: [Word(text: Text("As")!, frame: ScreenRect(x: 40, y: 0, width: 20, height: 12))],
-                         source: .tree(role: Self.button, also: [Words(.title, Text("Save it")!)]))
+        let save = try! Found(first: Word(text: Text("Save")!, frame: .at(0, 0, 30, 12)),
+                              rest: [Word(text: Text("As")!, frame: .at(40, 0, 20, 12))],
+                              source: .tree(role: Self.button, frame: .at(0, 0, 60, 12), also: [Words(.title, Text("Save it")!)]),
+                              within: Self.region, on: .vast)
         #expect(Match?.some(.contains("save")).fit(save) == .drawn(0))
         guard case .matched(let m) = judged([save], .contains("save")).outcome else { Issue.record("not found"); return }
         #expect(m.all.map(\.text.value) == ["Save"])
@@ -250,9 +271,9 @@ import Testing
     /// the text pixels alone saw has no role anyone knows, so it could be the button, and the
     /// region was not read whole for the question.
     @Test func aRoleKeepsItsOwnAndSaysWhatItSetAside() {
-        let r = judged([tree("Add"), tree("Add", "AXStaticText", at: ScreenRect(x: 0, y: 0, width: 30, height: 12)),
-                        pixels("Add", at: ScreenRect(x: 0, y: 100, width: 30, height: 12)),
-                        pixels("Cancel", at: ScreenRect(x: 0, y: 200, width: 30, height: 12))], .exact("Add"), role: Self.button)
+        let r = judged([tree("Add"), tree("Add", "AXStaticText", at: ScreenRect.at(0, 0, 30, 12)),
+                        pixels("Add", at: ScreenRect.at(0, 100, 30, 12)),
+                        pixels("Cancel", at: ScreenRect.at(0, 200, 30, 12))], .exact("Add"), role: Self.button)
         guard case .matched(let m) = r.outcome else { Issue.record("not found"); return }
         #expect(m.all == [tree("Add")])
         #expect(r.scope.excluded == [Exclusion(reason: .otherRole, count: 1), Exclusion(reason: .roleUnknown, count: 1)])
@@ -283,15 +304,15 @@ import Testing
     /// What a role sets aside is counted a place at a time, as rows are: a cell and its own
     /// label are one other_role. A reader's duplicates and the judge's are one count.
     @Test func whatIsSetAsideIsCountedOncePerPlace() {
-        let r = judged([tree("Inbox", "AXCell"), tree("Inbox", "AXStaticText"), tree("Inbox", at: ScreenRect(x: 0, y: 100, width: 40, height: 18)),
-                        tree("Inbox", at: ScreenRect(x: 0, y: 100, width: 40, height: 18))],
+        let r = judged([tree("Inbox", "AXCell"), tree("Inbox", "AXStaticText"), tree("Inbox", at: ScreenRect.at(0, 100, 40, 18)),
+                        tree("Inbox", at: ScreenRect.at(0, 100, 40, 18))],
                        .exact("Inbox"), role: Self.button, excluded: [Exclusion(reason: .duplicate, count: 2), Exclusion(reason: .wordless, count: 0)])
         #expect(r.scope.excluded == [Exclusion(reason: .duplicate, count: 3), Exclusion(reason: .otherRole, count: 1)])
     }
 
     /// A miss shows one place once: a cell and its own label are one near miss, not two of three.
     @Test func aMissShowsOnePlaceOnce() {
-        let other = ScreenRect(x: 0, y: 100, width: 60, height: 12)
+        let other = ScreenRect.at(0, 100, 60, 12)
         guard case .nearest(let n) = judged([tree("Remove", "AXCell"), tree("Remove", "AXStaticText"), tree("Rename", at: other)],
                                             .exact("Removed")).outcome else { Issue.record("matched"); return }
         #expect(n.map(\.found.text.value) == ["Remove", "Rename"])
@@ -300,7 +321,7 @@ import Testing
     /// A role narrows the matches, never the text they are placed near: the anchor is any
     /// text on screen.
     @Test func anAnchorIsAnyTextWhateverTheRole() {
-        let r = judged([tree("Beta", "AXStaticText", at: ScreenRect(x: 0, y: 417, width: 40, height: 18)), tree("Remove")],
+        let r = judged([tree("Beta", "AXStaticText", at: ScreenRect.at(0, 417, 40, 18)), tree("Remove")],
                        .exact("Remove"), role: Self.button, near: .contains("Beta"))
         guard case .matched(let m) = r.outcome else { Issue.record("not placed"); return }
         #expect(m.all == [tree("Remove")])

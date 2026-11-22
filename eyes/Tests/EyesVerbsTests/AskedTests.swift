@@ -1,4 +1,6 @@
 import ArgumentParser
+import ScreenSpace
+import ScreenSpaceTesting
 @testable import Seeing
 import Synchronization
 import Testing
@@ -7,24 +9,34 @@ import Testing
 /// What `look` answers, asked of a screen a test wrote: the arguments read into one question,
 /// and the overview that shows the desk whatever the place came to.
 @Suite(.eventsKept) @MainActor struct AskedTests {
-    nonisolated static let main = Display(id: 1, frame: ScreenRect(x: 0, y: 0, width: 1512, height: 982), isMain: true, scale: 2)
+    nonisolated static let main = Display(OnlineDisplay(id: 1, frame: .at(0, 0, 1512, 982), active: true), isMain: true, scale: 2)
     static let safari = Front.App(pid: 400, name: "Safari")
     static let finder = Front.App(pid: 500, name: "Finder")
-    static let window = Window(id: 4, owner: "Safari", pid: 400, frame: ScreenRect(x: 0, y: 40, width: 600, height: 400), layer: 0)
+    static let window = Window(id: 4, owner: "Safari", pid: 400, frame: ScreenRect.at(0, 40, 600, 400), layer: 0)
 
     /// Finder frontmost over the desktop, Safari's window behind it.
     static let desk = Desk(frontmost: finder, own: Front.Passed(pids: [80], name: "iTerm2"),
                            running: [Desk.Running(app: safari, regular: true), Desk.Running(app: finder, regular: true)],
-                           listing: WindowListing(windows: [window], excluded: []), displays: [main])
+                           listing: WindowListing(windows: [window], excluded: []), layout: .at([main.frame]),
+                           describe: { Display($0, isMain: true, scale: 2) })
 
-    nonisolated static let found = Found(text: Text("Reload")!, frame: ScreenRect(x: 20, y: 50, width: 40, height: 20), source: .tree(role: Role(rawValue: "AXButton"), also: []))
+    /// The layout the screen reads after the desk: a second display plugged in since.
+    nonisolated static let later = DisplayLayout.at([main.frame, .at(1512, 0, 1920, 1080)])
 
-    /// A reader that reads `Reload` wherever it is asked, keeping the regions it was asked for.
+    nonisolated static let found = try! Found(text: Text("Reload")!, frame: .at(20, 50, 40, 20),
+                                              source: .tree(role: Role(rawValue: "AXButton"), frame: .at(20, 50, 40, 20), also: []),
+                                              within: main.frame, on: .vast)
+
+    /// A reader that reads `Reload` wherever it is asked, keeping the regions it was asked for
+    /// and the layouts it read them on.
     final class Reader: Sendable {
         private let regions = Mutex<[Region]>([])
+        private let read = Mutex<[DisplayLayout]>([])
         var asked: [Region] { regions.withLock { $0 } }
-        func read(_ source: SourceKind, _ query: Query) async throws -> Judged {
+        var layouts: [DisplayLayout] { read.withLock { $0 } }
+        func read(_ source: SourceKind, _ query: Query, _ layout: DisplayLayout) async throws -> Judged {
             regions.withLock { $0.append(query.region) }
+            read.withLock { $0.append(layout) }
             return Judged(Reading(outcome: .matched(Matches([AskedTests.found])!), scope: Scope(region: AskedTests.main.frame, examined: 1, reach: .whole))) { r, _ in r }
         }
     }
@@ -39,7 +51,7 @@ import Testing
     /// of the app a person sees in front - Safari, behind a windowless Finder - with its points.
     @Test func noArgumentsAnswersTheDeskAndTheFrontAppsText() async throws {
         let reader = Reader()
-        let said = try await Self.asked().answer(on: Screen(desk: { Self.desk }, read: reader.read))
+        let said = try await Self.asked().answer(on: Screen(desk: { Self.desk }, layouts: { Self.later }, read: reader.read))
         let parts = said.components(separatedBy: "\n\n")
         #expect(parts.count == 3)
         #expect(parts[0].hasPrefix("1 display, main first.") && parts[0].contains("1\tmain\t0,0,1512,982"))
@@ -47,12 +59,14 @@ import Testing
         #expect(parts[2].contains("1 matched") == false && parts[2].hasPrefix("1 run in Safari (pid 400) and what is in front of it, passing over Finder (pid 500), which has no window open, on display 1"))
         #expect(parts[2].contains("40,60\t20,50,40,20\tReload\tAXButton"))
         #expect(reader.asked == [.front(Front(app: Self.safari, display: 1, own: Self.desk.own, passedOver: .windowless(Self.finder)))])
+        // The app was chosen on the desk's layout, so it is read on that one.
+        #expect(reader.layouts == [Self.desk.layout])
     }
 
     /// The desk is answered when the place cannot be read, with why it could not be.
     @Test func aPlaceThatCannotBeReadStillAnswersTheDesk() async throws {
         let reader = Reader()
-        let said = try await Self.asked(app: "Nope").answer(on: Screen(desk: { Self.desk }, read: reader.read))
+        let said = try await Self.asked(app: "Nope").answer(on: Screen(desk: { Self.desk }, layouts: { Self.later }, read: reader.read))
         let parts = said.components(separatedBy: "\n\n")
         #expect(parts.count == 3)
         #expect(parts[0].hasPrefix("1 display") && parts[1].hasPrefix("1 window"))
@@ -63,22 +77,25 @@ import Testing
     /// An app named is the app read, on the display holding its window.
     @Test func anAppNamedIsTheAppRead() async throws {
         let reader = Reader()
-        _ = try await Self.asked(app: "Safari").answer(on: Screen(desk: { Self.desk }, read: reader.read))
+        _ = try await Self.asked(app: "Safari").answer(on: Screen(desk: { Self.desk }, layouts: { Self.later }, read: reader.read))
         #expect(reader.asked == [.front(Front(app: Self.safari, display: 1, own: Self.desk.own, passedOver: nil))])
     }
 
     /// A look withdrawn while it reads is withdrawn, not answered as a place that could not be read.
     @Test func aLookCancelledWhileReadingIsCancelledNotAnswered() async {
         await #expect(throws: CancellationError.self) {
-            _ = try await Self.asked().answer(on: Screen(desk: { Self.desk }, read: { _, _ in throw CancellationError() }))
+            _ = try await Self.asked().answer(on: Screen(desk: { Self.desk }, layouts: { Self.later }, read: { _, _, _ in throw CancellationError() }))
         }
     }
 
     /// Text asks where it is, and answers alone, without the desk.
     @Test func textIsFoundAndAnsweredAlone() async throws {
-        let said = try await Self.asked(text: "Reload", display: 1).answer(on: Screen(desk: { Self.desk }, read: Reader().read))
+        let reader = Reader()
+        let said = try await Self.asked(text: "Reload", display: 1).answer(on: Screen(desk: { Self.desk }, layouts: { Self.later }, read: reader.read))
         #expect(said.hasPrefix("1 matched \"Reload\" in display 1"))
         #expect(!said.contains("display, main first"))
+        // A display is found on the layout the screen reads as it is found, and read on it.
+        #expect(reader.layouts == [Self.later])
     }
 
     /// Each set of arguments that asks no one question is refused, naming them as given.
@@ -97,6 +114,6 @@ import Testing
 
     @Test func aPointAsksWhatAClickThereLandsOn() throws {
         guard case .at(let point) = try Self.asked(x: -500, y: 300).question else { Issue.record("not a point"); return }
-        #expect(point == ScreenPoint(x: -500, y: 300))
+        #expect(point == ScreenPoint.at(-500, 300))
     }
 }

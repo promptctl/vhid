@@ -1,3 +1,5 @@
+import ScreenSpace
+import ScreenSpaceTesting
 import Seeing
 import Telemetry
 import TelemetryTesting
@@ -8,12 +10,12 @@ import Testing
 /// What `eyes hit` says of a click at a point, asked with landings a test wrote.
 @Suite(.eventsKept) struct HitCommandTests {
     static let settings = Front.App(pid: 300, name: "System Settings")
-    static let window = Window(id: 4127, owner: "System Settings", pid: 300, frame: ScreenRect(x: 0, y: 25, width: 800, height: 600), layer: 0)
-    static let add = Landing.Element(role: Role(rawValue: "AXButton"), texts: [Said(.description, Text("Add")!, .words)], frame: ScreenRect(x: 160, y: 417, width: 18, height: 18))
-    static let list = Landing.Element(role: Role(rawValue: "AXList"), texts: [], unanswered: 1, frame: nil)
+    static let window = Window(id: 4127, owner: "System Settings", pid: 300, frame: ScreenRect.at(0, 25, 800, 600), layer: 0)
+    static let add = Landing.Element(role: Role(rawValue: "AXButton"), texts: [Said(.description, Text("Add")!, .words)], frame: .box(ScreenRect.at(160, 417, 18, 18)))
+    static let list = Landing.Element(role: Role(rawValue: "AXList"), texts: [], unanswered: 1, frame: .none)
 
     /// The case the epic began with: the button "Add" in System Settings, the front app.
-    static let button = Landing(point: ScreenPoint(x: 169, y: 426.5), app: settings, standing: .front(settings), window: window,
+    static let button = Landing(point: ScreenPoint.at(169, 426.5), app: settings, standing: .front(settings), window: window,
                                 elements: [add, list], end: .area, calls: 3, frontCalls: 1)
 
     /// The landings the MCP tests serve: the button at 1,1 and at 169,426.5, nothing at 2,2, no
@@ -30,7 +32,7 @@ import Testing
     }
 
     private func landing(_ standing: Standing, window: Window? = window, elements: [Landing.Element] = [add], end: Landing.End = .area) -> Landing {
-        Landing(point: ScreenPoint(x: 169, y: 426), app: Self.settings, standing: standing, window: window, elements: elements, end: end, calls: 2, frontCalls: 0)
+        Landing(point: ScreenPoint.at(169, 426), app: Self.settings, standing: standing, window: window, elements: elements, end: end, calls: 2, frontCalls: 0)
     }
 
     /// The scope line names the app, where it stands, the window by the id `find --window`
@@ -48,7 +50,7 @@ import Testing
     /// Each standing is said apart: the agent's own terminal and an app behind are the clicks
     /// an agent most needs to hear about before making them.
     @Test func whereTheAppStandsIsSaid() {
-        let said = { (s: Standing) in Hit.report(at: ScreenPoint(x: 169, y: 426), .landed(landing(s))) }
+        let said = { (s: Standing) in Hit.report(at: ScreenPoint.at(169, 426), .landed(landing(s))) }
         let panel = Front.App(pid: 900, name: "Open and Save Panel Service")
         #expect(said(.overFront(Self.settings)).contains("a window over the front app System Settings (pid 300), which a look with no place named reads too"))
         #expect(said(.own("iTerm2")).contains("the agent's own app, whose windows a look never reads: its terminal or Claude app"))
@@ -58,23 +60,23 @@ import Testing
         #expect(said(.noWindow(Self.settings)).contains("in no window of its own here - a menu bar, a menu - which a look with no place named never reads"))
         #expect(said(.otherDisplay(Self.settings, 1)).contains(
             "on a display a look with no place named does not read: it reads System Settings (pid 300) on display 1"))
-        #expect(Hit.report(at: ScreenPoint(x: 1, y: 1), .landed(landing(.front(Self.settings), window: nil))).contains("in none of its listed windows"))
+        #expect(Hit.report(at: ScreenPoint.at(1, 1), .landed(landing(.front(Self.settings), window: nil))).contains("in none of its listed windows"))
     }
 
     /// A climb that stopped short says what is unknown, never as a whole answer.
     @Test func howTheClimbEndedIsSaid() {
         let ended = { (end: Landing.End, elements: [Landing.Element]) in
-            Hit.report(at: ScreenPoint(x: 1, y: 1), .landed(landing(.front(Self.settings), elements: elements, end: end)))
+            Hit.report(at: ScreenPoint.at(1, 1), .landed(landing(.front(Self.settings), elements: elements, end: end)))
         }
         #expect(ended(.top, [Self.add]).contains("to the top of its tree"))
         #expect(ended(.short(.unanswered), [Self.add]).contains("Stopped short: a read did not answer, so what holds the last row is unknown."))
         #expect(ended(.short(.overTime), [Self.add]).contains("Stopped short: the time for hit tests ran out"))
         #expect(ended(.short(.unanswered), []).contains("The element hit would not say what it is."))
         #expect(ended(.tooDeep, [Self.add]).contains("Stopped at 1 elements, every one answering: its parents run in a loop"))
-        #expect(Hit.report(at: ScreenPoint(x: 2, y: 2), .nothing(calls: 1, window: nil))
+        #expect(Hit.report(at: ScreenPoint.at(2, 2), .nothing(calls: 1, window: nil))
             == "A click at 2,2 hits no element: the system's hit test answered that nothing is there, and no window is listed there.")
         // An app that exposes nothing at the point still draws there, and a click lands in it.
-        #expect(Hit.report(at: ScreenPoint(x: 5, y: 5), .nothing(calls: 1, window: Self.window))
+        #expect(Hit.report(at: ScreenPoint.at(5, 5), .nothing(calls: 1, window: Self.window))
             == "A click at 5,5 hits no element the system's hit test can name, but lands in window 4127 of System Settings at 0,25,800,600,"
             + " the frontmost listed there: its app exposes nothing at that point.")
     }
@@ -93,9 +95,9 @@ import Testing
     @Test func aPointThatIsNoPlaceIsRefused() throws {
         #expect(throws: (any Error).self) { try Hit.point(.infinity, 1) }
         #expect(throws: (any Error).self) { try Hit.point(1, .nan) }
-        #expect(try Hit.point(-5, 10) == ScreenPoint(x: -5, y: 10))
+        #expect(try Hit.point(-5, 10) == ScreenPoint.at(-5, 10))
         // A finite point past any screen is a number, said as one: it is refused off screen.
-        #expect(ScreenPoint(x: 1e19, y: 0).description == "1e+19,0")
+        #expect(ScreenPoint.at(1e19, 0).description == "1e+19,0")
     }
 
     /// One `hit` event per question, with the app, where it stands, the window, the rows and
@@ -104,10 +106,10 @@ import Testing
     @Test func eachQuestionIsAnEvent() async throws {
         let events = Collected()
         try await Telemetry.$export.withValue(events.export) {
-            _ = try await Hit.answer(at: ScreenPoint(x: 1, y: 1), landing: Self.landings)
-            _ = try await Hit.answer(at: ScreenPoint(x: 2, y: 2), landing: Self.landings)
-            _ = try? await Hit.answer(at: ScreenPoint(x: 4, y: 4), landing: Self.landings)
-            _ = try await Hit.answer(at: ScreenPoint(x: 5, y: 5), landing: Self.landings)
+            _ = try await Hit.answer(at: ScreenPoint.at(1, 1), landing: Self.landings)
+            _ = try await Hit.answer(at: ScreenPoint.at(2, 2), landing: Self.landings)
+            _ = try? await Hit.answer(at: ScreenPoint.at(4, 4), landing: Self.landings)
+            _ = try await Hit.answer(at: ScreenPoint.at(5, 5), landing: Self.landings)
         }
         let hits = events.all.filter { $0.event == "hit" }
         #expect(hits.map(\.outcome) == [.ok, .ok, .failed, .ok])

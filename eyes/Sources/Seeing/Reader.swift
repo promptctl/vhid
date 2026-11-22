@@ -1,3 +1,5 @@
+import ScreenSpace
+
 /// Something that can say what text is on screen and where.
 ///
 /// Two readers answer this: one walks the accessibility tree, one recognises pixels. They
@@ -15,6 +17,10 @@ public protocol Reader: Sendable {
     /// Everything the reader saw in the query's region, before any of it is judged
     /// against the query, or a throw when it could not look at all. `read` judges it.
     ///
+    /// On `layout`, read once for this pass by whoever asked: the region is resolved on it
+    /// and every row placed on its active displays, so one pass of a look is one moment of
+    /// the displays. [LAW:one-source-of-truth]
+    ///
     /// Unjudged so a merged reader reconciles what two readers saw rather than what
     /// survived each one's match and limit, and judges the union once. [LAW:single-enforcer]
     ///
@@ -23,7 +29,7 @@ public protocol Reader: Sendable {
     /// capture that wrote nothing - because those are facts about the tool and not about
     /// the screen, and a caller told "nothing matched" would take them for an absence.
     /// [LAW:no-silent-failure]
-    func look(_ query: Query) async throws -> Candidates
+    func look(_ query: Query, on layout: DisplayLayout) async throws -> Candidates
 
     /// The judged rows with each box this reader can check cut to where a click presses
     /// what the row names, and every other row as it was.
@@ -44,8 +50,8 @@ public let hitTesting = Duration.seconds(2)
 public extension Reader {
     /// The query's rows: what the reader saw, judged by the one rule every reader shares,
     /// held with this reader to check their boxes.
-    func judged(_ query: Query) async throws -> Judged {
-        Judged(Reading.judging(try await look(query), query: query)) { try await self.pressing($0, until: $1) }
+    func judged(_ query: Query, on layout: DisplayLayout) async throws -> Judged {
+        Judged(Reading.judging(try await look(query, on: layout), query: query)) { try await self.pressing($0, until: $1) }
     }
 }
 
@@ -75,7 +81,8 @@ public enum Pressed: Sendable, Hashable {
     /// The box stands: a click anywhere in it presses the element, as far as was checked,
     /// or the row is another reader's to check.
     case kept
-    /// Part of the box presses something else; this is the part that presses the element.
+    /// Part of the box presses something else; this is the part that presses the element,
+    /// which `Reading.pressing` places within the row's bound.
     case narrowed(ScreenRect)
     /// The box could not be checked, and stands as the reader placed it.
     case unchecked(Unchecked)
@@ -85,7 +92,8 @@ public enum Pressed: Sendable, Hashable {
 public enum Unchecked: String, Sendable, Hashable, CaseIterable {
     /// The hit test, or a read of what it hit, did not answer.
     case unanswered
-    /// A click at the row's own point lands on something other than the element it names.
+    /// A click at the row's own point lands on something other than the element it names,
+    /// or the part a click presses it in is too thin for a display to show a point of.
     case elsewhere
     /// The time for checking the reading's boxes ran out first.
     case overTime = "over_time"

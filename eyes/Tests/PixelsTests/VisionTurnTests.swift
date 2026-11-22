@@ -1,4 +1,6 @@
 import CoreGraphics
+import ScreenSpace
+import ScreenSpaceTesting
 import Seeing
 import Testing
 @testable import Pixels
@@ -16,10 +18,10 @@ import Testing
     }
 
     @Test func aRecognitionWaitsForAHeldVisionTurn() async throws {
-        let region = try #require(ScreenRect(x: 0, y: 0, width: 64, height: 64))
+        let region = ScreenRect.at(0, 0, 64, 64)
         let image = try Self.blank(region)
         let recognised = try await PixelReader.vision.take(waited: {}) {
-            let recognition = Task { try await PixelReader.recognise(image, of: region, in: region) }
+            let recognition = Task { try await PixelReader.recognise(image, of: region, in: region, on: .vast) }
             // Queued behind the turn this test holds, and still there.
             while await PixelReader.vision.queued == 0 { await Task.yield() }
             #expect(await PixelReader.vision.queued == 1)

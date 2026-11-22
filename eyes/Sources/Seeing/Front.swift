@@ -1,4 +1,5 @@
 import CoreGraphics
+import ScreenSpace
 
 /// The app a look reads: the one it was told, or with no app named, the one a person sees
 /// in front.
@@ -95,10 +96,7 @@ public struct Front: Sendable, Hashable {
     private init(_ app: App, passedOver: PassedOver?, on desk: Desk) throws(AppUnread) {
         guard !desk.displays.isEmpty else { throw .noDisplay }
         guard let window = desk.listing.front(of: app.pid).map({ desk.listing.windows[$0] }) else { throw .noWindow(app) }
-        let shown = { (display: Display) -> CGFloat in
-            let shared = display.frame.cgRect.intersection(window.frame.cgRect)
-            return shared.isNull ? 0 : shared.width * shared.height
-        }
+        let shown = { (display: Display) in display.frame.overlap(window.frame) }
         guard let display = desk.displays.max(by: { shown($0) < shown($1) }), shown(display) > 0 else { throw .offDisplays(app) }
         self.init(app: app, display: display.id, own: desk.own, passedOver: passedOver)
     }
@@ -117,8 +115,7 @@ public struct Front: Sendable, Hashable {
         let front = listing.front(of: app.pid)
         let over = front.map { i in
             listing.windows[..<i].filter { window in
-                let shared = window.frame.cgRect.intersection(listing.windows[i].frame.cgRect)
-                return !shared.isNull && !shared.isEmpty && hit(ScreenRect(shared).centre) == .answered(window.pid)
+                window.frame.intersection(listing.windows[i].frame).map { hit($0.centre) == .answered(window.pid) } ?? false
             }
         } ?? []
         return Set(over.map(\.pid)).union([app.pid]).subtracting(own.pids)
@@ -127,8 +124,10 @@ public struct Front: Sendable, Hashable {
     /// Where an app a click at `point` lands in stands to a look with no place named, by the
     /// rules that look reads by: `own`, its one display, the windows it walks, and `owners`.
     /// [LAW:single-enforcer] `front` is what that look would read on `desk`, or why it reads nothing.
-    public static func standing(of pid: Int32, at point: ScreenPoint, on desk: Desk, front: Result<Front, AppUnread>,
+    /// The point is placed on the desk's active displays, so it is on one of them.
+    public static func standing(of pid: Int32, at placed: Placed<ScreenPoint>, on desk: Desk, front: Result<Front, AppUnread>,
                                 hit: (ScreenPoint) -> Heard<Int32>) -> Standing {
+        let point = placed.value
         if desk.own.pids.contains(pid) { return .own(desk.own.name) }
         let read: Front
         switch front {

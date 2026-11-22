@@ -1,7 +1,9 @@
 import CoreGraphics
-import Testing
-import Seeing
 import Grants
+import ScreenSpace
+import ScreenSpaceTesting
+import Seeing
+import Testing
 @testable import Tree
 
 /// How a row's box is checked against where a click lands, asked of trees a test wrote:
@@ -13,14 +15,14 @@ import Grants
 
     /// Target B of the probe page as Safari answered on studious: the button's frame
     /// 813,620,97,34, the element the page hit-tests 820,625,87,26, its label inside it.
-    static let frame = ScreenRect(x: 813, y: 620, width: 97, height: 34)
-    static let element = ScreenRect(x: 820, y: 625, width: 87, height: 26)
-    static let text = ScreenRect(x: 825, y: 629, width: 78, height: 18)
+    static let frame = ScreenRect.at(813, 620, 97, 34)
+    static let element = ScreenRect.at(820, 625, 87, 26)
+    static let text = ScreenRect.at(825, 629, 78, 18)
 
     static let lineages: [Int: Lineage<Int>] = [
-        0: Lineage(role: page, frame: ScreenRect(x: 0, y: 105, width: 1500, height: 795), parent: nil),
-        1: Lineage(role: button, frame: frame, parent: 0),
-        2: Lineage(role: label, frame: text, parent: 1),
+        0: Lineage(role: page, frame: .box(ScreenRect.at(0, 105, 1500, 795)), parent: nil),
+        1: Lineage(role: button, frame: .box(frame), parent: 0),
+        2: Lineage(role: label, frame: .box(text), parent: 1),
     ]
 
     static func safari(_ p: ScreenPoint) -> Heard<Int?> {
@@ -40,8 +42,23 @@ import Grants
               same: ==, spent: spent)
     }
 
-    private func row(_ frame: ScreenRect = frame, source: Source = .tree(role: button, also: [])) -> Found {
-        Found(text: Text("Target B")!, frame: frame, source: source)
+    /// The page the probe page's rows are drawn within.
+    static let window = ScreenRect.at(0, 105, 1500, 795)
+
+    private func row(_ frame: ScreenRect = frame, source: Source? = nil, within bound: ScreenRect = window) -> Found {
+        try! Found(text: Text("Target B")!, frame: frame, source: source ?? .tree(role: Self.button, frame: frame, also: []), within: bound, on: .vast)
+    }
+
+    /// Target B half under its list's bottom edge: the element is found by the frame it
+    /// claims, and the box is checked in the part drawn, so it comes back inside the list.
+    @Test func aRowHalfUnderItsListsEdgeIsPressedInThePartDrawn() throws {
+        let list = ScreenRect.at(0, 105, 1500, 527)
+        let half = row(within: list)
+        #expect(half.part == .at(813, 620, 97, 12))
+        #expect(half.press == .at(862, 626))
+        guard case .narrowed(let cut) = try probe().press(half).pressed else { Issue.record("not narrowed"); return }
+        #expect(cut.y >= Self.element.y && cut.maxY <= list.maxY)
+        #expect(cut.x >= Self.element.x && cut.maxX <= Self.element.maxX)
     }
 
     /// The case measured: a click 4.7 points inside the frame's top pressed the page. The
@@ -57,7 +74,7 @@ import Grants
 
     /// A row merged from both readers carries the tree's role and frame, and is checked.
     @Test func aMergedRowIsCheckedAsTheTreesRowIs() throws {
-        let merged = Source.merged(.tree(role: Self.button, also: []), .pixels(confidence: Confidence(0.9)!))
+        let merged = Source.merged(.tree(role: Self.button, frame: Self.frame, also: []), .pixels(confidence: Confidence(0.9)!))
         guard case .narrowed = try probe().press(row(source: merged)).pressed else { Issue.record("not narrowed"); return }
     }
 
@@ -85,7 +102,7 @@ import Grants
             Issue.record("not narrowed"); return
         }
         let corners = [(cut.x, cut.y), (cut.x + cut.width, cut.y), (cut.x, cut.y + cut.height), (cut.x + cut.width, cut.y + cut.height)]
-        #expect(corners.allSatisfy { onPill(ScreenPoint(x: $0.0, y: $0.1)) })
+        #expect(corners.allSatisfy { onPill(ScreenPoint.at($0.0, $0.1)) })
         #expect(cut.width > Self.frame.width - 2 * radius && cut.height > radius)
     }
 
@@ -103,9 +120,9 @@ import Grants
     /// own ancestors - one parent read - never to the top of the tree.
     @Test func aClimbFromBesideStopsAtTheElementsAncestor() throws {
         var lineages = Self.lineages
-        lineages[0] = Lineage(role: Self.page, frame: ScreenRect(x: 0, y: 105, width: 1500, height: 795), parent: 10)
-        for at in 10..<20 { lineages[at] = Lineage(role: Self.page, frame: nil, parent: at == 19 ? nil : at + 1) }
-        lineages[3] = Lineage(role: Self.label, frame: nil, parent: 0)
+        lineages[0] = Lineage(role: Self.page, frame: .box(ScreenRect.at(0, 105, 1500, 795)), parent: 10)
+        for at in 10..<20 { lineages[at] = Lineage(role: Self.page, frame: .none, parent: at == 19 ? nil : at + 1) }
+        lineages[3] = Lineage(role: Self.label, frame: .none, parent: 0)
         var beside = 0
         let hit: (ScreenPoint) -> Heard<Int?> = { p in
             guard Self.element.cgRect.contains(CGPoint(x: p.x, y: p.y)) else { beside += 1; return .answered(3) }
@@ -129,7 +146,7 @@ import Grants
     /// no part of the frame is claimed for it.
     @Test func aRowWhosePointLandsOnSomethingElseIsUnchecked() throws {
         var lineages = Self.lineages
-        lineages[9] = Lineage(role: Self.page, frame: ScreenRect(x: 0, y: 0, width: 1500, height: 900), parent: nil)
+        lineages[9] = Lineage(role: Self.page, frame: .box(ScreenRect.at(0, 0, 1500, 900)), parent: nil)
         #expect(try probe(hit: { _ in .answered(9) }, lineages: lineages).press(row()) == Checked(.unchecked(.elsewhere), calls: 2))
         #expect(try probe(hit: { _ in .answered(nil) }).press(row()) == Checked(.unchecked(.elsewhere), calls: 1))
     }
@@ -147,8 +164,8 @@ import Grants
     /// Parents that run in a loop end the climb as unknown.
     @Test func parentsInALoopLeaveTheBoxUnchecked() throws {
         let loop: [Int: Lineage<Int>] = [
-            1: Lineage(role: Self.label, frame: Self.text, parent: 2),
-            2: Lineage(role: Self.label, frame: Self.text, parent: 1),
+            1: Lineage(role: Self.label, frame: .box(Self.text), parent: 2),
+            2: Lineage(role: Self.label, frame: .box(Self.text), parent: 1),
         ]
         #expect(try probe(hit: { _ in .answered(1) }, lineages: loop).press(row()).pressed == .unchecked(.unanswered))
     }
@@ -156,7 +173,7 @@ import Grants
     /// A merge whose tree could not look holds only the pixels' rows: the tree checks none of
     /// them, so it asks no grant and makes no call, and the pixels' answer stands.
     @Test @MainActor func theTreeAsksNothingOfAReadingWithNoRowOfItsOwn() async throws {
-        let seen = Found(text: Text("OK")!, frame: Self.frame, source: .pixels(confidence: Confidence(0.9)!))
+        let seen = row(source: .pixels(confidence: Confidence(0.9)!))
         let reading = Reading(outcome: .matched(Matches([seen])!), scope: Scope(region: Self.frame, examined: 1, reach: .whole))
         let tree = TreeReader(granted: { _ in Issue.record("the grant was asked"); return false })
         #expect(try await tree.pressing(reading, until: .now + .seconds(2)) == reading)
@@ -197,15 +214,15 @@ import Grants
     @Test func aClimbListsTheTextsThatAnsweredAndCountsTheRest() throws {
         let texts: [Int: [Heard<String?>]] = [1: [.answered(nil), .answered("Add"), .unanswered], 2: [.answered("+"), .answered("  "), .answered(nil)]]
         let c = try #require(climbed(try probe(texts: texts).climb(from: Self.text.centre)))
-        #expect(c.elements[0] == Landing.Element(role: Self.label, texts: [Said(.value, Text("+")!, .words)], unanswered: 0, frame: Self.text))
-        #expect(c.elements[1] == Landing.Element(role: Self.button, texts: [Said(.title, Text("Add")!, .words)], unanswered: 1, frame: Self.frame))
+        #expect(c.elements[0] == Landing.Element(role: Self.label, texts: [Said(.value, Text("+")!, .words)], unanswered: 0, frame: .box(Self.text)))
+        #expect(c.elements[1] == Landing.Element(role: Self.button, texts: [Said(.title, Text("Add")!, .words)], unanswered: 1, frame: .box(Self.frame)))
     }
 
     /// With no area above it, the climb reads to the top of the tree and says so.
     @Test func aClimbWithNoAreaEndsAtTheTop() throws {
         let lineages: [Int: Lineage<Int>] = [
-            1: Lineage(role: Self.button, frame: Self.frame, parent: 2),
-            2: Lineage(role: Self.label, frame: nil, parent: nil),
+            1: Lineage(role: Self.button, frame: .box(Self.frame), parent: 2),
+            2: Lineage(role: Self.label, frame: .none, parent: nil),
         ]
         let c = try #require(climbed(try probe(hit: { _ in .answered(1) }, lineages: lineages).climb(from: Self.frame.centre)))
         #expect(c.elements.map(\.role) == [Self.button, Self.label])
@@ -237,8 +254,8 @@ import Grants
         #expect(overTime.end == .short(.overTime))
 
         let loop: [Int: Lineage<Int>] = [
-            1: Lineage(role: Self.label, frame: Self.text, parent: 2),
-            2: Lineage(role: Self.label, frame: Self.text, parent: 1),
+            1: Lineage(role: Self.label, frame: .box(Self.text), parent: 2),
+            2: Lineage(role: Self.label, frame: .box(Self.text), parent: 1),
         ]
         let looped = try #require(climbed(try probe(hit: { _ in .answered(1) }, lineages: loop).climb(from: Self.text.centre)))
         #expect(looped.elements.count == Probe<Int>.depth)
@@ -249,7 +266,7 @@ import Grants
     @Test func aClimbThatReachesTheTopOnItsLastReadEndsAtTheTop() throws {
         let depth = Probe<Int>.depth
         var lineages: [Int: Lineage<Int>] = [:]
-        for at in 1...depth { lineages[at] = Lineage(role: Self.label, frame: nil, parent: at == depth ? nil : at + 1) }
+        for at in 1...depth { lineages[at] = Lineage(role: Self.label, frame: .none, parent: at == depth ? nil : at + 1) }
         let c = try #require(climbed(try probe(hit: { _ in .answered(1) }, lineages: lineages).climb(from: Self.text.centre)))
         #expect(c.elements.count == depth)
         #expect(c.end == .top)

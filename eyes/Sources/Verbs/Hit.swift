@@ -1,5 +1,6 @@
 import AppKit
 import ArgumentParser
+import ScreenSpace
 import Seeing
 import Telemetry
 import Tree
@@ -34,8 +35,7 @@ public struct Hit: AsyncParsableCommand {
     /// Two numbers as a point, or the refusal: `inf` and `nan` are numbers a shell hands over.
     /// [LAW:parse-dont-validate] One rule for the verb and the MCP tool. [LAW:single-enforcer]
     static func point(_ x: Double, _ y: Double) throws -> ScreenPoint {
-        guard x.isFinite, y.isFinite else { throw ValidationError("(\(x), \(y)) is not a place on the screen") }
-        return ScreenPoint(x: x, y: y)
+        do { return try ScreenPoint(x: x, y: y) } catch { throw ValidationError(error.description) }
     }
 
     /// Where a click at a point lands, or that nothing is there: the process in it, a fake in
@@ -127,17 +127,19 @@ public struct Hit: AsyncParsableCommand {
     /// row's other words are, and how many would not say.
     /// Tab-separated, like every row eyes prints.
     private static func row(_ element: Landing.Element) -> String {
-        ([element.role.rawValue, element.frame.map(String.init(describing:)) ?? "(no frame)"] + element.texts.map { "\($0.attribute.rawValue) \(Report.spelled($0.text.value))" }
+        ([element.role.rawValue, "\(element.frame)"] + element.texts.map { "\($0.attribute.rawValue) \(Report.spelled($0.text.value))" }
             + (element.unanswered > 0 ? ["(\(element.unanswered) of its texts unanswered)"] : []))
             .joined(separator: "\t")
     }
 
     /// The hit test and the window server, in the process. The window, and the front look a
     /// landing is judged by, come from the one desk read before the climb, so they are one moment.
+    /// A point no active display holds is refused by the one pressing rule, by name: a click
+    /// there hits nothing. [LAW:single-enforcer]
     @MainActor
     static func land(at point: ScreenPoint) async throws -> Struck {
         let desk = try await Desk.now()
-        guard desk.displays.contains(where: { $0.frame.contains(point) }) else { throw NoSuchPlace.pointOffScreen(point) }
+        let placed = try desk.layout.active.place(point)
         let climb: Landing.Climb
         switch try await TreeReader(granted: SourceKind.granted).climb(from: point, within: hitTesting) {
         case .nothing(let calls): return .nothing(calls: calls, window: desk.listing.windows.first { $0.frame.contains(point) })
@@ -151,7 +153,7 @@ public struct Hit: AsyncParsableCommand {
         // The front look's own hit tests, unbounded as that look's are: one cut off by time would
         // say behind of an app that is over the front one. Counted apart from the climb's.
         var tests = 0
-        let standing = Front.standing(of: climb.pid, at: point, on: desk, front: front) {
+        let standing = Front.standing(of: climb.pid, at: placed, on: desk, front: front) {
             tests += 1
             return TreeReader.hit($0)
         }

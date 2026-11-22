@@ -1,5 +1,6 @@
 import ApplicationServices
 import Grants
+import ScreenSpace
 import Seeing
 
 /// What one accessibility read came back as, before anything is made of it.
@@ -69,8 +70,8 @@ struct Facts {
     let role: Role
     /// Its value, title and description, in that order.
     let texts: [Heard<Said?>]
-    /// Where it is: nil inside when it has no position or no size.
-    let frame: Heard<ScreenRect?>
+    /// Where it is, decided as it was read: nowhere, a box, or no box.
+    let frame: Heard<Frame>
     /// Whether the app answered its role, even with nothing. Apart from `role` because
     /// `AXUnknown` is also a role apps answer - measured, Safari names elements that - and
     /// the two are not one fact. No default: a caller building one says which it is.
@@ -83,21 +84,13 @@ struct Node<Element> {
     let children: Heard<[Element]>
 }
 
-/// An element as something a reading can hold, or why it cannot be.
-enum Candidate: Equatable {
-    case found(Found)
-    case excluded(Exclusion.Reason)
-}
-
 /// The part of `frame` a click can reach inside `clip`: none when they do not meet, or when
 /// what they share lies wholly under one window in front.
 ///
 /// One rule for an element's children and for a window the tree cannot walk, so "could
 /// anything there be seen" means one thing. [LAW:single-enforcer]
 func visible(_ frame: ScreenRect, in clip: ScreenRect, under covers: Covers) -> ScreenRect? {
-    let shared = frame.cgRect.intersection(clip.cgRect)
-    guard !shared.isNull, !shared.isEmpty, !covers.hide(ScreenRect(shared)) else { return nil }
-    return ScreenRect(shared)
+    frame.intersection(clip).flatMap { covers.hide($0) ? nil : $0 }
 }
 
 /// Roles whose frame is an area holding other elements. What such an element says names
@@ -114,11 +107,12 @@ let areas: Set<Role> = Set([
 ].map { Role(rawValue: $0) } + [webArea])
 
 extension Node {
-    /// The element as a finding: its first text in words, at its own frame, with the rest of
-    /// its words as `also` - a figure or an address says an element's state or where it goes,
-    /// never what it is, so neither is a row's text or a name to find it by. If it
-    /// is not an area, and the centre of that frame - the point a click lands on - is
-    /// inside `clip` and under none of the windows in front of this one.
+    /// The element as a finding: its first text in words, placed from its own frame within
+    /// `clip` on `displays`, with the rest of its words as `also` - a figure or an address
+    /// says an element's state or where it goes, never what it is, so neither is a row's text
+    /// or a name to find it by. If it is not an area, a display shows a part of it inside
+    /// `clip`, and the point it is pressed at is under none of the windows in front of this
+    /// one. Its frame goes with the row as claimed, for the press check to find it by.
     ///
     /// An area is known by its role and children together: a list with nothing under it is
     /// the thing its label names, and its centre is where it is pressed. It is decided first, from reads that arrive with the role, so an area
@@ -128,31 +122,45 @@ extension Node {
     /// element's own text off the region does not make the region unread; what is under
     /// it is `descent`'s to decide. An element is unanswered
     /// only when a read it needed failed: its frame would not say, or no text answered and
-    /// one would not say. Whether it is covered is asked only of an element with words or
+    /// one would not say; an element with words whose frame is no box is `not_a_box`.
+    /// Whether it is covered is asked only of an element with words or
     /// words it could not read, since the hit test is a call into another process and a
     /// wordless element could never be a finding. [LAW:no-silent-failure]
     /// [LAW:effects-at-boundaries] Decided from facts and a hit test handed in, so every
     /// rule an element is kept or dropped by is tested with both written by a test.
-    func candidate(in clip: ScreenRect, under covers: Covers) -> Candidate {
+    func candidate(in clip: ScreenRect, on displays: Displays, under covers: Covers) -> Candidate {
         let leaf = if case .answered(let children) = children { children.isEmpty } else { false }
         guard leaf || !areas.contains(facts.role) else { return .excluded(.area) }
-        if case .answered(let placed) = facts.frame {
-            guard let placed, !placed.isThin, clip.contains(placed.centre) else { return .excluded(.unplaced) }
+        // Where a click would press it, when its frame says: placed by the one rule, which the
+        // row is placed by below.
+        var press: ScreenPoint?
+        switch facts.frame {
+        case .answered(.none): return .excluded(.unplaced)
+        case .answered(.box(let frame)):
+            guard !frame.isThin else { return .excluded(.unplaced) }
+            do { press = try displays.place(frame, within: clip).value.press } catch { return .excluded(.unplaced) }
+        case .answered(.refused), .unanswered: break
         }
         let words = facts.texts.compactMap { $0.answer??.words }
         let text = words.first?.text
         guard text != nil || facts.texts.contains(.unanswered) else { return .excluded(.wordless) }
-        if case .answered(let placed?) = facts.frame {
-            switch covers.hide(placed.centre) {
+        if let press {
+            switch covers.hide(press) {
             case .answered(false): break
             case .answered(true): return .excluded(.covered)
             case .unanswered: return .excluded(.overlaid)
             }
         }
-        guard let text, case .answered(let placed?) = facts.frame else { return .excluded(.unanswered) }
+        if case .answered(.refused) = facts.frame { return .excluded(.notABox) }
+        guard let text, case .answered(.box(let frame)) = facts.frame else { return .excluded(.unanswered) }
         var said: Set = [text]
         let also = words.dropFirst().filter { said.insert($0.text).inserted }
-        return .found(Found(text: text, frame: placed, source: .tree(role: facts.role, also: also)))
+        do {
+            return .found(try Found(text: text, frame: frame, source: .tree(role: facts.role, frame: frame, also: also), within: clip, on: displays))
+        } catch {
+            // The rule placed this frame within this clip above, so it places it again.
+            return .excluded(.unplaced)
+        }
     }
 }
 
@@ -220,14 +228,15 @@ func pages<Element>(
         guard elapsed() < bounds.time else { return Paged(pages: pages, examined: examined, stop: .timeBudget(bounds.time)) }
         let node = try read(element)
         examined += 1
-        // An element that will not name itself may be the page, and one that clips but will
+        // An element that will not name itself may be the page, and one that clips but does
         // not say where it is leaves unknown which page is shown and how much of it:
         // descending into the first finds its iframes, dropping the second could leave a
         // DevTools pane the one page or hand back the toolbar. [LAW:no-silent-failure]
-        guard node.facts.named, !(clips.contains(node.facts.role) && node.facts.frame == .unanswered) else { unread = true; continue }
-        let inner = node.facts.bound(within: bound)
+        guard node.facts.named, node.facts.saysWhere else { unread = true; continue }
+        // Clipped to nothing: nothing under it is drawn, so no page is shown there.
+        guard let inner = node.facts.bound(within: bound) else { continue }
         if node.facts.role == webArea {
-            if case .answered(let placed?) = node.facts.frame, !placed.isEmpty, !inner.isThin { pages.append(inner) }
+            if case .answered(.box(let placed)) = node.facts.frame, !placed.isEmpty, !inner.isThin { pages.append(inner) }
             continue
         }
         guard case .answered(let children) = node.children else { unread = true; continue }
@@ -273,10 +282,10 @@ enum Descent: Equatable {
     case probe
     /// Nothing under it can be seen.
     case prune
-    /// It is not seen, it could still hold something that is, and its role read failed -
-    /// so whether it clips its children is unknown. They are not read, and are counted as a
-    /// part left unread. [LAW:no-silent-failure]
-    case unsure
+    /// It is not seen and could still hold something that is, and its role read failed, or
+    /// it clips and does not say where it is - so what it lets show is unknown. Its children
+    /// are not read, and are counted as a part left unread, by why. [LAW:no-silent-failure]
+    case unsure(Exclusion.Reason)
 }
 
 extension Facts {
@@ -298,23 +307,38 @@ extension Facts {
     /// more. The walk's own bounds cap it, and say so in the reach.
     ///
     /// Where what this element holds can be drawn: `bound`, cut to its own frame when it
-    /// clips - the one rule the reading walk and the page search narrow by.
-    /// [LAW:single-enforcer]
-    func bound(within bound: ScreenRect) -> ScreenRect {
-        guard clips.contains(role), case .answered(let placed?) = frame, !placed.isEmpty else { return bound }
-        return ScreenRect(bound.cgRect.intersection(placed.cgRect))
+    /// clips - the one rule the reading walk and the page search narrow by - or nowhere,
+    /// when the two share no area. [LAW:single-enforcer]
+    func bound(within bound: ScreenRect) -> ScreenRect? {
+        guard clips.contains(role), case .answered(.box(let placed)) = frame, !placed.isEmpty else { return bound }
+        return bound.intersection(placed)
+    }
+
+    /// Whether this element says where what it holds can be drawn: it draws its children
+    /// wherever they are, or its frame answered - a box, or no position at all, which bounds
+    /// nothing. A clipping element whose frame did not answer or is no box leaves unknown
+    /// what it lets show. [LAW:single-enforcer] The one predicate the reading walk and the
+    /// page search ask.
+    var saysWhere: Bool {
+        guard clips.contains(role) else { return true }
+        switch frame {
+        case .answered(.none), .answered(.box): return true
+        case .answered(.refused), .unanswered: return false
+        }
     }
 
     /// The one place the descend, probe and prune decision is made. [LAW:single-enforcer]
     func descent(clip: ScreenRect, bound: ScreenRect, under covers: Covers) -> Descent {
-        guard case .answered(let placed?) = frame, !placed.isEmpty else { return .descend(clip: clip, bound: bound) }
+        guard saysWhere else { return .unsure(frame == .unanswered ? .unanswered : .notABox) }
+        guard case .answered(.box(let placed)) = frame, !placed.isEmpty else { return .descend(clip: clip, bound: bound) }
         let clipping = clips.contains(role)
         if let shown = visible(placed, in: clip, under: covers) {
             guard clipping else { return .descend(clip: clip, bound: bound) }
-            return .descend(clip: shown, bound: self.bound(within: bound))
+            guard let inner = self.bound(within: bound) else { return .prune }
+            return .descend(clip: shown, bound: inner)
         }
         guard !clipping, placed.intersects(bound) else { return .prune }
-        return named ? .probe : .unsure
+        return named ? .probe : .unsure(.unanswered)
     }
 }
 
@@ -359,10 +383,11 @@ struct Bounds {
 ///
 /// Every accessibility call - the reads and the hit tests in each root's covers - is
 /// handed in, so the walk, its bounds and its counts are checked with no app to read
-/// from. [LAW:effects-at-boundaries]
+/// from. [LAW:effects-at-boundaries] Every row is placed on `displays`, the pass's active ones.
 func walk<Element>(
     from roots: [Root<Element>],
     unwalked: Int,
+    on displays: Displays,
     within bounds: Bounds,
     elapsed: () -> Duration,
     read: (Element) throws -> Node<Element>
@@ -379,12 +404,12 @@ func walk<Element>(
             guard elapsed() < bounds.time else { stop = .timeBudget(bounds.time); break roots }
             let node = try read(root.element)
             examined += 1
-            let candidate = node.candidate(in: root.clip, under: root.covers)
+            let candidate = node.candidate(in: root.clip, on: displays, under: root.covers)
             // A probe not seen - off the clip, or with a frame that says nothing - was never
             // placed in the region: nothing to count, unless a read it needed failed, which
             // leaves unknown whether it was.
             let quiet = root.probe && candidate != .excluded(.unanswered) && {
-                guard case .answered(let placed?) = node.facts.frame, !placed.isEmpty else { return true }
+                guard case .answered(.box(let placed)) = node.facts.frame, !placed.isEmpty else { return true }
                 return visible(placed, in: root.clip, under: root.covers) == nil
             }()
             switch candidate {
@@ -400,12 +425,12 @@ func walk<Element>(
                 queue.append(contentsOf: children.map { Root(element: $0, clip: clip, bound: bound, covers: root.covers, probe: probe) })
             case (.answered(let children), .probe):
                 queue.append(contentsOf: children.map { Root(element: $0, clip: root.clip, bound: root.bound, covers: root.covers, probe: true) })
-            // A subtree unread is one more unanswered part - unless nothing in it could be
-            // seen, or this element was already counted as one.
+            // A subtree unread is one more part left unread - unless nothing in it could be
+            // seen, or this element was already counted as one, by the same why.
             case (.unanswered, .descend), (.unanswered, .probe), (.unanswered, .unsure):
                 if !unread { counts[.unanswered, default: 0] += 1 }
-            case (.answered(let children), .unsure) where !children.isEmpty:
-                if !unread { counts[.unanswered, default: 0] += 1 }
+            case (.answered(let children), .unsure(let why)) where !children.isEmpty:
+                if candidate != .excluded(why) { counts[why, default: 0] += 1 }
             case (_, .prune), (.answered, .unsure): break
             }
         }
