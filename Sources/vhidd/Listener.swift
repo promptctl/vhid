@@ -13,8 +13,9 @@ final class Listener: NSObject, NSXPCListenerDelegate {
     private let callers: CallerIdentity
     private let screen: any ScreenSource
     private let holder = Holder()
-    /// Checks for keys held past the limit a few times a second.
-    private let sweep = DispatchSource.makeTimerSource(queue: .global())
+    /// Checks for keys held past the limit a few times a second, on a queue of its own: a
+    /// tick that found the pool full would leave a key held as long as the pool stayed so.
+    private let sweep = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "vhidd.sweep"))
 
     init(readiness: Readiness, callers: CallerIdentity, screen: any ScreenSource) {
         self.readiness = readiness

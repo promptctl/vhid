@@ -22,9 +22,13 @@ public struct SignalWatch {
     /// `answer` is handed the number on `queue`, once for each delivery: the source
     /// coalesces deliveries that land before it runs, and two signals sent together are
     /// still two, the second of which can mean something the first did not.
+    ///
+    /// On a queue of the watch's own by default, which dispatch gives a thread whenever a
+    /// signal lands, and not the bounded pool behind `DispatchQueue.global()`, which a busy
+    /// process can fill with the very work the signal is sent to stop.
     public init(
         on numbers: [Int32] = [SIGINT, SIGTERM],
-        answeringOn queue: DispatchQueue = .global(),
+        answeringOn queue: DispatchQueue = DispatchQueue(label: "Signals.watch"),
         answer: @escaping @Sendable (Int32) -> Void
     ) {
         sources = numbers.map { number in
