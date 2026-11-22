@@ -154,7 +154,7 @@ let package = Package(
         // daemon, over the same connection every verb dials. [LAW:one-way-deps]
         // [LAW:effects-at-boundaries]
         .target(name: "Doctor", dependencies: ["DriverExtension", "ChildProcess", "Installations", "Helper"]),
-        .testTarget(name: "DoctorTests", dependencies: ["Doctor", "DriverExtension", "ChildProcess", "Installations", "Helper", "OwnThread"]),
+        .testTarget(name: "DoctorTests", dependencies: ["Doctor", "DriverExtension", "ChildProcess", "Installations", "Helper", "OwnThread", "Waiting"]),
         // What vhid's menu bar item shows, as a value built from doctor's readings and the
         // daemon's last failure, so every menu is one a test constructs. It reads nothing.
         // [LAW:effects-at-boundaries]
@@ -258,7 +258,7 @@ let package = Package(
         // vocabulary stays linking nothing and the tree reader sits beside it unlinked.
         .target(name: "Pixels", dependencies: ["Seeing", "ScreenSpace", "Grants", "ChildProcess", "Telemetry", "Turns"], path: "eyes/Sources/Pixels"),
         // How a capture is cut into pieces and put back together, with no capture at all.
-        .testTarget(name: "PixelsTests", dependencies: ["Pixels", "Seeing", "ScreenSpace", "ScreenSpaceTesting", "Grants", "ChildProcess", "Turns"], path: "eyes/Tests/PixelsTests"),
+        .testTarget(name: "PixelsTests", dependencies: ["Pixels", "Seeing", "ScreenSpace", "ScreenSpaceTesting", "Grants", "ChildProcess", "Turns", "Waiting"], path: "eyes/Tests/PixelsTests"),
         // The tree reader: the accessibility grant and the element reads, apart from Pixels
         // for the same reason.
         .target(name: "Tree", dependencies: ["Seeing", "ScreenSpace", "Grants"], path: "eyes/Sources/Tree"),
@@ -274,7 +274,7 @@ let package = Package(
         // One piece of work at a time, for what serves one: the daemon, and Vision. It links
         // neither half, so each half's gate is the same rule.
         .target(name: "Turns", path: "eyes/Sources/Turns"),
-        .testTarget(name: "TurnsTests", dependencies: ["Turns"], path: "eyes/Tests/TurnsTests"),
+        .testTarget(name: "TurnsTests", dependencies: ["Turns", "Waiting"], path: "eyes/Tests/TurnsTests"),
         // One record per unit of work, and the one edge every record leaves a process by.
         // It links neither half, so both record through it. [LAW:nothing-unseen]
         .target(name: "Telemetry", path: "eyes/Sources/Telemetry"),

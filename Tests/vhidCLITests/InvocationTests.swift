@@ -414,7 +414,7 @@ import InputTesting
     /// A session stopped from outside - Control-C or SIGTERM, which cancel the task serving
     /// it - withdraws the call it is running, whose record says it was cancelled and what
     /// it had sent, and ends once that record is out.
-    @Test(.timeLimit(.minutes(2))) func aSessionStoppedFromOutsideRecordsItsRunningCallAsCancelled() async throws {
+    @Test(.hangLimit) func aSessionStoppedFromOutsideRecordsItsRunningCallAsCancelled() async throws {
         let (began, begin) = AsyncStream<Void>.makeStream()
         let waiting = VerbTool(Help.click, []) { _, _ in
             Telemetry.tally(.mouseReports)
@@ -447,7 +447,7 @@ import InputTesting
     /// A stopped session ends only once the call it withdrew has finished stopping: a
     /// withdrawn verb hands the devices back and lets go of what it holds on its way out,
     /// and its record says what it sent by then.
-    @Test(.timeLimit(.minutes(1))) func aStoppedSessionWaitsForItsWithdrawnCallToFinishStopping() async throws {
+    @Test(.hangLimit) func aStoppedSessionWaitsForItsWithdrawnCallToFinishStopping() async throws {
         let (began, begin) = AsyncStream<Void>.makeStream()
         let (handedBack, handBack) = AsyncStream<Void>.makeStream()
         let holding = VerbTool(Help.click, []) { _, _ in
@@ -484,7 +484,7 @@ import InputTesting
     /// The command line's dispatcher, as a shell meets it: `vhid mcp` serving, then a
     /// signal. Its record is written as cancelled, it says so, and it then dies by that
     /// signal, which is what tells a shell it was stopped.
-    @Test(arguments: [SIGINT, SIGTERM])
+    @Test(.ownThread, arguments: [SIGINT, SIGTERM])
     func aVerbStoppedByASignalIsRecordedAsCancelledAndDiesByIt(_ number: Int32) async throws {
         let home = FileManager.default.temporaryDirectory.appending(path: "vhid-tests-\(UUID().uuidString)")
         let process = Process(), stdin = Pipe(), stdout = Pipe()
@@ -540,7 +540,7 @@ import InputTesting
     /// On a thread of its own, so the test's blocking read of the child's start holds up no
     /// other test, and with a limit past the test's, so only the cancel can end the child in
     /// time. [LAW:no-ambient-temporal-coupling]
-    @Test(.ownThread, .timeLimit(.minutes(2))) func aReadingCancelledMidCommandIsRecordedAsCancelledAndLeavesNoChild() async throws {
+    @Test(.ownThread, .hangLimit) func aReadingCancelledMidCommandIsRecordedAsCancelledAndLeavesNoChild() async throws {
         let handshake = try Handshake()
         defer { handshake.remove() }
         let collected = Collected()

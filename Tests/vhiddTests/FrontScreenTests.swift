@@ -165,7 +165,7 @@ import Waiting
 
     /// Returning at all means the child was ended and reaped: `stop` waits for it, and it
     /// ignores SIGTERM and sleeps past the time limit.
-    @Test(.timeLimit(.minutes(2))) func aChildThatNeverSaysItJoinedIsGivenUpOnAndEnded() {
+    @Test(.hangLimit) func aChildThatNeverSaysItJoinedIsGivenUpOnAndEnded() {
         #expect {
             try child("trap '' TERM; exec sleep 3600", joinWithin: .milliseconds(300))
         } throws: { "\($0)".contains("did not say it joined within 0.3 seconds") }
@@ -194,12 +194,12 @@ import Waiting
 
     /// Stopping returns only once the child is reaped, even one that ignores SIGTERM and
     /// never reads its stdin: it sleeps past the time limit, so returning at all is ending it.
-    @Test(.timeLimit(.minutes(2))) func stoppingEndsEvenAChildThatWillNotListen() throws {
+    @Test(.hangLimit) func stoppingEndsEvenAChildThatWillNotListen() throws {
         let reader = try child("trap '' TERM; exec 0<&-; echo joined c0de; exec sleep 3600")
         reader.stop()
     }
 
-    @Test(.timeLimit(.minutes(2))) func aChildThatDoesNotAnswerIsGivenUpOnInTime() throws {
+    @Test(.hangLimit) func aChildThatDoesNotAnswerIsGivenUpOnInTime() throws {
         let reader = try child("echo joined c0de; exec sleep 3600", patience: .milliseconds(300))
         defer { reader.stop() }
         #expect { try reader.cursor() } throws: { "\($0)".contains("did not answer within 0.3 seconds") }

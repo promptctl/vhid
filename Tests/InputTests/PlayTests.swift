@@ -3,6 +3,7 @@ import Pointing
 import Synchronization
 import TestClock
 import Testing
+import Waiting
 @testable import Input
 import ScreenSpace
 import ScreenSpaceTesting
@@ -207,7 +208,7 @@ import InputTesting
     /// the deadline, which is right under a clock that advances on its own and is forever
     /// under one that does not: without the
     /// measurement that notices the clock standing still, this spins until the time limit.
-    @Test(.timeLimit(.minutes(1)))
+    @Test(.hangLimit)
     func aLeadIsWatchedOutOnAClockThatOnlyMovesWhenSleptOn() async throws {
         let clock = ManualClock()
         let fake = FakeMouse(at: ScreenPoint.at(0, 0))

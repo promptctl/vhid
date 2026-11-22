@@ -1,6 +1,7 @@
 import ChildProcess
 import CoreGraphics
 import ScreenSpace
+import Timeline
 import Foundation
 import IOKit
 
@@ -271,8 +272,7 @@ final class ChildReader: FrontScreen.Reader {
                 defer { pending.removeSubrange(...newline) }
                 return String(decoding: pending[..<newline], as: UTF8.self)
             }
-            let left = ContinuousClock.now.duration(to: deadline).components
-            let milliseconds = Int32(clamping: max(0, left.seconds * 1000 + left.attoseconds / 1_000_000_000_000_000))
+            let milliseconds = max(.zero, ContinuousClock.now.duration(to: deadline)).wholeMilliseconds
             var poll = pollfd(fd: answers, events: Int16(POLLIN), revents: 0)
             let ready = Darwin.poll(&poll, 1, milliseconds)
             if ready < 0, errno == EINTR { continue }

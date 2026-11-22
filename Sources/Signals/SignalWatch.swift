@@ -22,6 +22,10 @@ public struct SignalWatch {
     /// `answer` is handed the number on `queue`, once for each delivery: the source
     /// coalesces deliveries that land before it runs, and two signals sent together are
     /// still two, the second of which can mean something the first did not.
+    ///
+    /// [LAW:no-ambient-temporal-coupling] A queue of its own, not `DispatchQueue.global()`,
+    /// whose width is capped: blocked work there holds back whatever waits behind it
+    /// (Sources/ChildProcess/Reading.swift).
     public init(
         on numbers: [Int32] = [SIGINT, SIGTERM],
         answeringOn queue: DispatchQueue = DispatchQueue(label: "Signals.SignalWatch"),

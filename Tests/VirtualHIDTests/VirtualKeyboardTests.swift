@@ -121,8 +121,10 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
             try fake.send(.response(id: id, payload: []))
             try fake.push([(.keyboardReady, true)])
         }
-        try keyboard(on: fake).start(within: .seconds(2))
+        let device = try keyboard(on: fake)
+        try device.start(within: .seconds(2))
         try fake.awaitFrame(.control(.healthCheckResponse, payload: []))
+        withExtendedLifetime(device) {}
     }
 }
 

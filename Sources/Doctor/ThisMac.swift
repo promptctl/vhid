@@ -18,16 +18,17 @@ public extension Readiness {
     /// a daemon started by the call filed. [LAW:no-ambient-temporal-coupling]
     ///
     /// Every wait is bounded by `deadline`, the caller's one limit: the driver's and
-    /// launchd's commands share it, and each status call is given no more of the daemon's
-    /// reply timeout than is left of it. A probe the spent limit kept from starting reads as
-    /// that failure in its row. Its stop ends whichever command is reading.
+    /// launchd's commands share it, and each status call is admitted by it and given no more
+    /// of the daemon's reply timeout than is left of it. A probe the spent limit or the stop
+    /// kept from starting reads as that failure in its row. Its stop ends whichever command
+    /// is reading.
     static func read(for installation: Installation, by deadline: Command.Deadline) -> Readiness {
         Readiness(
             installation: installation,
             driver: Result { DriverState(try DriverProbe.facts(by: deadline)) },
             job: Result { try LaunchdProbe.standing(of: installation, by: deadline) },
-            daemon: DaemonProbe.reading {
-                HelperConnection(installation: installation, replyTimeout: min(HelperConnection.replyTimeout, deadline.left))
+            daemon: DaemonProbe.reading(admit: { min(HelperConnection.replyTimeout, try deadline.admit("the daemon's status call")) }) {
+                HelperConnection(installation: installation, replyTimeout: $0)
             },
             keyboardSetupAssistantAnswered: Result { try KeyboardTypeCache.read().answersThisKeyboard })
     }

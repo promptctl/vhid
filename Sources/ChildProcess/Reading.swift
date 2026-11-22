@@ -4,8 +4,8 @@ import Telemetry
 /// Takes a reading of this Mac within `limit`, one that blocks on the commands it runs,
 /// and ends the command running when the task is cancelled: Control-C or SIGTERM on the
 /// command line, a withdrawn call over MCP. What the reading waits on besides commands, as
-/// doctor waits on the daemon's status reply, is not ended: it is bounded by what the
-/// deadline has `left`.
+/// doctor waits on the daemon's status reply, is not ended once started: the deadline
+/// admits it, and it is bounded by what was left then.
 ///
 /// [LAW:no-ambient-temporal-coupling] The deadline is made here, at the call, before the
 /// reading waits for a thread, so the limit and the cancel count from the moment the
@@ -26,8 +26,10 @@ import Telemetry
 /// can never take a cancel for one. [LAW:types-are-the-program] A reading the cancel cut
 /// short is not an answer, and is not returned as one.
 ///
-/// [LAW:nothing-unseen] A cancelled reading's record names the commands the cancel
-/// ended: what a person who pressed Control-C was waiting on.
+/// [LAW:nothing-unseen] Every reading counts on its unit's record whether its limit was
+/// spent by its end, zero when not, so a row that reads as a command overran or unstarted
+/// is told from one read and found off. A cancelled reading's record names the commands
+/// the cancel ended: what a person who pressed Control-C was waiting on.
 public func reading<T: Sendable>(
     within limit: Duration,
     on queue: DispatchQueue = DispatchQueue(label: "ChildProcess.reading"),
@@ -41,6 +43,7 @@ public func reading<T: Sendable>(
     } onCancel: {
         deadline.stop.pull()
     }
+    Telemetry.tally(.limitsSpent, by: deadline.left == .zero ? 1 : 0)
     if Task.isCancelled {
         Telemetry.note(.stopped, .array(deadline.stop.ended.map(JSON.string)))
         throw CancellationError()

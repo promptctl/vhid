@@ -5,6 +5,7 @@ import Seeing
 import Telemetry
 import TelemetryTesting
 import Testing
+import Waiting
 @testable import vhid
 import ScreenSpace
 import ScreenSpaceTesting
@@ -47,7 +48,7 @@ import ScreenSpaceTesting
 
     /// The done criterion: a look sent beside a click that holds the daemon's turn is
     /// answered while the click is still underway.
-    @Test(.timeLimit(.minutes(1))) func aLookIsAnsweredWhileAClickHoldsTheDaemonsTurn() async throws {
+    @Test(.hangLimit) func aLookIsAnsweredWhileAClickHoldsTheDaemonsTurn() async throws {
         let (began, begin) = AsyncStream<Void>.makeStream()
         let (released, release) = AsyncStream<Void>.makeStream()
         let click = VerbTool(Help.click, []) { _, _ in

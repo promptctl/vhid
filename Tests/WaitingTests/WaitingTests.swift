@@ -3,7 +3,7 @@ import OwnThread
 import Testing
 import Waiting
 
-@Suite(.ownThread, .timeLimit(.minutes(2))) struct LatchTests {
+@Suite(.ownThread, .hangLimit) struct LatchTests {
     /// A wait for a condition that already holds returns the state at once.
     @Test func aConditionThatHoldsIsAnsweredAtOnce() throws {
         let latch = Latch(3)
@@ -23,7 +23,7 @@ import Waiting
     }
 }
 
-@Suite(.ownThread, .timeLimit(.minutes(2))) struct HandshakeTests {
+@Suite(.ownThread, .hangLimit) struct HandshakeTests {
     /// The pid read is the one the child wrote.
     @Test func thePidReadIsTheChildsOwn() throws {
         let handshake = try Handshake()

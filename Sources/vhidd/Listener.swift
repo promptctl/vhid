@@ -14,6 +14,9 @@ final class Listener: NSObject, NSXPCListenerDelegate {
     private let screen: any ScreenSource
     private let holder = Holder()
     /// Checks for keys held past the limit a few times a second.
+    /// [LAW:no-ambient-temporal-coupling] A queue of its own, not `DispatchQueue.global()`,
+    /// whose width is capped: blocked work there holds back whatever waits behind it
+    /// (Sources/ChildProcess/Reading.swift).
     private let sweep = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "vhidd.sweep"))
 
     init(readiness: Readiness, callers: CallerIdentity, screen: any ScreenSource) {

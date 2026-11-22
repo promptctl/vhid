@@ -42,6 +42,16 @@ enum DaemonProcess {
         let mouse: VirtualPointing
     }
 
+    /// What `keepUp` carries from one attempt to the next: the failures in a row, and the
+    /// driver as it was last read not on since the devices were last up, which is what a
+    /// wait is for. Kept across attempts, so a driver turned on while an attempt was already
+    /// failing is still one turned on since, and one reading that could not be taken leaves
+    /// the wait looking. [LAW:no-ambient-temporal-coupling]
+    struct Retry {
+        var failures = 0
+        var off: DriverState?
+    }
+
     enum Origin: Equatable {
         case alreadyRunning
         case startedHere(pid_t)
@@ -76,17 +86,19 @@ enum DaemonProcess {
         var say: (Said) -> Void
         /// What every wait here is kept on: the time, and a pause of a given length.
         /// [LAW:one-source-of-truth] One clock for the attempt's limit, the retries inside
-        /// it and the waits between attempts, so a test moves one by hand and none waits.
+        /// it, the device starts and the waits between attempts, so a test moves one by hand
+        /// and none waits.
         var now: () -> Duration
-        var pause: (Duration) throws -> Void
+        var pause: (Duration) -> Void
     }
 
     /// The effects done for real. The daemon outlives any one connection on purpose, and
     /// only `stop` ends it.
     static var real: Effects<HID> {
-        Effects(
+        let clock = Timeline(ContinuousClock())
+        return Effects(
             connect: { whenLost in
-                let daemon = try DaemonConnection(whenLost: whenLost)
+                let daemon = try DaemonConnection(now: clock.now, whenLost: whenLost)
                 return HID(keyboard: VirtualKeyboard(daemon: daemon), mouse: VirtualPointing(daemon: daemon))
             },
             bringUp: { hid, left in
@@ -101,8 +113,8 @@ enum DaemonProcess {
                 case .failed(let what): logFailure(what)
                 }
             },
-            now: Timeline(ContinuousClock()).now,
-            pause: { Thread.sleep(forTimeInterval: Double($0.components.seconds) + Double($0.components.attoseconds) / 1e18) }
+            now: clock.now,
+            pause: { Thread.sleep(forTimeInterval: $0.seconds) }
         )
     }
 
@@ -170,7 +182,7 @@ extension DaemonProcess.Effects {
             } catch let unreachable as DaemonError {
                 let left = deadline - now()
                 guard left > .zero else { stop(origin); throw unreachable }
-                try pause(min(.milliseconds(100), left))
+                pause(min(.milliseconds(100), left))
             }
         }
     }
@@ -216,14 +228,14 @@ func waitOut<Found>(
     _ whole: Duration,
     lookingEvery look: Duration,
     now: () -> Duration,
-    pause: (Duration) throws -> Void,
+    pause: (Duration) -> Void,
     for find: () -> Found?
-) rethrows -> (found: Found, after: Duration)? {
+) -> (found: Found, after: Duration)? {
     let began = now()
     while true {
         let left = whole - (now() - began)
         guard left > .zero else { return nil }
-        try pause(min(look, left))
+        pause(min(look, left))
         if let found = find() { return (found, now() - began) }
     }
 }
@@ -314,8 +326,6 @@ extension DaemonProcess.Effects {
     /// other wait is taken whole and reads nothing. A wait ends by `now`, so the time its
     /// readings take is part of it: the next attempt starts no later than the wait the
     /// log gave and one reading.
-    ///
-    /// Returns only by `pause` throwing, which the real one never does.
     func keepUp(
         within limit: Duration,
         backoff: Backoff,
@@ -323,48 +333,61 @@ extension DaemonProcess.Effects {
         readiness: Readiness,
         serve: (DaemonProcess.Reached<Device>) -> any ServedDevices,
         driver: () -> DriverState?
-    ) throws -> Never {
-        var failures = 0
-        // The driver as it was last read not on, since the devices were last up: what a
-        // wait is for. Kept across attempts, so a driver turned on while an attempt was
-        // already failing is still one turned on since, and one reading that could not
-        // be taken leaves the wait looking. [LAW:no-ambient-temporal-coupling]
-        var off: DriverState?
+    ) -> Never {
+        var retry = DaemonProcess.Retry()
         while true {
-            let attempt = readiness.begin()
-            do {
-                let reached = try reach(within: limit) { lost, _ in _ = readiness.lost(lost, in: attempt) }
-                readiness.up(serve(reached))
-                say(.happened("serving"))
-                // Devices that came up did so on a driver that is on, whatever it read
-                // before them: a loss of these is not that driver turning on.
-                off = nil
-                let since = now()
-                let why = readiness.whileUp()
-                failures = now() - since >= backoff.most ? 1 : failures + 1
-                // Said before the stop, which waits on a daemon that takes its time to end.
-                say(.failed("the devices went down (\(why))"))
-                // Lost, so whatever the daemon held for vhidd went with the connection; a
-                // daemon started here is stopped so the next attempt starts it afresh.
-                stop(reached.daemon)
-            } catch {
-                failures += 1
-                readiness.failed(error)
-                say(.failed("could not bring the devices up (\(error))"))
-            }
-            // [LAW:dataflow-not-control-flow] However the attempt ended, it is said as it
-            // ends, then the driver is read, then the wait is said: a reading that takes
-            // time holds back neither the failure nor the wait that follows its line.
-            if let read = driver(), !read.isOn { off = read }
-            let wait = backoff.after(failures)
-            say(.happened("bringing the devices up again in \(wait)"))
-            // [LAW:dataflow-not-control-flow] Every wait is waited out the same way: one
-            // with nothing to look for is a single look as long as itself, finding nothing.
-            if let on = try waitOut(wait, lookingEvery: off == nil ? wait : look, now: now, pause: pause, for: { off.flatMap { TurnedOn(from: $0, to: driver()) } }) {
-                say(.happened("\(on.found), \(on.after) into a wait of \(wait); bringing the devices up now"))
-                failures = 0
-                off = nil
-            }
+            retry = turn(after: retry, within: limit, backoff: backoff, lookingEvery: look, readiness: readiness, serve: serve, driver: driver)
         }
+    }
+
+    /// One turn of `keepUp`: an attempt to bring the devices up, serving them until they
+    /// are lost, and the wait after it. [LAW:effects-at-boundaries] A turn returns, so the
+    /// loop's state between turns is a value, and a test takes as many turns as it watches.
+    func turn(
+        after retry: DaemonProcess.Retry,
+        within limit: Duration,
+        backoff: Backoff,
+        lookingEvery look: Duration,
+        readiness: Readiness,
+        serve: (DaemonProcess.Reached<Device>) -> any ServedDevices,
+        driver: () -> DriverState?
+    ) -> DaemonProcess.Retry {
+        var failures = retry.failures
+        var off = retry.off
+        let attempt = readiness.begin()
+        do {
+            let reached = try reach(within: limit) { lost, _ in _ = readiness.lost(lost, in: attempt) }
+            readiness.up(serve(reached))
+            say(.happened("serving"))
+            // Devices that came up did so on a driver that is on, whatever it read
+            // before them: a loss of these is not that driver turning on.
+            off = nil
+            let since = now()
+            let why = readiness.whileUp()
+            failures = now() - since >= backoff.most ? 1 : failures + 1
+            // Said before the stop, which waits on a daemon that takes its time to end.
+            say(.failed("the devices went down (\(why))"))
+            // Lost, so whatever the daemon held for vhidd went with the connection; a
+            // daemon started here is stopped so the next attempt starts it afresh.
+            stop(reached.daemon)
+        } catch {
+            failures += 1
+            readiness.failed(error)
+            say(.failed("could not bring the devices up (\(error))"))
+        }
+        // [LAW:dataflow-not-control-flow] However the attempt ended, it is said as it
+        // ends, then the driver is read, then the wait is said: a reading that takes
+        // time holds back neither the failure nor the wait that follows its line.
+        if let read = driver(), !read.isOn { off = read }
+        let wait = backoff.after(failures)
+        say(.happened("bringing the devices up again in \(wait)"))
+        // [LAW:dataflow-not-control-flow] Every wait is waited out the same way: one
+        // with nothing to look for is a single look as long as itself, finding nothing.
+        if let on = waitOut(wait, lookingEvery: off == nil ? wait : look, now: now, pause: pause, for: { off.flatMap { TurnedOn(from: $0, to: driver()) } }) {
+            say(.happened("\(on.found), \(on.after) into a wait of \(wait); bringing the devices up now"))
+            failures = 0
+            off = nil
+        }
+        return DaemonProcess.Retry(failures: failures, off: off)
     }
 }

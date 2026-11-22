@@ -127,6 +127,8 @@ never for a time. From the `Waiting` target:
   how long the work takes.
 - A wait whose length is not what the test tests is bounded by `hangGuard`, and only by
   it: past it the wait is a hang, and the test fails as one rather than hanging the run.
+  A test whose wait is a limit under test, which the guard cannot bound, takes the
+  `.hangLimit` trait, derived from the guard.
 - A limit that is what the test tests runs on a clock the test holds. A `ManualClock`
   from `TestClock`, given as a `Timeline`, stands still until the test advances it, so a
   miss is forced and nothing else times out. A limit counts from the call that asks for

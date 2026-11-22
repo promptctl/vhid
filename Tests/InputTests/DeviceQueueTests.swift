@@ -18,10 +18,9 @@ private final class Journal: Sendable {
 /// A device that holds the thread a key-down is made on until the test acknowledges it,
 /// as vhidd's round trip holds it until the report is posted.
 private final class BlockingKeyPress: KeyPress {
-    struct Unacknowledged: Error {}
-
     private let journal: Journal
-    private let acknowledged = DispatchSemaphore(value: 0)
+    /// Acknowledgements given and not yet taken by a key-down.
+    private let acknowledged = Latch(0)
     private let held = Latch<Bool>()
 
     init(journal: Journal) { self.journal = journal }
@@ -31,14 +30,15 @@ private final class BlockingKeyPress: KeyPress {
         try await held.value(for: "a key-down to hold its thread") { $0 }
     }
 
-    func acknowledge() { acknowledged.signal() }
+    func acknowledge() { acknowledged.update { $0 += 1 } }
 
     /// Bounded by the hang guard, so a key-down made where it should not be fails the test
     /// rather than holding the suite.
     func down(_ usage: Usage) throws {
         held.update { $0 = true }
         defer { held.update { $0 = false } }
-        guard acknowledged.wait(timeout: .now() + .seconds(Int(hangGuard.components.seconds))) == .success else { throw Unacknowledged() }
+        try acknowledged.wait(for: "the test to acknowledge a key-down") { $0 > 0 }
+        acknowledged.update { $0 -= 1 }
         journal.record("down \(usage.rawValue)")
     }
 

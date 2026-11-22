@@ -76,17 +76,27 @@ public struct Command: Sendable {
         fileprivate let at: SuspendingClock.Instant
         /// [LAW:dataflow-not-control-flow] Every deadline has a stop of its own, and one
         /// nobody pulls is the reading that runs to its end; no pull of one reaches another.
-        public let stop: Stop
+        let stop: Stop
 
         /// Over `limit` from now, or at its stop, whichever comes first.
         public static func within(_ limit: Duration) -> Deadline {
             Deadline(limit: limit, at: .now + limit, stop: Stop())
         }
 
-        /// What is left of the limit now: none once it is spent. For a wait the reading
-        /// makes besides its commands, as doctor's status call is, so that wait is bounded
-        /// by the reading's limit too.
-        public var left: Duration { max(.zero, SuspendingClock.now.duration(to: at)) }
+        /// What is left of the limit now: none once it is spent. What a command's hearing
+        /// waits by, as admitting it is, so the two cannot count the limit two ways.
+        var left: Duration { max(.zero, SuspendingClock.now.duration(to: at)) }
+
+        /// What is left of the limit for `what` to be started in. [LAW:single-enforcer] Every
+        /// wait a reading makes is let start here, its commands and doctor's status call
+        /// alike: a stop pulled is thrown as the cancel, and a limit spent as `Unstarted`, so
+        /// neither starts anything, and a wait that does start is bounded by what is left.
+        public func admit(_ what: String) throws -> Duration {
+            try stop.admit()
+            let left = left
+            guard left > .zero else { throw Unstarted(command: what, limit: limit) }
+            return left
+        }
     }
 
     /// What ends a reading before its deadline, pulled from whichever thread hears the
@@ -94,7 +104,7 @@ public struct Command: Sendable {
     ///
     /// A stop pulled stays pulled: a command the reading runs afterwards is not started, so
     /// a reading of several commands ends at the one running and runs no more.
-    public final class Stop: Sendable {
+    final class Stop: Sendable {
         /// Whether it has been pulled, the kqueues of the commands waiting on it now and
         /// what each runs, and the commands it has ended. Changed under one lock, so a
         /// command that starts as the stop is pulled is woken either way: by the pull, or
@@ -104,7 +114,7 @@ public struct Command: Sendable {
         fileprivate init() {}
 
         /// Ends the reading.
-        public func pull() {
+        func pull() {
             state.withLock { state in
                 state.pulled = true
                 state.ended += state.waiting.values.sorted()
@@ -115,7 +125,7 @@ public struct Command: Sendable {
         /// The commands this stop ended, each as it was run: the one running when it was
         /// pulled. Empty for a stop pulled while no command ran, which is what says the
         /// reading was waiting on something else.
-        public var ended: [String] {
+        var ended: [String] {
             state.withLock { $0.ended }
         }
 
@@ -200,8 +210,7 @@ public struct Command: Sendable {
     /// The child is this call's from `spawn` to `collect`: nothing of it is left once this
     /// returns or throws, not a descriptor and not a pid to collect.
     public func run(by deadline: Deadline) throws -> Output {
-        try deadline.stop.admit()
-        guard deadline.left > .zero else { throw Unstarted(command: said, limit: deadline.limit) }
+        _ = try deadline.admit(said)
         let started = SuspendingClock.now
         // Nothing to read: a reading takes no input, and under an MCP server this process's
         // own stdin is the client's JSON-RPC stream, which a child must not take from.
@@ -308,7 +317,7 @@ public struct Command: Sendable {
         var events = Array(repeating: Darwin.kevent(), count: streams.count + 2)
         var buffer = [UInt8](repeating: 0, count: 65536)
         while !(exited && open.isEmpty) {
-            let left = SuspendingClock.now.duration(to: deadline.at)
+            let left = deadline.left
             guard left > .zero else { return .overran }
             var patience = timespec(tv_sec: Int(left.components.seconds), tv_nsec: Int(left.components.attoseconds / 1_000_000_000))
             let ready = kevent(queue, nil, 0, &events, Int32(events.count), &patience)

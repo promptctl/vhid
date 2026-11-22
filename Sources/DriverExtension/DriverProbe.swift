@@ -64,14 +64,17 @@ public enum DriverProbe {
     /// Takes the pkgutil run as a closure so a test can fail it either way it fails in
     /// life: the run itself, or an answer this build cannot read.
     ///
-    /// A stopped reading is not a receipt that could not be read: the cancel is thrown on,
-    /// so `facts` ends with it rather than returning a reading the stop cut short.
+    /// A reading that was stopped, or whose limit was spent before pkgutil could start, is
+    /// not a receipt that could not be read: either is thrown on, so `facts` ends with it
+    /// rather than returning a reading cut short as one that read a fact.
     /// [LAW:no-silent-failure]
-    static func elementsReceipt(_ read: () throws -> Command.Output) throws(CancellationError) -> ElementsReceipt {
+    static func elementsReceipt(_ read: () throws -> Command.Output) throws -> ElementsReceipt {
         do {
             return try receiptVersion(of: elementsReceiptID, from: read()).map { .installed(version: $0) } ?? .absent
         } catch let cancel as CancellationError {
             throw cancel
+        } catch let refused as Command.Unstarted {
+            throw refused
         } catch {
             return .unreadable(reason: "\(error)")
         }

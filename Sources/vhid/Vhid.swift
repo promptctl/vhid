@@ -62,6 +62,9 @@ struct Vhid: AsyncParsableCommand {
         let watch = SignalWatch { number in
             guard first.take(number) else { die(by: number) }
             let task = running.withLock { $0 }
+            // [LAW:no-ambient-temporal-coupling] A queue of its own, not
+            // `DispatchQueue.global()`, whose width is capped: blocked work there holds
+            // back whatever waits behind it (Sources/ChildProcess/Reading.swift).
             DispatchQueue(label: "vhid.cancel").async { task?.cancel() }
         }
         let invocation = Task {

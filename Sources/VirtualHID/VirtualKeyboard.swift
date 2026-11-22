@@ -77,18 +77,6 @@ public final class VirtualKeyboard: KeyPress {
 
     public var keysDown: Set<Usage> { held.withLock { $0.keysDown } }
 
-    /// Connects to the daemon and takes nothing else on faith. The device is not up until
-    /// `start` says so.
-    ///
-    /// `whenLost` is told, once and from another thread, when the daemon's connection ends
-    /// underneath this device: the daemon exited, the socket failed, or the driver went
-    /// away. Every call after
-    /// that throws the same failure, so a caller that presses keys and stops can leave the
-    /// default; a process holding the device open across silences is the one that needs to
-    /// hear, because nothing it does in between would tell it.
-    public convenience init(reportTimeout: Duration = .seconds(2), whenLost: @escaping @Sendable (DaemonError) -> Void = { _ in }) throws {
-        self.init(daemon: try DaemonConnection(whenLost: whenLost), reportTimeout: reportTimeout)
-    }
 
     /// Over a connection the mouse may share, for the reason `VirtualPointing` gives.
     public init(daemon: DaemonConnection, reportTimeout: Duration = .seconds(2)) {

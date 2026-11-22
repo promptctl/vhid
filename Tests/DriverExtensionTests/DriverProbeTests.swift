@@ -1,4 +1,4 @@
-import ChildProcess
+@testable import ChildProcess
 import Testing
 @testable import DriverExtension
 
@@ -179,9 +179,12 @@ import Testing
         }
     }
 
-    /// A reading stopped while pkgutil runs is not a receipt that could not be read: the
-    /// cancel goes on up, so the facts end with it rather than as a reading it cut short.
-    @Test func aStoppedKarabinerElementsReadIsThrownNotUnreadable() {
+    /// A reading stopped while pkgutil runs, or whose limit was spent before it started, is
+    /// not a receipt that could not be read: it goes on up, so the facts end with it rather
+    /// than as a reading it cut short.
+    @Test func aStoppedOrUnstartedKarabinerElementsReadIsThrownNotUnreadable() {
         #expect(throws: CancellationError.self) { try DriverProbe.elementsReceipt { throw CancellationError() } }
+        let unstarted = Command.Unstarted(command: "pkgutil --pkg-info org.pqrs.Karabiner-Elements", limit: .seconds(2))
+        #expect(throws: unstarted) { try DriverProbe.elementsReceipt { throw unstarted } }
     }
 }

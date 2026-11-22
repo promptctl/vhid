@@ -161,8 +161,6 @@ import VirtualHID
         #expect(world.terminated == [World.pid])
     }
 
-    private struct Stop: Error {}
-
     /// A daemon started for devices that will not come up is stopped before each wait, and
     /// not started again until the whole wait has passed: one spawn per backoff window.
     /// Every failure is told to readiness as the reason acts are refused.
@@ -176,13 +174,10 @@ import VirtualHID
         let readiness = Readiness(driver: { .running })
         var downWhileWaiting: [Bool] = []
         let clock = world.clock
-        #expect(throws: Stop.self) {
-            try logged.keepUp(within: .zero, backoff: Backoff(first: .seconds(2), most: .seconds(5)), lookingEvery: .seconds(5), readiness: readiness, serve: { _ in RecordingDevices() }, driver: { nil }) { wait in
-                clock.advance(by: wait)
-                events.append("wait \(wait)")
-                downWhileWaiting.append((try? readiness.devices()) == nil)
-                if events.filter({ $0.hasPrefix("wait") }).count == 3 { throw Stop() }
-            }
+        logged.turns(3, within: .zero, backoff: Backoff(first: .seconds(2), most: .seconds(5)), lookingEvery: .seconds(5), readiness: readiness, serve: { _ in RecordingDevices() }, driver: { nil }) { wait in
+            clock.advance(by: wait)
+            events.append("wait \(wait)")
+            downWhileWaiting.append((try? readiness.devices()) == nil)
         }
         #expect(events == ["launch", "stop", "wait 2.0 seconds", "launch", "stop", "wait 4.0 seconds", "launch", "stop", "wait 5.0 seconds"])
         #expect(downWhileWaiting == [true, true, true])
@@ -199,18 +194,15 @@ import VirtualHID
         var downWhileWaiting: [Bool] = []
         var waits: [Duration] = []
         let clock = world.clock
-        #expect(throws: Stop.self) {
-            try world.effects.keepUp(within: .seconds(1), backoff: Backoff(first: .seconds(2), most: .seconds(60)), lookingEvery: .seconds(60), readiness: readiness, serve: { _ in
-                served += 1
-                // Lost as they are handed over, for the reason `lostEachTime` gives.
-                world.lost!(.closed)
-                return RecordingDevices()
-            }, driver: { nil }) { wait in
-                clock.advance(by: wait)
-                waits.append(wait)
-                downWhileWaiting.append((try? readiness.devices()) == nil)
-                if waits.count == 2 { throw Stop() }
-            }
+        world.effects.turns(2, within: .seconds(1), backoff: Backoff(first: .seconds(2), most: .seconds(60)), lookingEvery: .seconds(60), readiness: readiness, serve: { _ in
+            served += 1
+            // Lost as they are handed over, for the reason `lostEachTime` gives.
+            world.lost!(.closed)
+            return RecordingDevices()
+        }, driver: { nil }) { wait in
+            clock.advance(by: wait)
+            waits.append(wait)
+            downWhileWaiting.append((try? readiness.devices()) == nil)
         }
         #expect(served == 2)
         #expect(waits == [.seconds(2), .seconds(4)])
@@ -228,11 +220,10 @@ import VirtualHID
     }
 
     /// The loop in `world`, whose driver reads as `driver` says, on a clock that only the
-    /// pauses move, up to the `pauses`th pause: every line said, every launch and stop,
-    /// every reading of the driver and every pause, in the order they happened.
-    private func trace(in world: World, upTo pauses: Int = 1, backoff: Backoff = Backoff(first: .seconds(2), most: .seconds(60)), serve: @escaping () -> Void = {}, driver: @escaping (_ launched: Int, _ waited: Duration) -> DriverState? = { _, _ in nil }) -> [Step] {
+    /// pauses move, for `turns` turns: every line said, every launch and stop, every
+    /// reading of the driver and every pause, in the order they happened.
+    private func trace(in world: World, turns: Int = 1, backoff: Backoff = Backoff(first: .seconds(2), most: .seconds(60)), serve: @escaping () -> Void = {}, driver: @escaping (_ launched: Int, _ waited: Duration) -> DriverState? = { _, _ in nil }) -> [Step] {
         var steps: [Step] = []
-        var paused = 0
         let clock = world.clock
         let began = clock.now.offset
         let effects = world.effects
@@ -240,24 +231,19 @@ import VirtualHID
         traced.launch = { steps.append(.launched); return try effects.launch() }
         traced.terminate = { steps.append(.stopped($0)); effects.terminate($0) }
         traced.say = { steps.append(.said($0)) }
-        #expect(throws: Stop.self) {
-            try traced.keepUp(within: .zero, backoff: backoff, lookingEvery: .seconds(2), readiness: Readiness(driver: { .running }), serve: { _ in
-                serve()
-                return RecordingDevices()
-            }, driver: { steps.append(.readTheDriver); return driver(world.launched, clock.now.offset - began) }) { wait in
-                clock.advance(by: wait)
-                steps.append(.paused(wait))
-                paused += 1
-                if paused == pauses { throw Stop() }
-            }
+        traced.turns(turns, within: .zero, backoff: backoff, lookingEvery: .seconds(2), readiness: Readiness(driver: { .running }), serve: { _ in
+            serve()
+            return RecordingDevices()
+        }, driver: { steps.append(.readTheDriver); return driver(world.launched, clock.now.offset - began) }) { wait in
+            clock.advance(by: wait)
+            steps.append(.paused(wait))
         }
         return steps
     }
 
-    /// Attempts that fail: what was launched and waited, in order, up to the `pauses`th
-    /// pause.
-    private func paced(_ pauses: Int, backoff: Backoff, driver: @escaping (_ launched: Int, _ waited: Duration) -> DriverState?) -> [String] {
-        trace(in: World(connections: [.failure(.noSocket(path: "nowhere"))]), upTo: pauses, backoff: backoff, driver: driver).compactMap {
+    /// Attempts that fail: what was launched and waited, in order, over `turns` turns.
+    private func paced(_ turns: Int, backoff: Backoff, driver: @escaping (_ launched: Int, _ waited: Duration) -> DriverState?) -> [String] {
+        trace(in: World(connections: [.failure(.noSocket(path: "nowhere"))]), turns: turns, backoff: backoff, driver: driver).compactMap {
             switch $0 {
             case .launched: "launch"
             case .paused(let wait): "wait \(wait)"
@@ -269,7 +255,7 @@ import VirtualHID
     /// The person approving the driver is waiting on this loop: the wait it is in ends at
     /// the look that reads the driver on, not at the end of the minute.
     @Test func aDriverTurnedOnDuringAWaitEndsIt() {
-        let events = paced(3, backoff: Backoff(first: .seconds(60), most: .seconds(60))) { _, waited in
+        let events = paced(2, backoff: Backoff(first: .seconds(60), most: .seconds(60))) { _, waited in
             waited < .seconds(4) ? .awaitingApproval : .enabled
         }
         #expect(events == ["launch", "wait 2.0 seconds", "wait 2.0 seconds", "launch", "wait 60.0 seconds"])
@@ -280,7 +266,7 @@ import VirtualHID
     /// where the next in the row would have been 12. That last one is taken whole: the
     /// driver is on, so there is nothing in it to look for.
     @Test func theAttemptAfterTheDriverTurnsOnIsFollowedByTheShortestWait() {
-        let events = paced(5, backoff: Backoff(first: .seconds(3), most: .seconds(60))) { _, waited in
+        let events = paced(3, backoff: Backoff(first: .seconds(3), most: .seconds(60))) { _, waited in
             waited < .seconds(7) ? .disabled : .running
         }
         #expect(events == ["launch", "wait 2.0 seconds", "wait 1.0 seconds", "launch", "wait 2.0 seconds", "wait 2.0 seconds", "launch", "wait 3.0 seconds"])
@@ -289,7 +275,7 @@ import VirtualHID
     /// A driver turned on while an attempt was already failing was last read off in the
     /// wait before that attempt, so the first look of the wait after it ends it.
     @Test func aDriverTurnedOnDuringTheFailingAttemptEndsTheWaitAtItsFirstLook() {
-        let events = paced(4, backoff: Backoff(first: .seconds(4), most: .seconds(4))) { launched, _ in
+        let events = paced(3, backoff: Backoff(first: .seconds(4), most: .seconds(4))) { launched, _ in
             launched == 1 ? .awaitingApproval : .enabled
         }
         #expect(events == ["launch", "wait 2.0 seconds", "wait 2.0 seconds", "launch", "wait 2.0 seconds", "launch", "wait 4.0 seconds"])
@@ -313,7 +299,7 @@ import VirtualHID
     @Test func anUnreadDriverLeavesTheWaitLooking() {
         let readings: [DriverState?] = [.awaitingApproval, nil, .enabled]
         var read = 0
-        let events = paced(3, backoff: Backoff(first: .seconds(60), most: .seconds(60))) { _, _ in
+        let events = paced(2, backoff: Backoff(first: .seconds(60), most: .seconds(60))) { _, _ in
             defer { read += 1 }
             return readings[min(read, readings.count - 1)]
         }
@@ -321,27 +307,24 @@ import VirtualHID
     }
 
     /// Devices that come up and are lost as they are handed over, in a world whose
-    /// daemon is running and whose driver reads as `driver` says: the waits taken, up to
-    /// the `pauses`th. `before` is run ahead of each wait.
+    /// daemon is running and whose driver reads as `driver` says: the waits taken over
+    /// `turns` turns. `before` is run ahead of each wait.
     ///
     /// Lost from inside `serve` and not a moment later from another thread: a test that
     /// holds its thread until a dispatch queue calls back waits on the runner having a
     /// thread to spare, and three of them on a three-core runner wait forever.
-    private func lostEachTime(_ pauses: Int, world: World, backoff: Backoff, driver: @escaping (_ served: Int, _ waited: Duration) -> DriverState?, before: @escaping (World) -> Void = { _ in }) -> [Duration] {
+    private func lostEachTime(_ turns: Int, world: World, backoff: Backoff, driver: @escaping (_ served: Int, _ waited: Duration) -> DriverState?, before: @escaping (World) -> Void = { _ in }) -> [Duration] {
         var served = 0
         var waits: [Duration] = []
         let clock = world.clock
-        #expect(throws: Stop.self) {
-            try world.effects.keepUp(within: .seconds(1), backoff: backoff, lookingEvery: .seconds(2), readiness: Readiness(driver: { .running }), serve: { _ in
-                served += 1
-                world.lost!(.closed)
-                return RecordingDevices()
-            }, driver: { driver(served, waits.reduce(.zero, +)) }) { wait in
-                clock.advance(by: wait)
-                before(world)
-                waits.append(wait)
-                if waits.count == pauses { throw Stop() }
-            }
+        world.effects.turns(turns, within: .seconds(1), backoff: backoff, lookingEvery: .seconds(2), readiness: Readiness(driver: { .running }), serve: { _ in
+            served += 1
+            world.lost!(.closed)
+            return RecordingDevices()
+        }, driver: { driver(served, waits.reduce(.zero, +)) }) { wait in
+            clock.advance(by: wait)
+            before(world)
+            waits.append(wait)
         }
         return waits
     }
@@ -361,7 +344,7 @@ import VirtualHID
     /// driver read off at the loss is what the wait is for, and turning it on ends it.
     @Test func aDriverTurnedOnAfterTheDevicesWereLostToItEndsTheWait() {
         let world = World(connections: [.success(Device())])
-        let waits = lostEachTime(3, world: world, backoff: Backoff(first: .seconds(6), most: .seconds(60))) { _, waited in
+        let waits = lostEachTime(2, world: world, backoff: Backoff(first: .seconds(6), most: .seconds(60))) { _, waited in
             waited < .seconds(4) ? .disabled : .enabled
         }
         #expect(waits == [.seconds(2), .seconds(2), .seconds(6)])
@@ -369,10 +352,10 @@ import VirtualHID
 
     /// A driver that goes from one off state to another has not turned on.
     @Test func aDriverThatChangesWithoutTurningOnEndsNoWait() {
-        let events = paced(4, backoff: Backoff(first: .seconds(6), most: .seconds(6))) { _, waited in
+        let events = paced(2, backoff: Backoff(first: .seconds(6), most: .seconds(6))) { _, waited in
             waited == .zero ? .installedInactive : .awaitingApproval
         }
-        #expect(events == ["launch", "wait 2.0 seconds", "wait 2.0 seconds", "wait 2.0 seconds", "launch", "wait 2.0 seconds"])
+        #expect(events == ["launch", "wait 2.0 seconds", "wait 2.0 seconds", "wait 2.0 seconds", "launch", "wait 2.0 seconds", "wait 2.0 seconds", "wait 2.0 seconds"])
     }
 
     @Test func aWaitIsTakenALookAtATimeAndEndsWithWhatALookFinds() throws {
@@ -420,12 +403,9 @@ import VirtualHID
         let effects = world.effects
         var logged = effects
         logged.launch = { launches.append(clock.now.offset); return try effects.launch() }
-        #expect(throws: Stop.self) {
-            try logged.keepUp(within: .zero, backoff: Backoff(first: wait, most: wait), lookingEvery: .seconds(2), readiness: Readiness(driver: { .running }), serve: { _ in RecordingDevices() }, driver: { clock.advance(by: reading); return .awaitingApproval }) { pause in
-                if launches.count == 2 { throw Stop() }
-                waitBegan = waitBegan ?? clock.now.offset
-                clock.advance(by: pause)
-            }
+        logged.turns(2, within: .zero, backoff: Backoff(first: wait, most: wait), lookingEvery: .seconds(2), readiness: Readiness(driver: { .running }), serve: { _ in RecordingDevices() }, driver: { clock.advance(by: reading); return .awaitingApproval }) { pause in
+            waitBegan = waitBegan ?? clock.now.offset
+            clock.advance(by: pause)
         }
         #expect(launches.count == 2)
         #expect(launches[1] - waitBegan! <= wait + reading)
@@ -472,7 +452,7 @@ import VirtualHID
     /// A wait cut short is said at the look that read the driver on, with how far into
     /// the wait that was.
     @Test func aWaitCutShortIsSaidAtTheLookThatReadTheDriverOn() {
-        let steps = trace(in: World(connections: [.failure(.noSocket(path: "nowhere"))]), upTo: 2, backoff: Backoff(first: .seconds(60), most: .seconds(60)), driver: { _, waited in
+        let steps = trace(in: World(connections: [.failure(.noSocket(path: "nowhere"))]), backoff: Backoff(first: .seconds(60), most: .seconds(60)), driver: { _, waited in
             waited < .seconds(2) ? .awaitingApproval : .enabled
         })
         let look: [Step] = [
@@ -515,11 +495,14 @@ import VirtualHID
 }
 
 private extension DaemonProcess.Effects {
-    /// `keepUp` with every pause handed to `pausing`, which is how a test watches the waits
-    /// and ends the loop.
-    func keepUp(within limit: Duration, backoff: Backoff, lookingEvery look: Duration, readiness: Readiness, serve: (DaemonProcess.Reached<Device>) -> any ServedDevices, driver: () -> DriverState?, pausing: @escaping (Duration) throws -> Void) throws -> Never {
+    /// The first `count` turns of `keepUp`, with every pause handed to `pausing`, which is
+    /// how a test watches the waits.
+    func turns(_ count: Int, within limit: Duration, backoff: Backoff, lookingEvery look: Duration, readiness: Readiness, serve: (DaemonProcess.Reached<Device>) -> any ServedDevices, driver: () -> DriverState?, pausing: @escaping (Duration) -> Void) {
         var paused = self
         paused.pause = pausing
-        try paused.keepUp(within: limit, backoff: backoff, lookingEvery: look, readiness: readiness, serve: serve, driver: driver)
+        var retry = DaemonProcess.Retry()
+        for _ in 0..<count {
+            retry = paused.turn(after: retry, within: limit, backoff: backoff, lookingEvery: look, readiness: readiness, serve: serve, driver: driver)
+        }
     }
 }

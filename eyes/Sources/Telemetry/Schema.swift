@@ -44,6 +44,9 @@ extension Telemetry {
         case boxCalls = "box_calls"
         /// Processes a reading was limited to.
         case owners
+        /// Readings of this Mac whose limit was spent by their end: zero for a unit whose
+        /// readings all ended in time, absent for one that took none.
+        case limitsSpent = "limits_spent"
         /// Runs that matched, those matched only loosely, and those given as nearest instead.
         case matched
         case matchedAlso = "matched_also"
@@ -57,7 +60,7 @@ extension Telemetry {
             switch self {
             case .keyboardReports, .mouseReports, .verticalNotches, .horizontalNotches, .keyRollovers, .keyHesitations: true
             case .queuedMilliseconds, .visionQueuedMilliseconds, .calls, .frontCalls, .rows, .ownPids, .examined, .pages, .reads,
-                 .boxMilliseconds, .boxesNarrowed, .boxCalls, .owners, .matched, .matchedAlso, .nearest: false
+                 .boxMilliseconds, .boxesNarrowed, .boxCalls, .owners, .limitsSpent, .matched, .matchedAlso, .nearest: false
             }
         }
     }

@@ -106,10 +106,10 @@ import Waiting
     }
 
     /// The first client going away releases everything, and the devices are then another
-    /// client's. The release comes before the devices are let go, and the test can see
-    /// only the first of the two, so the next client's admission is asked for, a beat apart,
-    /// until it comes or the hang guard has passed.
-    @Test func aClientGoingAwayReleasesEverythingAndFreesTheDevices() async throws {
+    /// client's. The release and the letting go are made under the holder's one lock, which
+    /// the next client's act takes too, so a client that asks once the release is seen is
+    /// served on its first ask.
+    @Test func aClientGoingAwayReleasesEverythingAndFreesTheDevices() throws {
         let served = try serve()
         let first = client(of: served)
         let keyboard = first.helper.keyboard
@@ -125,13 +125,7 @@ import Waiting
         try released.get()
         #expect(served.devices.releasedBecause.first == "a client went away", "\(seen)")
 
-        let deadline = ContinuousClock.now + hangGuard
-        var next = try admitted(served, pressing: .space)
-        while !next, ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(50))
-            next = try admitted(served, pressing: .space)
-        }
-        #expect(next, "no client was admitted after the first went away")
+        #expect(try admitted(served, pressing: .space), "no client was admitted after the first went away")
         #expect(served.devices.asked == [Usage.leftShift.rawValue, Usage.space.rawValue])
         withExtendedLifetime((served, first)) {}
     }

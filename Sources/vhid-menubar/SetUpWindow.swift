@@ -172,6 +172,9 @@ final class SetUpWindow: NSObject, NSWindowDelegate {
     private func request(_ ask: Requirement.Ask, for requirement: Requirement) {
         failure = nil
         let log = log
+        // [LAW:no-ambient-temporal-coupling] A queue of its own, not
+        // `DispatchQueue.global()`, whose width is capped: blocked work there holds back
+        // whatever waits behind it (Sources/ChildProcess/Reading.swift).
         DispatchQueue(label: "vhid-menubar.request", qos: .userInitiated).async {
             let started = Result { try Self.perform(ask, log: log) }
             DispatchQueue.main.async { MainActor.assumeIsolated { [weak self] in self?.requested(ask, for: requirement, started) } }

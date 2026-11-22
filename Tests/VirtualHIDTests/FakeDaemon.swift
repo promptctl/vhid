@@ -105,7 +105,8 @@ final class FakeDaemon: @unchecked Sendable {
     /// Waits for a frame the client sends without waiting on anything itself - its answer
     /// to a health check, say. Every other frame is logged before the response the client
     /// is blocked on, so only these need waiting for; asserting on them straight after the
-    /// call under test returns is a race, and one that passes most of the time.
+    /// call under test returns is a race, and one that passes most of the time. The client is
+    /// held until the frame comes: it waits its turn in the outbox, and a hang-up drops it.
     func awaitFrame(_ wanted: Frame) throws(Hung) {
         try seen.wait(for: "the client to send \(wanted)") { $0.frames.contains(wanted) }
     }
@@ -114,7 +115,7 @@ final class FakeDaemon: @unchecked Sendable {
     /// the sign that the client has begun its next frame.
     func awaitUnread() throws(Hung) {
         var waiting = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
-        let milliseconds = Int32(hangGuard.components.seconds * 1_000)
+        let milliseconds = hangGuard.wholeMilliseconds
         guard uninterrupted({ Int(poll(&waiting, 1, milliseconds)) }) > 0 else { throw Hung(waitingFor: "the client to send more") }
     }
 

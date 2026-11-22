@@ -4,6 +4,7 @@ import Foundation
 import Helper
 import OwnThread
 import Testing
+import Waiting
 import VirtualHID
 @testable import vhidd
 
@@ -169,7 +170,7 @@ import VirtualHID
 /// the tool's limit: with why the devices are not up, and that the driver could not be
 /// read, naming the tool and the limit. A suite of its own because it waits the limit out.
 @Suite(.ownThread) struct StuckDriverReadTests {
-    @Test(.timeLimit(.minutes(1))) func aDriverReadThatNeverReturnsStillAnswersTheRefusedClient() throws {
+    @Test(.hangLimit) func aDriverReadThatNeverReturnsStillAnswersTheRefusedClient() throws {
         let readiness = Readiness(driver: {
             _ = try Command("/bin/sleep", "600").run(by: .within(.milliseconds(200)))
             return .running

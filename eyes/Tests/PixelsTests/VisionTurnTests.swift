@@ -3,12 +3,13 @@ import ScreenSpace
 import ScreenSpaceTesting
 import Seeing
 import Testing
+import Waiting
 @testable import Pixels
 @testable import Turns
 
 /// Two recognitions in flight crash the process inside Vision, so each one waits for the
 /// process's one Vision turn.
-@Suite(.timeLimit(.minutes(1))) struct VisionTurnTests {
+@Suite(.hangLimit) struct VisionTurnTests {
     /// A blank image the size of `region`, which Vision reads as no text.
     private static func blank(_ region: ScreenRect) throws -> CGImage {
         let context = try #require(CGContext(data: nil, width: Int(region.width), height: Int(region.height), bitsPerComponent: 8,

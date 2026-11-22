@@ -24,7 +24,7 @@ import Waiting
     /// Both orders, because the promise is that the order does not matter. Written the
     /// other way - stderr first - the child fills stderr and stops, and a reader that
     /// takes stdout to completion first waits for an end the child can no longer reach.
-    @Test(.timeLimit(.minutes(1)), arguments: [["e", "o"], ["o", "e"]])
+    @Test(.hangLimit, arguments: [["e", "o"], ["o", "e"]])
     func bothStreamsComeBackWholeWhicheverIsWrittenFirst(order: [String]) throws {
         let output = try Command("/bin/sh", "-c", order.map(Self.fill).joined(separator: "; ")).run(by: .within(hangGuard))
         #expect(output.status == 0)
@@ -46,31 +46,9 @@ import Waiting
         #expect(try Command("/bin/sh", "-c", "kill -KILL $$").run(by: .within(hangGuard)).status == SIGKILL)
     }
 
-    /// A command that has returned holds nothing open, on a thread that never drains a
-    /// pool as much as on one that does: vhidd runs the driver probe every two seconds
-    /// from a thread that never returns, and four commands a probe each leaving two
-    /// descriptors behind would be the whole table within the minute.
-    ///
-    /// The count is the process's, so it is taken in a process of its own, where no other
-    /// test opens anything: what is checked is that it did not grow by the 200 that 100
-    /// leaking runs leave.
-    @Test(.timeLimit(.minutes(2))) func aCommandThatHasReturnedHoldsNoDescriptorOpen() async {
-        await #expect(processExitsWith: .success) {
-            let (ran, grew) = try onAThreadOfItsOwn {
-                let before = try Self.descriptors()
-                let ran = (0..<100).count { _ in (try? Command("/usr/bin/true").run(by: .within(hangGuard)))?.status == 0 }
-                return (ran, try Self.descriptors() - before)
-            }
-            guard ran == 100, grew < 100 else {
-                FileHandle.standardError.write(Data("\(ran) of 100 ran, and the descriptors grew by \(grew)\n".utf8))
-                exit(1)
-            }
-        }
-    }
-
     /// A command that never ends is given up on at its limit and said by name, with the
     /// limit and how long it had.
-    @Test(.timeLimit(.minutes(2))) func aCommandThatNeverEndsIsGivenUpOnAtItsLimitAndNamed() throws {
+    @Test(.hangLimit) func aCommandThatNeverEndsIsGivenUpOnAtItsLimitAndNamed() throws {
         let overran = try #require(#expect(throws: Command.Overran.self) {
             try Command("/bin/sh", "-c", "exec sleep 3600").run(by: .within(.milliseconds(200)))
         })
@@ -94,7 +72,7 @@ import Waiting
     /// the end of a stream is what a reading waits for: the limit covers that wait too. The
     /// grandchild holds the streams for as long as the hang guard, so only a hang lets them
     /// end before the limit.
-    @Test(.timeLimit(.minutes(2))) func aStreamHeldOpenPastTheChildsExitIsGivenUpOnAtTheLimit() throws {
+    @Test(.hangLimit) func aStreamHeldOpenPastTheChildsExitIsGivenUpOnAtTheLimit() throws {
         let overran = try #require(#expect(throws: Command.Overran.self) {
             try Command("/bin/sh", "-c", "sleep \(hangGuard.components.seconds) & exit 0").run(by: .within(.milliseconds(500)))
         })
@@ -103,7 +81,7 @@ import Waiting
 
     /// The limit is the reading's: a command run by a deadline that another has spent is
     /// not started, where a limit of its own would have run it.
-    @Test(.timeLimit(.minutes(2))) func aCommandRunByADeadlineAnotherSpentIsNotStarted() throws {
+    @Test(.hangLimit) func aCommandRunByADeadlineAnotherSpentIsNotStarted() throws {
         let marker = Self.marker()
         defer { try? FileManager.default.removeItem(at: marker) }
         let deadline = Command.Deadline.within(.milliseconds(200))
@@ -119,7 +97,7 @@ import Waiting
     /// Mac holds one, starts no command once the queue lets it go. The limit is the same
     /// value as the stop, made at the same call, so a reading that made either later, when
     /// it got its thread, would hold a stop nobody pulled and run the command.
-    @Test(.timeLimit(.minutes(2))) func aReadingCancelledWhileItWaitsForItsQueueStartsNoCommand() async throws {
+    @Test(.hangLimit) func aReadingCancelledWhileItWaitsForItsQueueStartsNoCommand() async throws {
         let marker = Self.marker()
         defer { try? FileManager.default.removeItem(at: marker) }
         let queue = DispatchQueue(label: "CommandTests.held")
@@ -142,7 +120,7 @@ import Waiting
     /// as a cancel, not as a command that failed or overran, and the child stopped and
     /// collected by the time it is thrown, as one given up on at its limit is. Its limit is
     /// past the test's, so only the cancel can end it in time.
-    @Test(.timeLimit(.minutes(2))) func aReadingCancelledWhileACommandRunsEndsItAndLeavesNoChild() async throws {
+    @Test(.hangLimit) func aReadingCancelledWhileACommandRunsEndsItAndLeavesNoChild() async throws {
         let handshake = try Handshake()
         defer { handshake.remove() }
         let taken = Task {
@@ -156,40 +134,65 @@ import Waiting
         #expect(kill(child, 0) == -1 && errno == ESRCH)
     }
 
-    /// A command given up on holds nothing open either: vhidd reads the driver every two
-    /// seconds while it waits, and a stuck tool is stuck at every one of them. Both ways of
-    /// overrunning: a child that never ends, whose streams end when it is stopped, and one
-    /// that has ended and left its streams open in something it started, where giving up is
-    /// all that lets go of them. That one holds them for as long as the hang guard.
+    /// A command holds nothing open once it has returned or been given up on, on a thread
+    /// that never drains a pool as much as on one that does: vhidd runs the driver probe
+    /// every two seconds from a thread that never returns, a stuck tool is stuck at every
+    /// one of them, and four commands a probe each leaving two descriptors behind would be
+    /// the whole table within the minute. Both ways of overrunning: a child that never
+    /// ends, whose streams end when it is stopped, and one that has ended and left its
+    /// streams open in something it started, where giving up is all that lets go of them.
+    /// That one holds them for as long as the hang guard.
     ///
     /// In a process of its own: the count is of every descriptor the process holds, and in
-    /// the test process another test's open would be counted as this one's leak.
-    @Test(.timeLimit(.minutes(2)), arguments: [
-        ("exec sleep 3600", Duration.milliseconds(20), 50),
-        ("sleep \(hangGuard.components.seconds) & exit 0", Duration.milliseconds(300), 10),
+    /// the test process another test's open would be counted as this one's leak. What is
+    /// checked is that it did not grow by the two each leaking run leaves.
+    @Test(.hangLimit, arguments: [
+        (["/usr/bin/true"], hangGuard, 100, Outcome.returned),
+        (["/bin/sh", "-c", "exec sleep 3600"], Duration.milliseconds(20), 50, Outcome.givenUp),
+        (["/bin/sh", "-c", "sleep \(hangGuard.components.seconds) & exit 0"], Duration.milliseconds(300), 10, Outcome.givenUp),
     ])
-    func aCommandGivenUpOnHoldsNoDescriptorOpen(script: String, limit: Duration, runs: Int) async {
-        await #expect(processExitsWith: .success) { [script, limit, runs] in
-            let (overran, grew) = try onAThreadOfItsOwn {
+    func aCommandThatHasEndedHoldsNoDescriptorOpen(command: [String], limit: Duration, runs: Int, outcome: Outcome) async {
+        await #expect(processExitsWith: .success) { [command, limit, runs, outcome] in
+            let (ended, grew) = try onAThreadOfItsOwn {
                 let before = try Self.descriptors()
-                let overran = (0..<runs).count { _ in
-                    do { _ = try Command("/bin/sh", "-c", script).run(by: .within(limit)); return false } catch { return error is Command.Overran }
+                let ended = (0..<runs).count { _ in
+                    outcome.came { try Command(command[0], Array(command.dropFirst())).run(by: .within(limit)) }
                 }
-                return (overran, try Self.descriptors() - before)
+                return (ended, try Self.descriptors() - before)
             }
-            guard overran == runs, grew < runs else {
-                FileHandle.standardError.write(Data("\(overran) of \(runs) overran, and the descriptors grew by \(grew)\n".utf8))
+            guard ended == runs, grew < runs else {
+                FileHandle.standardError.write(Data("\(ended) of \(runs) \(outcome), and the descriptors grew by \(grew)\n".utf8))
                 exit(1)
+            }
+        }
+    }
+
+    /// How a run of a command is meant to end.
+    enum Outcome: Sendable, Codable, CustomStringConvertible {
+        case returned, givenUp
+
+        func came(_ run: () throws -> Command.Output) -> Bool {
+            switch self {
+            case .returned: return (try? run())?.status == 0
+            case .givenUp:
+                do { _ = try run(); return false } catch { return error is Command.Overran }
+            }
+        }
+
+        var description: String {
+            switch self {
+            case .returned: "returned"
+            case .givenUp: "were given up on"
             }
         }
     }
 
     /// A stop stays pulled: no command a stopped reading runs after it is started, so a
     /// reading of several commands runs none past the one it stopped.
-    @Test(.timeLimit(.minutes(2))) func aCommandRunByAStoppedReadingIsNeverStarted() throws {
+    @Test(.hangLimit) func aCommandRunByAStoppedReadingIsNeverStarted() throws {
         let marker = Self.marker()
         defer { try? FileManager.default.removeItem(at: marker) }
-        let deadline = Command.Deadline.within(.seconds(30))
+        let deadline = Command.Deadline.within(hangGuard)
         deadline.stop.pull()
         for _ in 0..<2 {
             #expect(throws: CancellationError.self) { try Command("/usr/bin/touch", marker.path).run(by: deadline) }
@@ -210,5 +213,5 @@ import Waiting
 private func onAThreadOfItsOwn<T: Sendable>(_ work: @escaping @Sendable () throws -> T) throws -> T {
     let done = Latch<Result<T, any Error>?>(nil)
     Thread.detachNewThread { done.update { $0 = Result { try work() } } }
-    return try done.wait(for: "the thread's work") { $0 != nil }!.get()
+    return try done.wait(for: "the thread's work") { $0 }.get()
 }

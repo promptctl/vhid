@@ -28,6 +28,7 @@ import Waiting
         let pushed = try fake.push([(.keyboardReady, true)])
         #expect(throws: Never.self) { try connection.wait(for: .keyboardReady, within: .seconds(2)) }
         try fake.awaitFrame(.response(id: pushed, payload: []))
+        withExtendedLifetime(connection) {}
     }
 
     /// The daemon going away is an event, told once to whoever holds the connection, and
@@ -45,8 +46,8 @@ import Waiting
     }
 
     /// A write that fails is the same loss as a stream that ends, found by the thread that
-    /// asked rather than the one that reads: told once, thrown from the request that found
-    /// it, and every later request fails by the same name. [LAW:single-enforcer]
+    /// writes rather than the one that reads: told once, thrown from the request whose frame
+    /// found it, and every later request fails by the same name. [LAW:single-enforcer]
     ///
     /// The write is made to fail by shutting this side's sending half, which makes the
     /// next write fail with EPIPE while the reader goes on reading. Not the daemon's
@@ -268,15 +269,17 @@ import Waiting
         #expect(lost.count == 0)
     }
 
-    /// A write the peer stopped draining ends at its request's limit, however long the
-    /// daemon's patience: the limit is the caller's. Cut off part way, the frame has broken
-    /// the framing, so it is the loss, and every request on the connection ends with it.
-    @Test func aWriteStalledPartWayEndsAtItsRequestsLimitAsTheLoss() throws {
+    /// A request whose frame the peer stopped draining part way ends at its own limit,
+    /// however long the daemon's patience: the limit is the caller's, and the patience is
+    /// the connection's. A request behind it whose limit ends while it waits its turn is
+    /// taken back unsent, on the thread that asked, while the write is still stuck. Neither
+    /// is the connection's loss. [LAW:no-ambient-temporal-coupling]
+    @Test func aRequestStalledPartWayEndsAtItsLimitAndOneBehindItIsUnsent() throws {
         let stalled = try StalledWrite(within: .milliseconds(200))
+        #expect(throws: DaemonError.unsent) { try stalled.connection.request(.keyboardReset, within: .zero) }
         stalled.fake.clock.advance(by: .milliseconds(200))
         #expect(try stalled.ended() == .silent)
-        #expect(try stalled.lost.first() == .silent)
-        #expect(stalled.lost.count == 1)
+        #expect(stalled.lost.count == 0)
     }
 
     /// A stalled write holds no one but the writers behind it: a wait for the daemon's word
@@ -292,8 +295,7 @@ import Waiting
             catch { waited.update { $0 = error as? DaemonError } }
         }
         #expect(try waited.wait(for: "the wait to end") { $0 != nil } == .notReady(awaiting: .keyboardReady, said: [:]))
-        stalled.fake.clock.advance(by: .milliseconds(200))
-        #expect(try stalled.ended() == .silent)
+        #expect(stalled.thrown.state == nil)
     }
 
     /// This side hanging up is not the daemon's doing, and is not reported as it.
@@ -336,7 +338,7 @@ private final class StalledWrite: Sendable {
     let fake: FakeDaemon
     let lost = Lost()
     let connection: DaemonConnection
-    private let thrown = Latch<DaemonError?>(nil)
+    let thrown = Latch<DaemonError?>(nil)
     /// Lets the fake read again once the test is done with it, so its thread ends on the
     /// client's hang-up like every other fake's.
     private let done = Latch<Bool>()
@@ -350,7 +352,7 @@ private final class StalledWrite: Sendable {
             try done.waitOpen("the test to finish with a stalled write")
         }
         try fake.limitSendSpace(to: 2048)
-        // A patience past the test's life: what ends the write here is its limit, or the hang-up.
+        // A patience past the test's life: the write ends only with the hang-up.
         let connection = try fake.connect(patience: .seconds(3600), whenLost: lost.record)
         self.connection = connection
         // Read whole and never answered; it ends with the connection.

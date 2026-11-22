@@ -1,3 +1,4 @@
+@testable import ChildProcess
 import Foundation
 import OwnThread
 import Testing
@@ -74,8 +75,8 @@ import Testing
         listener.delegate = far
         listener.resume()
         if invalidated { listener.invalidate() }
-        let helper = { HelperConnection(connection: NSXPCConnection(listenerEndpoint: listener.endpoint), service: "ai.promptctl.vhid.tests.far", replyTimeout: replyTimeout) }
-        let read = DaemonProbe.reading(helper)
+        let helper = { HelperConnection(connection: NSXPCConnection(listenerEndpoint: listener.endpoint), service: "ai.promptctl.vhid.tests.far", replyTimeout: $0) }
+        let read = DaemonProbe.reading(admit: { replyTimeout }, helper)
         withExtendedLifetime((far, listener)) {}
         return read
     }
@@ -115,6 +116,17 @@ import Testing
         #expect(reason == "refused by the fake")
     }
 
+    /// A call its reading does not admit is not made: no connection is opened, and the
+    /// reading says why.
+    @Test func aCallNotAdmittedIsUnaskedAndNothingIsDialled() {
+        let refused = Command.Unstarted(command: "the daemon's status call", limit: .seconds(30))
+        let read = DaemonProbe.reading(admit: { throw refused }) { _ in
+            Issue.record("a connection was made for a call not admitted")
+            return HelperConnection(connection: NSXPCConnection(machServiceName: "ai.promptctl.vhid.tests.nobody"), service: "ai.promptctl.vhid.tests.nobody", replyTimeout: .zero)
+        }
+        #expect(read == .unasked(reason: refused.description))
+    }
+
     /// A refusal followed by an answer is a daemon that went away mid-call and came back,
     /// not a refused signature: the second connection's reading stands.
     @Test func aRefusalThatDoesNotRepeatIsNotTheSignature() {
@@ -124,9 +136,9 @@ import Testing
         refusing.resume(); answering.resume()
         let endpoints = [refusing.endpoint, answering.endpoint]
         var asked = 0
-        let read = DaemonProbe.reading {
+        let read = DaemonProbe.reading(admit: { .seconds(20) }) {
             defer { asked += 1 }
-            return HelperConnection(connection: NSXPCConnection(listenerEndpoint: endpoints[asked]), service: "ai.promptctl.vhid.tests.far", replyTimeout: .seconds(20))
+            return HelperConnection(connection: NSXPCConnection(listenerEndpoint: endpoints[asked]), service: "ai.promptctl.vhid.tests.far", replyTimeout: $0)
         }
         #expect(read == .answered(holder: nil))
         withExtendedLifetime((refusing, answering, no, yes)) {}

@@ -1,3 +1,4 @@
+@testable import ChildProcess
 import DriverExtension
 import Installations
 import Testing
@@ -17,6 +18,7 @@ import Testing
         .answered(holder: nil), .answered(holder: 4242), .refusedThisVhid,
         .unreachable(reason: "NSCocoaErrorDomain 4099"), .silent(reason: "no answer in 5 seconds"),
         .failed(reason: "something new"), .devicesDown(reason: "devices not up: the driver is not activated"),
+        .unasked(reason: "`the daemon's status call` was not started: the limit of 30.0 seconds was spent before it"),
     ]
 
     // MARK: - the driver extension
@@ -130,7 +132,7 @@ import Testing
             let row = Requirement.daemon(reading, installation: Self.installation)
             let listening = switch reading {
             case .answered, .refusedThisVhid: true
-            case .devicesDown, .unreachable, .silent, .failed: false
+            case .devicesDown, .unreachable, .silent, .failed, .unasked: false
             }
             #expect(row.met == listening, "\(reading)")
         }
@@ -140,9 +142,11 @@ import Testing
     /// reason is: this installation's own log, when there is a daemon to have written it.
     @Test func eachWayOfNotAnsweringQuotesTheCallAndThisInstallationsLog() throws {
         for reading in Self.daemonReadings where !Requirement.daemon(reading, installation: Self.installation).met {
+            // Never asked: its own test, below.
+            if case .unasked = reading { continue }
             let step = try #require(Requirement.daemon(reading, installation: Self.installation).step)
             let said = switch reading {
-            case .devicesDown(let reason), .unreachable(let reason), .silent(let reason), .failed(let reason): reason
+            case .devicesDown(let reason), .unreachable(let reason), .silent(let reason), .failed(let reason), .unasked(let reason): reason
             case .answered, .refusedThisVhid: ""
             }
             #expect(step.contains(said), "\(reading)")
@@ -157,6 +161,18 @@ import Testing
         }
     }
 
+    /// A call the reading's limit or its stop kept from being made says why where readings
+    /// go, and asks for the reading again, as any row that could not be read does: no daemon
+    /// was asked, so there is no log of its to send anyone to.
+    @Test func aCallNeverMadeReadsAsUnreadAndAsksForTheReadingAgain() {
+        let reason = "`the daemon's status call` was not started: the limit of 30.0 seconds was spent before it"
+        let row = Requirement.daemon(.unasked(reason: reason), installation: Self.installation)
+        let unread = Requirement.unreadable(.daemon, Command.Unstarted(command: "the daemon's status call", limit: .seconds(30)))
+        #expect(row.reads == "could not be read: \(reason)")
+        #expect(row.reads == unread.reads)
+        #expect(row.step == unread.step)
+    }
+
     // MARK: - the signature
 
     /// Met by any reply to the call - an answer, or devices down - since either came
@@ -166,7 +182,7 @@ import Testing
             let row = Requirement.signature(reading, installation: Self.installation)
             let answered = switch reading {
             case .answered, .devicesDown: true
-            case .refusedThisVhid, .unreachable, .silent, .failed: false
+            case .refusedThisVhid, .unreachable, .silent, .failed, .unasked: false
             }
             #expect(row.met == answered, "\(reading)")
         }
@@ -251,7 +267,7 @@ import Testing
         for reading in Self.daemonReadings {
             let proves = switch reading {
             case .answered, .devicesDown, .refusedThisVhid: true
-            case .unreachable, .silent, .failed: false
+            case .unreachable, .silent, .failed, .unasked: false
             }
             #expect(reading.daemonHasStarted == proves, "\(reading)")
         }

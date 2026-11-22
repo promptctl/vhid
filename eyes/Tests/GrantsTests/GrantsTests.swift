@@ -72,7 +72,7 @@ import Waiting
     /// A reading withdrawn while its child runs is a cancellation, recorded as one, and its
     /// child is gone with it. Its limit is past the test's, so only the withdrawal can end
     /// it in time.
-    @Test(.timeLimit(.minutes(2))) func aReadingWithdrawnWhileItsChildRunsIsCancelled() async throws {
+    @Test(.hangLimit) func aReadingWithdrawnWhileItsChildRunsIsCancelled() async throws {
         let events = Collected()
         let handshake = try Handshake()
         defer { handshake.remove() }
@@ -119,7 +119,7 @@ struct GrantMappingTests {
 }
 
 /// Every gate of a process answers from one reading while it is fresh, and takes a new one after.
-@Suite(.eventsKept, .timeLimit(.minutes(1))) struct SharedReadingTests {
+@Suite(.eventsKept, .hangLimit) struct SharedReadingTests {
     actor Takes {
         var count = 0
         func take() -> GrantReading { count += 1; return GrantReading { $0 == .accessibility } }
