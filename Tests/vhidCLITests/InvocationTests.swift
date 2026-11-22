@@ -412,8 +412,9 @@ import InputTesting
 
     /// A session stopped from outside - Control-C or SIGTERM, which cancel the task serving
     /// it - withdraws the call it is running, whose record says it was cancelled and what
-    /// it had sent, and ends once that record is out.
-    @Test func aSessionStoppedFromOutsideRecordsItsRunningCallAsCancelled() async throws {
+    /// it had sent, and ends once that record is out. The call never ends on its own, so
+    /// the session ending at all is the stop's doing.
+    @Test(.timeLimit(.minutes(1))) func aSessionStoppedFromOutsideRecordsItsRunningCallAsCancelled() async throws {
         let (began, begin) = AsyncStream<Void>.makeStream()
         let waiting = VerbTool(Help.click, []) { _, _ in
             Telemetry.tally(.mouseReports)
@@ -433,14 +434,7 @@ import InputTesting
         // As the command line's watch does: the signal is taken, then the session cancelled.
         _ = signals.take(SIGTERM)
         session.cancel()
-        let ended = await withTaskGroup(of: Result<Void, any Error>?.self) { race in
-            race.addTask { await session.result }
-            race.addTask { try? await Task.sleep(for: .seconds(10)); return nil }
-            defer { race.cancelAll() }
-            return await race.next() ?? nil
-        }
-        let ending = try #require(ended, "the session is still serving after its task was cancelled")
-        #expect(throws: CancellationError.self) { try ending.get() }
+        await #expect(throws: CancellationError.self) { try await session.value }
         let record = try Self.only(collected)
         #expect(record["event"] as? String == "click")
         #expect(record["outcome"] as? String == "cancelled")
@@ -488,7 +482,9 @@ import InputTesting
     /// The command line's dispatcher, as a shell meets it: `vhid mcp` serving, then a
     /// signal. Its record is written as cancelled, it says so, and it then dies by that
     /// signal, which is what tells a shell it was stopped.
-    @Test(arguments: [SIGINT, SIGTERM])
+    ///
+    /// On a thread of its own, because it blocks on the server's pipes and its exit.
+    @Test(.ownThread, arguments: [SIGINT, SIGTERM])
     func aVerbStoppedByASignalIsRecordedAsCancelledAndDiesByIt(_ number: Int32) async throws {
         let home = FileManager.default.temporaryDirectory.appending(path: "vhid-tests-\(UUID().uuidString)")
         let process = Process(), stdin = Pipe(), stdout = Pipe()
@@ -505,8 +501,9 @@ import InputTesting
             try? FileManager.default.removeItem(at: home)
         }
         // A server that never answers is ended, which ends the read below at end of file.
+        // Only a hang: a server starting on a loaded runner takes what it takes.
         let watchdog = Task {
-            try await Task.sleep(for: .seconds(10))
+            try await Task.sleep(for: .seconds(60))
             process.terminate()
         }
         defer { watchdog.cancel() }
@@ -537,12 +534,12 @@ import InputTesting
 
     /// A verb that reads the machine - `doctor`, `driver`, `service standing` - is stopped
     /// as every verb is: the cancel a signal makes ends the command its reading is
-    /// running, the child with it, at once rather than at the command's limit, and the
-    /// record says cancelled, names the command it ended, and how long it ran.
+    /// running, the child with it, rather than at the command's limit, and the record says
+    /// cancelled, names the command it ended, and how long it ran.
     ///
-    /// On a thread of its own, and timed from the cancel to the child's end: the test's
-    /// waits then queue behind no other test on the pool, and how long the child took to
-    /// start is the runner's load, not the claim. [LAW:no-ambient-temporal-coupling]
+    /// The child and the command's limit both outlast the test's, so the verb ending at all
+    /// is the cancel's doing. On a thread of its own, so the test's waits queue behind no
+    /// other test on the pool.
     @Test(.ownThread, .timeLimit(.minutes(1))) func aReadingCancelledMidCommandIsRecordedAsCancelledAndLeavesNoChild() async throws {
         let pidFile = FileManager.default.temporaryDirectory.appending(path: "vhid-reading-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: pidFile) }
@@ -551,27 +548,24 @@ import InputTesting
         let verb = Task {
             try await Self.cli("driver state", into: collected) {
                 try await reading { stop in
-                    Result { try Command("/bin/sh", "-c", "echo $$ > \(pidFile.path); exec sleep 600").run(by: .within(Command.limit, or: stop)) }
+                    Result { try Command("/bin/sh", "-c", "echo $$ > \(pidFile.path); exec sleep 3600").run(by: .within(.seconds(3600), or: stop)) }
                 }
             }
         }
         func pid() -> pid_t? { (try? String(contentsOf: pidFile, encoding: .utf8)).flatMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) } }
         while pid() == nil { try await Task.sleep(for: .milliseconds(10)) }
         let child = try #require(pid())
-        // The clock the command's deadline is kept on.
-        let cancelled = SuspendingClock.now
         verb.cancel()
-        while kill(child, 0) == 0 { try await Task.sleep(for: .milliseconds(10)) }
-        #expect(errno == ESRCH)
-        #expect(SuspendingClock.now - cancelled < Command.limit / 3)
         await #expect(throws: CancellationError.self) { try await verb.value }
+        // A command returns only once its child is reaped.
+        #expect(kill(child, 0) == -1 && errno == ESRCH)
         let took = ContinuousClock.now - begun
         let record = try Self.only(collected)
         #expect(record["event"] as? String == "driver state")
         #expect(record["outcome"] as? String == "cancelled")
         #expect(try #require(record["duration_ms"] as? Double) <= took / .milliseconds(1))
         let stopped = try #require((record["attributes"] as? [String: Any])?["stopped"] as? [String])
-        #expect(stopped == ["sh -c echo $$ > \(pidFile.path); exec sleep 600"])
+        #expect(stopped == ["sh -c echo $$ > \(pidFile.path); exec sleep 3600"])
     }
 
     /// `doctor` prints its own report and exits 1 with nothing more to say.

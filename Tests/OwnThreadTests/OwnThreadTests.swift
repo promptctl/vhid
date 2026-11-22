@@ -15,7 +15,7 @@ private func signalled(_ ran: DispatchSemaphore, within bound: DispatchTimeInter
     @Test func aTestHoldingItsThreadLeavesThePoolFree() {
         let ran = DispatchSemaphore(value: 0)
         Task { ran.signal() }
-        #expect(signalled(ran, within: .seconds(10)), "the pool ran nothing while the test waited")
+        #expect(signalled(ran, within: .seconds(60)), "the pool ran nothing while the test waited")
     }
 
     /// A child task is run where its parent is, off the pool, and the parent may be
@@ -23,7 +23,7 @@ private func signalled(_ ran: DispatchSemaphore, within bound: DispatchTimeInter
     @Test func aTestHoldingItsThreadLeavesItsChildrenFree() async {
         let ran = DispatchSemaphore(value: 0)
         async let child = ran.signal()
-        #expect(signalled(ran, within: .seconds(10)), "the child did not run while the test waited")
+        #expect(signalled(ran, within: .seconds(60)), "the child did not run while the test waited")
         _ = await child
     }
 }

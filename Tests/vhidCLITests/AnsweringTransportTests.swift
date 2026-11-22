@@ -30,8 +30,10 @@ import Testing
     }
 
     /// A session stopped while an answer is owed lets go of its transport rather than
-    /// waiting on an answer nothing will now send.
-    @Test func aStoppedSessionDoesNotWaitOnWhatIsOwed() async throws {
+    /// waiting on an answer nothing will now send. The transport is let go of as the
+    /// session's last task ends, which is after the session's value is in, so it is waited
+    /// on; a transport held for good is a test past its limit.
+    @Test(.timeLimit(.minutes(1))) func aStoppedSessionDoesNotWaitOnWhatIsOwed() async throws {
         let stdio = Stdio()
         weak var held: AnsweringTransport?
         do {
@@ -46,8 +48,7 @@ import Testing
             session.cancel()
             _ = try? await session.value
         }
-        for _ in 0..<200 where held != nil { try await Task.sleep(for: .milliseconds(10)) }
-        #expect(held == nil, "the relay is still waiting on the owed answer")
+        while held != nil { try await Task.sleep(for: .milliseconds(10)) }
     }
 
     /// Stopped after stdin has ended, when the relay is already parked on what is owed, the
@@ -153,8 +154,9 @@ import Testing
     /// A call withdrawn in the same breath as it was asked, before its handler could have
     /// started, still ends the session once it is over, and answers nothing. The SDK, had it
     /// read the cancel, would have answered nothing and left the session waiting for good,
-    /// or ignored it and let the call run on unawaited.
-    @Test func aCallWithdrawnAsItIsAskedEndsTheSessionWithNoAnswer() async throws {
+    /// or ignored it and let the call run on unawaited. The call never ends on its own, so
+    /// the session ending at all is the withdrawal's doing.
+    @Test(.timeLimit(.minutes(1))) func aCallWithdrawnAsItIsAskedEndsTheSessionWithNoAnswer() async throws {
         let waiting = VerbTool(Help.click, []) { _, _ in
             try await Task.sleep(for: .seconds(3600))
             return "clicked"
@@ -166,13 +168,7 @@ import Testing
             await server.waitUntilCompleted()
         }
         stdio.call(4, then: [.cancel(4), .end])
-        let ended = await withTaskGroup(of: Bool.self) { race in
-            race.addTask { _ = try? await session.value; return true }
-            race.addTask { try? await Task.sleep(for: .seconds(10)); return false }
-            defer { race.cancelAll() }
-            return await race.next() ?? false
-        }
-        #expect(ended, "the session is still waiting on a withdrawn call")
+        _ = try? await session.value
         #expect(stdio.sent.isEmpty, "a withdrawn call's answer was written: \(stdio.sent)")
     }
 }

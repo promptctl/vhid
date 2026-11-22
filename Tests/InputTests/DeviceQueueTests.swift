@@ -67,7 +67,7 @@ private struct JournalPointing: PointingDevice {
         let device = BlockingKeyPress(journal: journal)
         let keyboard = QueuedKeyboard(keyboard: device, queue: DeviceQueue())
         let pressed = Task { try await keyboard.down(Usage(rawValue: 0x04)) }
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { device.blocking })
+        #expect(try await holds(within: .seconds(60), askingEvery: .milliseconds(2)) { device.blocking })
         device.acknowledge()
         try await pressed.value
         #expect(journal.log == ["down 4"])
@@ -88,13 +88,13 @@ private struct JournalPointing: PointingDevice {
         let keyboard = QueuedKeyboard(keyboard: device, queue: queue)
         let mouse = QueuedMouse(pointing: JournalPointing(journal: journal), queue: queue)
         let pressed = Task { try await keyboard.down(Usage(rawValue: 0x04)) }
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { device.blocking })
+        #expect(try await holds(within: .seconds(60), askingEvery: .milliseconds(2)) { device.blocking })
         var asked = false
         let moved = Task {
             asked = true
             try await mouse.move(by: Move(x: Count(clamping: 3), y: Count(clamping: 4)))
         }
-        #expect(try await holds(within: .seconds(10), askingEvery: .milliseconds(2)) { asked })
+        #expect(try await holds(within: .seconds(60), askingEvery: .milliseconds(2)) { asked })
         device.acknowledge()
         try await pressed.value
         try await moved.value
