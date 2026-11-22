@@ -152,7 +152,7 @@ import InputTesting
     @Test func aClickGivenABoxLandsWhereItAimedInsideTheBox() async throws {
         for seed in UInt64(0) ..< 5 {
             let mouse = CurvedMouse(at: Self.start, lateEvery: 0)
-            let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor() }, clock: ManualClock(),
+            let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor() }, timeline: ManualClock().timeline,
                                   randomness: RandomSource(seed: seed), hand: .macOSDefault, traced: { _ in })
             let click = try await pointer.click(at: .box(Self.button), button: .left, times: .single)
             let aimed = click.moved.aimed

@@ -1,3 +1,4 @@
+import Time
 import Keystrokes
 
 /// Makes a planned run's changes, each at its time, and keeps the score a stopped run has to
@@ -21,7 +22,7 @@ public struct Scribe {
     public let traced: @Sendable (Pause) -> Void
 
     /// When the run started, which every change's time is measured from.
-    private let start: Duration
+    private let start: Instant
     /// How far behind its plan this run is: every report that went out late, behind a slow
     /// acknowledgement of the one before or a sleep that woke late, moves every report
     /// after it by as much, so a hold or a settle is never shortened to make up the time.

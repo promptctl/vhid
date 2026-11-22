@@ -1,3 +1,4 @@
+import Time
 import KeyboardLayouts
 import Keystrokes
 
@@ -39,10 +40,10 @@ public struct Typist {
         case ran(late: Duration, rollovers: Int, hesitations: [Duration])
     }
 
-    public init<C: Clock>(keyboard: any Keyboard, clock: C, randomness: RandomSource, cadence: Cadence = .typist,
-                          traced: @escaping @Sendable (Traced) -> Void) where C.Duration == Duration {
+    public init(keyboard: any Keyboard, timeline: Timeline, randomness: RandomSource, cadence: Cadence = .typist,
+                traced: @escaping @Sendable (Traced) -> Void) {
         self.keyboard = keyboard
-        timeline = Timeline(clock)
+        self.timeline = timeline
         self.randomness = randomness
         self.cadence = cadence
         self.traced = traced

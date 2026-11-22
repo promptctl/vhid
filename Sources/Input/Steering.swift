@@ -1,3 +1,4 @@
+import Time
 import Foundation
 import Pointing
 import ScreenSpace
@@ -136,9 +137,9 @@ extension Pointer {
         for _ in 0..<times {
             try Task.checkCancellation()
             try await mouse.move(by: step)
-            try await timeline.sleep(timeline.now() + interval)
+            try await timeline.sleep(until: timeline.now() + interval)
         }
-        try await timeline.sleep(timeline.now() + Self.settle)
+        try await timeline.sleep(until: timeline.now() + Self.settle)
         let after = try await cursor()
         return hypot(after.x - before.x, after.y - before.y)
     }

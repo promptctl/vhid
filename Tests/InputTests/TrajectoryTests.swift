@@ -346,7 +346,7 @@ import InputTesting
         let mouse = CurvedMouse(at: start, lateEvery: 0)
         let trace = SteeringTheTrajectoryTests.Trace(), clock = ManualClock()
         let pointer = Pointer(mouse: mouse, cursor: { trace.read(mouse.cursor(), at: clock.now.offset) },
-                              clock: clock, randomness: RandomSource(seed: seed), hand: .macOSDefault, traced: { _ in })
+                              timeline: clock.timeline, randomness: RandomSource(seed: seed), hand: .macOSDefault, traced: { _ in })
         try await pointer.move(to: .point(target, on: Self.screen))
         #expect(trace.all.allSatisfy { $0.point.y < 1075 }, "lowest \(trace.all.map(\.point.y).max()!)")
         #expect(abs(mouse.position.x - target.x) <= 0.5 && abs(mouse.position.y - target.y) <= 0.5)
@@ -378,7 +378,7 @@ import InputTesting
         let (start, target) = moves[move]
         let mouse = CurvedMouse(at: start, lateEvery: 0)
         let clock = ManualClock(), trace = Trace()
-        let pointer = Pointer(mouse: mouse, cursor: { trace.read(mouse.cursor(), at: clock.now.offset) }, clock: clock, randomness: RandomSource(seed: seed), hand: .macOSDefault, traced: { _ in })
+        let pointer = Pointer(mouse: mouse, cursor: { trace.read(mouse.cursor(), at: clock.now.offset) }, timeline: clock.timeline, randomness: RandomSource(seed: seed), hand: .macOSDefault, traced: { _ in })
         let moved = try await pointer.move(to: .point(target))
         let path = TrajectoryTests.trajectory(seed: seed, from: start, to: target)
         let ticks = Int((path.duration / Pointer.tick).rounded(.up))
@@ -430,7 +430,7 @@ import InputTesting
     @Test(arguments: 1 ... 10)
     func reportsTheCursorHasNotShownAreNotSentAgain(seed: UInt64) async throws {
         let mouse = CurvedMouse(at: Self.start, lateEvery: 4)
-        let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor() }, clock: ManualClock(), randomness: RandomSource(seed: seed), hand: .macOSDefault, traced: { _ in })
+        let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor() }, timeline: ManualClock().timeline, randomness: RandomSource(seed: seed), hand: .macOSDefault, traced: { _ in })
         _ = try await pointer.move(to: .point(Self.target))
         let path = TrajectoryTests.trajectory(seed: seed, from: Self.start, to: Self.target)
         let farthest = (0 ... Int(path.duration / .milliseconds(1))).map { path.point(after: .milliseconds($0)).x }.max()!
@@ -451,7 +451,7 @@ import InputTesting
     @Test func everyMoveIsTraced() async throws {
         final class Traced: Sendable { let moves = Mutex<[Pointer.Moved]>([]) }
         let mouse = CurvedMouse(at: Self.start, lateEvery: 0), traced = Traced()
-        let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor() }, clock: ManualClock(), randomness: RandomSource(seed: 1),
+        let pointer = Pointer(mouse: mouse, cursor: { mouse.cursor() }, timeline: ManualClock().timeline, randomness: RandomSource(seed: 1),
                               hand: .macOSDefault, traced: { if case .moved(let move) = $0 { traced.moves.withLock { $0.append(move) } } })
         let drag = try await pointer.drag(from: .point(Self.target), to: .point(Self.start), button: .left)
         #expect(traced.moves.withLock { $0 } == [drag.approach, drag.carry])
@@ -465,7 +465,7 @@ import InputTesting
         final class Traced: Sendable { let moves = Mutex<[Pointer.Moved]>([]) }
         let mouse = FakeMouse(at: Self.start), traced = Traced()
         mouse.stuck = true
-        let pointer = Pointer(mouse: mouse, cursor: mouse.cursor, clock: ManualClock(), randomness: RandomSource(seed: 1),
+        let pointer = Pointer(mouse: mouse, cursor: mouse.cursor, timeline: ManualClock().timeline, randomness: RandomSource(seed: 1),
                               hand: .macOSDefault, traced: { if case .moved(let move) = $0 { traced.moves.withLock { $0.append(move) } } })
         let stop = try await #require(throws: WouldNotReach.self) { try await pointer.move(to: .point(Self.target)) }
         let moved = try #require(traced.moves.withLock { $0.first })

@@ -84,9 +84,9 @@ struct Devices {
         Telemetry.note(.keyRepeatDelayMilliseconds, .double(keyRepeatDelay / .milliseconds(1)))
         let keyboard = TalliedKeyboard(keyboard: QueuedKeyboard(keyboard: helper.keyboard, queue: queue))
         let devices = Devices(keyboard: keyboard, mouse: mouse, cursor: cursor, layout: layout(helper, on: queue), front: front(helper, on: queue),
-                              pointer: Pointer(mouse: mouse, cursor: cursor, clock: ContinuousClock(),
+                              pointer: Pointer(mouse: mouse, cursor: cursor, timeline: .suspending,
                                                randomness: randomness, hand: Hand(doubleClickInterval: doubleClick), traced: trail.traced),
-                              typist: Typist(keyboard: keyboard, clock: ContinuousClock(), randomness: randomness,
+                              typist: Typist(keyboard: keyboard, timeline: .suspending, randomness: randomness,
                                              cadence: Cadence(keyRepeatDelay: keyRepeatDelay), traced: trail.typed), trail: trail)
         let ran: Result<T, any Error>
         do { ran = .success(try await body(devices)) } catch { ran = .failure(error) }

@@ -70,7 +70,7 @@ extension Typist {
     /// A typist on `keyboard` timed on a clock of its own, so a test's keys take no time,
     /// its timings drawn from seed 1.
     static func onManualClock(_ keyboard: any Keyboard, clock: ManualClock = ManualClock(), traced: @escaping @Sendable (Typist.Traced) -> Void = { _ in }) -> Typist {
-        Typist(keyboard: keyboard, clock: clock, randomness: RandomSource(seed: 1), traced: traced)
+        Typist(keyboard: keyboard, timeline: clock.timeline, randomness: RandomSource(seed: 1), traced: traced)
     }
 }
 

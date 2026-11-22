@@ -38,7 +38,7 @@ import InputTesting
 
     private static func scroll(vertical: Int, horizontal: Int, clock: ManualClock = ManualClock(), on devices: Devices) async throws -> String {
         try await ScrollCommand.scroll(at: .point(at), vertical: vertical, horizontal: horizontal, holding: .none,
-                                       with: Pointer(mouse: devices.mouse, cursor: { at }, clock: clock, randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: devices.trail.traced), devices.keyboard)
+                                       with: Pointer(mouse: devices.mouse, cursor: { at }, timeline: clock.timeline, randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: devices.trail.traced), devices.keyboard)
     }
 
     private static func only(_ collected: Collected) throws -> [String: Any] {
@@ -123,7 +123,7 @@ import InputTesting
         _ = try await Self.mcp("type", into: collected) {
             try await Self.against { devices in
                 try await TypeCommand.type("Ab", on: VerbTests.us, into: .anywhere,
-                                           with: Typist(keyboard: devices.keyboard, clock: ManualClock(), randomness: RandomSource(seed: 1), traced: devices.trail.typed),
+                                           with: Typist(keyboard: devices.keyboard, timeline: ManualClock().timeline, randomness: RandomSource(seed: 1), traced: devices.trail.typed),
                                            front: { nil })
             }
         }
@@ -147,7 +147,7 @@ import InputTesting
         _ = try await Self.mcp("type", into: collected) {
             try await Self.against { devices in
                 try await TypeCommand.type(text, on: VerbTests.us, into: .anywhere,
-                                           with: Typist(keyboard: devices.keyboard, clock: ManualClock(), randomness: RandomSource(seed: 1), traced: devices.trail.typed),
+                                           with: Typist(keyboard: devices.keyboard, timeline: ManualClock().timeline, randomness: RandomSource(seed: 1), traced: devices.trail.typed),
                                            front: { nil })
             }
         }

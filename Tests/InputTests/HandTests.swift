@@ -33,7 +33,7 @@ import InputTesting
         func scroll(by delta: Scroll) throws { try mouse.scroll(by: delta); logged("notch") }
 
         func pointer(hand: Hand = .macOSDefault, seed: UInt64 = 1) -> Pointer {
-            Pointer(mouse: self, cursor: mouse.cursor, clock: clock, randomness: RandomSource(seed: seed), hand: hand,
+            Pointer(mouse: self, cursor: mouse.cursor, timeline: clock.timeline, randomness: RandomSource(seed: seed), hand: hand,
                     traced: { [self] in if case .paused(let pause) = $0 { self.state.withLock { $0.pauses.append(pause) } } })
         }
     }

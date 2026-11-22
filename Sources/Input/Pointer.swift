@@ -1,3 +1,4 @@
+import Time
 import Foundation
 import Pointing
 import ScreenSpace
@@ -94,11 +95,11 @@ public struct Pointer: Sendable {
     /// How often a moving pointer reports: every 8 ms, a 125 Hz USB mouse's rate.
     public static let tick: Duration = .milliseconds(8)
 
-    public init<C: Clock>(mouse: any Mouse, cursor: @escaping @Sendable () async throws -> ScreenPoint,
-                          clock: C, randomness: RandomSource, hand: Hand, traced: @escaping @Sendable (Traced) -> Void) where C.Duration == Duration {
+    public init(mouse: any Mouse, cursor: @escaping @Sendable () async throws -> ScreenPoint,
+                timeline: Timeline, randomness: RandomSource, hand: Hand, traced: @escaping @Sendable (Traced) -> Void) {
         self.mouse = mouse
         self.cursor = cursor
-        timeline = Timeline(clock)
+        self.timeline = timeline
         self.randomness = randomness
         self.hand = hand
         self.traced = traced
@@ -243,7 +244,7 @@ public struct Pointer: Sendable {
         defer { traced(.moved(moved)) }
         for tick in stride(from: 1, through: ticks, by: 1) {
             try Task.checkCancellation()
-            try await timeline.sleep(began + Self.tick * tick)
+            try await timeline.sleep(until: began + Self.tick * tick)
             tracking.saw(try await cursor(), on: tick)
             let report = tracking.report(toward: trajectory.point(after: Self.tick * tick))
             // A tick whose share of the path is under half a count sends nothing, as a
@@ -262,7 +263,7 @@ public struct Pointer: Sendable {
             landed = try await home(on: trajectory.target, toward: target) {
                 closing += 1
                 slot += Self.tick
-                try await timeline.sleep(slot)
+                try await timeline.sleep(until: slot)
             }.at
         } catch let stop as WouldNotReach {
             // The move's reports, not the closing loop's alone: what the error says the move
@@ -349,7 +350,7 @@ public struct Pointer: Sendable {
         while true {
             let now = try await cursor()
             if shown(now) || timeline.now() >= deadline { return now }
-            try await timeline.sleep(timeline.now() + .milliseconds(1))
+            try await timeline.sleep(until: timeline.now() + .milliseconds(1))
         }
     }
 

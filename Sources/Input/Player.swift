@@ -1,3 +1,4 @@
+import Time
 import Foundation
 import Keystrokes
 import Pointing
@@ -270,7 +271,7 @@ public struct Player {
                 // [LAW:single-enforcer]
                 while timeline.now() < wake {
                     try Task.checkCancellation()
-                    try await timeline.sleep(min(wake, timeline.now() + Self.slice))
+                    try await timeline.sleep(until: min(wake, timeline.now() + Self.slice))
                 }
                 // The watch that follows the sleep. It asks the same question the sleep
                 // did, because `lead` is the caller's to choose and nothing caps it: a long
@@ -293,7 +294,7 @@ public struct Player {
                     try Task.checkCancellation()
                     await Task.yield()
                     guard timeline.now() != watched else {
-                        try await timeline.sleep(deadline)
+                        try await timeline.sleep(until: deadline)
                         break
                     }
                     watched = timeline.now()
@@ -319,7 +320,7 @@ public struct Player {
                     // A step longer than one report is paced as the table was measured, so
                     // macOS accelerates each report as the table says.
                     for (number, move) in moves.enumerated() {
-                        if number > 0 { try await timeline.sleep(timeline.now() + current.interval) }
+                        if number > 0 { try await timeline.sleep(until: timeline.now() + current.interval) }
                         try await pointer.mouse.move(by: move)
                     }
                     sentReports = moves.count

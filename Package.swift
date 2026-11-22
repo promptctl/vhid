@@ -45,6 +45,11 @@ let package = Package(
         // nothing, so neither the layout nor the device has to link the other to speak.
         // [LAW:one-way-deps]
         .target(name: "Keystrokes"),
+        // The one clock a process measures and waits on, and the deadline a request carries
+        // down through every wait under it. It links nothing, so every target, either half's,
+        // waits by one rule. [LAW:one-source-of-truth]
+        .target(name: "Time"),
+        .testTarget(name: "TimeTests", dependencies: ["Time", "TestClock", "OwnThread"]),
         // The version the binaries report, stamped at build time from claude-plugin/VERSION
         // and git by the plugin, so no copy of the number is written down anywhere else.
         // It links nothing, so both halves' executables take it. [LAW:one-source-of-truth]
@@ -131,7 +136,7 @@ let package = Package(
         // caller supplies a conformance. [LAW:one-way-deps] [LAW:effects-at-boundaries]
         // Telemetry for the cause chain its stops are read by, so a record and a caller tell
         // a withdrawn run from a failed one by one rule. [LAW:single-enforcer]
-        .target(name: "Input", dependencies: ["KeyboardLayouts", "Keystrokes", "Pointing", "ScreenSpace", "Telemetry"]),
+        .target(name: "Input", dependencies: ["KeyboardLayouts", "Keystrokes", "Pointing", "ScreenSpace", "Telemetry", "Time"]),
         // The pointer's loop against a fake screen with an acceleration curve of its own,
         // and the typist against a keyboard that can be made to fail at the third keystroke
         // of four: no device, no window server, no grant.
@@ -219,7 +224,7 @@ let package = Package(
         // A clock that moves only when a test moves it or something sleeps on it, so a
         // verb that rests between reports is tested without waiting. A target of its own
         // for OwnThread's reason: InputTests, vhidCLITests and SeeingTests all sleep on it.
-        .target(name: "TestClock", path: "Tests/TestClock"),
+        .target(name: "TestClock", dependencies: ["Time"], path: "Tests/TestClock"),
         // The authorization boundary of a root keystroke service, checked against the
         // test process's own identity and audit token: real code signing, no root.
         .testTarget(
