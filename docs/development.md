@@ -117,7 +117,37 @@ one of the pool's.
 
 `make test` runs the suite with the pool one thread wide, so a test that needs the trait
 and lacks it is slow or hung on any Mac, and not only on CI. `thePoolIsOneThreadWide`
-fails on a wider pool, so a run that has lost the narrow one says so.
+fails when the run was not given the narrow pool, so a run that has lost it says so.
+
+### How a test waits
+
+A test's verdict never depends on how fast the machine is. The `Waiting` target has the
+pieces:
+
+- A wait for an event that will come is a `Latch` the other side updates, or a
+  `Handshake` a child process writes to. It is bounded only by `hangGuard`, so a hang
+  fails by name. Never bound it by a number of its own. A suite that waits takes
+  `.hangGuarded`, the whole-test limit derived from the guard.
+- A wait on something only this actor can make happen yields to it
+  (`while !done { await Task.yield() }`). It does not block the actor it waits on.
+- A limit under test is given to a peer that cannot answer: a fake held on a latch, or
+  a child that sleeps past the guard. The give-up then has one verdict at any pace. Where
+  the test must see a limit spent before work began, the deadline is made on a
+  `ManualClock` through `Timeline(clock)` and advanced by the test.
+- A negative ("did not fire") is asserted after an event that proves the watched path
+  ran, or after draining the queue it would run on. It is never asserted after a sleep.
+- An elapsed-time upper bound stands for something; assert that thing instead. An
+  elapsed-time lower bound (`ran >= limit`) is fine.
+- Nothing is checked by running it again. A race is proven by forcing its interleaving
+  with a latch inside the fake.
+
+### Where a deadline is made
+
+A `Deadline` is made once, where a caller asks: by `Timeline.deadline(within:)`, at the
+CLI verb, the MCP call, the seat an XPC act arrives at, or each wait of the bring-up.
+Everything below takes that `Deadline` and never a span, so a wait for a lock, a queue or
+a turn is counted against it. A new `within:` below an entry point is the line to refuse
+in review. The real timeline is `Timeline.suspending`, passed in from `main`.
 
 ## Checking the reach matrix
 
