@@ -16,6 +16,14 @@ public enum Target: Hashable, Sendable, CustomStringConvertible {
     /// vhid is not told the size of, and the room a path keeps from an edge.
     static let button = 20.0
 
+    /// A target as text spells it: `x,y` a point and `x,y,width,height` a box, the forms every
+    /// verb prints. [LAW:single-enforcer] The command line and the MCP server both read a
+    /// spelled target here, so what one prints the other takes back.
+    public init(spelled: String) throws(Misspelled) {
+        self = spelled.split(separator: ",", omittingEmptySubsequences: false).count == 2
+            ? .point(try ScreenPoint(spelled: spelled)) : .box(try ScreenRect(spelled: spelled))
+    }
+
     /// This target on `displays`, by the one rule both halves press by, or the refusal that
     /// says it is on none. [LAW:single-enforcer]
     public func placed(on displays: Displays) throws(Unplaced) -> PlacedTarget {
@@ -95,7 +103,7 @@ public enum PlacedTarget: Hashable, Sendable {
     /// its margin included, has no line of travel and aims
     /// at the scatter alone. Drawn again outside the aimable part. A point has no aimable
     /// width and is aimed at exactly. [LAW:dataflow-not-control-flow]
-    func aim(from start: ScreenPoint, drawing generator: inout some RandomNumberGenerator) -> ScreenPoint {
+    func aim(from start: ScreenPoint, drawing generator: inout some RandomNumberGenerator) throws(NotAPlace) -> ScreenPoint {
         let (centre, reach, half) = extent
         let scatter = Scatter(mean: (centre.x, centre.y), covariance: (pow(2 * half.x / Self.spreads, 2), 0, pow(2 * half.y / Self.spreads, 2)))
         let nearest = (x: min(max(start.x, centre.x - half.x), centre.x + half.x), y: min(max(start.y, centre.y - half.y), centre.y + half.y))
@@ -104,8 +112,7 @@ public enum PlacedTarget: Hashable, Sendable {
         let over = abs(start.x - centre.x) <= reach.x && abs(start.y - centre.y) <= reach.y
         let held = over ? scatter : scatter.held(to: (start.x, start.y), across: (-dy / distance, dx / distance), straying: Self.directionalError * distance)
         let (x, y) = held.draw(within: (centre.x - half.x ... centre.x + half.x, centre.y - half.y ... centre.y + half.y), using: &generator)
-        // Inside the shown part, which lies on a display, so finite.
-        return try! ScreenPoint(x: x, y: y)
+        return try ScreenPoint(x: x, y: y)
     }
 
     /// The centre, how far either side of it on each axis the target reaches, and how far a

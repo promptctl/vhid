@@ -135,6 +135,13 @@ import ScreenSpaceTesting
         #expect(try places(["-10,20,30,40", "5", "6"], count: 2) == [Self.box, .point(try! ScreenPoint(x: 5, y: 6))])
     }
 
+    /// A point eyes prints, `x,y`, is one word too, so it passes straight back.
+    @Test func aPointAsEyesPrintsItIsOneWord() throws {
+        #expect(try places(["-5.5,6"], count: 1) == [.point(try! ScreenPoint(x: -5.5, y: 6))])
+        #expect(try places(["-5.5,6", "-10,20,30,40"], count: 2) == [.point(try! ScreenPoint(x: -5.5, y: 6)), Self.box])
+        #expect(try Target(spelled: "1,2") == .point(try! ScreenPoint(x: 1, y: 2)))
+    }
+
     @Test func theVerbsTakeABox() throws {
         let click = try ClickCommand.parse(["--", "-10,20,30,40"])
         #expect(try places(click.place, count: 1) == [Self.box])
@@ -143,8 +150,8 @@ import ScreenSpaceTesting
     }
 
     @Test(arguments: [
-        (["1,2,3"], "1,2,3 is not a box"), (["1,2,-1,4"], "1,2,-1,4 is not a box"), (["1,2,3,nan"], "1,2,3,nan is not a box"),
-        (["1,2,3,4,5"], "1,2,3,4,5 is not a box"), (["1"], "1 is not a point"), (["1", "x"], "1 x is not a point"),
+        (["1,2,3"], "1,2,3 is not x,y,width,height"), (["1,2,-1,4"], "1,2,-1,4 is not a box"), (["1,2,3,nan"], "1,2,3,nan is not a box"),
+        (["1,2,3,4,5"], "1,2,3,4,5 is not x,y,width,height"), (["1"], "1 is not a point"), (["1", "x"], "1 x is not a point"),
         (["1", "2", "3", "4"], "1 2 3 4 is 2 places, and this takes 1"), (["inf", "2"], "inf,2 is not a place"),
     ])
     func whatIsNotAPlaceIsRefusedByName(words: [String], said: String) {

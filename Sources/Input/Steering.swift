@@ -65,7 +65,7 @@ public struct Steering: Hashable, Sendable {
     /// leave it. One report when the distance fits in one, and otherwise as many as it
     /// takes, each as long as a report carries. What no whole count covers is left over
     /// in the expected point, so the next line's reports make it up rather than lose it.
-    public func reports(from: ScreenPoint, to placed: Placed<ScreenPoint>) -> (reports: [Move], lands: ScreenPoint) {
+    public func reports(from: ScreenPoint, to placed: Placed<ScreenPoint>) throws(NotAPlace) -> (reports: [Move], lands: ScreenPoint) {
         let to = placed.value
         var at = (x: from.x, y: from.y)
         var reports: [Move] = []
@@ -77,8 +77,7 @@ public struct Steering: Hashable, Sendable {
             // The longest report there is, in any direction, and still short: another.
             guard counts == Int(Count.limit) else { break }
         }
-        // Within a report of `to`, which a display holds, so finite.
-        return (reports, try! ScreenPoint(x: at.x, y: at.y))
+        return (reports, try ScreenPoint(x: at.x, y: at.y))
     }
 
     /// The one report whose expected motion comes nearest `dx, dy`, its length in counts,
@@ -109,9 +108,10 @@ extension Pointer {
     ///
     /// `timeline` paces the bursts and the wait after them, so a test runs it on a clock of
     /// its own. [LAW:effects-at-boundaries]
-    func calibrate(_ calibration: Calibration, from start: Placed<ScreenPoint>) async throws -> Steering {
-        let away = hypot(calibration.toward.x - start.value.x, calibration.toward.y - start.value.y)
-        let unit = away > 0 ? ((calibration.toward.x - start.value.x) / away, (calibration.toward.y - start.value.y) / away) : (1.0, 0.0)
+    func calibrate(_ calibration: Calibration<Placed<ScreenPoint>>, from start: Placed<ScreenPoint>) async throws -> Steering {
+        let toward = calibration.toward.value
+        let away = hypot(toward.x - start.value.x, toward.y - start.value.y)
+        let unit = away > 0 ? ((toward.x - start.value.x) / away, (toward.y - start.value.y) / away) : (1.0, 0.0)
         var samples: [Steering.Sample] = []
         for size in Self.ladder {
             let step = Move(x: Count(clamping: Int((unit.0 * Double(size)).rounded())), y: Count(clamping: Int((unit.1 * Double(size)).rounded())))

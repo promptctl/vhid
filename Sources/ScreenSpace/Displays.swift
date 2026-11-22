@@ -30,7 +30,7 @@ public struct OnlineDisplay: Hashable, Sendable {
         do {
             bounds = try ScreenRect(x: numbers[1], y: numbers[2], width: numbers[3], height: numbers[4])
         } catch {
-            throw .notARecord(numbers)
+            throw .notADisplay(id, error)
         }
         self.id = id
         active = numbers[5] == 1
@@ -71,11 +71,11 @@ public struct DisplayLayout: Hashable, Sendable {
     }
 
     /// Every online display: where the cursor can go, so where an act is placed.
-    public var online: Displays { Displays(frames: displays.map(\.bounds)) }
+    public var online: Displays { Displays(displays) }
 
     /// The active ones: what a capture can show, so where a look is placed. None on a Mac
     /// whose only display is asleep.
-    public var active: Displays { Displays(frames: displays.filter(\.active).map(\.bounds)) }
+    public var active: Displays { Displays(displays.filter(\.active)) }
 }
 
 /// A display list that is no layout.
@@ -84,6 +84,8 @@ public enum LayoutUnreadable: Error, Equatable, CustomStringConvertible {
     case arealess(OnlineDisplay)
     case unbounded([ScreenRect])
     case notARecord([Double])
+    /// A display listed at bounds that are no box.
+    case notADisplay(UInt32, NotABox)
     /// The window server's own refusal, as its reader said it.
     case refused(String)
 
@@ -93,6 +95,7 @@ public enum LayoutUnreadable: Error, Equatable, CustomStringConvertible {
         case .arealess(let display): "display \(display.id) is listed at \(display.bounds), which has no area"
         case .unbounded(let bounds): "the displays at \(bounds.map(\.description).joined(separator: " ")) lie further apart than a Double holds"
         case .notARecord(let numbers): "\(numbers.map(Coordinate.spelled).joined(separator: " ")) is not a display list: \(OnlineDisplay.width) numbers a display, id, x, y, width, height and 1 or 0 for active"
+        case .notADisplay(let id, let box): "display \(id) is listed at bounds that are no box: \(box)"
         case .refused(let why): why
         }
     }
@@ -106,40 +109,53 @@ public enum LayoutUnreadable: Error, Equatable, CustomStringConvertible {
 /// disagree on what is pressable and where.
 public struct Displays: Hashable, Sendable {
     /// In the order the window server listed them, which settles a tie.
-    public let frames: [ScreenRect]
+    public let displays: [OnlineDisplay]
 
-    init(frames: [ScreenRect]) { self.frames = frames }
+    init(_ displays: [OnlineDisplay]) { self.displays = displays }
 
-    /// A point is pressed where it is, when a display holds it.
+    /// Where each display sits, in the same order.
+    public var frames: [ScreenRect] { displays.map(\.bounds) }
+
+    /// A point is pressed where it is, when a display holds it, on the first that does.
     public func place(_ point: ScreenPoint) throws(Unplaced) -> Placed<ScreenPoint> {
-        guard frames.contains(where: { $0.contains(point) }) else { throw .point(point) }
-        return Placed(value: point, on: self)
+        guard let display = displays.first(where: { $0.bounds.contains(point) }) else { throw .point(point) }
+        return Placed(value: point, on: display, of: self)
     }
 
     /// A box is pressed in the largest part of it one display shows that is at least a point a
     /// side, the first display's on a tie, at the whole point nearest that part's middle that
     /// the part holds. A part a point a side always holds a whole point, since every half-open
-    /// span a point long holds one.
+    /// span a point long holds one, and that point lies between the part's finite edges.
     public func place(_ box: ScreenRect) throws(Unplaced) -> Placed<Shown> {
-        let parts = frames.compactMap { $0.intersection(box) }.filter { $0.width >= 1 && $0.height >= 1 }
-        guard let part = parts.max(by: { $0.area < $1.area }) else { throw .box(box) }
+        guard let shown = parts(of: box).max(by: { $0.part.area < $1.part.area }) else { throw .box(box) }
         func nearest(_ start: Double, _ length: Double) -> Double {
             min(max((start + length / 2).rounded(), start.rounded(.up)), (start + length).rounded(.up) - 1)
         }
-        let press = ScreenPoint(finite: (nearest(part.x, part.width), nearest(part.y, part.height)))
-        return Placed(value: Shown(box: box, part: part, press: press), on: self)
+        let part = shown.part
+        let press = ScreenPoint(between: (nearest(part.x, part.width), nearest(part.y, part.height)))
+        return Placed(value: Shown(box: box, part: part, press: press), on: shown.display, of: self)
+    }
+
+    /// Each part of `box` a display shows that is at least a point a side, with that display,
+    /// in the order the displays are listed: what `place` chooses from, and what a capture
+    /// asks to know whether a box lies on one display.
+    public func parts(of box: ScreenRect) -> [(display: OnlineDisplay, part: ScreenRect)] {
+        displays.compactMap { display in display.bounds.intersection(box).map { (display: display, part: $0) } }
+            .filter { $0.part.width >= 1 && $0.part.height >= 1 }
     }
 }
 
-/// A value placed on displays, with the displays it was placed on. Made only by
-/// `Displays.place`, so holding one is the proof a display shows it.
+/// A value placed on displays: the display that shows it, and the displays it was placed
+/// among. Made only by `Displays.place`, so holding one is the proof a display shows it.
 /// [LAW:parse-dont-validate]
 public struct Placed<Value: Hashable & Sendable>: Hashable, Sendable {
     public let value: Value
+    public let display: OnlineDisplay
     public let displays: Displays
 
-    init(value: Value, on displays: Displays) {
+    init(value: Value, on display: OnlineDisplay, of displays: Displays) {
         self.value = value
+        self.display = display
         self.displays = displays
     }
 }
@@ -161,14 +177,7 @@ public enum Unplaced: Error, Hashable, CustomStringConvertible {
     public var description: String {
         switch self {
         case .point(let point): "\(point) is on no display"
-        case .box(let box): "the box \(box) is on no display: none shows a part of it a point or more a side"
+        case .box(let box): "no display shows a part of the box \(box) a point or more a side"
         }
-    }
-}
-
-extension ScreenPoint {
-    /// Two numbers this file has already shown are finite.
-    init(finite point: (x: Double, y: Double)) {
-        (x, y) = point
     }
 }

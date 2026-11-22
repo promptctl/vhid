@@ -15,7 +15,7 @@ import ScreenSpaceTesting
     static func aims(at target: Target, from start: ScreenPoint = start, seeds: Range<UInt64> = 0 ..< 2000) -> [ScreenPoint] {
         seeds.map { seed in
             var generator = SeededGenerator(seed: seed)
-            return target.on(.vast).aim(from: start, drawing: &generator)
+            return try! target.on(.vast).aim(from: start, drawing: &generator)
         }
     }
 
@@ -29,7 +29,7 @@ import ScreenSpaceTesting
         let point = try! ScreenPoint(x: 840.5, y: 300.25)
         #expect(Set(Self.aims(at: .point(point))) == [point])
         var generator = SeededGenerator(seed: 7)
-        let path = Trajectory(from: Self.start, toward: Target.point(point).on(.vast), drawing: &generator)
+        let path = try! Trajectory(from: Self.start, toward: Target.point(point).on(.vast), drawing: &generator)
         #expect(path.target == point)
         #expect(path.toward.width == 20)
     }
@@ -107,11 +107,11 @@ import ScreenSpaceTesting
 
     /// Fitts' W is the smaller of the box's sides, so a large target is a quicker move than
     /// a small one from as far away.
-    @Test func aMoveToABoxIsTimedByItsSmallerSide() {
+    @Test func aMoveToABoxIsTimedByItsSmallerSide() throws {
         var generator = SeededGenerator(seed: 7)
-        let path = Trajectory(from: Self.start, toward: Target.box(Self.button).on(.vast), drawing: &generator)
+        let path = try! Trajectory(from: Self.start, toward: Target.box(Self.button).on(.vast), drawing: &generator)
         var replay = SeededGenerator(seed: 7)
-        _ = Target.box(Self.button).on(.vast).aim(from: Self.start, drawing: &replay)
+        _ = try! Target.box(Self.button).on(.vast).aim(from: Self.start, drawing: &replay)
         let pace = Trajectory.pace.draw(using: &replay)
         let distance = hypot(path.target.x - Self.start.x, path.target.y - Self.start.y)
         #expect(path.toward.width == 24)
@@ -119,7 +119,7 @@ import ScreenSpaceTesting
         let wide = try! ScreenRect(x: 700, y: 200, width: 280, height: 200)
         let small = try! ScreenRect(x: 836, y: 296, width: 8, height: 8)
         var a = SeededGenerator(seed: 3), b = SeededGenerator(seed: 3)
-        #expect(Trajectory(from: Self.start, toward: Target.box(wide).on(.vast), drawing: &a).duration
+        #expect(try Trajectory(from: Self.start, toward: Target.box(wide).on(.vast), drawing: &a).duration
             < Trajectory(from: Self.start, toward: Target.box(small).on(.vast), drawing: &b).duration)
     }
 

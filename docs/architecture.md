@@ -196,6 +196,8 @@ The devices' half, by layer. Lower rows depend on nothing above them.
 | `Keystrokes`, `Pointing` | key usages, key codes, buttons: plain values |
 | `Installations` | an installation's names, built from one string |
 | `ChildProcess` | starting a child and running a command to its deadline or its stop, for both halves |
+| `ScreenSpace` | the point, the box and the display layout both halves speak, and the one rule for where on the displays a point or a box is pressed |
+| `DisplayReading` | the display layout read from the window server, for both halves |
 | `Signals`, `Version` | catching signals, the build's version |
 
 The rest of the tree:
@@ -203,7 +205,7 @@ The rest of the tree:
 | Path | What it is |
 |---|---|
 | `eyes/` | the half that reads the screen: `Seeing`, `Tree`, `Pixels`, `Grants`, `EyesVerbs` and the `eyes` command line, with `Telemetry` and `Turns`, which both halves use |
-| `Tests/` | test targets, each named for what it tests (`Signals`, `Version` and the two apps have none); `OwnThread` and `TestClock` are helpers for tests |
+| `Tests/` | test targets, each named for what it tests (`Signals`, `Version` and the two apps have none); `OwnThread`, `TestClock` and `ScreenSpaceTesting` are helpers for tests |
 | `claude-plugin/`, `.claude-plugin/` | the Claude Code plugin: skills, the session-start check, the marketplace entry, and `VERSION`, the one place the version is written, which `scripts/version` reads for every build |
 | `pkg/`, `scripts/make-pkg`, `scripts/notarize` | building, signing and notarizing the package |
 | `scripts/` | every other build, check and release script; each says what it does in its header |

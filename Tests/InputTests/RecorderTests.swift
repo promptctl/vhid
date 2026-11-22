@@ -50,7 +50,7 @@ import ScreenSpaceTesting
             event(58, .motion, at: point(110, 105.5)),
             event(66, .motion, at: point(120, 110)),
             event(70, .buttonUp(.left), at: point(120, 110)),
-        ] { recorder.take(event) }
+        ] { try recorder.take(event) }
         expect(try replayed(recorder, stoppedAt: 80), [
             (0, keys()), (10, keys(0xE1)), (20, keys(0x0B, 0xE1)), (30, keys(0xE1)), (35, keys()),
             (40, keys(0x0C)), (45, keys()), (50, .buttons([.left])), (58, .at(point(110, 105.5))),
@@ -62,24 +62,24 @@ import ScreenSpaceTesting
     /// stop, is. The script still ends with nothing held, at the stop.
     @Test func theStopChordIsTrimmedAndNothingElse() throws {
         var stopped = try Recorder(start: Self.start, flags: 0, vhid: [], displays: .vast)
-        stopped.take(event(10, .keyDown(keyCode: 0, autorepeat: false)))
-        stopped.take(event(20, .keyUp(keyCode: 0)))
-        stopped.take(event(100, .flagsChanged(keyCode: 59, flags: 0x40001)))
-        stopped.take(event(101, .keyDown(keyCode: 8, autorepeat: false)))
+        try stopped.take(event(10, .keyDown(keyCode: 0, autorepeat: false)))
+        try stopped.take(event(20, .keyUp(keyCode: 0)))
+        try stopped.take(event(100, .flagsChanged(keyCode: 59, flags: 0x40001)))
+        try stopped.take(event(101, .keyDown(keyCode: 8, autorepeat: false)))
         expect(try replayed(stopped, stoppedAt: 150), [
             (0, keys()), (10, keys(0x04)), (20, keys()), (100, keys()), (101, keys()), (150, keys()), (150, .buttons([])),
         ])
 
         // Let go before the stop took effect: the releases are the chord's too.
-        stopped.take(event(110, .keyUp(keyCode: 8)))
-        stopped.take(event(112, .flagsChanged(keyCode: 59, flags: 0)))
+        try stopped.take(event(110, .keyUp(keyCode: 8)))
+        try stopped.take(event(112, .flagsChanged(keyCode: 59, flags: 0)))
         expect(try replayed(stopped, stoppedAt: 150), [
             (0, keys()), (10, keys(0x04)), (20, keys()), (100, keys()), (101, keys()), (110, keys()), (112, keys()), (150, keys()), (150, .buttons([])),
         ])
 
         var cut = try Recorder(start: Self.start, flags: 0, vhid: [], displays: .vast)
-        cut.take(event(100, .flagsChanged(keyCode: 59, flags: 0x40001)))
-        cut.take(event(101, .keyDown(keyCode: 7, autorepeat: false)))
+        try cut.take(event(100, .flagsChanged(keyCode: 59, flags: 0x40001)))
+        try cut.take(event(101, .keyDown(keyCode: 7, autorepeat: false)))
         expect(try replayed(cut, stoppedAt: 90), [
             (0, keys()), (100, keys(0xE0)), (101, keys(0x1B, 0xE0)), (101, keys()), (101, .buttons([])),
         ])
@@ -89,13 +89,13 @@ import ScreenSpaceTesting
     /// points; its modifiers are in the session's flags, and are taken out of their keys.
     @Test func vhidsOwnEventsAreNotThePersons() throws {
         var recorder = try Recorder(start: Self.start, flags: 0, vhid: [Self.vhid], displays: DisplayLayout.at(try! ScreenRect(x: 0, y: 0, width: 151, height: 1000)).online)
-        recorder.take(event(10, .motion, at: point(150, 100), from: Self.vhid))
-        recorder.take(event(20, .motion, at: point(160, 102)))
-        recorder.take(event(30, .flagsChanged(keyCode: 56, flags: 0x20002), at: point(160, 102), from: Self.vhid))
-        recorder.take(event(40, .keyDown(keyCode: 0, autorepeat: false), at: point(160, 102)))
-        recorder.take(event(50, .flagsChanged(keyCode: 56, flags: 0), at: point(160, 102), from: Self.vhid))
-        recorder.take(event(60, .keyDown(keyCode: 4, autorepeat: false), at: point(160, 102), from: Self.vhid))
-        recorder.take(event(70, .keyUp(keyCode: 0), at: point(160, 102)))
+        try recorder.take(event(10, .motion, at: point(150, 100), from: Self.vhid))
+        try recorder.take(event(20, .motion, at: point(160, 102)))
+        try recorder.take(event(30, .flagsChanged(keyCode: 56, flags: 0x20002), at: point(160, 102), from: Self.vhid))
+        try recorder.take(event(40, .keyDown(keyCode: 0, autorepeat: false), at: point(160, 102)))
+        try recorder.take(event(50, .flagsChanged(keyCode: 56, flags: 0), at: point(160, 102), from: Self.vhid))
+        try recorder.take(event(60, .keyDown(keyCode: 4, autorepeat: false), at: point(160, 102), from: Self.vhid))
+        try recorder.take(event(70, .keyUp(keyCode: 0), at: point(160, 102)))
         expect(try replayed(recorder, stoppedAt: 80), [
             (0, keys()), (20, .at(point(110, 102))), (40, keys(0x04)), (70, keys()), (80, keys()), (80, .buttons([])),
         ])
@@ -106,23 +106,23 @@ import ScreenSpaceTesting
     /// person's: only the stop's own presses come out.
     @Test func onlyTheStopsOwnPressesComeOut() throws {
         var earlier = try Recorder(start: Self.start, flags: 0, vhid: [], displays: .vast)
-        earlier.take(event(10, .flagsChanged(keyCode: 59, flags: 0x40001)))
-        earlier.take(event(11, .keyDown(keyCode: 8, autorepeat: false)))
-        earlier.take(event(12, .keyUp(keyCode: 8)))
-        earlier.take(event(13, .flagsChanged(keyCode: 59, flags: 0)))
-        earlier.take(event(20, .motion, at: point(101, 100)))
-        earlier.take(event(30, .flagsChanged(keyCode: 59, flags: 0x40001)))
-        earlier.take(event(31, .keyDown(keyCode: 8, autorepeat: false)))
+        try earlier.take(event(10, .flagsChanged(keyCode: 59, flags: 0x40001)))
+        try earlier.take(event(11, .keyDown(keyCode: 8, autorepeat: false)))
+        try earlier.take(event(12, .keyUp(keyCode: 8)))
+        try earlier.take(event(13, .flagsChanged(keyCode: 59, flags: 0)))
+        try earlier.take(event(20, .motion, at: point(101, 100)))
+        try earlier.take(event(30, .flagsChanged(keyCode: 59, flags: 0x40001)))
+        try earlier.take(event(31, .keyDown(keyCode: 8, autorepeat: false)))
         expect(try replayed(earlier, stoppedAt: 40), [
             (0, keys()), (10, keys(0xE0)), (11, keys(0x06, 0xE0)), (12, keys(0xE0)), (13, keys()),
             (20, .at(point(101, 100))), (30, keys()), (31, keys()), (40, keys()), (40, .buttons([])),
         ])
 
         var controlA = try Recorder(start: Self.start, flags: 0, vhid: [], displays: .vast)
-        controlA.take(event(5, .flagsChanged(keyCode: 59, flags: 0x40001)))
-        controlA.take(event(10, .keyDown(keyCode: 0, autorepeat: false)))
-        controlA.take(event(20, .keyUp(keyCode: 0)))
-        controlA.take(event(30, .keyDown(keyCode: 8, autorepeat: false)))
+        try controlA.take(event(5, .flagsChanged(keyCode: 59, flags: 0x40001)))
+        try controlA.take(event(10, .keyDown(keyCode: 0, autorepeat: false)))
+        try controlA.take(event(20, .keyUp(keyCode: 0)))
+        try controlA.take(event(30, .keyDown(keyCode: 8, autorepeat: false)))
         expect(try replayed(controlA, stoppedAt: 40), [
             (0, keys()), (5, keys(0xE0)), (10, keys(0x04, 0xE0)), (20, keys()), (30, keys()), (40, keys()), (40, .buttons([])),
         ])
@@ -133,12 +133,12 @@ import ScreenSpaceTesting
     /// held to the line before.
     @Test func aSharedModifierIsThePersonsOnceVhidLetsGo() throws {
         var recorder = try Recorder(start: Self.start, flags: 0, vhid: [Self.vhid], displays: .vast)
-        recorder.take(event(10, .flagsChanged(keyCode: 56, flags: 0x20002), from: Self.vhid))
-        recorder.take(event(20, .flagsChanged(keyCode: 56, flags: 0x20002)))
-        recorder.take(event(30, .flagsChanged(keyCode: 56, flags: 0x20002), from: Self.vhid))
-        recorder.take(event(40, .flagsChanged(keyCode: 56, flags: 0)))
-        recorder.take(event(50, .flagsChanged(keyCode: 56, flags: 0x20002)))
-        recorder.take(event(45, .flagsChanged(keyCode: 56, flags: 0)))
+        try recorder.take(event(10, .flagsChanged(keyCode: 56, flags: 0x20002), from: Self.vhid))
+        try recorder.take(event(20, .flagsChanged(keyCode: 56, flags: 0x20002)))
+        try recorder.take(event(30, .flagsChanged(keyCode: 56, flags: 0x20002), from: Self.vhid))
+        try recorder.take(event(40, .flagsChanged(keyCode: 56, flags: 0)))
+        try recorder.take(event(50, .flagsChanged(keyCode: 56, flags: 0x20002)))
+        try recorder.take(event(45, .flagsChanged(keyCode: 56, flags: 0)))
         expect(try replayed(recorder, stoppedAt: 60), [
             (0, keys()), (50, keys(0xE1)), (50, keys()), (60, keys()), (60, .buttons([])),
         ])
@@ -149,10 +149,10 @@ import ScreenSpaceTesting
     /// line, and comes up when it does.
     @Test func capsLockFnAndAModifierAlreadyDown() throws {
         var recorder = try Recorder(start: Self.start, flags: 0x100008, vhid: [], displays: .vast)
-        recorder.take(event(10, .flagsChanged(keyCode: 55, flags: 0)))
-        recorder.take(event(20, .flagsChanged(keyCode: 0x39, flags: 0x10000)))
-        recorder.take(event(30, .flagsChanged(keyCode: 63, flags: 0x800100)))
-        recorder.take(event(35, .flagsChanged(keyCode: 63, flags: 0)))
+        try recorder.take(event(10, .flagsChanged(keyCode: 55, flags: 0)))
+        try recorder.take(event(20, .flagsChanged(keyCode: 0x39, flags: 0x10000)))
+        try recorder.take(event(30, .flagsChanged(keyCode: 63, flags: 0x800100)))
+        try recorder.take(event(35, .flagsChanged(keyCode: 63, flags: 0)))
         expect(try replayed(recorder, stoppedAt: 40), [
             (0, keys(0xE3)), (10, keys()), (20, keys(0x39)), (20, keys()), (40, keys()), (40, .buttons([])),
         ])
@@ -172,21 +172,56 @@ import ScreenSpaceTesting
     @Test func aMoveNoDisplayHoldsOnceWrittenIsLeftOutAndCounted() throws {
         let one = DisplayLayout.at(try! ScreenRect(x: 0, y: 0, width: 200, height: 200)).online
         var recorder = try Recorder(start: Self.start, flags: 0, vhid: [], displays: one)
-        recorder.take(event(10, .motion, at: point(150.25, 100)))
-        recorder.take(event(20, .motion, at: point(199.9996, 100)))
-        recorder.take(event(30, .motion, at: point(-3, 100)))
+        try recorder.take(event(10, .motion, at: point(150.25, 100)))
+        try recorder.take(event(20, .motion, at: point(199.9996, 100)))
+        try recorder.take(event(30, .motion, at: point(-3, 100)))
         expect(try replayed(recorder, stoppedAt: 40), [(0, keys()), (10, .at(point(150.25, 100))), (40, keys()), (40, .buttons([]))])
         #expect(recorder.offDisplays == 2)
         let script = try Schedule<ScreenPoint>(Play.parse(recorder.script(stoppedAt: .milliseconds(40), stopKeys: Self.stopKeys)))
         #expect(throws: Never.self) { try script.placed(on: one) }
     }
 
+    /// vhid's motion stopped at the displays' edge is counted, and the seam between two
+    /// displays side by side is no edge: the cursor crosses it.
+    @Test func theSeamBetweenTwoDisplaysIsNoEdge() throws {
+        let two = DisplayLayout.at(try! ScreenRect(x: 0, y: 0, width: 100, height: 100), try! ScreenRect(x: 100, y: 0, width: 100, height: 100)).online
+        var recorder = try Recorder(start: point(50, 50), flags: 0, vhid: [Self.vhid], displays: two)
+        try recorder.take(event(10, .motion, at: point(99.5, 50), from: Self.vhid))
+        try recorder.take(event(20, .motion, at: point(100, 50), from: Self.vhid))
+        #expect(recorder.vhidAtEdge == 0)
+        try recorder.take(event(30, .motion, at: point(199.5, 50), from: Self.vhid))
+        #expect(recorder.vhidAtEdge == 1)
+    }
+
+    /// A layout the window server says changed is counted only when it differs, and the
+    /// recorder places on it from then on.
+    @Test func aLayoutChangeIsCountedAndPlacedOn() throws {
+        let narrow = DisplayLayout.at(try! ScreenRect(x: 0, y: 0, width: 200, height: 200)).online
+        let wide = DisplayLayout.at(try! ScreenRect(x: 0, y: 0, width: 400, height: 200)).online
+        var recorder = try Recorder(start: Self.start, flags: 0, vhid: [], displays: narrow)
+        recorder.relayout(narrow)
+        #expect(recorder.layoutChanges == 0)
+        recorder.relayout(wide)
+        #expect(recorder.layoutChanges == 1)
+        try recorder.take(event(10, .motion, at: point(300, 100)))
+        #expect(recorder.offDisplays == 0)
+    }
+
+    /// A coordinate is written to the nearest thousandth by scaling only its fraction, so
+    /// one near the end of what a Double holds is written as itself, not past it.
+    @Test func aCoordinateIsWrittenToAThousandthWithoutOverflow() throws {
+        #expect(Recorder.thousandth(150.2504) == 150.25)
+        #expect(Recorder.thousandth(-3.0006) == -3.001)
+        #expect(Recorder.thousandth(1.7e308) == 1.7e308)
+        #expect(try Recorder.written(point(1.7e308, -1.7e308)) == point(1.7e308, -1.7e308))
+    }
+
     /// A recording is a script `vhid play` schedules whole: at lines and all.
     @Test func aRecordingSchedules() throws {
         var recorder = try Recorder(start: Self.start, flags: 0, vhid: [], displays: .vast)
-        recorder.take(event(8, .motion, at: point(104, 100)))
-        recorder.take(event(16, .buttonDown(.left), at: point(104, 100)))
-        recorder.take(event(24, .buttonUp(.left), at: point(104, 100)))
+        try recorder.take(event(8, .motion, at: point(104, 100)))
+        try recorder.take(event(16, .buttonDown(.left), at: point(104, 100)))
+        try recorder.take(event(24, .buttonUp(.left), at: point(104, 100)))
         let schedule = try Schedule<ScreenPoint>(Play.parse(recorder.script(stoppedAt: .milliseconds(30), stopKeys: Self.stopKeys)))
         #expect(schedule.calibration != nil)
         #expect(schedule.reports == 3)

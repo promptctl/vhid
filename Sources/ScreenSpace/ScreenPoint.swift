@@ -35,7 +35,28 @@ public struct ScreenPoint: Hashable, Sendable, Codable, CustomStringConvertible 
         }
     }
 
-    /// `x,y`, the form `click` takes, so a point any verb prints can be passed back.
+    /// A point between finite edges, which is finite: a box's middle, or the point a part
+    /// of a box is pressed at.
+    init(between point: (x: Double, y: Double)) {
+        (x, y) = point
+    }
+
+    /// A point as `x,y` spells it. [LAW:single-enforcer] The command line and the MCP server
+    /// both read a point here, as they read a box at `ScreenRect(spelled:)`.
+    public init(spelled: String) throws(Misspelled) {
+        let numbers = try Coordinate.numbers(spelled, count: 2, of: Self.spelling)
+        do {
+            try self.init(x: numbers[0], y: numbers[1])
+        } catch {
+            throw .notAPlace(spelled, error)
+        }
+    }
+
+    /// What a refusal names as the form wanted.
+    public static let spelling = "x,y in points"
+
+    /// `x,y`. [LAW:one-source-of-truth] The one spelling of a point, which every verb prints
+    /// and `init(spelled:)` reads back, so a point any verb prints can be passed back.
     public var description: String { "\(Coordinate.spelled(x)),\(Coordinate.spelled(y))" }
 }
 
@@ -54,5 +75,32 @@ public enum Coordinate {
     public static func spelled(_ value: Double) -> String {
         let digits = "\(value)"
         return digits.hasSuffix(".0") ? String(digits.dropLast(2)) : digits
+    }
+
+    /// `count` numbers, comma separated, as a point or a box spells them, or the refusal that
+    /// names the form wanted.
+    static func numbers(_ spelled: String, count: Int, of spelling: String) throws(Misspelled) -> [Double] {
+        let words = spelled.split(separator: ",", omittingEmptySubsequences: false)
+        let numbers = words.compactMap { Double(String($0.drop(while: \.isWhitespace).reversed().drop(while: \.isWhitespace).reversed())) }
+        guard words.count == count, numbers.count == count else { throw .form(spelled, wanted: spelling) }
+        return numbers
+    }
+}
+
+/// Text that does not spell the point or box it was read as, and why.
+public enum Misspelled: Error, Equatable, CustomStringConvertible {
+    /// Not that many numbers: the text, and the form wanted.
+    case form(String, wanted: String)
+    /// Two numbers that are not a place on the screen.
+    case notAPlace(String, NotAPlace)
+    /// Four numbers that are not a box.
+    case notABox(String, NotABox)
+
+    public var description: String {
+        switch self {
+        case .form(let spelled, let wanted): "\(spelled) is not \(wanted)"
+        case .notAPlace(_, let cause): cause.description
+        case .notABox(_, let cause): cause.description
+        }
     }
 }

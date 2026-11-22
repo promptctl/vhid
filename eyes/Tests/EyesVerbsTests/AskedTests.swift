@@ -17,15 +17,15 @@ import ScreenSpaceTesting
     /// Finder frontmost over the desktop, Safari's window behind it.
     static let desk = Desk(frontmost: finder, own: Front.Passed(pids: [80], name: "iTerm2"),
                            running: [Desk.Running(app: safari, regular: true), Desk.Running(app: finder, regular: true)],
-                           listing: WindowListing(windows: [window], excluded: []), displays: [main])
+                           listing: WindowListing(windows: [window], excluded: []), layout: .at(main.frame), describe: { _ in [main] })
 
-    nonisolated static let found = Found(text: Text("Reload")!, frame: try! ScreenRect(x: 20, y: 50, width: 40, height: 20), source: .tree(role: Role(rawValue: "AXButton"), also: []), on: .vast)!
+    nonisolated static let found = try! Found(text: Text("Reload")!, frame: try! ScreenRect(x: 20, y: 50, width: 40, height: 20), source: .tree(role: Role(rawValue: "AXButton"), also: []), on: .vast)
 
     /// A reader that reads `Reload` wherever it is asked, keeping the regions it was asked for.
     final class Reader: Sendable {
         private let regions = Mutex<[Region]>([])
         var asked: [Region] { regions.withLock { $0 } }
-        func read(_ source: SourceKind, _ query: Query) async throws -> Judged {
+        func read(_ source: SourceKind, _ query: Query, _ layout: DisplayLayout) async throws -> Judged {
             regions.withLock { $0.append(query.region) }
             return Judged(Reading(outcome: .matched(Matches([AskedTests.found])!), scope: Scope(region: AskedTests.main.frame, examined: 1, reach: .whole))) { r, _ in r }
         }
@@ -72,7 +72,7 @@ import ScreenSpaceTesting
     /// A look withdrawn while it reads is withdrawn, not answered as a place that could not be read.
     @Test func aLookCancelledWhileReadingIsCancelledNotAnswered() async {
         await #expect(throws: CancellationError.self) {
-            _ = try await Self.asked().answer(on: Screen(desk: { Self.desk }, read: { _, _ in throw CancellationError() }))
+            _ = try await Self.asked().answer(on: Screen(desk: { Self.desk }, read: { _, _, _ in throw CancellationError() }))
         }
     }
 

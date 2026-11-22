@@ -78,9 +78,9 @@ build from this tree. `vhid service` prints which. Coordinates are screen points
 left of or above it has negative ones, which follow `--` after every option:
 `vhid click --button left -- -100 -40`.
 
-`click`, `move`, `scroll` and `drag` take each place as a point, two numbers `x y`, or as a
-box, one word `x,y,width,height`: the box `look` prints beside each point. A point is
-pressed where it is. In a box, the pointer lands on a point drawn inside the largest part
+`click`, `move`, `scroll` and `drag` take each place as a point, one word `x,y` or two
+numbers `x y`, or as a box, one word `x,y,width,height`: the point and the box `look`
+prints, each passed back as printed. A point is pressed where it is. In a box, the pointer lands on a point drawn inside the largest part
 of it one display shows, spread about that part's centre as a person's clicks spread on a
 button and never within 2 points of its edge (a side too narrow for that is aimed at its
 centre), and the move there takes as long as Fitts' law says a hand's would to a target
@@ -88,8 +88,8 @@ that size. A point no display holds, or a box no display shows a part of a point
 side, is refused, saying it is on no display, by `click`, `move`, `scroll`, `drag` and
 `play` alike: nothing is moved to an edge without a word. A display asleep still holds the
 cursor, so it counts.
-The MCP tools take `box` in place of `x` and `y`, and `drag`'s `from` and `to` take the
-box as a string. [design/human.md](design/human.md#where-a-click-lands) has the model.
+The MCP tools take `box` in place of `x` and `y`, and `drag`'s `from` and `to` take a
+point or a box as a string, `"x,y"` or `"x,y,width,height"`, or a point as `{x, y}`. [design/human.md](design/human.md#where-a-click-lands) has the model.
 
 ## What each run leaves behind
 

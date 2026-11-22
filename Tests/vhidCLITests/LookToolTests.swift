@@ -18,8 +18,8 @@ import ScreenSpaceTesting
                            running: [Desk.Running(app: safari, regular: true)],
                            listing: WindowListing(windows: [Window(id: 4, owner: "Safari", pid: 400, frame: try! ScreenRect(x: 0, y: 40, width: 600, height: 400), layer: 0)],
                                                   excluded: []),
-                           displays: [main])
-    static let screen = Screen(desk: { desk }) { _, _ in
+                           layout: .at(main.frame), describe: { _ in [main] })
+    static let screen = Screen(desk: { desk }) { _, _, _ in
         Judged(Reading(outcome: .nearest([]), scope: Scope(region: main.frame, examined: 0, reach: .whole))) { r, _ in r }
     }
 

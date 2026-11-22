@@ -1,16 +1,22 @@
+import ScreenSpace
+
 /// The screen as one answer reads it: which app is frontmost, which app is the agent's own,
 /// what is running, the windows on screen and the displays, read once, frontmost first -
 /// an activation lands before the listing that reflects it.
 ///
 /// [LAW:one-source-of-truth] The displays and windows an answer lists, the app it chooses
-/// to read, and where a click it was asked about lands are judged against this one value,
-/// so those parts of an answer describe one moment. The text read in the chosen place is
-/// read after it, by readers that read the screen as they read - a wait reads it many times.
+/// to read, where a click it was asked about lands, and the first read of the chosen place
+/// are judged against this one value, so those parts of an answer describe one moment. A
+/// wait's later reads read the layout again, as they read the screen again.
 public struct Desk: Sendable {
     public let frontmost: Front.App?
     public let own: Front.Passed
     public let running: [Running]
     public let listing: WindowListing
+    /// The display layout, read once, which every question of where something is on the
+    /// displays is asked of.
+    public let layout: DisplayLayout
+    /// The active displays as `eyes displays` lists them, from `layout`.
     public let displays: [Display]
 
     /// A running application, and whether it is an ordinary one - AppKit's `.regular`
@@ -26,12 +32,16 @@ public struct Desk: Sendable {
         }
     }
 
-    public init(frontmost: Front.App?, own: Front.Passed, running: [Running], listing: WindowListing, displays: [Display]) {
+    /// `describe` says how each active display of `layout` is listed: the window server's
+    /// main display and scale in the process, written by a test.
+    public init(frontmost: Front.App?, own: Front.Passed, running: [Running], listing: WindowListing, layout: DisplayLayout,
+                describe: (DisplayLayout) -> [Display]) {
         self.frontmost = frontmost
         self.own = own
         self.running = running
         self.listing = listing
-        self.displays = displays
+        self.layout = layout
+        displays = describe(layout)
     }
 
     func isRegular(_ pid: Int32) -> Bool { running.contains { $0.app.pid == pid && $0.regular } }

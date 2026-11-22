@@ -104,7 +104,7 @@ public final class RandomSource: Sendable {
     }
 
     /// Whatever `body` draws, drawn from this source's generator.
-    public func draw<T>(_ body: (inout SeededGenerator) -> T) -> T {
-        generator.withLock { body(&$0) }
+    public func draw<T, Failure: Error>(_ body: (inout SeededGenerator) throws(Failure) -> T) throws(Failure) -> T {
+        try generator.withLock { (generator) throws(Failure) -> T in try body(&generator) }
     }
 }

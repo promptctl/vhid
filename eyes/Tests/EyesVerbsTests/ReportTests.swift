@@ -14,7 +14,7 @@ import ScreenSpaceTesting
     static let display = try! ScreenRect(x: -2400, y: -300, width: 2400, height: 1600)
 
     private func found(_ text: String, x: Double) -> Found {
-        Found(text: Text(text)!, frame: try! ScreenRect(x: x, y: -60, width: 40, height: 20), source: .pixels(confidence: Confidence(1)!), on: .vast)!
+        try! Found(text: Text(text)!, frame: try! ScreenRect(x: x, y: -60, width: 40, height: 20), source: .pixels(confidence: Confidence(1)!), on: .vast)
     }
 
     /// The done criterion for an absence: it carries where it looked, how much it read,
@@ -53,9 +53,9 @@ import ScreenSpaceTesting
         let frame = try! ScreenRect(x: 0, y: 0, width: 40, height: 20)
         let button = Source.tree(role: Role(rawValue: "AXButton"), also: [])
         let rows = Report.rows(.matched(Matches([
-            Found(text: Text("Settings")!, frame: frame, source: .tree(role: Role(rawValue: "AXLink"), also: []), on: .vast)!,
-            Found(text: Text("Settings")!, frame: frame, source: .merged(button, .pixels(confidence: Confidence(1)!)), on: .vast)!,
-            Found(text: Text("Canvas")!, frame: frame, source: .pixels(confidence: Confidence(1)!), on: .vast)!,
+            try! Found(text: Text("Settings")!, frame: frame, source: .tree(role: Role(rawValue: "AXLink"), also: []), on: .vast),
+            try! Found(text: Text("Settings")!, frame: frame, source: .merged(button, .pixels(confidence: Confidence(1)!)), on: .vast),
+            try! Found(text: Text("Canvas")!, frame: frame, source: .pixels(confidence: Confidence(1)!), on: .vast),
         ])!))
         #expect(rows == ["20,10\t0,0,40,20\tSettings\tAXLink", "20,10\t0,0,40,20\tSettings\tAXButton", "20,10\t0,0,40,20\tCanvas\tpixels"])
     }
@@ -64,7 +64,7 @@ import ScreenSpaceTesting
     /// words, each after its attribute: the "+" button found as "Add" still reads "+".
     @Test func aRowSaysWhatElseItsElementSays() {
         let frame = try! ScreenRect(x: 160, y: 417, width: 18, height: 18)
-        let plus = Found(text: Text("+")!, frame: frame, source: .tree(role: Role(rawValue: "AXButton"), also: [Words(.description, Text("Add")!)]), on: .vast)!
+        let plus = try! Found(text: Text("+")!, frame: frame, source: .tree(role: Role(rawValue: "AXButton"), also: [Words(.description, Text("Add")!)]), on: .vast)
         #expect(Report.rows(.matched(Matches([plus])!)) == ["169,426\t160,417,18,18\t+\tAXButton\tdescription Add"])
         let reading = Reading(outcome: .matched(Matches([plus])!), scope: Scope(region: frame, examined: 1, reach: .whole))
         #expect(Report.scope(reading, query: Query(match: .contains("Add"), region: .rect(frame), role: Role(rawValue: "AXButton")), source: .tree)
@@ -80,7 +80,7 @@ import ScreenSpaceTesting
     /// far off it was in the column after its role, whatever else its element says.
     @Test func aRowsTextsAreSpelledOnOneLineAndItsDistanceStaysPut() {
         let frame = try! ScreenRect(x: 160, y: 417, width: 18, height: 18)
-        let close = Found(text: Text("x")!, frame: frame, source: .tree(role: Role(rawValue: "AXImage"), also: [Words(.description, Text("Close\n(Esc)")!)]), on: .vast)!
+        let close = try! Found(text: Text("x")!, frame: frame, source: .tree(role: Role(rawValue: "AXImage"), also: [Words(.description, Text("Close\n(Esc)")!)]), on: .vast)
         #expect(Report.rows(.nearest([Near(found: close, distance: 2)])) == ["169,426\t160,417,18,18\tx\tAXImage\t2 off\tdescription Close (Esc)"])
     }
 
@@ -89,11 +89,11 @@ import ScreenSpaceTesting
     @Test func aLookNotesItsRoleAndCountsMatchesByOtherWords() async throws {
         let events = Collected()
         let frame = try! ScreenRect(x: 160, y: 417, width: 18, height: 18)
-        let plus = Found(text: Text("+")!, frame: frame, source: .tree(role: Role(rawValue: "AXButton"), also: [Words(.description, Text("Add")!)]), on: .vast)!
-        let add = Found(text: Text("Add")!, frame: try! ScreenRect(x: 0, y: 0, width: 30, height: 18), source: .tree(role: Role(rawValue: "AXButton"), also: []), on: .vast)!
+        let plus = try! Found(text: Text("+")!, frame: frame, source: .tree(role: Role(rawValue: "AXButton"), also: [Words(.description, Text("Add")!)]), on: .vast)
+        let add = try! Found(text: Text("Add")!, frame: try! ScreenRect(x: 0, y: 0, width: 30, height: 18), source: .tree(role: Role(rawValue: "AXButton"), also: []), on: .vast)
         let reading = Reading(outcome: .matched(Matches([plus, add])!), scope: Scope(region: frame, examined: 2, reach: .whole))
         _ = try await Telemetry.$export.withValue(events.export) {
-            try await Report.text(Query(match: .contains("Add"), region: .rect(frame), role: Role(rawValue: "AXButton")), source: .tree) { _, _ in .standing(reading) }
+            try await Report.text(Query(match: .contains("Add"), region: .rect(frame), role: Role(rawValue: "AXButton")), on: .vast, source: .tree, layouts: { .vast }) { _, _, _ in .standing(reading) }
         }
         #expect(events.all.first?.attributes["role"] == "AXButton")
         #expect(events.all.first?.counts["matched"] == 2)
@@ -108,17 +108,17 @@ import ScreenSpaceTesting
         #expect(throws: (any Error).self) { try Read.parse(["--role", "AXButton", "--source", "pixels"]) }
     }
 
-    /// A row's box covers its frame in whole points, takes the form `rect` takes, and holds
-    /// the point printed beside it - fractional frames and negative coordinates included,
-    /// where rounding each number its own way would cut the frame or miss the point.
+    /// A row's box is its frame as given, takes the form `rect` takes, and holds the point
+    /// printed beside it - fractional frames and negative coordinates included - so a box a
+    /// look prints reads back as itself.
     @Test(arguments: [
-        (try! ScreenRect(x: 10.4, y: 20.6, width: 80.3, height: 23.9), "10,20,81,25"),
-        (try! ScreenRect(x: -1900.7, y: -60.2, width: 40.5, height: 19.4), "-1901,-61,41,21"),
+        (try! ScreenRect(x: 10.4, y: 20.6, width: 80.3, height: 23.9), "10.4,20.6,80.3,23.9"),
+        (try! ScreenRect(x: -1900.7, y: -60.2, width: 40.5, height: 19.4), "-1900.7,-60.2,40.5,19.4"),
         (try! ScreenRect(x: 0, y: 0, width: 40, height: 20), "0,0,40,20"),
-        (try! ScreenRect(x: 10.9, y: 20, width: 10, height: 10), "10,20,11,10"),
+        (try! ScreenRect(x: 10.9, y: 20, width: 10, height: 10), "10.9,20,10,10"),
     ])
     func aRowsBoxHoldsItsFrameAndItsCentre(frame: ScreenRect, box: String) throws {
-        let found = Found(text: Text("Save")!, frame: frame, source: .tree(role: Role(rawValue: "AXButton"), also: []), on: .vast)!
+        let found = try! Found(text: Text("Save")!, frame: frame, source: .tree(role: Role(rawValue: "AXButton"), also: []), on: .vast)
         let columns = try #require(Report.rows(.matched(Matches([found])!)).first).split(separator: "\t").map(String.init)
         #expect(columns[1] == box)
         let c = columns[0].split(separator: ",").compactMap { Double($0) }
@@ -131,7 +131,10 @@ import ScreenSpaceTesting
     /// A frame narrower than a point is shown by no display a point a side, so it is no row:
     /// there is no place a click could press it. [LAW:parse-dont-validate]
     @Test func aFrameNarrowerThanAPointIsNoRow() {
-        #expect(Found(text: Text("Save")!, frame: try! ScreenRect(x: 10.5, y: 20, width: 0.4, height: 10), source: .pixels(confidence: Confidence(1)!), on: .vast) == nil)
+        let sliver = try! ScreenRect(x: 10.5, y: 20, width: 0.4, height: 10)
+        #expect(throws: Unfound.unshown(.box(sliver))) {
+            try Found(text: Text("Save")!, frame: sliver, source: .pixels(confidence: Confidence(1)!), on: .vast)
+        }
     }
 
     /// The scope says a match was ordered beside other text, and that a page was read.
@@ -243,14 +246,14 @@ import ScreenSpaceTesting
         let halfBlind = Reading(outcome: hit.outcome, scope: Scope(region: Self.display, examined: 9, reach: .stopped(.merged(
             .blind(.tree, "no grant", missingGrant: true), .read(.pixels, .stopped(.timeBudget(.seconds(5))))))))
         try await Telemetry.$export.withValue(events.export) {
-            _ = try await Report.text(Query(match: .contains("OK"), region: .display(12)), source: .tree) { _, _ in .standing(near) }
-            _ = try await Report.text(Query(match: .contains("OK"), region: .display(12)), source: .pixels,
-                                      wait: Wait(until: .present, seconds: 1)) { _, _ in
+            _ = try await Report.text(Query(match: .contains("OK"), region: .display(12)), on: .vast, source: .tree, layouts: { .vast }) { _, _, _ in .standing(near) }
+            _ = try await Report.text(Query(match: .contains("OK"), region: .display(12)), on: .vast, source: .pixels,
+                                      wait: Wait(until: .present, seconds: 1), layouts: { .vast }) { _, _, _ in
                 Judged(hit) { reading, _ in try await Task.sleep(for: .milliseconds(20)); return reading }
             }
-            _ = try? await Report.text(Query(match: nil, region: .display(12)), source: .merged) { _, _ in throw PixelsError.noGrant(.screenRecording) }
+            _ = try? await Report.text(Query(match: nil, region: .display(12)), on: .vast, source: .merged, layouts: { .vast }) { _, _, _ in throw PixelsError.noGrant(.screenRecording) }
             _ = try await Report.text(Query(match: .contains("OK"), region: .page(window: 7, frame: Self.display), near: .contains("Beta")),
-                                      source: .merged) { _, _ in .standing(halfBlind) }
+                                      on: .vast, source: .merged, layouts: { .vast }) { _, _, _ in .standing(halfBlind) }
         }
         let seen = events.all
         #expect(seen.map(\.event) == ["reading", "reading", "reading", "reading"])
@@ -287,7 +290,7 @@ import ScreenSpaceTesting
                           passedOver: .own("iTerm2"))
         let reading = Reading(outcome: .nearest([]), scope: Scope(region: Self.display, examined: 3, reach: .whole, owners: .only([300, 900])))
         let text = try await Telemetry.$export.withValue(events.export) {
-            try await Report.text(Query(match: .contains("Add"), region: .front(front)), source: .tree) { _, _ in .standing(reading) }
+            try await Report.text(Query(match: .contains("Add"), region: .front(front)), on: .vast, source: .tree, layouts: { .vast }) { _, _, _ in .standing(reading) }
         }
         #expect(text.hasPrefix("\"Add\" not found in System Settings (pid 300) and what is in front of it, passing over iTerm2,"
             + " the agent's own, on display 2 -2400,-300,2400,1600 by the tree; 3 runs read;"))
@@ -296,7 +299,7 @@ import ScreenSpaceTesting
         // A display read takes in every process, which no count stands for.
         let display = Reading(outcome: .nearest([]), scope: Scope(region: Self.display, examined: 3, reach: .whole))
         _ = try await Telemetry.$export.withValue(events.export) {
-            try await Report.text(Query(match: .contains("Add"), region: .display(2)), source: .tree) { _, _ in .standing(display) }
+            try await Report.text(Query(match: .contains("Add"), region: .display(2)), on: .vast, source: .tree, layouts: { .vast }) { _, _, _ in .standing(display) }
         }
         #expect(events.all.last?.counts["owners"] == nil)
     }
@@ -311,11 +314,15 @@ import ScreenSpaceTesting
         let window = Window(id: 3, owner: "System Settings", pid: 300, frame: try! ScreenRect(x: -1000, y: 0, width: 600, height: 400), layer: 0)
         let desk = Desk(frontmost: finder, own: Front.Passed(pids: [80], name: "iTerm2"),
                         running: [Desk.Running(app: settings, regular: true), Desk.Running(app: finder, regular: true)],
-                        listing: WindowListing(windows: [window], excluded: []), displays: [display])
-        let region = try await Telemetry.$export.withValue(events.export) {
-            try await Where.Place.front.region(desk: { desk })
+                        listing: WindowListing(windows: [window], excluded: []),
+                        layout: try! DisplayLayout([OnlineDisplay(id: 2, bounds: Self.display, active: true)]), describe: { _ in [display] })
+        let located = try await Telemetry.$export.withValue(events.export) {
+            try await Where.Place.front.located(desk: { desk })
         }
-        #expect(region == .front(Front(app: settings, display: 2, own: desk.own, passedOver: .windowless(finder))))
+        #expect(located.region == .front(Front(app: settings, display: 2, own: desk.own, passedOver: .windowless(finder))))
+        // Found on the layout of the desk it was chosen on, so the choice and the first read
+        // are of one moment.
+        #expect(located.layout == desk.layout)
         let event = try #require(events.all.first)
         #expect(event.event == "front")
         #expect(event.attributes["front_app"] == "System Settings" && event.attributes["passed_over"] == .string("\(finder)"))
@@ -339,7 +346,7 @@ import ScreenSpaceTesting
         let unanchored = Reading(outcome: .unanchored([beta]), scope: Scope(region: Self.display, examined: 6, reach: .whole))
         let query = Query(match: .exact("Remove"), region: .display(12), near: .contains("Bta"))
         let text = try await Telemetry.$export.withValue(events.export) {
-            try await Report.text(query, source: .tree) { _, _ in .standing(unanchored) }
+            try await Report.text(query, on: .vast, source: .tree, layouts: { .vast }) { _, _, _ in .standing(unanchored) }
         }
         #expect(text.hasPrefix("\"Bta\" not found to place exactly \"Remove\" near in "))
         #expect(text.contains("nearest follow"))
@@ -353,10 +360,10 @@ import ScreenSpaceTesting
         let events = Collected()
         let viewport = try! ScreenRect(x: 22, y: 190, width: 1200, height: 688)
         try await Telemetry.$export.withValue(events.export) {
-            let found = try await Where.Place.page(219).region { _ in Paged(pages: [viewport], examined: 40, stop: nil) }
+            let found = try await Where.Place.page(219).located(pages: { _ in Paged(pages: [viewport], examined: 40, stop: nil) }, layouts: { .vast }).region
             #expect(found == .page(window: 219, frame: viewport))
-            _ = try? await Where.Place.page(219).region { _ in Paged(pages: [viewport, viewport], examined: 52, stop: nil) }
-            _ = try? await Where.Place.page(219).region { _ in Paged(pages: [], examined: 4000, stop: .elementLimit(Limit(4000)!)) }
+            _ = try? await Where.Place.page(219).located(pages: { _ in Paged(pages: [viewport, viewport], examined: 52, stop: nil) }, layouts: { .vast })
+            _ = try? await Where.Place.page(219).located(pages: { _ in Paged(pages: [], examined: 4000, stop: .elementLimit(Limit(4000)!)) }, layouts: { .vast })
         }
         let seen = events.all
         #expect(seen.map(\.event) == ["page", "page", "page"])

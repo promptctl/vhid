@@ -72,7 +72,7 @@ struct RecordCommand: AsyncParsableCommand {
         for note in recorded.notes { FileHandle.standardError.write(Data("vhid record: \(note)\n".utf8)) }
         Telemetry.note(.ending, .string(recorded.ending.said))
         Telemetry.note(.leftOut, .object(["unmapped": .int(recorded.unmapped), "off_displays": .int(recorded.offDisplays),
-                                          "vhid_at_edge": .int(recorded.vhidAtEdge)]))
+                                          "vhid_at_edge": .int(recorded.vhidAtEdge), "layout_changes": .int(recorded.layoutChanges)]))
         print(recorded.script, terminator: "")
     }
 

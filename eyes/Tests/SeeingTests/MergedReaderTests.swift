@@ -31,7 +31,7 @@ import ScreenSpaceTesting
     static let seen = Source.pixels(confidence: Confidence(0.8)!)
 
     private func at(_ text: String, _ x: Double, _ y: Double, _ source: Source, width: Double = 60) -> Found {
-        Found(text: Text(text)!, frame: try! ScreenRect(x: x, y: y, width: width, height: 20), source: source, on: .vast)!
+        try! Found(text: Text(text)!, frame: try! ScreenRect(x: x, y: y, width: width, height: 20), source: source, on: .vast)
     }
 
     /// The region resolved without asking the host which displays it has. [LAW:effects-at-boundaries]
@@ -147,7 +147,7 @@ import ScreenSpaceTesting
         let words = text.split(separator: " ").enumerated().map { i, w in
             Word(text: Text(String(w))!, frame: try! ScreenRect(x: x + Double(i) * 50, y: y, width: 45, height: 20))
         }
-        return Found(first: words[0], rest: Array(words.dropFirst()), source: Self.seen, on: .vast)!
+        return try! Found(first: words[0], rest: Array(words.dropFirst()), source: Self.seen, on: .vast)
     }
 
     @Test func aContainsQueryFindsOneButtonOnceWhateverEachReaderDividedItInto() async throws {
@@ -257,7 +257,7 @@ import ScreenSpaceTesting
     @Test func eachReaderChecksTheBoxesOfTheRowsItPlaced() async throws {
         let cut = try! ScreenRect(x: 17, y: 15, width: 40, height: 12)
         let tree = Fake(source: .tree, found: [at("Allow", 10, 10, Self.role), at("Deny", 100, 10, Self.role)],
-                        press: { $0.text.value == "Allow" ? .narrowed(Found(text: $0.text, frame: cut, source: $0.source, on: .vast)!) : .unchecked(.elsewhere) }, calls: 4)
+                        press: { $0.text.value == "Allow" ? .narrowed(try! Found(text: $0.text, frame: cut, source: $0.source, on: .vast)) : .unchecked(.elsewhere) }, calls: 4)
         let pixels = Fake(source: .pixels, found: [at("Allow", 12, 11, Self.seen)],
                           press: { $0.source.role == nil ? .unchecked(.unanswered) : .kept })
         let r = try await read(tree, pixels)

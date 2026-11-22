@@ -35,13 +35,17 @@ public struct Recorded: Codable, Equatable, Sendable {
     public let offDisplays: Int
     /// Motion of vhid's that reached a screen edge, after which the points may be off.
     public let vhidAtEdge: Int
+    /// Times the displays changed under the recording: its lines are placed on the layout
+    /// each was written on, which a play may no longer have.
+    public let layoutChanges: Int
 
-    public init(script: String, ending: Ending, unmapped: Int, offDisplays: Int, vhidAtEdge: Int) {
+    public init(script: String, ending: Ending, unmapped: Int, offDisplays: Int, vhidAtEdge: Int, layoutChanges: Int) {
         self.script = script
         self.ending = ending
         self.unmapped = unmapped
         self.offDisplays = offDisplays
         self.vhidAtEdge = vhidAtEdge
+        self.layoutChanges = layoutChanges
     }
 
     public enum Ending: Codable, Equatable, Sendable {
@@ -88,6 +92,7 @@ public struct Recorded: Codable, Equatable, Sendable {
             + (unmapped > 0 ? ["\(unmapped) key presses with no HID usage, fn among them, are not in the recording"] : [])
             + (offDisplays > 0 ? ["\(offDisplays) moves on no display, once vhid's own motion was taken out, are not in the recording"] : [])
             + (vhidAtEdge > 0 ? ["vhid's motion reached a screen edge \(vhidAtEdge) times while recording, so the pointer points after it may be off"] : [])
+            + (layoutChanges > 0 ? ["the displays changed \(layoutChanges) times while recording, so a play on the displays as they are now may refuse a line written before a change"] : [])
     }
 }
 

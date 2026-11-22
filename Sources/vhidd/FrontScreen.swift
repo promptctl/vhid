@@ -137,9 +137,9 @@ final class FrontScreen: ScreenSource, @unchecked Sendable {
 struct WindowServerRefused: Error, CustomStringConvertible {
     let session: FrontScreen.Session
     let question: ScreenQuestion
-    /// Why, when the reader said: empty when it did not.
-    let why: String
-    var description: String { "the window server in \(session) would not answer '\(question.rawValue)'" + (why.isEmpty ? "" : ": \(why)") }
+    /// Why, when the reader said.
+    let why: String?
+    var description: String { "the window server in \(session) would not answer '\(question.rawValue)'" + (why.map { ": \($0)" } ?? "") }
 }
 
 /// Where the cursor is and where the displays are, as the daemon answers them.
@@ -248,8 +248,10 @@ final class ChildReader: FrontScreen.Reader {
         let line = question.rawValue + "\n"
         guard Darwin.write(requests, line, line.utf8.count) == line.utf8.count else { throw Failed(session: session, what: "could not be asked: errno \(errno)") }
         let answer = try answerLine(within: patience, to: "answer")
-        let refused = answer == refusedAnswer ? "" : answer.hasPrefix(refusedAnswer + " ") ? String(answer.dropFirst(refusedAnswer.count + 1)) : nil
-        if let refused { throw WindowServerRefused(session: session, question: question, why: refused) }
+        if answer == refusedAnswer { throw WindowServerRefused(session: session, question: question, why: nil) }
+        if answer.hasPrefix(refusedAnswer + " ") {
+            throw WindowServerRefused(session: session, question: question, why: String(answer.dropFirst(refusedAnswer.count + 1)))
+        }
         return answer
     }
 

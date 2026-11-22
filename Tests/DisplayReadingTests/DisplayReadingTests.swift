@@ -38,5 +38,17 @@ import ScreenSpace
         #expect(throws: LayoutUnreadable.refused("the window server would not list its online displays (CGError \(CGError.illegalArgument.rawValue))")) {
             try DisplayReading.layout(online: refused, active: Self.list([]), bounds: Self.bounds)
         }
+        // The active list is read as the online one is, and refused as itself.
+        #expect(throws: LayoutUnreadable.refused("the window server would not list its active displays (CGError \(CGError.illegalArgument.rawValue))")) {
+            try DisplayReading.layout(online: Self.list([1]), active: refused, bounds: Self.bounds)
+        }
+    }
+
+    /// A display listed at bounds that are no box is refused naming the display and why.
+    @Test func aDisplayAtBoundsThatAreNoBoxIsRefusedByName() {
+        let bounds = { (_: CGDirectDisplayID) in CGRect(x: CGFloat.nan, y: 0, width: 1000, height: 800) }
+        #expect(performing: { try DisplayReading.layout(online: Self.list([1]), active: Self.list([1]), bounds: bounds) }, throws: { error in
+            if case LayoutUnreadable.notADisplay(1, _) = error { true } else { false }
+        })
     }
 }

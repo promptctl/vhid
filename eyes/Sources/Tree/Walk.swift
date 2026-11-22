@@ -70,8 +70,9 @@ struct Facts {
     let role: Role
     /// Its value, title and description, in that order.
     let texts: [Heard<Said?>]
-    /// Where it is: nil inside when it has no position or no size.
-    let frame: Heard<ScreenRect?>
+    /// Where it is: nil inside when it has no position or no size, and the refusal when what
+    /// the app gave is no box.
+    let frame: Heard<Result<ScreenRect, NotABox>?>
     /// Whether the app answered its role, even with nothing. Apart from `role` because
     /// `AXUnknown` is also a role apps answer - measured, Safari names elements that - and
     /// the two are not one fact. No default: a caller building one says which it is.
@@ -137,17 +138,25 @@ extension Node {
     func candidate(in clip: ScreenRect, under covers: Covers, on displays: Displays) -> Candidate {
         let leaf = if case .answered(let children) = children { children.isEmpty } else { false }
         guard leaf || !areas.contains(facts.role) else { return .excluded(.area) }
-        // Nil while the frame would not say, or no display shows it.
-        var shown: Placed<Shown>?
+        // Where a display shows it in the region, or why it makes no row: nil while the frame
+        // would not say. Whether it is in the region is the clip's to say, and whether a
+        // display shows it is the one rule's. [LAW:single-enforcer]
+        var placement: Result<Placed<Shown>, Unfound>?
         if case .answered(let frame) = facts.frame {
-            guard let frame, !frame.isThin, clip.intersects(frame) else { return .excluded(.unplaced) }
-            shown = try? displays.place(frame)
-            if let shown, !clip.contains(shown.value.press) { return .excluded(.unplaced) }
+            switch frame {
+            case nil: return .excluded(.unplaced)
+            case .failure(let refused)?: placement = .failure(.notABox(refused))
+            case .success(let frame)?:
+                guard !frame.isThin, clip.intersects(frame) else { return .excluded(.unplaced) }
+                placement = Result { () throws(Unplaced) in try displays.place(frame) }.mapError(Unfound.unshown)
+                if case .success(let shown) = placement, !clip.contains(shown.value.press) { return .excluded(.unplaced) }
+            }
         }
         let words = facts.texts.compactMap { $0.answer??.words }
         let text = words.first?.text
         guard text != nil || facts.texts.contains(.unanswered) else { return .excluded(.wordless) }
-        if case .answered(.some) = facts.frame, shown == nil { return .excluded(.unshown) }
+        if case .failure(let unfound) = placement { return .excluded(unfound.reason) }
+        let shown: Placed<Shown>? = if case .success(let shown) = placement { shown } else { nil }
         if let shown {
             switch covers.hide(shown.value.press) {
             case .answered(false): break
@@ -231,9 +240,10 @@ func pages<Element>(
         // descending into the first finds its iframes, dropping the second could leave a
         // DevTools pane the one page or hand back the toolbar. [LAW:no-silent-failure]
         guard node.facts.named, !(clips.contains(node.facts.role) && node.facts.frame == .unanswered) else { unread = true; continue }
-        let inner = node.facts.bound(within: bound)
+        // An element whose frame misses the bound draws nothing under it anywhere.
+        guard let inner = node.facts.bound(within: bound) else { continue }
         if node.facts.role == webArea {
-            if case .answered(let placed?) = node.facts.frame, !placed.isEmpty, !inner.isThin { pages.append(inner) }
+            if case .answered(.success(let placed)?) = node.facts.frame, !placed.isEmpty, !inner.isThin { pages.append(inner) }
             continue
         }
         guard case .answered(let children) = node.children else { unread = true; continue }
@@ -304,21 +314,21 @@ extension Facts {
     /// more. The walk's own bounds cap it, and say so in the reach.
     ///
     /// Where what this element holds can be drawn: `bound`, cut to its own frame when it
-    /// clips - the one rule the reading walk and the page search narrow by - and a box
-    /// holding no point at `bound`'s corner when the two do not meet. [LAW:single-enforcer]
-    func bound(within bound: ScreenRect) -> ScreenRect {
-        guard clips.contains(role), case .answered(let placed?) = frame, !placed.isEmpty else { return bound }
-        // A corner of a box is finite, and a side of zero is a box.
-        return bound.intersection(placed) ?? (try! ScreenRect(x: bound.x, y: bound.y, width: 0, height: 0))
+    /// clips - the one rule the reading walk and the page search narrow by - and nil when the
+    /// two do not meet, so nothing under it is drawn anywhere. [LAW:single-enforcer]
+    func bound(within bound: ScreenRect) -> ScreenRect? {
+        guard clips.contains(role), case .answered(.success(let placed)?) = frame, !placed.isEmpty else { return bound }
+        return bound.intersection(placed)
     }
 
     /// The one place the descend, probe and prune decision is made. [LAW:single-enforcer]
     func descent(clip: ScreenRect, bound: ScreenRect, under covers: Covers) -> Descent {
-        guard case .answered(let placed?) = frame, !placed.isEmpty else { return .descend(clip: clip, bound: bound) }
+        guard case .answered(.success(let placed)?) = frame, !placed.isEmpty else { return .descend(clip: clip, bound: bound) }
         let clipping = clips.contains(role)
         if let shown = visible(placed, in: clip, under: covers) {
             guard clipping else { return .descend(clip: clip, bound: bound) }
-            return .descend(clip: shown, bound: self.bound(within: bound))
+            guard let inner = self.bound(within: bound) else { return .prune }
+            return .descend(clip: shown, bound: inner)
         }
         guard !clipping, placed.intersects(bound) else { return .prune }
         return named ? .probe : .unsure
@@ -392,7 +402,7 @@ func walk<Element>(
             // placed in the region: nothing to count, unless a read it needed failed, which
             // leaves unknown whether it was.
             let quiet = root.probe && candidate != .excluded(.unanswered) && {
-                guard case .answered(let placed?) = node.facts.frame, !placed.isEmpty else { return true }
+                guard case .answered(.success(let placed)?) = node.facts.frame, !placed.isEmpty else { return true }
                 return visible(placed, in: root.clip, under: root.covers) == nil
             }()
             switch candidate {

@@ -46,7 +46,7 @@ let package = Package(
         // other, and a rule both need cannot grow a second version in one of them.
         // [LAW:one-way-deps] [LAW:single-enforcer]
         .target(name: "ScreenSpace"),
-        .testTarget(name: "ScreenSpaceTests", dependencies: ["ScreenSpace"]),
+        .testTarget(name: "ScreenSpaceTests", dependencies: ["ScreenSpace", "ScreenSpaceTesting"]),
         // Layouts for tests on either half, so a test's displays are made one way.
         .target(name: "ScreenSpaceTesting", dependencies: ["ScreenSpace"], path: "Tests/ScreenSpaceTesting"),
         // The window server's read of that layout, apart from ScreenSpace so the types link no
@@ -97,7 +97,7 @@ let package = Package(
         // exercised here - including the ones this Mac cannot be put into.
         .testTarget(name: "DriverExtensionTests", dependencies: ["DriverExtension", "ChildProcess", "OwnThread"]),
         // Carbon lives here and not in the device layer, so the privileged side that owns
-        // the device never links a window server API. [LAW:one-way-deps]
+        // the device never reads a keyboard layout. [LAW:one-way-deps]
         .target(name: "KeyboardLayouts", dependencies: ["Keystrokes"]),
         // The reverse map is built from a real layout's own data, so these read the
         // installed US and Dvorak layouts rather than a fixture that could agree with a
@@ -118,14 +118,15 @@ let package = Package(
         // the framing is proven without root and without the driver.
         .testTarget(name: "VirtualHIDTests", dependencies: ["VirtualHID", "DriverExtension", "Keystrokes", "Pointing", "OwnThread"]),
         // What crosses the privilege boundary, and the client's side of it. It links the
-        // two vocabularies and nothing else: not the layout, because a root daemon must
-        // never read one, and not the device, because a client must never open one.
-        // [LAW:one-way-deps]
+        // vocabularies - keys, pointing and the screen space the display layout crosses in -
+        // and nothing else: not the keyboard layout, because a root daemon must never read
+        // one, and not the device, because a client must never open one. [LAW:one-way-deps]
         .target(name: "Helper", dependencies: ["Installations", "Keystrokes", "Pointing", "ScreenSpace"]),
-        .testTarget(name: "HelperTests", dependencies: ["Helper", "Installations", "Keystrokes", "Pointing", "OwnThread", "ScreenSpace"]),
+        .testTarget(name: "HelperTests", dependencies: ["Helper", "Installations", "Keystrokes", "Pointing", "OwnThread", "ScreenSpace", "ScreenSpaceTesting"]),
         // What a caller asks the devices for, said in a caller's terms: text lowered to
-        // keystrokes, a chord, a place on the screen to click. It links the two
-        // vocabularies and the layout, and deliberately not Helper or VirtualHID: which
+        // keystrokes, a chord, a place on the screen to click. It links the vocabularies -
+        // keys, pointing and the screen space - and the keyboard layout, and deliberately
+        // not Helper or VirtualHID: which
         // device answers is the caller's to pick, so this holds the protocols and the
         // caller supplies a conformance. [LAW:one-way-deps] [LAW:effects-at-boundaries]
         // Telemetry for the cause chain its stops are read by, so a record and a caller tell
@@ -167,8 +168,9 @@ let package = Package(
         // [LAW:effects-at-boundaries]
         .executableTarget(name: "vhid-record", dependencies: ["Input", "Keystrokes", "KeyboardLayouts", "Pointing", "RecordingTie", "ScreenSpace", "DisplayReading"]),
         // The root daemon that owns the devices. It links DriverExtension for the identity
-        // the keyboard files its Keyboard Setup Assistant answer under, and deliberately
-        // not KeyboardLayouts: text never reaches this process. [LAW:one-way-deps]
+        // the keyboard files its Keyboard Setup Assistant answer under, DisplayReading for
+        // the display layout its front-session reader answers, and deliberately not
+        // KeyboardLayouts: text never reaches this process. [LAW:one-way-deps]
         .executableTarget(
             name: "vhidd",
             dependencies: ["Helper", "VirtualHID", "DriverExtension", "ChildProcess", "Keystrokes", "Pointing", "Signals", "Installations", "ScreenSpace", "DisplayReading"]
@@ -231,7 +233,7 @@ let package = Package(
         // The vocabulary both readers speak and the protocol both conform to. It links neither
         // reader - not Vision, not ApplicationServices - so the tree and the pixels share one
         // language without either linking the other; its screen space is ScreenSpace's.
-        .target(name: "Seeing", dependencies: ["ScreenSpace", "DisplayReading"], path: "eyes/Sources/Seeing"),
+        .target(name: "Seeing", dependencies: ["ScreenSpace"], path: "eyes/Sources/Seeing"),
         // Every type there is a value, so the vocabulary is exercised with no display, no
         // capture and no grant. [LAW:effects-at-boundaries] The waits are kept on
         // a test's clock.
@@ -283,8 +285,8 @@ let package = Package(
             path: "eyes/Tests/EyesVerbsTests"
         ),
         // The eyes command line: the verbs, and the version every binary here is stamped with.
-        // Version is the one root target an eyes target names, and it links nothing, so no
-        // device target comes in under eyes through it. Named for its product, as a target
+        // Version, the one root target it names itself, links nothing, so no device target
+        // comes in under eyes through it. Named for its product, as a target
         // swiftbuild links with a `_main` must be. [LAW:one-way-deps]
         .executableTarget(
             name: "eyes",

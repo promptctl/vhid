@@ -36,9 +36,15 @@ import ScreenSpaceTesting
         Desk.Running(app: finder, regular: true),
     ]
 
+    /// Both displays, listed as `main` and `left` are.
+    static let both = DisplayLayout.at(main.frame, left.frame)
+
+    /// `listing` on `layout`, each active display of it listed as its fixture is.
     static func desk(_ frontmost: Front.App?, _ listing: WindowListing = listing, running: [Desk.Running] = running,
-                     displays: [Display] = [main, left]) -> Desk {
-        Desk(frontmost: frontmost, own: terminal, running: running, listing: listing, displays: displays)
+                     layout: DisplayLayout = both) -> Desk {
+        Desk(frontmost: frontmost, own: terminal, running: running, listing: listing, layout: layout) { layout in
+            [main, left].filter { display in layout.active.displays.contains { $0.id == display.id } }
+        }
     }
 
     static func choose(_ frontmost: Front.App?, _ listing: WindowListing = listing) throws(AppUnread) -> Front {
@@ -101,10 +107,16 @@ import ScreenSpaceTesting
         #expect(throws: AppUnread.noOrdinaryWindow(own: "iTerm2")) { try Self.choose(Front.App(pid: 80, name: "iTerm2"), alone) }
         #expect(throws: AppUnread.nothingOnScreen) { try Self.choose(Self.finder, WindowListing(windows: [Self.menuBar], excluded: [])) }
         // The display it was on unplugged mid-read: its window is on none left.
-        #expect(throws: AppUnread.offDisplays(Self.settings)) { try Front.named("System Settings", on: Self.desk(Self.safari, displays: [Self.main])) }
+        #expect(throws: AppUnread.offDisplays(Self.settings)) { try Front.named("System Settings", on: Self.desk(Self.safari, layout: .at(Self.main.frame))) }
         // No display active at all - the one attached asleep, as at the lock screen - is no
         // screen to read, whatever app it was.
-        #expect(throws: AppUnread.noDisplay) { try Front.choose(on: Self.desk(Self.safari, displays: [])) }
+        let asleep = try! DisplayLayout([OnlineDisplay(id: 1, bounds: Self.main.frame, active: false)])
+        #expect(throws: AppUnread.noDisplay) { try Front.choose(on: Self.desk(Self.safari, layout: asleep)) }
+        // A window showing only a sliver on a display is on no display, by the rule a row is
+        // placed by: the sliver presses nothing.
+        let sliver = WindowListing(windows: [Window(id: 4, owner: "Safari", pid: 400, frame: try! ScreenRect(x: 1511.5, y: 40, width: 600, height: 400), layer: 0)],
+                                   excluded: [])
+        #expect(throws: AppUnread.offDisplays(Self.safari)) { try Front.choose(on: Self.desk(Self.safari, sliver, layout: .at(Self.main.frame))) }
         #expect(AppUnread.noOrdinaryWindow(own: "iTerm2").description.contains("no app but iTerm2, the agent's own, has a window on screen"))
     }
 
@@ -126,7 +138,7 @@ import ScreenSpaceTesting
         let listing = WindowListing(windows: [Self.window(5, "Safari", pid: 401), Self.window(4, "Safari", pid: 400)], excluded: [])
         let desk = Self.desk(nil, listing, running: Self.running + [Desk.Running(app: second, regular: true)])
         #expect(try Front.named("Safari", on: desk).app == second)
-        let ownTwin = Desk(frontmost: nil, own: Front.Passed(pids: [401], name: "Safari"), running: desk.running, listing: listing, displays: desk.displays)
+        let ownTwin = Desk(frontmost: nil, own: Front.Passed(pids: [401], name: "Safari"), running: desk.running, listing: listing, layout: desk.layout) { _ in desk.displays }
         #expect(try Front.named("Safari", on: ownTwin).app == Self.safari)
     }
 

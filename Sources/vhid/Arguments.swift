@@ -14,20 +14,22 @@ func place(_ x: Double, _ y: Double) throws -> ScreenPoint {
     do { return try ScreenPoint(x: x, y: y) } catch { throw ValidationError(error.description) }
 }
 
-/// `count` places from a command line's words, in order: each a point as two numbers, `x y`,
-/// or a box as one word, `x,y,width,height`, the form eyes prints beside each point. A word
-/// with a comma in it is a box, and any other starts a point.
+/// `count` places from a command line's words, in order: each spelled in one word as every
+/// verb prints it, a point `x,y` or a box `x,y,width,height`, or a point as two numbers,
+/// `x y`. A word with a comma in it is a spelled place, and any other starts a point.
 ///
-/// [LAW:single-enforcer] Every pointer verb reads its places through here, so a point is
-/// refused by `place` and a box by `ScreenRect(spelled:)`, as the MCP server refuses them.
+/// [LAW:single-enforcer] Every pointer verb reads its places through here, so a spelled
+/// place is refused by `Target(spelled:)`, as the MCP server refuses it, and two numbers by
+/// `place`.
 func places(_ words: [String], count: Int) throws -> [Target] {
     var rest = words[...], read: [Target] = []
     while let word = rest.first {
         if word.contains(",") {
-            guard let box = ScreenRect(spelled: word) else {
-                throw ValidationError("\(word) is not a box: a box is \(ScreenRect.spelling)")
+            do {
+                read.append(try Target(spelled: word))
+            } catch {
+                throw ValidationError(error.description)
             }
-            read.append(.box(box))
             rest = rest.dropFirst()
         } else {
             let pair = Array(rest.prefix(2))

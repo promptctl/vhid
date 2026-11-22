@@ -19,12 +19,12 @@ import Testing
     }
 
     @Test func aFinishedPlayPrintsALinePerReportAndThenADoneLine() throws {
-        let played = Played(startReports: 4, reports: [Self.report(1_000, 1_050, 1_090), Self.report(2_000, 2_500, 2_600, line: 4)])
+        let played = Played(startReports: 4, reports: [Self.report(1_000, 1_050, 1_090), Self.report(2_000, 2_500, 2_600, line: 4)], layoutChanged: true)
         let lines = try PlayCommand.lines(of: .finished(played))
         #expect(lines == [
             #"{"report":{"acked_us":1090,"index":0,"line":2,"scheduled_us":1000,"sent_us":1050}}"#,
             #"{"report":{"acked_us":2600,"index":1,"line":4,"scheduled_us":2000,"sent_us":2500}}"#,
-            #"{"done":{"late_us":{"max":500,"p50":50,"p90":500,"p99":500},"reports":2,"start_reports":4}}"#,
+            #"{"done":{"late_us":{"max":500,"p50":50,"p90":500,"p99":500},"layout_changed":true,"reports":2,"start_reports":4}}"#,
         ])
     }
 

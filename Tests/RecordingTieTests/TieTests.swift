@@ -6,7 +6,7 @@ import Testing
 
 /// The tie between `vhid record` and its tap app, over a real socket and real processes.
 @Suite(.ownThread) struct TieTests {
-    static let recorded = Recorded(script: "{\"to\":{\"x\":1,\"y\":2}}\n{\"t_ms\":0,\"keys\":[]}\n", ending: .tapOff("too slow"), unmapped: 1, offDisplays: 2, vhidAtEdge: 0)
+    static let recorded = Recorded(script: "{\"to\":{\"x\":1,\"y\":2}}\n{\"t_ms\":0,\"keys\":[]}\n", ending: .tapOff("too slow"), unmapped: 1, offDisplays: 2, vhidAtEdge: 0, layoutChanges: 3)
 
     /// A person hears how an ending that is not the ordinary stop went, and each thing left out.
     @Test func aRecordingSaysHowItEndedAndWhatItLeftOut() {
@@ -14,8 +14,9 @@ import Testing
             "macOS turned the tap off (too slow), so the recording ends there",
             "1 key presses with no HID usage, fn among them, are not in the recording",
             "2 moves on no display, once vhid's own motion was taken out, are not in the recording",
+            "the displays changed 3 times while recording, so a play on the displays as they are now may refuse a line written before a change",
         ])
-        #expect(Recorded(script: "", ending: .stopped, unmapped: 0, offDisplays: 0, vhidAtEdge: 0).notes.isEmpty)
+        #expect(Recorded(script: "", ending: .stopped, unmapped: 0, offDisplays: 0, vhidAtEdge: 0, layoutChanges: 0).notes.isEmpty)
     }
 
     /// Messages cross both ways whole, a script's newlines included, and a closed end

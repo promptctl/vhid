@@ -8,21 +8,24 @@ import ScreenSpaceTesting
 /// Cutting a region into pieces for Vision and putting the runs back together.
 @Suite struct PixelReaderTests {
     private func run(_ text: String, _ x: Double, _ y: Double, _ w: Double, _ h: Double = 14) -> Found {
-        Found(text: Text(text)!, frame: try! ScreenRect(x: x, y: y, width: w, height: h), source: .pixels(confidence: Confidence(1)!), on: .vast)!
+        try! Found(text: Text(text)!, frame: try! ScreenRect(x: x, y: y, width: w, height: h), source: .pixels(confidence: Confidence(1)!), on: .vast)
     }
 
     /// The runs `PixelReader.distinct` joins, each of which a display shows.
     private func distinct(_ pieces: [Piece], sourceLocation: SourceLocation = #_sourceLocation) -> [Found] {
-        let joined = PixelReader.distinct(pieces)
-        #expect(!joined.contains(nil), "a joined run is on no display", sourceLocation: sourceLocation)
-        return joined.compactMap { $0 }
+        PixelReader.distinct(pieces).compactMap { joined in
+            switch joined {
+            case .success(let run): return run
+            case .failure(let unfound): Issue.record("a joined run makes no row: \(unfound)", sourceLocation: sourceLocation); return nil
+            }
+        }
     }
 
     /// Every point of the region is in some piece, no piece leaves it, and none is larger
     /// than Vision reads well - on a display at a negative origin, where an offset shows.
     @Test func thePiecesCoverTheRegionAndStayInsideIt() {
         let region = try! ScreenRect(x: -2400, y: -300, width: 2400, height: 1600)
-        let tiles = PixelReader.tiles(of: region)
+        let tiles = try! PixelReader.tiles(of: region)
         for tile in tiles {
             #expect(tile.width <= PixelReader.tileSide && tile.height <= PixelReader.tileSide)
             #expect(region.cgRect.contains(tile.cgRect))
@@ -38,16 +41,16 @@ import ScreenSpaceTesting
     /// never leaves a short label readable only in halves.
     @Test func aShortRunIsWholeInSomePiece() {
         let region = try! ScreenRect(x: 0, y: 0, width: 1512, height: 982)
-        let tiles = PixelReader.tiles(of: region)
+        let tiles = try! PixelReader.tiles(of: region)
         for x in stride(from: 0.0, through: region.width - 400, by: 23) {
             let label = try! ScreenRect(x: x, y: 390, width: 400, height: 20)
             #expect(tiles.contains { $0.cgRect.contains(label.cgRect) }, "a label at \(x) is cut by every piece")
         }
     }
 
-    @Test func aRegionSmallerThanAPieceIsOnePieceItself() {
+    @Test func aRegionSmallerThanAPieceIsOnePieceItself() throws {
         let small = try! ScreenRect(x: 300, y: 0, width: 300, height: 40)
-        #expect(PixelReader.tiles(of: small) == [small])
+        #expect(try PixelReader.tiles(of: small) == [small])
     }
 
     /// The same text read by two overlapping pieces, or a piece of it a seam cut, is kept
@@ -78,7 +81,7 @@ import ScreenSpaceTesting
     /// The measured case: 400x300 reaching past the main display's corner is captured as
     /// only its on-screen 212x182, so that is the rectangle the boxes map back through.
     @Test func aRectHangingOffTheDisplayIsReadAsItsOnScreenPart() throws {
-        let seen = try PixelReader.onOneDisplay(try! ScreenRect(x: 1300, y: 800, width: 400, height: 300), displays: [Self.main, Self.left])
+        let seen = try PixelReader.onOneDisplay(try! ScreenRect(x: 1300, y: 800, width: 400, height: 300), displays: DisplayLayout.at(Self.main, Self.left).active)
         #expect(seen == (try! ScreenRect(x: 1300, y: 800, width: 212, height: 182)))
     }
 
@@ -86,13 +89,14 @@ import ScreenSpaceTesting
     /// while the reading claimed the whole region, so the rectangle is refused.
     @Test func aRectAcrossTwoDisplaysIsRefused() {
         #expect(throws: PixelsError.self) {
-            try PixelReader.onOneDisplay(try! ScreenRect(x: -100, y: 10, width: 400, height: 50), displays: [Self.main, Self.left])
+            try PixelReader.onOneDisplay(try! ScreenRect(x: -100, y: 10, width: 400, height: 50), displays: DisplayLayout.at(Self.main, Self.left).active)
         }
     }
 
     @Test func aRectOnNoDisplayIsRefusedNotReadAsBlank() {
-        #expect(throws: PixelsError.self) {
-            try PixelReader.onOneDisplay(try! ScreenRect(x: 9000, y: 9000, width: 40, height: 30), displays: [Self.main, Self.left])
+        let far = try! ScreenRect(x: 9000, y: 9000, width: 40, height: 30)
+        #expect(throws: Unplaced.box(far)) {
+            try PixelReader.onOneDisplay(far, displays: DisplayLayout.at(Self.main, Self.left).active)
         }
     }
 
@@ -115,7 +119,7 @@ import ScreenSpaceTesting
         let placed = words.enumerated().map { i, w in
             Word(text: Text(w)!, frame: try! ScreenRect(x: from + Double(i) * 50, y: y, width: 44, height: 14))
         }
-        return Found(first: placed[0], rest: Array(placed.dropFirst()), source: .pixels(confidence: Confidence(0.9)!), on: .vast)!
+        return try! Found(first: placed[0], rest: Array(placed.dropFirst()), source: .pixels(confidence: Confidence(0.9)!), on: .vast)
     }
 
     /// The reviewer's first case: a line from 300 to 1000 read in three overlapping pieces.
@@ -144,8 +148,8 @@ import ScreenSpaceTesting
     /// A seam fragment of a word is dropped in favour of the whole word at the same spot.
     @Test func aSeamFragmentGivesWayToTheWholeWord() {
         let whole = line(["Open", "Settings"], from: 100)
-        let fragment = Found(text: Text("Sett")!, frame: try! ScreenRect(x: 150, y: 100, width: 24, height: 14),
-                             source: .pixels(confidence: Confidence(0.5)!), on: .vast)!
+        let fragment = try! Found(text: Text("Sett")!, frame: try! ScreenRect(x: 150, y: 100, width: 24, height: 14),
+                             source: .pixels(confidence: Confidence(0.5)!), on: .vast)
         #expect(distinct([Piece(tile: 0, run: whole), Piece(tile: 1, run: fragment)]).map(\.text.value) == ["Open Settings"])
     }
 
@@ -159,7 +163,7 @@ import ScreenSpaceTesting
     @Test func theWordsOfOneRunAreNeverDroppedAgainstEachOther() {
         let wide = Word(text: Text("Shell")!, frame: try! ScreenRect(x: 0, y: 0, width: 200, height: 14))
         let inside = Word(text: Text("Edit")!, frame: try! ScreenRect(x: 60, y: 0, width: 30, height: 14))
-        let run = Found(first: wide, rest: [inside], source: .pixels(confidence: Confidence(1)!), on: .vast)!
+        let run = try! Found(first: wide, rest: [inside], source: .pixels(confidence: Confidence(1)!), on: .vast)
         #expect(distinct([Piece(tile: 0, run: run)]).first?.text.value == "Shell Edit")
     }
 

@@ -47,27 +47,28 @@ public struct PixelReader: Reader {
         let listing = try Geometry.onScreen()
         let owners = query.region.owners(in: listing, hit: hit)
         let image = try await Self.capture(region)
-        // Every run examined: with no words in it, counted wordless; one no display shows,
-        // unshown. One piece after another, never at once: measured, recognising the pieces
-        // in a task group segfaulted inside TextRecognition in 4 runs of 15.
+        // Every run examined: with no words in it, counted wordless; one that makes no row,
+        // counted by why. One piece after another, never at once: measured, recognising the
+        // pieces in a task group segfaulted inside TextRecognition in 4 runs of 15.
         var runs: [Recognised] = []
         var readable: [Piece] = []
-        for (index, tile) in Self.tiles(of: region).enumerated() {
+        for (index, tile) in try Self.tiles(of: region).enumerated() {
             let recognised = try await Self.recognise(image, of: region, in: tile, on: layout.active)
             runs += recognised
             readable += recognised.compactMap { if case .read(let run) = $0 { Piece(tile: index, run: run) } else { nil } }
         }
 
         let joined = Self.distinct(readable)
-        let distinct = joined.compactMap { $0 }
+        let distinct = joined.compactMap { if case .success(let run) = $0 { run } else { nil } }
+        let unfound = runs.compactMap { if case .unfound(let why) = $0 { why } else { nil } }
+            + joined.compactMap { if case .failure(let why) = $0 { why } else { nil } }
         // A capture is what is on top, every app's; the owners' part of it is what is read.
         let seen = distinct.map { (found: $0, seen: owners.see($0.press, windows: listing.windows, hit: hit)) }
         let setAside = seen.compactMap { if case .setAside(let why) = $0.seen { why } else { nil } }
         let excluded = ([
             Exclusion(reason: .wordless, count: runs.filter { $0 == .wordless }.count),
-            Exclusion(reason: .unshown, count: runs.filter { $0 == .unshown }.count + joined.count - distinct.count),
             Exclusion(reason: .duplicate, count: readable.count - joined.count),
-        ] + Exclusion.Reason.allCases.map { why in Exclusion(reason: why, count: setAside.filter { $0 == why }.count) })
+        ] + Unfound.counted(unfound) + Exclusion.Reason.allCases.map { why in Exclusion(reason: why, count: setAside.filter { $0 == why }.count) })
             .filter { $0.count > 0 }
         return Candidates(
             found: seen.filter { $0.seen == .read }.map(\.found).inReadingOrder,
@@ -92,17 +93,18 @@ public struct PixelReader: Reader {
     /// Overlapping pieces covering `region`, each at most `tileSide` square and stepped by
     /// half of it, so any run up to half a tile wide lies whole inside at least one piece.
     /// A region smaller than a tile is one piece: itself. [LAW:dataflow-not-control-flow]
-    nonisolated static func tiles(of region: ScreenRect) -> [ScreenRect] {
+    nonisolated static func tiles(of region: ScreenRect) throws(NotABox) -> [ScreenRect] {
         func starts(_ origin: Double, _ length: Double) -> [Double] {
             let side = min(tileSide, length)
             let steps = Int(((length - side) / (tileSide / 2)).rounded(.up))
             return (0...steps).map { origin + min(Double($0) * tileSide / 2, length - side) }
         }
         let (w, h) = (min(tileSide, region.width), min(tileSide, region.height))
-        return starts(region.y, region.height).flatMap { y in
-            // Inside the region, so finite, with no side under zero.
-            starts(region.x, region.width).map { x in try! ScreenRect(x: x, y: y, width: w, height: h) }
+        var tiles: [ScreenRect] = []
+        for y in starts(region.y, region.height) {
+            for x in starts(region.x, region.width) { tiles.append(try ScreenRect(x: x, y: y, width: w, height: h)) }
         }
+        return tiles
     }
 
     /// One run per stretch of text, where overlapping pieces each read some of it.
@@ -114,8 +116,8 @@ public struct PixelReader: Reader {
     /// spans overlap; within a joined run, a word mostly inside a wider word at the same
     /// place is the same word read again or cut by a seam, and only the widest is kept.
     /// Labels side by side do not overlap, so they stay apart. [LAW:no-silent-failure] A
-    /// joined run no display shows is nil, for the caller to count.
-    nonisolated static func distinct(_ pieces: [Piece]) -> [Found?] {
+    /// joined run that makes no row is its `Unfound`, for the caller to count.
+    nonisolated static func distinct(_ pieces: [Piece]) -> [Result<Found, Unfound>] {
         var groups: [[Piece]] = []
         for piece in pieces {
             let joined = groups.indices.filter { i in groups[i].contains { piece.continues($0) } }
@@ -129,7 +131,7 @@ public struct PixelReader: Reader {
     /// *different* tile covers half of it - the same spot read twice, or cut by a seam - so
     /// the words of one Vision run are never weighed against each other. Larger by area, so
     /// a half-height misread from a tile whose edge cut the line gives way to the whole one.
-    nonisolated static func joining(_ pieces: [Piece]) -> Found? {
+    nonisolated static func joining(_ pieces: [Piece]) -> Result<Found, Unfound> {
         let words = pieces.flatMap { piece in piece.run.words.map { (tile: piece.tile, word: $0) } }
         var kept: [(tile: Int, word: Word)] = []
         for candidate in words.sorted(by: { $0.word.frame.area > $1.word.frame.area }) {
@@ -141,14 +143,16 @@ public struct PixelReader: Reader {
         let ordered = kept.map(\.word).sorted { $0.frame.x < $1.frame.x }
         // A joined run is no surer than its least sure piece.
         let confidence = pieces.compactMap { if case .pixels(let c) = $0.run.source { c } else { nil } }.min()!
-        return Found(first: ordered[0], rest: Array(ordered.dropFirst()), source: .pixels(confidence: confidence), on: pieces[0].run.displays)
+        return Result { () throws(Unfound) in
+            try Found(first: ordered[0], rest: Array(ordered.dropFirst()), source: .pixels(confidence: confidence), on: pieces[0].run.displays)
+        }
     }
 
     /// The query's region as a rectangle a capture can take: the one `Region.bounds` names on
     /// `layout`, clipped to the active display it lies on.
     @MainActor
     static func resolve(_ region: Region, on layout: DisplayLayout) throws -> ScreenRect {
-        try onOneDisplay(region.bounds(on: layout), displays: layout.active.frames)
+        try onOneDisplay(region.bounds(on: layout), displays: layout.active)
     }
 
     /// The part of `rect` a capture can see, on the one display it lies on, in whole points.
@@ -161,14 +165,16 @@ public struct PixelReader: Reader {
     /// and the rectangle the same shape; a rectangle on no display is refused, not read as
     /// blank. Whole points because the capture takes whole points, and the rectangle boxes
     /// are mapped back through must be the one that was captured.
-    nonisolated static func onOneDisplay(_ rect: ScreenRect, displays: [ScreenRect]) throws -> ScreenRect {
-        let seen = displays.compactMap { $0.intersection(rect) }
+    ///
+    /// [LAW:single-enforcer] The parts a display shows are the placement rule's, so a sliver
+    /// too thin to press is no part here either.
+    nonisolated static func onOneDisplay(_ rect: ScreenRect, displays: Displays) throws -> ScreenRect {
+        let seen = displays.parts(of: rect)
         // Across two displays, the part on the other one is on screen and would go unread
         // while the reading claimed the whole region, so it is refused by name instead.
         guard seen.count <= 1 else { throw PixelsError.spansDisplays(rect) }
-        guard let only = seen.first else { throw PixelsError.offScreen(rect) }
-        // Part of a display, whose far edges the layout's finite extent holds.
-        return try! only.integral
+        guard let only = seen.first else { throw Unplaced.box(rect) }
+        return try only.part.integral
     }
 
     /// Captures exactly `region` with `screencapture`, in points of the global space it
@@ -246,34 +252,40 @@ public struct PixelReader: Reader {
             guard let confidence = Confidence(Double(best.confidence)) else {
                 throw PixelsError.unreadableConfidence(best.string)
             }
-            let place = { (box: NormalizedRect) in try? ScreenRect.fromImageSpace(normalized: box.cgRect, on: tile) }
+            // Vision's numbers as a box on the screen, or the run counted as making none.
+            let place = { (box: NormalizedRect) throws(Unfound) -> ScreenRect in
+                do throws(NotABox) { return try ScreenRect.fromImageSpace(normalized: box.cgRect, on: tile) } catch { throw .notABox(error) }
+            }
             let source = Source.pixels(confidence: confidence)
             let words = best.string.split(whereSeparator: \.isWhitespace).map { word in
                 (text: Text(String(word))!, box: best.boundingBox(for: word.startIndex..<word.endIndex)?.boundingBox)
             }
+            let boxed = words.compactMap { word in word.box.map { (text: word.text, box: $0) } }
             // A run with a word Vision cannot place stays one word at the run's own box,
             // rather than placing that word as if it covered the whole line.
-            guard words.allSatisfy({ $0.box != nil }) else {
+            guard boxed.count == words.count else {
                 guard let text = Text(best.string) else { return .wordless }
-                return Recognised(place(observation.boundingBox).flatMap { Found(text: text, frame: $0, source: source, on: displays) })
+                return Recognised { () throws(Unfound) in try Found(text: text, frame: try place(observation.boundingBox), source: source, on: displays) }
             }
-            guard !words.isEmpty else { return .wordless }
-            let placed = words.map { word in place(word.box!).map { Word(text: word.text, frame: $0) } }
-            guard placed.allSatisfy({ $0 != nil }) else { return .unshown }
-            let all = placed.map { $0! }
-            return Recognised(Found(first: all[0], rest: Array(all.dropFirst()), source: source, on: displays))
+            guard let first = boxed.first else { return .wordless }
+            return Recognised { () throws(Unfound) in
+                let rest = try boxed.dropFirst().map { (word) throws(Unfound) in Word(text: word.text, frame: try place(word.box)) }
+                return try Found(first: Word(text: first.text, frame: try place(first.box)), rest: rest, source: source, on: displays)
+            }
         }
     }
 }
 
 /// One of Vision's runs as the reader takes it: read and placed, with no words in it, or
-/// read where no display shows it - Vision's numbers making no box included.
+/// read and making no row, with why.
 enum Recognised: Equatable {
     case read(Found)
     case wordless
-    case unshown
+    case unfound(Unfound)
 
-    init(_ found: Found?) { self = found.map(Recognised.read) ?? .unshown }
+    init(_ found: () throws(Unfound) -> Found) {
+        do { self = .read(try found()) } catch { self = .unfound(error) }
+    }
 }
 
 /// A run and the tile that read it, which is what tells the same text read twice by
@@ -295,7 +307,6 @@ struct Piece {
 /// nothing. Each one throws, because a returned `Reading` is taken as proof of looking.
 public enum PixelsError: ReaderError, CustomStringConvertible {
     case noGrant(Grant)
-    case offScreen(ScreenRect)
     case spansDisplays(ScreenRect)
     case captureWrongShape(ScreenRect, width: Int, height: Int)
     case captureWroteNothing(ScreenRect, String)
@@ -309,8 +320,6 @@ public enum PixelsError: ReaderError, CustomStringConvertible {
             "\(grant.name) is not granted to the app responsible for this process, so "
                 + (grant == PixelReader.grant ? "a capture would show only the wallpaper." : "the front app's text cannot be told from what covers it.")
                 + " Grant it in \(grant.pane); \(Grant.holderNamedBy) names that app."
-        case .offScreen(let r):
-            "\(r) is on no active display, so there is nothing there to read"
         case .spansDisplays(let r):
             "\(r) lies across more than one display; read each display's part with its own --rect or --display"
         case .captureWrongShape(let r, let width, let height):

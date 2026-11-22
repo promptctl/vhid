@@ -43,7 +43,7 @@ import ScreenSpaceTesting
     }
 
     private func row(_ frame: ScreenRect = frame, source: Source = .tree(role: button, also: [])) -> Found {
-        Found(text: Text("Target B")!, frame: frame, source: source, on: .vast)!
+        try! Found(text: Text("Target B")!, frame: frame, source: source, on: .vast)
     }
 
     /// The case measured: a click 4.7 points inside the frame's top pressed the page. The
@@ -160,7 +160,7 @@ import ScreenSpaceTesting
     /// A merge whose tree could not look holds only the pixels' rows: the tree checks none of
     /// them, so it asks no grant and makes no call, and the pixels' answer stands.
     @Test @MainActor func theTreeAsksNothingOfAReadingWithNoRowOfItsOwn() async throws {
-        let seen = Found(text: Text("OK")!, frame: Self.frame, source: .pixels(confidence: Confidence(0.9)!), on: .vast)!
+        let seen = try! Found(text: Text("OK")!, frame: Self.frame, source: .pixels(confidence: Confidence(0.9)!), on: .vast)
         let reading = Reading(outcome: .matched(Matches([seen])!), scope: Scope(region: Self.frame, examined: 1, reach: .whole))
         let tree = TreeReader(granted: { _ in Issue.record("the grant was asked"); return false })
         #expect(try await tree.pressing(reading, until: .now + .seconds(2)) == reading)

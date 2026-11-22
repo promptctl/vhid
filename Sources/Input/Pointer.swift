@@ -240,7 +240,7 @@ public struct Pointer: Sendable {
     /// The move itself, to a target already placed. [LAW:parse-dont-validate]
     func move(to target: PlacedTarget) async throws -> Moved {
         let start = try await cursor()
-        let trajectory = randomness.draw { Trajectory(from: start, toward: target, drawing: &$0) }
+        let trajectory = try randomness.draw { (generator) throws(NotAPlace) in try Trajectory(from: start, toward: target, drawing: &generator) }
         let began = timeline.now()
         var tracking = Tracking(at: trajectory.start)
         let ticks = Int((trajectory.duration / Self.tick).rounded(.up))

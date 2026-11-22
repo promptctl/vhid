@@ -115,8 +115,8 @@ public struct Where: ParsableArguments {
         _ = try Self.place(display: display, window: window, page: page, rect: rect, app: app, as: .flag)
     }
 
-    @MainActor var region: Region {
-        get async throws { try await Self.place(display: display, window: window, page: page, rect: rect, app: app, as: .flag).region() }
+    @MainActor var located: Located {
+        get async throws { try await Self.place(display: display, window: window, page: page, rect: rect, app: app, as: .flag).located() }
     }
 
     /// The one place a region is spelled from its five arguments, for the verbs and the
@@ -157,10 +157,17 @@ public struct Where: ParsableArguments {
         typealias Desks = @Sendable @MainActor () async throws -> Desk
         static let live: Desks = { try await Desk.now() }
 
-        @MainActor func region(pages: Pages = tree, desk: Desks = live) async throws -> Region {
+        /// The display layout now: the window server in the process, a fake in a test.
+        typealias Layouts = @Sendable @MainActor () async throws -> DisplayLayout
+        static let layouts: Layouts = { try DisplayReading.layout() }
+
+        /// The region, on the layout it was found on: the desk's, when the app in front was
+        /// chosen on it, so the choice and the read are of one moment, and one read for it
+        /// otherwise. [LAW:one-source-of-truth]
+        @MainActor func located(pages: Pages = tree, desk: Desks = live, layouts: Layouts = layouts) async throws -> Located {
             switch self {
-            case .region(let region): region
-            case .page(let id): try await Self.page(id, pages: pages)
+            case .region(let region): Located(region: region, layout: try await layouts())
+            case .page(let id): Located(region: try await Self.page(id, pages: pages), layout: try await layouts())
             case .front: try await Self.front(desk, "in_front") { try Front.choose(on: $0) }
             case .app(let name): try await Self.front(desk, "named") { try Front.named(name, on: $0) }
             }
@@ -168,10 +175,11 @@ public struct Where: ParsableArguments {
 
         /// [LAW:nothing-unseen] Choosing the app is a decision of its own, before any look
         /// starts: which app, how it was chosen, on which display, and which app it passed over.
-        @MainActor private static func front(_ desks: Desks, _ chosen: String, by rule: (Desk) throws -> Front) async throws -> Region {
+        @MainActor private static func front(_ desks: Desks, _ chosen: String, by rule: (Desk) throws -> Front) async throws -> Located {
             try await Telemetry.unit("front") {
                 Telemetry.note(.chosen, .string(chosen))
-                let front = try rule(try await desks())
+                let desk = try await desks()
+                let front = try rule(desk)
                 Telemetry.note(.frontApp, front.app.name.map(JSON.string))
                 Telemetry.note(.frontPid, .int(Int(front.app.pid)))
                 Telemetry.note(.display, .int(Int(front.display)))
@@ -179,7 +187,7 @@ public struct Where: ParsableArguments {
                 // How many processes were matched as the agent's own app: zero means none
                 // could be passed over or kept out, whatever is in front.
                 Telemetry.count(.ownPids, front.own.pids.count)
-                return .front(front)
+                return Located(region: .front(front), layout: desk.layout)
             }
         }
 
@@ -197,6 +205,12 @@ public struct Where: ParsableArguments {
         }
     }
 
+    /// A place as a look found it: the region, and the layout its first read is on.
+    struct Located: Sendable {
+        let region: Region
+        let layout: DisplayLayout
+    }
+
     /// How many rows, for both verbs and both tools.
     static func limit(_ count: Int, as s: Spelling) throws -> Limit {
         guard let limit = Limit(count) else { throw ValidationError("\(s("limit")) must be at least 1") }
@@ -205,9 +219,9 @@ public struct Where: ParsableArguments {
 
     /// A box with area: one with none has nothing in it to read.
     private static func parsedRect(_ spelled: String, as s: Spelling) throws -> ScreenRect {
-        guard let rect = ScreenRect(spelled: spelled), !rect.isEmpty else {
-            throw ValidationError("\(s("rect")) wants a box with area, \(ScreenRect.spelling) - got \(spelled)")
-        }
+        let rect: ScreenRect
+        do throws(Misspelled) { rect = try ScreenRect(spelled: spelled) } catch { throw ValidationError("\(s("rect")): \(error)") }
+        guard !rect.isEmpty else { throw ValidationError("\(s("rect")) wants a box with area, \(ScreenRect.spelling) - got \(spelled)") }
         return rect
     }
 }
@@ -263,6 +277,7 @@ enum Report {
         switch why {
         case .unanswered: "unanswered"
         case .elsewhere: "its point on something else"
+        case .unshown: "its pressed part on no display"
         case .overTime: "out of time"
         }
     }
@@ -427,17 +442,19 @@ private extension Outcome {
 
 /// Reads with the chosen reader and prints. The one place the verbs meet the screen.
 @MainActor
-func look(_ query: Query, source: SourceKind, wait: Wait? = nil) async throws {
-    print(try await Report.text(query, source: source, wait: wait, reading: Screen.live.read))
+func look(_ query: Query, on layout: DisplayLayout, source: SourceKind, wait: Wait? = nil) async throws {
+    print(try await Report.text(query, on: layout, source: source, wait: wait, layouts: Screen.live.layouts, reading: Screen.live.read))
 }
 
 extension Report {
     /// A query's reading as the text the verbs print and the MCP tools answer: one read, or
     /// with a wait, the read the wait ended on, its scope line led by how the wait went.
-    /// [LAW:one-source-of-truth]
+    /// [LAW:one-source-of-truth] The first read is on `layout`, the one the region was found
+    /// on; each later read of a wait is on one `layouts` reads for it.
     static func text(
-        _ query: Query, source: SourceKind, wait: Wait? = nil,
-        reading read: @Sendable (SourceKind, Query) async throws -> Judged
+        _ query: Query, on layout: DisplayLayout, source: SourceKind, wait: Wait? = nil,
+        layouts: () async throws -> DisplayLayout,
+        reading read: @Sendable (SourceKind, Query, DisplayLayout) async throws -> Judged
     ) async throws -> String {
         // [LAW:nothing-unseen] One event per look, from the one path every verb and tool
         // reads through: which reader, what it read, and how it ended.
@@ -451,9 +468,9 @@ extension Report {
             Telemetry.count(.boxMilliseconds, 0)
             // The boxes' checks timed apart from the read, wherever they run - after a read,
             // or at the end of a wait.
-            func counted(_ query: Query) async throws -> Judged {
+            func counted(_ query: Query, on layout: DisplayLayout) async throws -> Judged {
                 Telemetry.tally(.reads)
-                let judged = try await read(source, query)
+                let judged = try await read(source, query, layout)
                 return Judged(judged.reading) { _, deadline in
                     let start = ContinuousClock.now
                     defer { Telemetry.tally(.boxMilliseconds, by: Int((ContinuousClock.now - start) / .milliseconds(1))) }
@@ -461,13 +478,13 @@ extension Report {
                 }
             }
             guard let wait else {
-                let reading = try await counted(query).pressed()
+                let reading = try await counted(query, on: layout).pressed()
                 Self.count(reading, query)
                 return (text: lines(reading, query: query, source: source).joined(separator: "\n"),
                         result: reading.outcome.said)
             }
             Telemetry.note(.until, .string(wait.until.rawValue))
-            let waited = try await waiting(for: wait, on: query, read: counted)
+            let waited = try await waiting(for: wait, on: query, on: layout, layouts: layouts, read: counted)
             Self.count(waited.reading, query)
             let said = lines(waited.reading, query: query, source: source)
             return (text: ([waitedClause(waited, wait) + said[0]] + said.dropFirst()).joined(separator: "\n"),
@@ -560,6 +577,6 @@ extension Desk {
             Desk.Running(app: Front.App(pid: $0.processIdentifier, name: $0.localizedName), regular: $0.activationPolicy == .regular)
         }
         return Desk(frontmost: frontmost, own: Front.Passed(holder: holder, among: apps), running: running,
-                    listing: try Geometry.onScreen(), displays: Geometry.displays(of: try DisplayReading.layout()))
+                    listing: try Geometry.onScreen(), layout: try DisplayReading.layout(), describe: Geometry.displays(of:))
     }
 }

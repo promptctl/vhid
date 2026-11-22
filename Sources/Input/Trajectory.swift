@@ -145,9 +145,9 @@ public struct Trajectory: Sendable, Equatable {
     /// and always whole: at most 1.6 points, under the few the steering follows the path to,
     /// it swings toward every edge it runs beside, and checking it would cut every other
     /// deviation with it.
-    public init(from start: ScreenPoint, toward aimed: PlacedTarget, drawing generator: inout some RandomNumberGenerator) {
+    public init(from start: ScreenPoint, toward aimed: PlacedTarget, drawing generator: inout some RandomNumberGenerator) throws(NotAPlace) {
         let displays = aimed.displays
-        let target = aimed.aim(from: start, drawing: &generator)
+        let target = try aimed.aim(from: start, drawing: &generator)
         let pace = Self.pace.draw(using: &generator)
         let structure = Structure.draw(using: &generator)
         let (short, over) = (Self.short.draw(using: &generator), Self.over.draw(using: &generator))

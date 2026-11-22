@@ -139,7 +139,8 @@ func sinceStart() -> Duration { .nanoseconds(Int64(clock_gettime_nsec_np(CLOCK_U
             let script = recorder.script(stoppedAt: stoppedAt, stopKeys: ending == .stopped ? stopKeys : [])
             do {
                 try command.send(FromApp.recorded(Recorded(script: script, ending: ending, unmapped: recorder.unmapped,
-                                                           offDisplays: recorder.offDisplays, vhidAtEdge: recorder.vhidAtEdge)))
+                                                           offDisplays: recorder.offDisplays, vhidAtEdge: recorder.vhidAtEdge,
+                                                           layoutChanges: recorder.layoutChanges)))
                 exit(0)
             } catch {
                 FileHandle.standardError.write(Data("vhid-record: the recording could not be sent: \(error)\n".utf8))
@@ -162,7 +163,7 @@ let reconfigured: CGDisplayReconfigurationCallBack = { _, flags, _ in
     DispatchQueue.main.async {
         MainActor.assumeIsolated {
             do {
-                session.recorder.displays = try DisplayReading.layout().online
+                session.recorder.relayout(try DisplayReading.layout().online)
             } catch {
                 session.finish(.layoutUnreadable("\(error)"))
             }
@@ -217,7 +218,7 @@ guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .tailAppendEve
         } else if session.taking {
             do {
                 guard let taken = try tapEvent(type, event) else { return }
-                if taken.at > hour { session.finish(.hour) } else { session.recorder.take(taken) }
+                if taken.at > hour { session.finish(.hour) } else { try session.recorder.take(taken) }
             } catch {
                 session.finish(.eventUnreadable("\(error)"))
             }

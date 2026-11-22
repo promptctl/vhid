@@ -277,8 +277,9 @@ import ScreenSpaceTesting
             {"t_ms":0,"at":{"x":20,"y":0}}
             {"t_ms":8,"at":{"x":0,"y":0}}
             """))
-        let calibration = try #require(script.calibration)
-        let steering = try await fake.pointer.calibrate(calibration, from: Displays.vast.at(script.start))
+        let placed = try script.placed(on: .vast)
+        let calibration = try #require(placed.calibration)
+        let steering = try await fake.pointer.calibrate(calibration, from: placed.start)
         #expect(steering.samples.map(\.counts) == [1, 2, 4])
         #expect(steering.samples.map(\.perCount) == [1, 1, 1])
     }

@@ -49,10 +49,11 @@ public struct Find: AsyncParsableCommand {
 
     @MainActor
     public func run() async throws {
+        let located = try await place.located
         try await look(Query(match: Self.match(text, exact: exact, edits: edits, as: .flag),
-                             region: await place.region, limit: Where.limit(limit, as: .flag), near: Self.near(near),
+                             region: located.region, limit: Where.limit(limit, as: .flag), near: Self.near(near),
                              role: Self.role(role, source: source, as: .flag)),
-                       source: source, wait: Self.wait(until, timeout: timeout, as: .flag))
+                       on: located.layout, source: source, wait: Self.wait(until, timeout: timeout, as: .flag))
     }
 
     /// The wait, none, or the refusal - one rule for the verb and the MCP tool.
@@ -128,7 +129,8 @@ public struct Read: AsyncParsableCommand {
 
     @MainActor
     public func run() async throws {
-        try await look(Query(match: nil, region: await place.region, limit: Where.limit(limit, as: .flag),
-                             role: Find.role(role, source: source, as: .flag)), source: source)
+        let located = try await place.located
+        try await look(Query(match: nil, region: located.region, limit: Where.limit(limit, as: .flag),
+                             role: Find.role(role, source: source, as: .flag)), on: located.layout, source: source)
     }
 }

@@ -92,13 +92,14 @@ public struct Front: Sendable, Hashable {
         return try Front(chosen.app, passedOver: nil, on: desk)
     }
 
-    /// `app` on the display holding most of its front window.
+    /// `app` on the display its front window is placed on, by the one rule a row is: the
+    /// active display showing the largest part of it. [LAW:single-enforcer]
     private init(_ app: App, passedOver: PassedOver?, on desk: Desk) throws(AppUnread) {
-        guard !desk.displays.isEmpty else { throw .noDisplay }
+        guard !desk.layout.active.displays.isEmpty else { throw .noDisplay }
         guard let window = desk.listing.front(of: app.pid).map({ desk.listing.windows[$0] }) else { throw .noWindow(app) }
-        let shown = { (display: Display) in display.frame.intersection(window.frame)?.area ?? 0 }
-        guard let display = desk.displays.max(by: { shown($0) < shown($1) }), shown(display) > 0 else { throw .offDisplays(app) }
-        self.init(app: app, display: display.id, own: desk.own, passedOver: passedOver)
+        let placed: Placed<Shown>
+        do throws(Unplaced) { placed = try desk.layout.active.place(window.frame) } catch { throw .offDisplays(app) }
+        self.init(app: app, display: placed.display.id, own: desk.own, passedOver: passedOver)
     }
 
     /// The processes this read takes in, from the windows on screen now: the app, and every
@@ -109,13 +110,13 @@ public struct Front: Sendable, Hashable {
     /// could be drawn. Notification Center holds one over the whole screen that draws nothing
     /// there, and the menu bar is listed above every window and shows the frontmost app's
     /// menus. So the hit test settles each, at the centre of what it covers of the front
-    /// window, as `Covers` settles a rect; one that does not answer, or whose centre is past
-    /// what a Double holds, takes nothing in. [LAW:single-enforcer]
+    /// window, as `Covers` settles a rect; one that does not answer takes nothing in.
+    /// [LAW:single-enforcer]
     public func owners(in listing: WindowListing, hit: (ScreenPoint) -> Heard<Int32>) -> Set<Int32> {
         let front = listing.front(of: app.pid)
         let over = front.map { i in
             listing.windows[..<i].filter { window in
-                guard let centre = try? window.frame.intersection(listing.windows[i].frame)?.centre else { return false }
+                guard let centre = window.frame.intersection(listing.windows[i].frame)?.centre else { return false }
                 return hit(centre) == .answered(window.pid)
             }
         } ?? []
@@ -133,9 +134,9 @@ public struct Front: Sendable, Hashable {
         case .success(let front): read = front
         case .failure(let why): return .unread(why)
         }
-        guard desk.displays.contains(where: { $0.id == read.display && $0.frame.contains(point) }) else {
-            return .otherDisplay(read.app, read.display)
-        }
+        // The display a click at the point is placed on, by the one rule. [LAW:single-enforcer]
+        let on = Result { () throws(Unplaced) in try desk.layout.active.place(point) }
+        guard case .success(let placed) = on, placed.display.id == read.display else { return .otherDisplay(read.app, read.display) }
         guard desk.listing.windows.contains(where: { $0.pid == pid && $0.frame.contains(point) }) else { return .noWindow(read.app) }
         if pid == read.app.pid { return .front(read.app) }
         return read.owners(in: desk.listing, hit: hit).contains(pid) ? .overFront(read.app) : .behind(read.app)

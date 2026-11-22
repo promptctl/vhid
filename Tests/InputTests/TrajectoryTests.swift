@@ -17,14 +17,14 @@ import ScreenSpaceTesting
 
     static func trajectory(seed: UInt64, from start: ScreenPoint = start, to target: ScreenPoint = across) -> Trajectory {
         var generator = SeededGenerator(seed: seed)
-        return Trajectory(from: start, toward: Target.point(target).on(.vast), drawing: &generator)
+        return try! Trajectory(from: start, toward: Target.point(target).on(.vast), drawing: &generator)
     }
 
     /// MT = 50 ms + 150 ms × log2(D/20 + 1), times the pace drawn after the aim: about
     /// 0.84 s across 740 points before the pace.
     @Test func aMoveTakesFittsTimeTimesItsDrawnPace() {
         var generator = SeededGenerator(seed: 7)
-        _ = Target.point(Self.across).on(.vast).aim(from: Self.start, drawing: &generator)
+        _ = try! Target.point(Self.across).on(.vast).aim(from: Self.start, drawing: &generator)
         let pace = Trajectory.pace.draw(using: &generator)
         let fitts = Duration.milliseconds(50) + .milliseconds(150) * log2(740.0 / 20 + 1)
         #expect(Self.trajectory(seed: 7).duration == fitts * pace)
@@ -196,7 +196,7 @@ import ScreenSpaceTesting
         let start = try! ScreenPoint(x: 120, y: 250)
         var bows: [Double] = [], peaks: [Double] = []
         for _ in 0 ..< 100 {
-            let path = Trajectory(from: start, toward: box.on(.vast), drawing: &generator)
+            let path = try! Trajectory(from: start, toward: box.on(.vast), drawing: &generator)
             // The bow is signed away from the elbow, which for this move down and right is up and right of its line.
             bows.append(-path.strokes[0].bow)
             let ms = Int(path.duration / .milliseconds(1))
@@ -240,7 +240,7 @@ import ScreenSpaceTesting
 
     static func trajectory(seed: UInt64, from start: ScreenPoint, to target: ScreenPoint, within displays: Displays = screen) -> Trajectory {
         var generator = SeededGenerator(seed: seed)
-        return Trajectory(from: start, toward: Target.point(target).on(displays), drawing: &generator)
+        return try! Trajectory(from: start, toward: Target.point(target).on(displays), drawing: &generator)
     }
 
     /// Every millisecond of every path along the bottom edge: its strokes no lower than the

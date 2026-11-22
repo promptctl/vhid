@@ -88,7 +88,8 @@ struct PlayCommand: AsyncParsableCommand {
     /// recorded minute is thousands of report lines, which a tool's caller reads into its
     /// context and a harness reads from the command line instead.
     static func done(_ played: Played) throws -> String {
-        try line(DoneLine(done: .init(reports: played.reports.count, startReports: played.startReports, lateUs: played.lateness)))
+        try line(DoneLine(done: .init(reports: played.reports.count, startReports: played.startReports, lateUs: played.lateness,
+                                      layoutChanged: played.layoutChanged)))
     }
 
     /// How early each report is woken for. `Player` sleeps until this much before the
@@ -159,6 +160,7 @@ struct PlayCommand: AsyncParsableCommand {
             let startReports: Int
             /// Absent for a play that sent no report.
             let lateUs: Lateness?
+            let layoutChanged: Bool
         }
     }
 }

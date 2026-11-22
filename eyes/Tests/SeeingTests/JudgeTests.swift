@@ -12,7 +12,7 @@ import ScreenSpaceTesting
         let words = text.split(separator: " ").enumerated().map { i, w in
             Word(text: Text(String(w))!, frame: try! ScreenRect(x: 10 + Double(i) * 40, y: y, width: 30, height: 12))
         }
-        return Found(first: words[0], rest: Array(words.dropFirst()), source: .pixels(confidence: Confidence(0.9)!), on: .vast)!
+        return try! Found(first: words[0], rest: Array(words.dropFirst()), source: .pixels(confidence: Confidence(0.9)!), on: .vast)
     }
 
     private func judge(_ texts: [String], _ match: Match?, limit: Limit = .default) -> Reading {
@@ -32,8 +32,8 @@ import ScreenSpaceTesting
     /// them edge to edge.
     private func rows(near: String, limit: Limit = .default, pitch: Double = 33, match: String = "Remove") -> Reading {
         let at = { (text: String, x: Double, row: Double, w: Double) in
-            Found(text: Text(text)!, frame: try! ScreenRect(x: x, y: 504 + row * pitch, width: w, height: 27),
-                  source: .tree(role: Role(rawValue: "AXStaticText"), also: []), on: .vast)!
+            try! Found(text: Text(text)!, frame: try! ScreenRect(x: x, y: 504 + row * pitch, width: w, height: 27),
+                  source: .tree(role: Role(rawValue: "AXStaticText"), also: []), on: .vast)
         }
         let seen = [at("Alpha", 52, 0, 60), at("Remove", 192, 0, 84), at("Beta", 52, 1, 50),
                     at("Remove", 192, 1, 84), at("Gamma", 52, 2, 70), at("Remove", 192, 2, 84)]
@@ -60,7 +60,7 @@ import ScreenSpaceTesting
     /// Safari reads "Release notes More · Pricing More" with " · Pricing " one run.
     @Test func ofTwoMatchesTouchingTheTextTheOneAfterItIsNearer() {
         let at = { (text: String, x: Double, w: Double) in
-            Found(text: Text(text)!, frame: try! ScreenRect(x: x, y: 368, width: w, height: 18), source: .tree(role: Role(rawValue: "AXLink"), also: []), on: .vast)!
+            try! Found(text: Text(text)!, frame: try! ScreenRect(x: x, y: 368, width: w, height: 18), source: .tree(role: Role(rawValue: "AXLink"), also: []), on: .vast)
         }
         let seen = [at("Release notes", 200, 110), at("More", 310, 36), at(" · Pricing ", 346, 79), at("More", 425, 36)]
         let read = Reading.judging(seen, query: Query(match: .exact("More"), region: .rect(Self.region), near: .contains("Pricing")),
@@ -155,7 +155,7 @@ import ScreenSpaceTesting
         let words = ["Shell", "Edit", "View"].enumerated().map { i, w in
             Word(text: Text(w)!, frame: try! ScreenRect(x: Double(i) * 50, y: 0, width: 40, height: 20))
         }
-        let run = Found(first: words[0], rest: Array(words.dropFirst()), source: .pixels(confidence: Confidence(1)!), on: .vast)!
+        let run = try! Found(first: words[0], rest: Array(words.dropFirst()), source: .pixels(confidence: Confidence(1)!), on: .vast)
         let read = Reading.judging([run], query: Query(match: .contains("edit"), region: .rect(Self.region)),
                                    region: Self.region, examined: 1, excluded: [], reach: .whole, owners: .every)
         guard case .matched(let m) = read.outcome else { Issue.record("nothing"); return }
@@ -168,7 +168,7 @@ import ScreenSpaceTesting
         let words = ["Save", "As…", "Cancel"].enumerated().map { i, w in
             Word(text: Text(w)!, frame: try! ScreenRect(x: Double(i) * 50, y: 0, width: 40, height: 20))
         }
-        let run = Found(first: words[0], rest: Array(words.dropFirst()), source: .pixels(confidence: Confidence(1)!), on: .vast)!
+        let run = try! Found(first: words[0], rest: Array(words.dropFirst()), source: .pixels(confidence: Confidence(1)!), on: .vast)
         #expect(Match.contains("save as").narrowing(run, by: .drawn(0)).rows.map(\.text.value) == ["Save As…"])
         #expect(Match.exact("Save As… Cancel").narrowing(run, by: .drawn(0)).rows == [run])
     }
@@ -179,11 +179,11 @@ import ScreenSpaceTesting
         let one = DisplayLayout.at(try! ScreenRect(x: 0, y: 0, width: 1000, height: 800)).active
         let words = [Word(text: Text("Save")!, frame: try! ScreenRect(x: 900, y: 0, width: 40, height: 20)),
                      Word(text: Text("Cancel")!, frame: try! ScreenRect(x: 1100, y: 0, width: 60, height: 20))]
-        let run = Found(first: words[0], rest: [words[1]], source: .pixels(confidence: Confidence(1)!), on: one)!
+        let run = try! Found(first: words[0], rest: [words[1]], source: .pixels(confidence: Confidence(1)!), on: one)
         #expect(run.frame == (try! ScreenRect(x: 900, y: 0, width: 100, height: 20)))
         let cut = Match.contains("cancel").narrowing(run, by: .drawn(0))
         #expect(cut.rows.isEmpty)
-        #expect(cut.unshown == 1)
+        #expect(cut.unfound.map(\.reason) == [.unshown])
         #expect(Match.contains("save").narrowing(run, by: .drawn(0)).rows.map(\.frame) == [words[0].frame])
     }
 
@@ -222,11 +222,11 @@ import ScreenSpaceTesting
     private static let button = Role(rawValue: "AXButton")
 
     private func tree(_ text: String, _ role: String = "AXButton", at frame: ScreenRect = at, also: [Words] = []) -> Found {
-        Found(text: Text(text)!, frame: frame, source: .tree(role: Role(rawValue: role), also: also), on: .vast)!
+        try! Found(text: Text(text)!, frame: frame, source: .tree(role: Role(rawValue: role), also: also), on: .vast)
     }
 
     private func pixels(_ text: String, at frame: ScreenRect) -> Found {
-        Found(text: Text(text)!, frame: frame, source: .pixels(confidence: Confidence(0.9)!), on: .vast)!
+        try! Found(text: Text(text)!, frame: frame, source: .pixels(confidence: Confidence(0.9)!), on: .vast)
     }
 
     private func judged(_ seen: [Found], _ match: Match?, role: Role? = nil, near: Match? = nil, excluded: [Exclusion] = []) -> Reading {
@@ -246,9 +246,9 @@ import ScreenSpaceTesting
 
     /// The row's own text wins a tie, and is narrowed to its words as ever.
     @Test func theRowsOwnTextWinsATie() {
-        let save = Found(first: Word(text: Text("Save")!, frame: try! ScreenRect(x: 0, y: 0, width: 30, height: 12)),
+        let save = try! Found(first: Word(text: Text("Save")!, frame: try! ScreenRect(x: 0, y: 0, width: 30, height: 12)),
                          rest: [Word(text: Text("As")!, frame: try! ScreenRect(x: 40, y: 0, width: 20, height: 12))],
-                         source: .tree(role: Self.button, also: [Words(.title, Text("Save it")!)]), on: .vast)!
+                         source: .tree(role: Self.button, also: [Words(.title, Text("Save it")!)]), on: .vast)
         #expect(Match?.some(.contains("save")).fit(save) == .drawn(0))
         guard case .matched(let m) = judged([save], .contains("save")).outcome else { Issue.record("not found"); return }
         #expect(m.all.map(\.text.value) == ["Save"])

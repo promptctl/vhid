@@ -81,13 +81,12 @@ public struct Covers {
     /// only in places is read whole or not at all by where its middle is. Only a window
     /// holding the whole rect can stand for it - a click at the centre landing in one that
     /// overlaps only the middle says nothing of the rest. Unanswered is not hidden - what
-    /// is under it is read, and each finding asks for itself - and a centre past what a
-    /// Double holds is no point to ask about, so goes the same way.
+    /// is under it is read, and each finding asks for itself.
     public func hide(_ rect: ScreenRect) -> Bool {
         let whole = windows.filter { $0.frame.holds(rect) }
         guard !whole.isEmpty else { return false }
         guard !whole.contains(where: { $0.pid == owner }) else { return true }
-        guard let centre = try? rect.centre, case .answered(let pid) = hit(centre) else { return false }
+        guard case .answered(let pid) = hit(rect.centre) else { return false }
         return whole.contains { $0.pid == pid }
     }
 }

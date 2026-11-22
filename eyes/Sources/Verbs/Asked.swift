@@ -66,7 +66,7 @@ public struct Asked: Sendable {
         case .at(let point):
             return try await Hit.answer(at: point, landing: screen.land)
         case .find(let sight, let match, let near, let wait):
-            return try await sight.text(match, near: near, wait: wait, on: screen, desk: screen.desk)
+            return try await sight.text(match, near: near, wait: wait, on: screen, desk: screen.desk, layouts: screen.layouts)
         case .overview(let sight):
             // [LAW:nothing-unseen] One unit for the overview, whose result says whether the
             // place was read; the displays and windows are answered either way.
@@ -74,7 +74,9 @@ public struct Asked: Sendable {
                 let desk = try await screen.desk()
                 let place: Result<String, any Error>
                 do {
-                    place = .success(try await sight.text(nil, near: nil, wait: nil, on: screen, desk: { desk }))
+                    // The place found and read on the desk's layout, so the displays listed and
+                    // the text read are of one moment.
+                    place = .success(try await sight.text(nil, near: nil, wait: nil, on: screen, desk: { desk }, layouts: { desk.layout }))
                 } catch where !error.isCancellation {
                     place = .failure(error)
                 }
@@ -98,41 +100,45 @@ public struct Asked: Sendable {
 
 extension Asked.Sight {
     /// This place's text, matched against `match` when there is one, with the place found
-    /// on `desk`.
+    /// on `desk` or on a layout `layouts` reads, and its first read on that layout.
     @MainActor
-    func text(_ match: Match?, near: Match?, wait: Wait?, on screen: Screen, desk: @escaping Where.Place.Desks) async throws -> String {
-        let region = try await place.region(pages: screen.pages, desk: desk)
-        return try await Report.text(Query(match: match, region: region, limit: limit, near: near, role: role),
-                                     source: source, wait: wait, reading: screen.read)
+    func text(_ match: Match?, near: Match?, wait: Wait?, on screen: Screen, desk: @escaping Where.Place.Desks,
+              layouts: @escaping Where.Place.Layouts) async throws -> String {
+        let located = try await place.located(pages: screen.pages, desk: desk, layouts: layouts)
+        return try await Report.text(Query(match: match, region: located.region, limit: limit, near: near, role: role),
+                                     on: located.layout, source: source, wait: wait, layouts: screen.layouts, reading: screen.read)
     }
 }
 
-/// The screen, as a look reads it: the desk, a window's pages, the readers, and the hit
-/// test - in the process, or fakes in a test. [LAW:effects-at-boundaries]
+/// The screen, as a look reads it: the desk, the display layout, a window's pages, the
+/// readers, and the hit test - in the process, or fakes in a test. [LAW:effects-at-boundaries]
 public struct Screen: Sendable {
+    public typealias Read = @Sendable (SourceKind, Query, DisplayLayout) async throws -> Judged
+
     let desk: Where.Place.Desks
+    let layouts: Where.Place.Layouts
     let pages: Where.Place.Pages
-    let read: @Sendable (SourceKind, Query) async throws -> Judged
+    let read: Read
     let land: Hit.Landings
 
-    init(desk: @escaping Where.Place.Desks = Where.Place.live, pages: @escaping Where.Place.Pages = Where.Place.tree,
-         read: @escaping @Sendable (SourceKind, Query) async throws -> Judged = Self.reader,
+    init(desk: @escaping Where.Place.Desks = Where.Place.live, layouts: @escaping Where.Place.Layouts = Where.Place.layouts,
+         pages: @escaping Where.Place.Pages = Where.Place.tree, read: @escaping Read = Self.reader,
          land: @escaping Hit.Landings = { try await Hit.land(at: $0) }) {
         self.desk = desk
+        self.layouts = layouts
         self.pages = pages
         self.read = read
         self.land = land
     }
 
-    /// The screen with its desk and readers written by a test, and the rest as it is.
-    public init(desk: @escaping @Sendable @MainActor () async throws -> Desk,
-                read: @escaping @Sendable (SourceKind, Query) async throws -> Judged) {
-        self.init(desk: desk, pages: Where.Place.tree, read: read)
+    /// The screen with its desk and readers written by a test, its layout the desk's, and the
+    /// rest as it is.
+    public init(desk: @escaping @Sendable @MainActor () async throws -> Desk, read: @escaping Read) {
+        self.init(desk: desk, layouts: { try await desk().layout }, pages: Where.Place.tree, read: read)
     }
 
     public static let live = Screen()
 
-    /// The reader of each kind, in the process, on the layout read for this look: one read
-    /// each look, so a wait sees a display that went to sleep. [LAW:no-ambient-temporal-coupling]
-    static let reader: @Sendable (SourceKind, Query) async throws -> Judged = { @MainActor in try await $0.reader.judged($1, on: DisplayReading.layout()) }
+    /// The reader of each kind, in the process, on the layout the look's pass was given.
+    static let reader: Read = { @MainActor in try await $0.reader.judged($1, on: $2) }
 }

@@ -33,12 +33,6 @@ import ScreenSpaceTesting
         var all: [String] { lock.lock(); defer { lock.unlock() }; return lines }
     }
 
-    /// The main display, and one above and right of it asleep.
-    static let twoDisplays = try! DisplayLayout([
-        OnlineDisplay(id: 1, bounds: try! ScreenRect(x: 0, y: 0, width: 1920, height: 1080), active: true),
-        OnlineDisplay(id: 2, bounds: try! ScreenRect(x: 1920, y: -200, width: 1280, height: 800), active: false),
-    ])
-
     private let bmf = FrontScreen.Session(audit: 100003, user: "bmf")
     private let loginWindow = FrontScreen.Session(audit: 100120, user: "root")
 
@@ -135,7 +129,7 @@ import ScreenSpaceTesting
         echo joined c0de; while read q; do case $q in cursor) echo '12.5 40';; displays) echo '1 0 0 1920 1080 1 2 1920 -200 1280 800 0';; *) echo nonsense;; esac; done
         """)
         defer { reader.stop() }
-        #expect(try reader.displays() == Self.twoDisplays)
+        #expect(try reader.displays() == DisplayLayout.besideOneAsleep)
         #expect(try reader.cursor() == (12.5, 40))
         let garbled = try child("echo joined c0de; while read _; do echo '0 0 1920'; done")
         defer { garbled.stop() }
@@ -235,7 +229,7 @@ import ScreenSpaceTesting
     @Test func aSeatReadsTheDisplaysWithoutTheDevices() {
         let holder = Holder()
         let seat = Seat(ObjectIdentifier(NSObject()), pid: 41, holder: holder, readiness: Readiness(driver: { .running }),
-                        screen: FixedScreen(layout: Self.twoDisplays))
+                        screen: FixedScreen(layout: DisplayLayout.besideOneAsleep))
         var answer: ([NSNumber], Error?)?
         seat.displays { answer = ($0, $1) }
         #expect(answer?.0.map(\.doubleValue) == [1, 0, 0, 1920, 1080, 1, 2, 1920, -200, 1280, 800, 0] && answer?.1 == nil)

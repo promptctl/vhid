@@ -212,7 +212,7 @@ import ScreenSpaceTesting
             { try await DragCommand.drag(from: on, to: off, button: .left, holding: .none, with: pointer, RecordingKeyboard()) },
         ]
         for act in acts {
-            await #expect { _ = try await act() } throws: { "\($0)".contains("on no display") }
+            await #expect { _ = try await act() } throws: { "\($0)".contains("on no display") || "\($0)".contains("no display shows a part of the box") }
         }
         #expect(mouse.moves == 0 && mouse.buttons.isEmpty && mouse.scrolls.isEmpty)
     }

@@ -107,12 +107,15 @@ public extension Candidates {
         var merged = Set<Int>()
         var extra: [Found] = []
         var duplicates = 0
-        var unshown = 0
+        var unfound: [Unfound] = []
         // The words as a row on the run's displays, or counted. [LAW:no-silent-failure]
         func row(_ words: [Word], _ run: Found) {
             guard let head = words.first else { return }
-            guard let found = Found(first: head, rest: Array(words.dropFirst()), source: run.source, on: run.displays) else { unshown += 1; return }
-            extra.append(found)
+            do throws(Unfound) {
+                extra.append(try Found(first: head, rest: Array(words.dropFirst()), source: run.source, on: run.displays))
+            } catch {
+                unfound.append(error)
+            }
         }
         for run in b.seen?.found ?? [] {
             var loose: [Word] = []
@@ -123,8 +126,9 @@ public extension Candidates {
                 // one within the slip allowance would carry a neighbour along - "Downloads 3"
                 // is one edit from "Downloads", and the badge only the pixels saw is lost.
                 let hit = (i..<words.count).flatMap { j -> [(index: Int, end: Int, edits: Int)] in
-                    // A stretch no display shows is no place the first reader saw anything.
-                    guard let stretch = Found(first: words[i], rest: Array(words[(i + 1)..<(j + 1)]), source: run.source, on: run.displays) else { return [] }
+                    // A stretch that is no row is no place the first reader saw anything; its
+                    // words stay loose, and are counted when they are made a row.
+                    guard let stretch = try? Found(first: words[i], rest: Array(words[(i + 1)..<(j + 1)]), source: run.source, on: run.displays) else { return [] }
                     return (0..<firsts).compactMap { k in kept[k].edits(to: stretch).map { (index: k, end: j, edits: $0) } }
                 }.min { ($0.edits, -$0.end) < ($1.edits, -$1.end) }
                 guard let (index, end, _) = hit else {
@@ -144,7 +148,7 @@ public extension Candidates {
         }
         let regions = seen.map(\.region)
         let both = regions.dropFirst().reduce(Optional(regions[0])) { $0?.intersection($1) }
-        let excluded = seen.flatMap(\.excluded) + [Exclusion(reason: .duplicate, count: duplicates), Exclusion(reason: .unshown, count: unshown)]
+        let excluded = seen.flatMap(\.excluded) + [Exclusion(reason: .duplicate, count: duplicates)] + Unfound.counted(unfound)
         return Candidates(
             found: (kept + extra).inReadingOrder,
             region: both ?? seen[0].region,

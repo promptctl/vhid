@@ -49,7 +49,8 @@ public struct Word: Sendable, Hashable {
 ///
 /// [LAW:parse-dont-validate] Made only placed, by `Displays.place`, so every row a reading
 /// holds is one a display shows, at the point the devices press for its box. Words that make
-/// no such row are no `Found`, and whoever read them counts them `unshown`.
+/// no such row are no `Found`, refused as `Unfound`, which names the reason whoever read them
+/// counts them under.
 public struct Found: Sendable, Hashable {
     public let first: Word
     public let rest: [Word]
@@ -64,18 +65,19 @@ public struct Found: Sendable, Hashable {
     }
 
     /// One run the reader places as a whole - what the accessibility tree reports.
-    public init?(text: Text, frame: ScreenRect, source: Source, on displays: Displays) {
-        self.init(first: Word(text: text, frame: frame), rest: [], source: source, on: displays)
+    public init(text: Text, frame: ScreenRect, source: Source, on displays: Displays) throws(Unfound) {
+        try self.init(first: Word(text: text, frame: frame), rest: [], source: source, on: displays)
     }
 
-    /// Nil when no display shows a part of the words' box a point or more a side, or the
-    /// words lie further apart than a box holds.
-    public init?(first: Word, rest: [Word], source: Source, on displays: Displays) {
-        guard let box = try? rest.reduce(first.frame, { try $0.union($1.frame) }), let placed = try? displays.place(box) else { return nil }
+    /// Refused when the words lie further apart than a box holds, or no display shows a part
+    /// of their box a point or more a side.
+    public init(first: Word, rest: [Word], source: Source, on displays: Displays) throws(Unfound) {
+        var box = first.frame
+        do throws(NotABox) { for word in rest { box = try box.union(word.frame) } } catch { throw .notABox(error) }
+        do throws(Unplaced) { placed = try displays.place(box) } catch { throw .unshown(error) }
         self.first = first
         self.rest = rest
         self.source = source
-        self.placed = placed
     }
 
     private init(first: Word, rest: [Word], source: Source, placed: Placed<Shown>) {
@@ -104,6 +106,29 @@ public struct Found: Sendable, Hashable {
 
     /// The displays it was placed on, which a row cut from it is placed on again.
     public var displays: Displays { placed.displays }
+}
+
+/// Text read that makes no `Found`, and why.
+public enum Unfound: Error, Equatable {
+    /// Its box is no box on the screen: an app's frame or a recogniser's box with a number
+    /// not finite or a side under zero, or words further apart than a box holds.
+    case notABox(NotABox)
+    /// No active display shows a part of it a point or more a side.
+    case unshown(Unplaced)
+
+    /// What a reading counts it under.
+    public var reason: Exclusion.Reason {
+        switch self {
+        case .notABox: .notABox
+        case .unshown: .unshown
+        }
+    }
+
+    /// What a reading counts `unfound` as: each reason one can be, with how many were,
+    /// zeros included. [LAW:single-enforcer] Every reader that drops text counts it here.
+    public static func counted(_ unfound: [Unfound]) -> [Exclusion] {
+        [Exclusion.Reason.notABox, .unshown].map { reason in Exclusion(reason: reason, count: unfound.filter { $0.reason == reason }.count) }
+    }
 }
 
 /// Which reader found it, carrying what only that reader can know.

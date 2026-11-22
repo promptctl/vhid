@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import ScreenSpaceTesting
 @testable import ScreenSpace
 
 /// Where a point or a box is pressed on a layout a test wrote: the one rule both halves use.
@@ -12,48 +13,44 @@ import Testing
 
     static func point(_ x: Double, _ y: Double) -> ScreenPoint { try! ScreenPoint(x: x, y: y) }
 
-    static func layout(_ bounds: ScreenRect..., active: Set<Int> = []) -> DisplayLayout {
-        try! DisplayLayout(bounds.enumerated().map { OnlineDisplay(id: UInt32($0.offset + 1), bounds: $0.element, active: active.isEmpty || active.contains($0.offset)) })
-    }
-
     static let main = box(0, 0, 1600, 900)
     /// Left of the main one, at a negative origin.
     static let left = box(-1280, 100, 1280, 800)
 
     @Test func aBoxWhollyOnADisplayIsPressedAtTheWholePointNearestItsMiddle() throws {
-        let shown = try Self.layout(Self.main).online.place(Self.box(10.25, 20.25, 31, 11)).value
+        let shown = try DisplayLayout.at(Self.main).online.place(Self.box(10.25, 20.25, 31, 11)).value
         #expect(shown.part == Self.box(10.25, 20.25, 31, 11))
         #expect(shown.press == Self.point(26, 26))
     }
 
     @Test func aBoxHangingOffADisplayIsPressedInsideTheShownPart() throws {
-        let shown = try Self.layout(Self.main).online.place(Self.box(1500, 800, 400, 300)).value
+        let shown = try DisplayLayout.at(Self.main).online.place(Self.box(1500, 800, 400, 300)).value
         #expect(shown.part == Self.box(1500, 800, 100, 100))
         #expect(shown.press == Self.point(1550, 850))
         #expect(shown.part.contains(shown.press))
     }
 
     @Test func aBoxAcrossTwoDisplaysIsPressedOnTheOneShowingMoreOfIt() throws {
-        let shown = try Self.layout(Self.main, Self.left).online.place(Self.box(-300, 400, 400, 20)).value
+        let shown = try DisplayLayout.at(Self.main, Self.left).online.place(Self.box(-300, 400, 400, 20)).value
         #expect(shown.part == Self.box(-300, 400, 300, 20))
         #expect(shown.press == Self.point(-150, 410))
     }
 
     @Test func aBoxUnderAPointASideIsOnNoDisplay() {
-        #expect(throws: Unplaced.box(Self.box(10, 10, 0.5, 30))) { try Self.layout(Self.main).online.place(Self.box(10, 10, 0.5, 30)) }
+        #expect(throws: Unplaced.box(Self.box(10, 10, 0.5, 30))) { try DisplayLayout.at(Self.main).online.place(Self.box(10, 10, 0.5, 30)) }
         // A point a side shown only in a sliver at the edge is no part to press either.
-        #expect(throws: Unplaced.box(Self.box(1599.5, 10, 30, 30))) { try Self.layout(Self.main).online.place(Self.box(1599.5, 10, 30, 30)) }
+        #expect(throws: Unplaced.box(Self.box(1599.5, 10, 30, 30))) { try DisplayLayout.at(Self.main).online.place(Self.box(1599.5, 10, 30, 30)) }
     }
 
     @Test func aPointASideIsPressedAtTheWholePointItHolds() throws {
-        let shown = try Self.layout(Self.main).online.place(Self.box(10.5, 10.5, 1, 1)).value
+        let shown = try DisplayLayout.at(Self.main).online.place(Self.box(10.5, 10.5, 1, 1)).value
         #expect(shown.press == Self.point(11, 11))
         #expect(shown.part.contains(shown.press))
     }
 
     @Test func aDocumentFrameFarWiderThanAnyDisplayIsPressedOnTheDisplay() throws {
         let frame = Self.box(-1e20, 100, 2e20, 40)
-        let shown = try Self.layout(Self.main).online.place(frame).value
+        let shown = try DisplayLayout.at(Self.main).online.place(frame).value
         #expect(shown.box == frame)
         #expect(shown.part == Self.box(0, 100, 1600, 40))
         #expect(shown.press == Self.point(800, 120))
@@ -61,20 +58,20 @@ import Testing
 
     @Test func aDisplayAtAFractionalOriginHoldsThePressPoint() throws {
         let display = Self.box(0.5, 0.5, 100, 100)
-        let shown = try Self.layout(display).online.place(Self.box(0, 0, 3, 3)).value
+        let shown = try DisplayLayout.at(display).online.place(Self.box(0, 0, 3, 3)).value
         #expect(shown.part == Self.box(0.5, 0.5, 2.5, 2.5))
         #expect(shown.part.contains(shown.press))
         #expect(display.contains(shown.press))
     }
 
     @Test func aPointIsPressedWhereItIsAndOnlyOnADisplay() throws {
-        #expect(try Self.layout(Self.main).online.place(Self.point(0, 899.5)).value == Self.point(0, 899.5))
+        #expect(try DisplayLayout.at(Self.main).online.place(Self.point(0, 899.5)).value == Self.point(0, 899.5))
         // Half-open: the far edge is the next display's, or no display's.
-        #expect(throws: Unplaced.point(Self.point(1600, 10))) { try Self.layout(Self.main).online.place(Self.point(1600, 10)) }
+        #expect(throws: Unplaced.point(Self.point(1600, 10))) { try DisplayLayout.at(Self.main).online.place(Self.point(1600, 10)) }
     }
 
     @Test func aSleepingDisplayIsOnlineAndNotActive() throws {
-        let layout = Self.layout(Self.main, Self.left, active: [1])
+        let layout = DisplayLayout.at(Self.main, Self.left, asleep: [1])
         _ = try layout.online.place(Self.point(10, 10))
         #expect(throws: Unplaced.point(Self.point(10, 10))) { try layout.active.place(Self.point(10, 10)) }
         #expect(try layout.active.place(Self.point(-10, 110)).value == Self.point(-10, 110))
@@ -83,7 +80,7 @@ import Testing
 
 @Suite struct LayoutTests {
     @Test func aLayoutCrossesTheWireAsItsFieldsAndComesBackTheSame() throws {
-        let layout = PlacementTests.layout(PlacementTests.main, PlacementTests.left, active: [0])
+        let layout = DisplayLayout.at(PlacementTests.main, PlacementTests.left, asleep: [2])
         #expect(try DisplayLayout(fields: layout.fields) == layout)
     }
 
@@ -115,20 +112,23 @@ import Testing
         #expect(try ScreenRect(x: 0, y: 0, width: 0, height: 5).isEmpty)
     }
 
-    @Test func boxesReachingPastWhatADoubleHoldsStillIntersectFinitely() throws {
-        let wide = PlacementTests.box(1e308, 0, 1e308, 10)
-        #expect(wide.intersection(PlacementTests.box(1e308, 0, 5e307, 10)) == PlacementTests.box(1e308, 0, 5e307, 10))
+    /// Boxes near the end of what a Double holds intersect and hold points finitely; the
+    /// box holding two of them would reach past it, so their union is refused.
+    @Test func boxesNearWhatADoubleHoldsStillIntersectFinitely() throws {
+        let wide = PlacementTests.box(8e307, 0, 9e307, 10)
+        #expect(wide.intersection(PlacementTests.box(8e307, 0, 5e307, 10)) == PlacementTests.box(8e307, 0, 5e307, 10))
         #expect(wide.intersection(PlacementTests.box(-1.7e308, 0, 1, 1)) == nil)
         #expect(throws: NotABox.self) { try wide.union(PlacementTests.box(-1.7e308, 0, 1, 1)) }
-        #expect(wide.contains(PlacementTests.point(1.7e308, 5)))
+        #expect(wide.contains(PlacementTests.point(1.6e308, 5)))
+        #expect(wide.contains(wide.centre))
     }
 
     /// The centre is the only number a caller actually uses, so it is derived from the
     /// rectangle rather than carried beside it.
-    @Test func theCentreIsTheMiddleOfTheRectangle() throws {
+    @Test func theCentreIsTheMiddleOfTheRectangle() {
         let rect = PlacementTests.box(100, 200, 60, 40)
-        #expect(try rect.centre == PlacementTests.point(130, 220))
-        #expect(rect.contains(try rect.centre))
+        #expect(rect.centre == PlacementTests.point(130, 220))
+        #expect(rect.contains(rect.centre))
     }
 
     /// Overlap is how a merged reading tells one thing seen by both readers from two
@@ -139,15 +139,40 @@ import Testing
         #expect(left.intersects(PlacementTests.box(9, 0, 10, 10)))
     }
 
-    @Test func aBoxIsSpelledInWholePointsRoundedOutAndReadBack() {
+    /// A box prints its four numbers as given, so what a look prints reads back as itself.
+    @Test func aBoxIsSpelledExactlyAndReadBackAsItself() throws {
         let box = PlacementTests.box(-10.5, 2.25, 20, 3.5)
-        #expect(box.description == "-11,2,21,4")
-        #expect(ScreenRect(spelled: box.description) == PlacementTests.box(-11, 2, 21, 4))
-        for refused in ["", "1,2,3", "1,2,3,4,5", "1,2,3,-4", "1,,3,4", "a,2,3,4", "1,2,inf,4", "0,0 10x10"] {
-            #expect(ScreenRect(spelled: refused) == nil, "\(refused)")
+        #expect(box.description == "-10.5,2.25,20,3.5")
+        #expect(try ScreenRect(spelled: box.description) == box)
+        for refused in ["", "1,2,3", "1,2,3,4,5", "1,,3,4", "a,2,3,4", "0,0 10x10"] {
+            #expect(throws: Misspelled.form(refused, wanted: ScreenRect.spelling), "\(refused)") { try ScreenRect(spelled: refused) }
         }
-        #expect(ScreenRect(spelled: " -5 ,2.5,1,1") == PlacementTests.box(-5, 2.5, 1, 1))
-        #expect(PlacementTests.point(-3, 4.5).description == "-3,4.5")
+        // Four numbers that are no box are refused as that, not as a misspelling.
+        for refused in ["1,2,3,-4", "1,2,inf,4"] {
+            #expect(performing: { try ScreenRect(spelled: refused) }, throws: { error in
+                if case Misspelled.notABox(refused, _) = error { true } else { false }
+            })
+        }
+        #expect(try ScreenRect(spelled: " -5 ,2.5,1,1") == PlacementTests.box(-5, 2.5, 1, 1))
+    }
+
+    /// A point prints as the one spelling `x,y`, and reads back as itself.
+    @Test func aPointIsSpelledXYAndReadBackAsItself() throws {
+        let point = PlacementTests.point(-3, 4.5)
+        #expect(point.description == "-3,4.5")
+        #expect(try ScreenPoint(spelled: point.description) == point)
+        #expect(throws: Misspelled.form("3", wanted: ScreenPoint.spelling)) { try ScreenPoint(spelled: "3") }
+        #expect(performing: { try ScreenPoint(spelled: "nan,1") }, throws: { error in
+            if case Misspelled.notAPlace("nan,1", _) = error { true } else { false }
+        })
+    }
+
+    /// A box whose far edge is past what a Double holds is no box, whatever its numbers'
+    /// size: the far edge is where its middle and its parts are worked out from.
+    @Test func aBoxWhoseFarEdgeIsPastADoubleIsRefused() {
+        #expect(throws: NotABox.self) { try ScreenRect(x: .greatestFiniteMagnitude, y: 0, width: .greatestFiniteMagnitude, height: 1) }
+        // No constant bound: a frame 1e20 wide is a box.
+        #expect(throws: Never.self) { try ScreenRect(x: -1e20, y: 0, width: 2e20, height: 1) }
     }
 }
 

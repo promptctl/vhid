@@ -18,7 +18,7 @@ Pull requests go to `master` and must pass the `vhid` and `pkg` checks.
 
 ## Two halves
 
-The package holds two halves that share no code: the devices, and eyes.
+The package holds two halves, the devices and eyes, neither of which links the other.
 
 | | what it is | where |
 |---|---|---|

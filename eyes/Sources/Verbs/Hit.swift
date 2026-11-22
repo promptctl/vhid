@@ -137,7 +137,8 @@ public struct Hit: AsyncParsableCommand {
     @MainActor
     static func land(at point: ScreenPoint) async throws -> Struck {
         let desk = try await Desk.now()
-        guard desk.displays.contains(where: { $0.frame.contains(point) }) else { throw NoSuchPlace.pointOffScreen(point) }
+        // A point no active display holds is refused by the rule every place is. [LAW:single-enforcer]
+        _ = try desk.layout.active.place(point)
         let climb: Landing.Climb
         switch try await TreeReader(granted: SourceKind.granted).climb(from: point, within: hitTesting) {
         case .nothing(let calls): return .nothing(calls: calls, window: desk.listing.windows.first { $0.frame.contains(point) })

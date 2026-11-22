@@ -167,11 +167,10 @@ private final class Check<Element> {
             throw Stop(why: .unanswered)
         }
         let resolution = Probe<Element>.resolution
-        // Every point probed is inside the shown part, which a display holds, so is finite.
-        func point(_ x: Double, _ y: Double) -> ScreenPoint { try! ScreenPoint(x: x, y: y) }
+        func point(_ x: Double, _ y: Double) throws(NotAPlace) -> ScreenPoint { try ScreenPoint(x: x, y: y) }
         // How far from the press point along a line of length `span` a click still presses
         // the element: all of it, or the last point found by halving.
-        func reach(_ span: Double, _ along: (Double) -> ScreenPoint) throws -> Double {
+        func reach(_ span: Double, _ along: (Double) throws -> ScreenPoint) throws -> Double {
             guard span > resolution, !(try presses(along(span - resolution))) else { return span }
             var (inside, outside) = (0.0, span - resolution)
             while outside - inside > resolution {
@@ -183,24 +182,26 @@ private final class Check<Element> {
         // To each edge of the shown part from the press point, which the part holds.
         let spans = (left: press.x - shown.x, right: shown.width - (press.x - shown.x),
                      up: press.y - shown.y, down: shown.height - (press.y - shown.y))
-        let left = try reach(spans.left) { point(press.x - $0, press.y) }
-        let right = try reach(spans.right) { point(press.x + $0, press.y) }
-        let up = try reach(spans.up) { point(press.x, press.y - $0) }
-        let down = try reach(spans.down) { point(press.x, press.y + $0) }
+        let left = try reach(spans.left) { try point(press.x - $0, press.y) }
+        let right = try reach(spans.right) { try point(press.x + $0, press.y) }
+        let up = try reach(spans.up) { try point(press.x, press.y - $0) }
+        let down = try reach(spans.down) { try point(press.x, press.y + $0) }
         // The share of the diagonal to a corner of that box a click presses the element along.
         func corner(_ dx: Double, _ dy: Double) throws -> Double {
             let length = (dx * dx + dy * dy).squareRoot()
-            return length == 0 ? 1 : try reach(length) { point(press.x + dx * $0 / length, press.y + dy * $0 / length) } / length
+            return length == 0 ? 1 : try reach(length) { try point(press.x + dx * $0 / length, press.y + dy * $0 / length) } / length
         }
         let (upLeft, upRight) = (try corner(-left, -up), try corner(right, -up))
         let (downLeft, downRight) = (try corner(-left, down), try corner(right, down))
         let (l, r) = (left * min(upLeft, downLeft), right * min(upRight, downRight))
         let (u, d) = (up * min(upLeft, upRight), down * min(downLeft, downRight))
         guard (l, r, u, d) == (spans.left, spans.right, spans.up, spans.down) else {
-            // Inside the shown part, so finite, with no side under zero.
-            let cut = try! ScreenRect(x: press.x - l, y: press.y - u, width: l + r, height: u + d)
-            guard let narrowed = Found(text: found.text, frame: cut, source: found.source, on: found.displays) else { throw Stop(why: .elsewhere) }
-            return .narrowed(narrowed)
+            let cut = try ScreenRect(x: press.x - l, y: press.y - u, width: l + r, height: u + d)
+            do throws(Unfound) {
+                return .narrowed(try Found(text: found.text, frame: cut, source: found.source, on: found.displays))
+            } catch {
+                throw Stop(why: .unshown)
+            }
         }
         return .kept
     }

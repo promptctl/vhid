@@ -300,6 +300,11 @@ public struct Exclusion: Sendable, Hashable {
         /// display asleep, or off every display - so nothing a look prints presses it, and the
         /// region was not read whole.
         case unshown
+        /// Text read with a box that is no box on the screen - an app's frame or a
+        /// recogniser's box with a number not finite or a side under zero, or words further
+        /// apart than a box holds - so where it is cannot be said, and the region was not
+        /// read whole.
+        case notABox = "not_a_box"
         /// An area holding other elements - a window, a group, a list - whose text names the
         /// area. Its centre is on whatever sits there, not on the words.
         case area
@@ -339,7 +344,7 @@ public struct Exclusion: Sendable, Hashable {
         /// [LAW:single-enforcer] Every reader's reach is decided here.
         public var leavesUnread: Bool {
             switch self {
-            case .unanswered, .unwalked, .overlaid, .roleUnknown, .unshown: true
+            case .unanswered, .unwalked, .overlaid, .roleUnknown, .unshown, .notABox: true
             case .wordless, .unplaced, .area, .covered, .duplicate, .ranked, .outside, .otherRole: false
             }
         }

@@ -3,6 +3,7 @@ import Keystrokes
 import OwnThread
 import Pointing
 import ScreenSpace
+import ScreenSpaceTesting
 import Testing
 @testable import Helper
 
@@ -91,7 +92,7 @@ import Testing
         }
         func displays(reply: @escaping ([NSNumber], Error?) -> Void) {
             lock.lock(); pointing.append("displays"); lock.unlock()
-            respond { reply([1, 0, 0, 1920, 1080, 1, 2, 1920, -200, 1280, 800, 0].map { NSNumber(value: $0) }, $0) }
+            respond { reply(DisplayLayout.besideOneAsleep.fields.map { NSNumber(value: $0) }, $0) }
         }
 
         func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
@@ -202,10 +203,7 @@ import Testing
     /// connection unspoken.
     @Test func theDisplaysAreReadAsRectangles() throws {
         let (helper, far) = helper(.acknowledge)
-        #expect(try helper.displays() == DisplayLayout([
-            OnlineDisplay(id: 1, bounds: try ScreenRect(x: 0, y: 0, width: 1920, height: 1080), active: true),
-            OnlineDisplay(id: 2, bounds: try ScreenRect(x: 1920, y: -200, width: 1280, height: 800), active: false),
-        ]))
+        #expect(try helper.displays() == .besideOneAsleep)
         try helper.leave()
         #expect(far.service.pointed == ["displays"])
     }

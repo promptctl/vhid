@@ -1,5 +1,4 @@
 import CoreGraphics
-import DisplayReading
 import ScreenSpace
 
 public extension Region {
@@ -8,25 +7,28 @@ public extension Region {
     /// reads as blindness, never as a blank screen. [LAW:no-silent-failure]
     ///
     /// [LAW:single-enforcer] Every reader resolves a region here, so a display id or a
-    /// window id means one rectangle whichever reader was asked. What a reader then does
-    /// with it - a capture clipping it to one display - is that reader's own business.
+    /// window id means one rectangle whichever reader was asked, and a rectangle is on the
+    /// displays by the one rule a row is placed by: one no active display shows a part of a
+    /// point or more a side has nothing in it to read. What a reader then does with it - a
+    /// capture clipping it to one display - is that reader's own business.
     @MainActor
     func bounds(on layout: DisplayLayout) throws -> ScreenRect {
         switch self {
         case .rect(let rect):
-            // A rectangle no active display shows has nothing in it to read, and a reader
-            // that walked it would report a blank screen. [LAW:no-silent-failure]
-            guard layout.active.frames.contains(where: { $0.intersects(rect) }) else { throw NoSuchPlace.offScreen(rect) }
+            _ = try layout.active.place(rect)
             return rect
         case .display(let id):
-            // The displays `eyes displays` lists, so an id it did not list is refused here.
-            guard let display = layout.displays.first(where: { $0.id == id && $0.active }) else { throw NoSuchPlace.display(id) }
+            // The displays `eyes displays` lists, so an id it did not list is refused here,
+            // saying whether the display is there asleep or not there at all.
+            guard let display = layout.displays.first(where: { $0.id == id }) else { throw NoSuchPlace.display(id) }
+            guard display.active else { throw NoSuchPlace.asleep(id) }
             return display.bounds
         case .window(let id):
             guard let window = try Geometry.onScreen().windows.first(where: { $0.id == id }) else {
                 throw NoSuchPlace.window(id)
             }
-            return window.frame
+            // On a display, as any rectangle must be.
+            return try Region.rect(window.frame).bounds(on: layout)
         case .front(let front):
             // Its display, as `.display` is refused when detached; the windows read on it are
             // the front's owners, which each reader takes from its own window list.
@@ -84,15 +86,14 @@ public extension Geometry {
 /// A region naming something that is not on screen.
 public enum NoSuchPlace: Error, CustomStringConvertible {
     case display(CGDirectDisplayID)
+    /// Online and not active: the cursor reaches it, and a capture of it shows nothing.
+    case asleep(CGDirectDisplayID)
     case window(UInt32)
-    case offScreen(ScreenRect)
-    case pointOffScreen(ScreenPoint)
 
     public var description: String {
         switch self {
-        case .offScreen(let r): "\(r) is on no active display, so there is nothing there to read"
-        case .pointOffScreen(let p): "\(p) is on no display, so a click there hits nothing"
         case .display(let id): "no display with id \(id) is attached"
+        case .asleep(let id): "display \(id) is asleep, so there is nothing on it to read"
         case .window(let id): "no on-screen window has id \(id); `look` with no arguments, or `eyes windows`, lists the ones that do"
         }
     }

@@ -25,7 +25,7 @@ public enum DisplayReading {
                 displays.append(OnlineDisplay(id: id, bounds: try ScreenRect(x: frame.minX, y: frame.minY, width: frame.width, height: frame.height),
                                               active: activeIDs.contains(id)))
             } catch {
-                throw .refused("the window server put display \(id) at \(frame), which is not a box: \(error)")
+                throw .notADisplay(id, error)
             }
         }
         return try DisplayLayout(displays)
