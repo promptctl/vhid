@@ -25,7 +25,7 @@ struct RecordCommand: AsyncParsableCommand {
         // app is launched, so a recording vhid refuses leaves nothing running. The app's own
         // refusal, and a first word that is not one, come after it.
         let installation = try service.installation()
-        let holder = try HelperConnection(installation: installation, timeline: Vhid.timeline).status(by: .within(HelperConnection.replyTimeout, on: Vhid.timeline))
+        let holder = try HelperConnection(installation: installation, timeline: Vhid.timeline).holding(by: .within(HelperConnection.replyTimeout, on: Vhid.timeline)).pid
         let (system, session) = try await reading(within: Command.limit, on: Vhid.timeline) { deadline, stop in
             Result { (try Self.services(in: "system", by: deadline, or: stop), try Self.services(in: "gui/\(getuid())", by: deadline, or: stop)) }
         }.get()

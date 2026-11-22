@@ -139,8 +139,12 @@ private func report(modifiers: UInt8, _ usages: [UInt16] = []) -> [UInt8] {
             try fake.push([(.keyboardReady, true)])
         }
         let clock = ManualClock()
-        try keyboard(on: fake, clock).start(by: unhurried(clock))
+        let device = try keyboard(on: fake, clock)
+        try device.start(by: unhurried(clock))
+        // Held until the answer is seen: the start returns once the device is ready, with
+        // the answer perhaps still queued, and a connection let go hangs up unwritten.
         #expect(fake.awaitFrame(.control(.healthCheckResponse, payload: [])))
+        withExtendedLifetime(device) {}
     }
 }
 

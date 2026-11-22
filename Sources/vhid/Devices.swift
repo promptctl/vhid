@@ -113,12 +113,12 @@ struct Devices {
     ///
     /// launchd starts vhidd on the first call, so asked any earlier the answer would be as
     /// old as the daemon's start by the first key - the window `--into` exists to close.
-    /// `status` is answered once the daemon is listening, and refused while its devices
+    /// `holding` is answered once the daemon is listening, and refused while its devices
     /// are down, so a verb that gets past it has devices to send to. It is made on `queue`
     /// like every other call, and claims nothing. [LAW:no-ambient-temporal-coupling]
     static func front(_ helper: HelperConnection, on queue: DeviceQueue) -> @Sendable () async throws -> Front.App? {
         {
-            _ = try await queue.run { try helper.status(by: .within(HelperConnection.replyTimeout, on: helper.timeline)) }
+            _ = try await queue.run { try helper.holding(by: .within(HelperConnection.replyTimeout, on: helper.timeline)) }
             return try await Aim.inFront()
         }
     }

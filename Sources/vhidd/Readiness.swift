@@ -81,7 +81,7 @@ final class Readiness: @unchecked Sendable {
     /// devices whose connection went before they were handed over are not handed over.
     private var ended = false
     /// How long a reading of the driver is given. A client refused is answered after the
-    /// reading, and waits `HelperConnection.replyTimeout` for the answer: a reading that
+    /// reading, by the client's deadline of `HelperConnection.replyTimeout`: a reading that
     /// cannot be taken is given up on while that client is still listening.
     static let driverReadLimit: Duration = .seconds(2)
 
@@ -119,7 +119,7 @@ final class Readiness: @unchecked Sendable {
     func releaseEverything(because reason: String) {
         switch current {
         case .down(let why): log("\(reason); nothing is held: \(why)")
-        case .up(let up): up.devices.releaseEverything(because: reason)
+        case .up(let up): _ = up.devices.releaseEverything(because: reason)
         }
     }
 

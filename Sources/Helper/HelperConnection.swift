@@ -101,6 +101,29 @@ public final class HelperConnection: @unchecked Sendable {
         public var description: String { "\(service) refused: \(reason)" }
     }
 
+    /// An act whose outcome is not known: nothing came back by its deadline, or vhidd itself
+    /// could not tell whether its report reached the driver. Never a failure - a client told
+    /// an act failed relies on it never having reached the devices, and this one may have.
+    /// [LAW:types-are-the-program]
+    public struct OutcomeUnknown: Error, Equatable, CustomStringConvertible {
+        public enum Cause: Sendable, Hashable {
+            /// No answer came before the act's deadline.
+            case silence(Duration)
+            /// vhidd answered that it could not tell, in its words.
+            case daemon(String)
+        }
+
+        public let service: String
+        public let cause: Cause
+
+        public var description: String {
+            switch cause {
+            case .silence(let limit): "\(service) did not answer within \(limit), so whether the act reached the devices is unknown"
+            case .daemon(let reason): "\(service) could not tell whether the act reached the devices: \(reason)"
+            }
+        }
+    }
+
     /// How long a client waits for vhidd's reply, unless it says otherwise: an act's limit,
     /// counted from when it is asked, and a read's, within the deadline of whatever asked it.
     public static let replyTimeout: Duration = .seconds(5)
@@ -144,7 +167,7 @@ public final class HelperConnection: @unchecked Sendable {
         let reached = hasSpoken
         history.unlock()
         guard reached else { return }
-        try release { service, reply in service.leave(reply: reply) }
+        try release { service, _, reply in service.leave(reply: reply) }
     }
 
     /// A call that frees what the daemon holds for this connection, which succeeds when
@@ -158,7 +181,7 @@ public final class HelperConnection: @unchecked Sendable {
     /// - the connection never got through (4099, 4097) and the daemon never ran an act of
     ///   it.
     /// [LAW:single-enforcer] Read here, once, for the keyboard, the mouse and leaving.
-    func release(_ body: (HelperService, @escaping (Error?) -> Void) -> Void) throws {
+    func release(_ body: (HelperService, UInt64, @escaping (Error?) -> Void) -> Void) throws {
         do {
             try call(body)
         } catch let refused as Refused where Installation.turnedAway(domain: refused.domain, code: refused.code) {
@@ -173,12 +196,16 @@ public final class HelperConnection: @unchecked Sendable {
         return hasActed
     }
 
-    /// Which process holds the devices, or nil when none does.
+    /// Who holds the devices.
     ///
     /// Not a word on the devices, so it leaves this connection as unspoken as it found it:
     /// a `leave` after it still has nothing to hand back. [LAW:dataflow-not-control-flow]
-    public func status(by deadline: Deadline) throws -> Int32? {
-        try exchange(by: deadline) { service, reply in service.status { holder, error in reply(error.map { .failed($0) } ?? .answered(holder?.int32Value)) } }
+    public func holding(by deadline: Deadline) throws -> Holding {
+        try exchange(by: deadline) { service, reply in
+            service.holding { pid, leftHeld, error in
+                reply(error.map { .failed($0) } ?? .answered(pid.map { .client(pid: $0.int32Value) } ?? (leftHeld ? .leftHeld : .nobody)))
+            }
+        }
     }
 
     /// The daemon's most recent failure, or nil when it has had none since it started.
@@ -247,17 +274,31 @@ public final class HelperConnection: @unchecked Sendable {
     }
 
     /// One act on the devices: the connection has spoken from here on, and the reply is an
-    /// acknowledgement or a refusal.
-    func call(_ body: (HelperService, @escaping (Error?) -> Void) -> Void) throws {
+    /// acknowledgement, a refusal, or word that its outcome is unknown.
+    ///
+    /// [LAW:no-ambient-temporal-coupling] The act's deadline is made here, as it is asked,
+    /// and crosses the wire with it, so vhidd and this side wait on one instant: an act
+    /// vhidd refuses for its deadline is one this side stopped waiting for.
+    func call(_ body: (HelperService, UInt64, @escaping (Error?) -> Void) -> Void) throws {
         history.lock()
         hasSpoken = true
         history.unlock()
-        let outcome = Result { try exchange(by: .within(replyTimeout, on: timeline)) { service, reply in body(service) { error in reply(error.map { .failed($0) } ?? .answered(())) } } }
-        // The daemon ran this act: it acknowledged it, or reached the devices and failed
-        // there. Not a refusal at the seat, the connection's failure, or silence.
+        let deadline = Deadline.within(replyTimeout, on: timeline)
+        let outcome = Result { () throws -> Void in
+            do {
+                try exchange(by: deadline) { service, reply in body(service, deadline.at.nanoseconds) { error in reply(error.map { .failed($0) } ?? .answered(())) } }
+            } catch let unreachable as Unreachable {
+                guard case .silence(let limit) = unreachable.cause else { throw unreachable }
+                throw OutcomeUnknown(service: service, cause: .silence(limit))
+            } catch let refused as Refused where refused.domain == Installation.refusalDomain && refused.code == Installation.outcomeUnknownCode {
+                throw OutcomeUnknown(service: service, cause: .daemon(refused.reason))
+            }
+        }
+        // The daemon may have run this act: it acknowledged it, or cannot say. Not a
+        // refusal, which vhidd makes only for an act that sent nothing, the connection's
+        // failure, or the deadline passing before the act was asked.
         let ran = switch outcome {
-        case .success: true
-        case .failure(let refused as Refused): !Installation.turnedAway(domain: refused.domain, code: refused.code)
+        case .success, .failure(is OutcomeUnknown): true
         case .failure: false
         }
         history.lock(); hasActed = hasActed || ran; history.unlock()

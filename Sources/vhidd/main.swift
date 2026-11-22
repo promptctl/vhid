@@ -111,7 +111,7 @@ do {
     let driver: @Sendable () throws -> DriverState = { try DriverState(DriverProbe.facts(by: .within(Readiness.driverReadLimit, on: timeline), or: .never)) }
     let readiness = Readiness(driver: driver)
     let listener = NSXPCListener(machServiceName: installation.service)
-    let delegate = Listener(readiness: readiness, callers: callers, screen: FrontScreen.real(build))
+    let delegate = Listener(readiness: readiness, callers: callers, screen: FrontScreen.real(build), timeline: timeline)
     listener.delegate = delegate
     listener.resume()
     log("listening on \(installation.service)")
@@ -156,8 +156,8 @@ do {
                     return nil
                 }
             },
-            now: { .now },
-            pause: { Thread.sleep(forTimeInterval: Double($0.components.seconds) + Double($0.components.attoseconds) / 1e18) }
+            on: timeline,
+            pause: timeline.pause
         )
     }
 

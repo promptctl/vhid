@@ -42,40 +42,46 @@ import Foundation
 /// number, a count is the signed byte the report carries. The wire admits values the
 /// device has no bit or count for - button 0 and 33 upward, and -128 - and vhidd
 /// refuses those by name rather than folding them. [LAW:parse-dont-validate]
+///
+/// **Every act carries its caller's deadline**, `by`, as nanoseconds of the Mac's uptime:
+/// the instant the client stops waiting, which means the same moment in both processes.
+/// vhidd runs the act by it and makes no limit of its own, so an act whose turn comes after
+/// its client gave up is refused with nothing sent, and a client told an act failed can
+/// rely on it never reaching the devices. [LAW:one-source-of-truth]
 @objc public protocol DeviceService {
     /// Holds `usage` down, and answers when the daemon has acknowledged the report.
     ///
     /// The reply is what makes the client's pacing possible, so it is not a fire-and-
     /// forget: `error` is nil when the report was acknowledged and carries the refusal
     /// otherwise. NSXPC has no throwing form, so the failure is the argument.
-    func down(usage: UInt16, reply: @escaping (Error?) -> Void)
+    func down(usage: UInt16, by deadline: UInt64, reply: @escaping (Error?) -> Void)
 
     /// Every key up, which is what a report of nothing held says.
-    func releaseAll(reply: @escaping (Error?) -> Void)
+    func releaseAll(by deadline: UInt64, reply: @escaping (Error?) -> Void)
 
     /// Holds exactly `usages` down, which may be none, and answers when the daemon has
     /// acknowledged the report. A non-empty set equal to the one the driver last
     /// acknowledged posts nothing and counts only as the client being alive; after a
     /// request that failed, the same set posts again. An empty set always posts, as
     /// `releaseAll` does.
-    func hold(usages: [UInt16], reply: @escaping (Error?) -> Void)
+    func hold(usages: [UInt16], by deadline: UInt64, reply: @escaping (Error?) -> Void)
 
     /// Holds mouse button `button`, 1 through 32, down.
-    func buttonDown(_ button: UInt8, reply: @escaping (Error?) -> Void)
+    func buttonDown(_ button: UInt8, by deadline: UInt64, reply: @escaping (Error?) -> Void)
 
     /// Every button up.
-    func releaseButtons(reply: @escaping (Error?) -> Void)
+    func releaseButtons(by deadline: UInt64, reply: @escaping (Error?) -> Void)
 
     /// Holds exactly the buttons whose bits are set in `buttons`, bit 0 for button 1,
     /// which may be none, and answers when the daemon has acknowledged the report. Always
     /// posts: buttons are not timed, so a repeat keeps nothing alive.
-    func holdButtons(_ buttons: UInt32, reply: @escaping (Error?) -> Void)
+    func holdButtons(_ buttons: UInt32, by deadline: UInt64, reply: @escaping (Error?) -> Void)
 
     /// Moves the pointer by `x` counts right and `y` counts down, buttons held as they are.
-    func move(x: Int8, y: Int8, reply: @escaping (Error?) -> Void)
+    func move(x: Int8, y: Int8, by deadline: UInt64, reply: @escaping (Error?) -> Void)
 
     /// Rolls the wheel: `vertical` positive away from the hand, `horizontal` positive right.
-    func scroll(vertical: Int8, horizontal: Int8, reply: @escaping (Error?) -> Void)
+    func scroll(vertical: Int8, horizontal: Int8, by deadline: UInt64, reply: @escaping (Error?) -> Void)
 }
 
 /// What a client is served: the device acts, and handing them back.
@@ -99,15 +105,19 @@ import Foundation
 /// first act is what is refused as busy. [LAW:single-enforcer]
 @objc public protocol HelperService: DeviceService {
     /// Releases every key and button this client left held, and frees the devices for the
-    /// next client. Every device act after it on this connection is refused.
+    /// next client. Every device act after it on this connection is refused. Answered with
+    /// the release's failure when it had one: the devices are then left held, and vhidd
+    /// releases them again on its own while nobody holds them.
     func leave(reply: @escaping (Error?) -> Void)
 
-    /// Which process holds the devices, as a pid, or nil when none does. Claims nothing and
-    /// sends no report, so asking it is never an act on the devices.
+    /// Who holds the devices: a pid, or nil and whether a client that went left them held
+    /// - a release that failed, which vhidd is still making. Claims nothing and sends no
+    /// report, so asking it is never an act on the devices.
     ///
     /// The answer is also the proof the devices are up: while they are down, this is
-    /// refused with the reason, as every act is.
-    func status(reply: @escaping (NSNumber?, Error?) -> Void)
+    /// refused with the reason, as every act is. It was `status(reply:)`, a pid alone,
+    /// renamed for the reason `layout` was.
+    func holding(reply: @escaping (NSNumber?, Bool, Error?) -> Void)
 
     /// The most recent failure this daemon had, as its words and when, or two nils when it
     /// has had none since it started. Claims nothing and is answered whether or not the
@@ -151,6 +161,22 @@ public extension NSXPCInterface {
         let interface = NSXPCInterface(with: HelperService.self)
         interface.setClasses(NSSet(objects: NSArray.self, NSNumber.self) as! Set<AnyHashable>, for: #selector(HelperService.layout(reply:)), argumentIndex: 0, ofReply: true)
         return interface
+    }
+}
+
+/// Who holds the devices, as the daemon answers it.
+public enum Holding: Sendable, Hashable {
+    /// Free, with nothing left down.
+    case nobody
+    /// The client with this pid holds them.
+    case client(pid: Int32)
+    /// Nobody holds them, and a client that went left keys or buttons down that its
+    /// release could not lift; vhidd is releasing them again.
+    case leftHeld
+
+    /// The pid of the client holding them, if one does.
+    public var pid: Int32? {
+        if case .client(let pid) = self { pid } else { nil }
     }
 }
 

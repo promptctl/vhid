@@ -1,4 +1,8 @@
 import Foundation
+import Pointing
+import TestClock
+import Testing
+import Time
 import ScreenSpace
 import ScreenSpaceTesting
 @testable import vhidd
@@ -13,22 +17,58 @@ extension Readiness {
     }
 }
 
-/// Devices that record every act and answer each with nil.
-final class RecordingDevices: NSObject, ServedDevices, @unchecked Sendable {
-    private let lock = NSLock()
-    private var acts: [String] = []
-    var done: [String] { lock.lock(); defer { lock.unlock() }; return acts }
-    private func note(_ act: String, _ reply: (Error?) -> Void) { lock.lock(); acts.append(act); lock.unlock(); reply(nil) }
-    func down(usage: UInt16, reply: @escaping (Error?) -> Void) { note("down \(usage)", reply) }
-    func releaseAll(reply: @escaping (Error?) -> Void) { note("release keys", reply) }
-    func hold(usages: [UInt16], reply: @escaping (Error?) -> Void) { note("hold \(usages)", reply) }
-    func buttonDown(_ button: UInt8, reply: @escaping (Error?) -> Void) { note("button \(button)", reply) }
-    func releaseButtons(reply: @escaping (Error?) -> Void) { note("release buttons", reply) }
-    func holdButtons(_ buttons: UInt32, reply: @escaping (Error?) -> Void) { note("hold buttons \(buttons)", reply) }
-    func move(x: Int8, y: Int8, reply: @escaping (Error?) -> Void) { note("move", reply) }
-    func scroll(vertical: Int8, horizontal: Int8, reply: @escaping (Error?) -> Void) { note("scroll", reply) }
-    func releaseKeysHeldPastLimit() -> KeysLetGo? { nil }
-    func releaseEverything(because reason: String) { lock.lock(); acts.append(reason); lock.unlock() }
+/// Devices that record every act they admit and every release they owe, in one log a test
+/// can wait on. Every release ends as `releasing` says: done, or left held.
+final class RecordingDevices: ServedDevices, @unchecked Sendable {
+    private let log = Watched<[String]>([])
+    private let releasing: Released
+    private let owed = Watched(false)
+
+    init(releasing: Released = Released(keyboard: nil, mouse: nil)) {
+        self.releasing = releasing
+    }
+
+    var done: [String] { log.current }
+    var leftHeld: Bool { owed.current }
+
+    /// Waits until the log reads `expected`, which a release on a connection's own queue
+    /// reaches only once what it frees is free.
+    @discardableResult
+    func await(_ expected: [String], sourceLocation: SourceLocation = #_sourceLocation) -> Bool {
+        log.wait("the devices to have done \(expected)", until: { $0 == expected }, sourceLocation: sourceLocation)
+    }
+
+    func act(_ act: Act, by deadline: Deadline, admitting admit: () throws -> Void) throws {
+        try log.withLock { log in
+            try admit()
+            log.append(Self.said(act))
+        }
+    }
+
+    func release(because reason: String, when owed: () -> Bool, then after: () -> Void) -> Released? {
+        log.withLock { log in
+            guard owed() else { return nil }
+            self.owed.withLock { $0 = releasing.failed }
+            after()
+            log.append(reason)
+            return releasing
+        }
+    }
+
+    func sweep(holding: () -> pid_t?) -> Swept? { nil }
+
+    private static func said(_ act: Act) -> String {
+        switch act {
+        case .down(let usage): "down \(usage.rawValue)"
+        case .releaseKeys: "release keys"
+        case .hold(let keys): "hold \(keys.usages.map(\.rawValue).sorted())"
+        case .buttonDown(let button): "button \(button.rawValue)"
+        case .releaseButtons: "release buttons"
+        case .holdButtons(let buttons): "hold buttons \(Button.field(buttons))"
+        case .move: "move"
+        case .scroll: "scroll"
+        }
+    }
 }
 
 /// A screen whose cursor is always at one place over one display, for seats whose tests

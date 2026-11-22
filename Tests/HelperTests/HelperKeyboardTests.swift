@@ -1,4 +1,5 @@
 import Foundation
+import Installations
 import Keystrokes
 import OwnThread
 import Pointing
@@ -27,6 +28,7 @@ import Time
         private let answer: Answer
         private let lock = NSLock()
         private var usages: [UInt16] = []
+        private var deadlines: [UInt64] = []
         private var pointing: [String] = []
         /// Replies never given, held so that a reply that was dropped rather than
         /// withheld cannot pass as the same thing.
@@ -45,6 +47,12 @@ import Time
         var asked: [UInt16] {
             lock.lock(); defer { lock.unlock() }
             return usages
+        }
+
+        /// The deadline each key-down carried, as the wire's nanoseconds of uptime.
+        var carried: [UInt64] {
+            lock.lock(); defer { lock.unlock() }
+            return deadlines
         }
 
         /// Every mouse call, in the wire's own integers.
@@ -70,25 +78,25 @@ import Time
             respond(reply)
         }
 
-        func down(usage: UInt16, reply: @escaping (Error?) -> Void) {
-            lock.lock(); usages.append(usage); lock.unlock()
+        func down(usage: UInt16, by deadline: UInt64, reply: @escaping (Error?) -> Void) {
+            lock.lock(); usages.append(usage); deadlines.append(deadline); lock.unlock()
             respond(reply)
         }
 
-        func releaseAll(reply: @escaping (Error?) -> Void) {
+        func releaseAll(by deadline: UInt64, reply: @escaping (Error?) -> Void) {
             respond(reply)
         }
 
-        func buttonDown(_ button: UInt8, reply: @escaping (Error?) -> Void) { note("button \(button)", reply) }
-        func releaseButtons(reply: @escaping (Error?) -> Void) { note("release", reply) }
-        func holdButtons(_ buttons: UInt32, reply: @escaping (Error?) -> Void) { note("hold buttons \(buttons)", reply) }
-        func hold(usages: [UInt16], reply: @escaping (Error?) -> Void) { note("hold \(usages.sorted())", reply) }
-        func move(x: Int8, y: Int8, reply: @escaping (Error?) -> Void) { note("move \(x) \(y)", reply) }
-        func scroll(vertical: Int8, horizontal: Int8, reply: @escaping (Error?) -> Void) { note("scroll \(vertical) \(horizontal)", reply) }
+        func buttonDown(_ button: UInt8, by deadline: UInt64, reply: @escaping (Error?) -> Void) { note("button \(button)", reply) }
+        func releaseButtons(by deadline: UInt64, reply: @escaping (Error?) -> Void) { note("release", reply) }
+        func holdButtons(_ buttons: UInt32, by deadline: UInt64, reply: @escaping (Error?) -> Void) { note("hold buttons \(buttons)", reply) }
+        func hold(usages: [UInt16], by deadline: UInt64, reply: @escaping (Error?) -> Void) { note("hold \(usages.sorted())", reply) }
+        func move(x: Int8, y: Int8, by deadline: UInt64, reply: @escaping (Error?) -> Void) { note("move \(x) \(y)", reply) }
+        func scroll(vertical: Int8, horizontal: Int8, by deadline: UInt64, reply: @escaping (Error?) -> Void) { note("scroll \(vertical) \(horizontal)", reply) }
         func leave(reply: @escaping (Error?) -> Void) { note("leave", reply) }
-        func status(reply: @escaping (NSNumber?, Error?) -> Void) {
-            lock.lock(); pointing.append("status"); lock.unlock()
-            respond { reply($0 == nil ? NSNumber(value: 41) : nil, $0) }
+        func holding(reply: @escaping (NSNumber?, Bool, Error?) -> Void) {
+            lock.lock(); pointing.append("holding"); lock.unlock()
+            respond { reply($0 == nil ? NSNumber(value: 41) : nil, false, $0) }
         }
         func lastFailure(reply: @escaping (String?, Date?) -> Void) { reply(failure.0, failure.1) }
         func cursor(reply: @escaping (Double, Double, Error?) -> Void) {
@@ -187,13 +195,33 @@ import Time
         #expect([NSXPCConnectionInvalid, NSXPCConnectionInterrupted].contains(code))
     }
 
-    /// `status` answers who holds the devices and is no act on them: the connection has
-    /// still not spoken, so a `leave` after it sends nothing.
-    @Test func statusAnswersTheHolderAndLeavesTheConnectionUnspoken() throws {
+    /// `holding` answers who holds the devices and is no act on them: the connection has
+    /// still not spoken, so a `leave` after it sends nothing. It was `status`, a pid alone,
+    /// and that name is gone, so a mismatched pair fails at the lookup.
+    @Test func holdingAnswersTheHolderAndLeavesTheConnectionUnspoken() throws {
         let (helper, far) = helper(.acknowledge)
-        #expect(try helper.status(by: .within(.seconds(5), on: ManualClock().timeline)) == 41)
+        #expect(try helper.holding(by: .within(.seconds(5), on: ManualClock().timeline)) == .client(pid: 41))
         try helper.leave()
-        #expect(far.service.pointed == ["status"])
+        #expect(far.service.pointed == ["holding"])
+        #expect(protocol_getMethodDescription(HelperService.self, NSSelectorFromString("statusWithReply:"), true, true).name == nil)
+    }
+
+    /// An act carries its deadline across the wire, as the uptime instant the client stops
+    /// waiting at: when it was asked, and the reply's limit after.
+    @Test func anActCarriesTheInstantItsClientStopsWaiting() throws {
+        let clock = ManualClock()
+        clock.advance(by: .seconds(7))
+        let (helper, far) = helper(.acknowledge, replyTimeout: .milliseconds(1500), clock: clock)
+        try helper.keyboard.down(.space)
+        #expect(far.service.carried == [Instant(sinceBoot: .milliseconds(8500)).nanoseconds])
+    }
+
+    /// vhidd saying it cannot tell whether an act reached the devices is no refusal: the
+    /// caller is told the outcome is unknown, in vhidd's words.
+    @Test func anActWhoseOutcomeVhiddCannotTellIsUnknownNotRefused() throws {
+        let (helper, far) = helper(.refuse(domain: Installation.refusalDomain, code: Installation.outcomeUnknownCode))
+        #expect(throws: HelperConnection.OutcomeUnknown(service: "ai.promptctl.vhid.tests.far", cause: .daemon("refused by the fake"))) { try helper.keyboard.down(.space) }
+        withExtendedLifetime(far) {}
     }
 
     @Test func theCursorIsReadAndLeavesTheConnectionUnspoken() throws {
@@ -224,9 +252,10 @@ import Time
         #expect(protocol_getMethodDescription(HelperService.self, #selector(HelperService.layout(reply:)), true, true).name != nil)
     }
 
-    /// A service that neither answers nor hangs up is unreachable at the deadline, rather
-    /// than a caller blocked for good. [LAW:no-ambient-temporal-coupling]
-    @Test func aServiceThatNeverAnswersIsUnreachableAtTheDeadline() throws {
+    /// An act a service neither answers nor hangs up on ends at its deadline, rather than
+    /// a caller blocked for good, and its outcome is unknown: the service may have done it.
+    /// [LAW:no-ambient-temporal-coupling]
+    @Test func anActAServiceNeverAnswersEndsAtTheDeadlineWithItsOutcomeUnknown() throws {
         let clock = ManualClock(), ended = Latch()
         let (helper, far) = helper(.never, replyTimeout: .milliseconds(200), clock: clock)
         nonisolated(unsafe) var said: (any Error)?
@@ -237,7 +266,7 @@ import Time
         far.service.reached.wait("the call to reach the far end")
         clock.advance(by: .milliseconds(200))
         try #require(ended.wait("the call to give up"))
-        #expect((said as? HelperConnection.Unreachable)?.cause == .silence(.milliseconds(200)))
+        #expect((said as? HelperConnection.OutcomeUnknown)?.cause == .silence(.milliseconds(200)))
         // Held to the deadline: a far end gone early is unreachable for the wrong reason,
         // and a test that cannot tell the two apart proves nothing.
         withExtendedLifetime(far) {}

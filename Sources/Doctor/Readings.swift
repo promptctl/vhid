@@ -1,4 +1,6 @@
+import Helper
 import Time
+
 /// The readings `vhid doctor` takes of this Mac, as values.
 ///
 /// [LAW:effects-at-boundaries] Nothing in this file reads anything. These are the shapes a
@@ -40,11 +42,11 @@ public enum JobStanding: String, Sendable, Hashable, CaseIterable {
 /// daemon that holds it and will not answer, a daemon that answers and refuses this
 /// binary's signature, and a daemon that answers.
 public enum DaemonReading: Sendable, Hashable {
-    /// The daemon answered, and said which process holds the devices, if any.
+    /// The daemon answered, and said who holds the devices.
     ///
     /// An answer is also the proof that both devices are up: while they are down the
     /// daemon refuses the call with the reason, which reads as `devicesDown`.
-    case answered(holder: Int32?)
+    case answered(Holding)
     /// The daemon answered, admitting this vhid, and said its devices are not up and why -
     /// an unapproved driver extension, usually. It keeps trying, and serves once they are.
     case devicesDown(reason: String)

@@ -76,6 +76,14 @@ public struct Timeline: Sendable {
         try await sleeper(instant)
     }
 
+    /// Blocks the calling thread for `span` of this timeline: a pause between attempts,
+    /// which a test timeline ends when it is moved past its end.
+    public func pause(for span: Duration) {
+        let condition = NSCondition(), over = Deadline.within(span, on: self)
+        condition.lock(); defer { condition.unlock() }
+        while over.wait(on: condition) {}
+    }
+
     /// One blocking wait toward `until`, as `init` describes.
     func block(until: Instant, waking wake: @escaping @Sendable () -> Void, _ sleep: (Duration) -> Bool) {
         blocker(until, wake, sleep)

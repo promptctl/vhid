@@ -17,6 +17,8 @@ import Testing
     enum Answer: Sendable {
         /// Admitted, and answers with this holder.
         case holder(Int32?)
+        /// Nobody holds them, and a release a client was owed failed.
+        case leftHeld
         /// Refuses the connection, as the daemon refuses a signature it does not admit.
         case refuseTheConnection
         /// Admitted, and never answers.
@@ -31,7 +33,7 @@ import Testing
         private let answer: Answer
         private let lock = NSLock()
         /// Replies withheld rather than dropped, so a dropped reply cannot pass as silence.
-        private var withheld: [(NSNumber?, Error?) -> Void] = []
+        private var withheld: [(NSNumber?, Bool, Error?) -> Void] = []
 
         init(_ answer: Answer) { self.answer = answer }
 
@@ -43,11 +45,12 @@ import Testing
             return true
         }
 
-        func status(reply: @escaping (NSNumber?, Error?) -> Void) {
+        func holding(reply: @escaping (NSNumber?, Bool, Error?) -> Void) {
             switch answer {
-            case .holder(let pid): reply(pid.map { NSNumber(value: $0) }, nil)
-            case .fail: reply(nil, NSError(domain: "fake", code: 7, userInfo: [NSLocalizedDescriptionKey: "refused by the fake"]))
-            case .devicesDown: reply(nil, NSError(domain: Installation.refusalDomain, code: Installation.devicesDownCode, userInfo: [NSLocalizedDescriptionKey: "devices not up: the driver is not activated"]))
+            case .holder(let pid): reply(pid.map { NSNumber(value: $0) }, false, nil)
+            case .leftHeld: reply(nil, true, nil)
+            case .fail: reply(nil, false, NSError(domain: "fake", code: 7, userInfo: [NSLocalizedDescriptionKey: "refused by the fake"]))
+            case .devicesDown: reply(nil, false, NSError(domain: Installation.refusalDomain, code: Installation.devicesDownCode, userInfo: [NSLocalizedDescriptionKey: "devices not up: the driver is not activated"]))
             case .never, .refuseTheConnection: lock.lock(); withheld.append(reply); lock.unlock(); reached.open()
             }
         }
@@ -60,14 +63,14 @@ import Testing
         func layout(reply: @escaping ([NSNumber], Error?) -> Void) { Issue.record("doctor read the layout"); reply([], nil) }
 
         // A status call is all doctor sends; any device act reaching here is a failure.
-        func down(usage: UInt16, reply: @escaping (Error?) -> Void) { Issue.record("doctor pressed a key"); reply(nil) }
-        func releaseAll(reply: @escaping (Error?) -> Void) { Issue.record("doctor released keys"); reply(nil) }
-        func hold(usages: [UInt16], reply: @escaping (Error?) -> Void) { Issue.record("doctor held keys"); reply(nil) }
-        func buttonDown(_ button: UInt8, reply: @escaping (Error?) -> Void) { Issue.record("doctor pressed a button"); reply(nil) }
-        func releaseButtons(reply: @escaping (Error?) -> Void) { Issue.record("doctor released buttons"); reply(nil) }
-        func holdButtons(_ buttons: UInt32, reply: @escaping (Error?) -> Void) { Issue.record("doctor held buttons"); reply(nil) }
-        func move(x: Int8, y: Int8, reply: @escaping (Error?) -> Void) { Issue.record("doctor moved the pointer"); reply(nil) }
-        func scroll(vertical: Int8, horizontal: Int8, reply: @escaping (Error?) -> Void) { Issue.record("doctor scrolled"); reply(nil) }
+        func down(usage: UInt16, by deadline: UInt64, reply: @escaping (Error?) -> Void) { Issue.record("doctor pressed a key"); reply(nil) }
+        func releaseAll(by deadline: UInt64, reply: @escaping (Error?) -> Void) { Issue.record("doctor released keys"); reply(nil) }
+        func hold(usages: [UInt16], by deadline: UInt64, reply: @escaping (Error?) -> Void) { Issue.record("doctor held keys"); reply(nil) }
+        func buttonDown(_ button: UInt8, by deadline: UInt64, reply: @escaping (Error?) -> Void) { Issue.record("doctor pressed a button"); reply(nil) }
+        func releaseButtons(by deadline: UInt64, reply: @escaping (Error?) -> Void) { Issue.record("doctor released buttons"); reply(nil) }
+        func holdButtons(_ buttons: UInt32, by deadline: UInt64, reply: @escaping (Error?) -> Void) { Issue.record("doctor held buttons"); reply(nil) }
+        func move(x: Int8, y: Int8, by deadline: UInt64, reply: @escaping (Error?) -> Void) { Issue.record("doctor moved the pointer"); reply(nil) }
+        func scroll(vertical: Int8, horizontal: Int8, by deadline: UInt64, reply: @escaping (Error?) -> Void) { Issue.record("doctor scrolled"); reply(nil) }
         func leave(reply: @escaping (Error?) -> Void) { Issue.record("doctor left"); reply(nil) }
     }
 
@@ -89,11 +92,16 @@ import Testing
     }
 
     @Test func aDaemonNobodyHoldsAnswersWithNoHolder() {
-        #expect(reading(.holder(nil)) == .answered(holder: nil))
+        #expect(reading(.holder(nil)) == .answered(.nobody))
     }
 
     @Test func aDaemonAnotherClientHoldsNamesItsPid() {
-        #expect(reading(.holder(41)) == .answered(holder: 41))
+        #expect(reading(.holder(41)) == .answered(.client(pid: 41)))
+    }
+
+    /// Devices a client left held are not free: the reading says so.
+    @Test func aDaemonLeftHeldSaysSo() {
+        #expect(reading(.leftHeld) == .answered(.leftHeld))
     }
 
     /// A refused connection is the signature, told apart from a service nobody holds.
@@ -163,7 +171,7 @@ import Testing
             defer { asked += 1 }
             return HelperConnection(connection: NSXPCConnection(listenerEndpoint: endpoints[asked]), service: "ai.promptctl.vhid.tests.far", timeline: timeline, replyTimeout: .seconds(5))
         }
-        #expect(read == .answered(holder: nil))
+        #expect(read == .answered(.nobody))
         withExtendedLifetime((refusing, answering, no, yes)) {}
     }
 }

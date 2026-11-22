@@ -44,16 +44,16 @@ import InputTesting
             reply(refuse ? refusal : nil)
         }
 
-        func down(usage: UInt16, reply: @escaping (Error?) -> Void) { respond(reply) }
-        func releaseAll(reply: @escaping (Error?) -> Void) { respond(reply) }
-        func hold(usages: [UInt16], reply: @escaping (Error?) -> Void) { respond(reply) }
-        func buttonDown(_ button: UInt8, reply: @escaping (Error?) -> Void) { respond(reply) }
-        func releaseButtons(reply: @escaping (Error?) -> Void) { respond(reply) }
-        func holdButtons(_ buttons: UInt32, reply: @escaping (Error?) -> Void) { respond(reply) }
-        func move(x: Int8, y: Int8, reply: @escaping (Error?) -> Void) { respond(reply) }
-        func scroll(vertical: Int8, horizontal: Int8, reply: @escaping (Error?) -> Void) { respond(reply) }
+        func down(usage: UInt16, by deadline: UInt64, reply: @escaping (Error?) -> Void) { respond(reply) }
+        func releaseAll(by deadline: UInt64, reply: @escaping (Error?) -> Void) { respond(reply) }
+        func hold(usages: [UInt16], by deadline: UInt64, reply: @escaping (Error?) -> Void) { respond(reply) }
+        func buttonDown(_ button: UInt8, by deadline: UInt64, reply: @escaping (Error?) -> Void) { respond(reply) }
+        func releaseButtons(by deadline: UInt64, reply: @escaping (Error?) -> Void) { respond(reply) }
+        func holdButtons(_ buttons: UInt32, by deadline: UInt64, reply: @escaping (Error?) -> Void) { respond(reply) }
+        func move(x: Int8, y: Int8, by deadline: UInt64, reply: @escaping (Error?) -> Void) { respond(reply) }
+        func scroll(vertical: Int8, horizontal: Int8, by deadline: UInt64, reply: @escaping (Error?) -> Void) { respond(reply) }
         func leave(reply: @escaping (Error?) -> Void) { respond(reply) }
-        func status(reply: @escaping (NSNumber?, Error?) -> Void) { respond { reply(nil, $0) } }
+        func holding(reply: @escaping (NSNumber?, Bool, Error?) -> Void) { respond { reply(nil, false, $0) } }
         func lastFailure(reply: @escaping (String?, Date?) -> Void) { reply(nil, nil) }
         func cursor(reply: @escaping (Double, Double, Error?) -> Void) { respond { reply(0, 0, $0) } }
         func layout(reply: @escaping ([NSNumber], Error?) -> Void) { reply([1, 0, 0, 1920, 1080, 1].map { NSNumber(value: $0) }, nil) }
@@ -162,16 +162,16 @@ private final class Unanswered: NSXPCConnection, HelperService, @unchecked Senda
 
     override func resume() {}
 
-    func down(usage: UInt16, reply: @escaping (Error?) -> Void) {}
-    func releaseAll(reply: @escaping (Error?) -> Void) {}
-    func hold(usages: [UInt16], reply: @escaping (Error?) -> Void) {}
-    func buttonDown(_ button: UInt8, reply: @escaping (Error?) -> Void) {}
-    func releaseButtons(reply: @escaping (Error?) -> Void) {}
-    func holdButtons(_ buttons: UInt32, reply: @escaping (Error?) -> Void) {}
-    func move(x: Int8, y: Int8, reply: @escaping (Error?) -> Void) {}
-    func scroll(vertical: Int8, horizontal: Int8, reply: @escaping (Error?) -> Void) {}
+    func down(usage: UInt16, by deadline: UInt64, reply: @escaping (Error?) -> Void) {}
+    func releaseAll(by deadline: UInt64, reply: @escaping (Error?) -> Void) {}
+    func hold(usages: [UInt16], by deadline: UInt64, reply: @escaping (Error?) -> Void) {}
+    func buttonDown(_ button: UInt8, by deadline: UInt64, reply: @escaping (Error?) -> Void) {}
+    func releaseButtons(by deadline: UInt64, reply: @escaping (Error?) -> Void) {}
+    func holdButtons(_ buttons: UInt32, by deadline: UInt64, reply: @escaping (Error?) -> Void) {}
+    func move(x: Int8, y: Int8, by deadline: UInt64, reply: @escaping (Error?) -> Void) {}
+    func scroll(vertical: Int8, horizontal: Int8, by deadline: UInt64, reply: @escaping (Error?) -> Void) {}
     func leave(reply: @escaping (Error?) -> Void) {}
-    func status(reply: @escaping (NSNumber?, Error?) -> Void) {}
+    func holding(reply: @escaping (NSNumber?, Bool, Error?) -> Void) {}
     func lastFailure(reply: @escaping (String?, Date?) -> Void) {}
     func cursor(reply: @escaping (Double, Double, Error?) -> Void) {}
     func layout(reply: @escaping ([NSNumber], Error?) -> Void) {}
