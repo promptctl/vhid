@@ -36,10 +36,10 @@ enum Help {
     static let x = "the x coordinate, in " + place
     static let y = "the y coordinate, in " + place
     /// A place as a command line writes one.
-    static let targetForm = "a point as two numbers, x y, or a box as one word, x,y,width,height - the box eyes prints beside each point - in " + place
+    static let targetForm = "a point as two numbers, x y, or one word, x,y, or a box as one word, x,y,width,height - the point and the box look prints for each run - in " + place + "; one no display shows is refused"
     static let target = "where: " + targetForm
     /// A box as a tool takes one.
-    static let box = "a box to press a point inside, as x,y,width,height in " + place + ": the box eyes prints beside each point. Given instead of x and y"
+    static let box = "a box to press a point inside, as x,y,width,height in " + place + ": the box look prints for each run. Given instead of x and y"
     static let text = "the text to type: anything the keyboard layout has keys for, dead-key sequences and line breaks included"
     static let chords = "the chords, pressed in order"
     static let layout = "the keyboard layout to read keys off, by input source id, e.g. com.apple.keylayout.Dvorak; left out, the calling user's own layout, or US English when the system reports none. Name it when the Mac is at the login window or another user is in front, whose layout the caller cannot see"
@@ -164,11 +164,13 @@ enum Help {
 
     /// What a box does to a pointer verb, said once for all four. [LAW:one-source-of-truth]
     static let aim = """
-        Given a point, it presses that point. Given a box - the one eyes prints beside each \
-        point - it presses a point drawn inside it, spread about the centre as a person's clicks \
-        spread on a target and never within \(Int(Target.margin)) points of its edge, or at its centre \
-        when a side is too narrow for that, and the move \
-        takes as long as a hand's would to a target that size.
+        Given a point, it presses that point. Given a box - the one look prints for each run - \
+        it presses inside the largest part of it one display shows, at least a point a side, at \
+        a point drawn inside that part, spread about the centre as a person's clicks spread on a \
+        target and never within \(Int(Target.margin)) points of its edge, or at its centre when a \
+        side is too narrow for that, and the move takes as long as a hand's would to a target \
+        that size. The displays are read once when it starts, sleeping ones included, and a \
+        point or a box no display shows is refused, saying it is on no display.
         """
 
     static let script = "the script, as JSON Lines: the start line, then one act a line"
@@ -198,9 +200,15 @@ enum Help {
         the start - so every press and release lands where the script says, and later lines wait for \
         as long as that took. A cursor that will not get there stops the play at that line.
 
-        A finished play answers {"done":{"reports":…,"start_reports":…,"late_us":{"p50":…,"p90":…,"p99":…,"max":…}}}: \
-        how many reports went out, how many the pointer took to reach the start, and how late \
-        they went out in microseconds, sent minus scheduled. A late report is sent late, never \
+        The start and every at point are placed on the displays as they are when the play begins, \
+        sleeping ones included, and a script with a point no display shows is refused at its line \
+        before anything is sent.
+
+        A finished play answers {"done":{"reports":…,"start_reports":…,"late_us":{"p50":…,"p90":…,"p99":…,"max":…},"layout":…}}: \
+        how many reports went out, how many the pointer took to reach the start, how late \
+        they went out in microseconds, sent minus scheduled, and whether the displays, read again \
+        once the last report was out, are laid out as the script was placed on them: kept, \
+        changed, or unread with layout_unread saying why. A late report is sent late, never \
         skipped. A play that stops releases every key and button and fails, saying how many \
         reports went out before it did.
         """, commandLine: ["""
@@ -221,14 +229,17 @@ enum Help {
         Prints the script on stdout when the recording stops: Control-C stops it and the \
         Control-C is not in it; SIGTERM stops it and drops nothing; an hour stops it, the \
         longest a script plays. Keys are recorded as the physical keys held, the pointer as \
-        at points, and anything vhid itself sends while recording is left out.
+        at points, and anything vhid itself sends while recording is left out. Every point is \
+        placed on the displays as vhid play places it, sleeping ones included, so a move to a \
+        point no display shows is left out and counted, and a change of the displays while \
+        recording is counted.
 
         The tap runs in vhid-record.app, which needs Input Monitoring: the first run is \
         refused and lists it in System Settings > Privacy & Security > Input Monitoring, \
         where it is switched on once. Refused while another process holds the devices, and \
         while Karabiner-Elements is running, whose keys come through vhid's driver and \
         could not be told from vhid's.
-        """, commandLine: ["Notes, such as key presses with no HID usage left out, go to stderr."])
+        """, commandLine: ["Notes, such as key presses with no HID usage left out, go to stderr; the record says how the recording ended and what it left out."])
 
     static let gestureName = "the gesture, by what it does"
 
