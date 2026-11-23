@@ -1,36 +1,41 @@
 ---
 name: look-click-look
-description: Operate apps on this Mac through its real screen, keyboard and mouse - find a button or text with the eyes tools, click, type or press keys with the vhid tools, then look again to see what changed. Use when the user asks to click something, type into a field, press a shortcut, or read what an app, window or dialog shows ("click the Save button in TextEdit", "type my name into that field", "press Command-S", "what does the alert say"), including at the lock screen, the login window or a password prompt.
+description: Operate apps on this Mac through its real screen, keyboard and mouse - find a button or text with `look`, click, type or press keys, then look again to see what changed. Use when the user asks to click something, type into a field, press a shortcut, or read what an app, window or dialog shows ("click the Save button in TextEdit", "type my name into that field", "press Command-S", "what does the alert say"), including at the lock screen, the login window or a password prompt.
 ---
 
 # Look, act, look again
 
-vhid and eyes are two MCP servers that work as a pair. eyes reads the screen: what is in front, and where text is. vhid drives a virtual keyboard and mouse that macOS takes for hardware. A client with only one of them is half the pair; both come with vhid, served by `vhid mcp` and `eyes mcp`.
+vhid is one MCP server that sees the screen and drives a virtual keyboard and mouse that macOS takes for hardware. `look` reads the screen: the displays, the windows front to back, and the text in a place, with the point `click` takes for each run. `type`, `press`, `gesture`, `click`, `move`, `scroll` and `drag` act through the devices, and `play` runs a timed script of them.
 
-Every point either server prints or takes is the same screen point. The point eyes `find` prints is the point vhid `click` takes, as printed: no scaling, no offset, negative on a display left of or above the main one. From 0.5.0, beside each point, eyes prints a box around the text that holds the point, as x,y,width,height in the same points: the form eyes' `rect` takes, and vhid `click`, `move` and `scroll` take it too, as `box`, and `drag` as `from` or `to`, pressing a point drawn inside it as a hand lands somewhere on a button rather than on its exact centre.
+Every point a tool prints or takes is the same screen point. The point `look` prints beside a run is the point `click` takes, as printed: no scaling, no offset, negative on a display left of or above the main one. Beside each point `look` prints a box, the part of the text a display shows, as x,y,width,height in the same points: the form `look`'s `rect` takes, and `click`, `move` and `scroll` take it too, as `box`, and `drag` as `from` or `to`, pressing a point drawn inside it as a hand lands somewhere on a button rather than on its exact centre. A point or a box no display shows is refused.
 
-Neither server decides anything. `click` presses whatever is at the point it is given, `type` types into whatever has keyboard focus, and `find` reports what is on screen, not whether an act did what was meant. So work in a loop:
+No tool decides anything. `click` presses whatever is at the point it is given, `type` types into whatever has keyboard focus, and `look` reports what is on screen, not whether an act did what was meant. So work in a loop:
 
-1. Look with eyes: `windows` for what is in front, `find` for where the text is.
-2. Act with vhid on what you saw.
-3. Look again at the same place. `find` with `until` and a `timeout` waits for the change; do not sleep and retry.
+1. Look: `look` with no arguments for what is in front, with `text` for where the text is.
+2. Act on what you saw.
+3. Look again at the same place. `look` with `text`, `until` and a `timeout` waits for the change; do not sleep and retry.
 
 Done means a look after the act showed the change. An act's answer says the act happened, not what it did.
 
 ## Each step
 
-1. **Look.** `windows` says what is in front and which app is frontmost. `find` with
-   the text you want says where it is - `{"text": "Save"}`. Named no place, it reads the
-   app in front, or the app behind your own terminal when that is in front, and its first
-   line names which; narrow it with `window`, or pass `display` to read every app there. `read` gives every run of
-   text in a window in reading order, for when you do not yet know what to look for.
+1. **Look.** `look` with no arguments answers in three blocks: the displays, the windows
+   front to back with the frontmost app's rows marked `front`, then the text read in what
+   is in front - one call for what is in front and what it shows. `look` with the text
+   you want says where it is - `{"text": "Save"}` - and answers its rows alone. Named no
+   place, it reads the app in front, or the app behind your own terminal when that is in
+   front, and its scope line names which; narrow it with `window`, name another app with
+   `app`, exactly as the windows block lists it, or pass `display` to read every app
+   there. With a place and no text, the third block is every run of text there in reading
+   order, for when you do not yet know what to look for; a place it could not read says
+   `No text was read:` and why.
    Each row is the point, the box around the run, the text, and what it is: the
    element's role, such as `AXButton` or `AXLink`, or `pixels` for text drawn with no
    element behind it - then what else the element says, such as `description Add` on a
-   button drawn "+". `find` matches those words too, and `role` keeps one kind of
+   button drawn "+". `text` matches those words too, and `role` keeps one kind of
    element: `{"text": "Add", "role": "AXButton"}` is the Add button, not a label
-   reading Add. `read` with a `role` lists every button and what each is called.
-   A first line that says `in the part read of` stopped short of the place: its match
+   reading Add. `role` with no text lists every button and what each is called.
+   A scope line that says `in the part read of` stopped short of the place: its match
    may not be the one meant and its not found proves nothing. The rest of the line says
    why. A smaller place gets past `stopped after` or `stopped at … elements`, `source: tree`
    past `role_unknown`, and a reader that `could not look` needs its grant. `unanswered` is
@@ -41,14 +46,14 @@ Done means a look after the act showed the change. An act's answer says the act 
    When the same label appears several times, such as a Remove button on every row,
    `near` orders the matches by the text beside each, so `{"text": "Remove", "near":
    "Beta"}` puts the Remove in Beta's row first.
-2. **Act** on what you saw: `click` the box `find` printed, as `box`, or its point; `type` or `press` once
+2. **Act** on what you saw: `click` the box `look` printed, as `box`, or its point; `type` or `press` once
    the field or window that should receive the keys is in front. Unsure what a point would
-   press? `hit` with the same `x` and `y` names the app, the window and the element a click
-   there lands on, with what holds it - the button around a label - and says when that app
-   is your own terminal or one behind the app in front.
-3. **Look again** at the same place. `find` the result you expected - the dialog's
+   press? `look` with the same `x` and `y` and nothing else names the app, the window and
+   the element a click there lands on, with what holds it - the button around a label - and
+   says when that app is your own terminal or one behind the app in front.
+3. **Look again** at the same place. `look` for the result you expected - the dialog's
    title, the new text, the button gone. To wait for it, pass `until` (`present` or
-   `absent`) and a `timeout`, which re-reads until it happens.
+   `absent`) and a `timeout` with the `text`, which re-reads until it happens.
 
 A `click` that answered "clicked left once at (812, 604) after 1 motion report" is an
 act that happened, not an outcome: the press landed on that point, and what sat there
@@ -60,9 +65,9 @@ shows it.
 
 Keys go wherever the keyboard is focused: another app's window, a chat, a terminal
 that runs what it receives. Before `type` or any `press` that edits, confirm with
-`windows` that the app you mean is frontmost, click into the field first when focus
+`look` that the app you mean is frontmost, click into the field first when focus
 could be anywhere else, and pass that app as `into`, copied from the frontmost
-application `windows` printed. With `into`, the tool checks the app is still in front just before the first
+application the windows block names (`Frontmost: TextEdit (pid 512)` is `TextEdit`). With `into`, the tool checks the app is still in front just before the first
 key and refuses, sending nothing, when something else came forward; look again rather
 than retrying blind. `into` checks the app, not the field, and a panel of another
 process over it can still hold the keys. If you cannot confirm where the keys will
@@ -73,17 +78,20 @@ land, say so instead of typing.
 Each refusal names its reason and the step that fixes it. Pass that on to the user;
 do not route around it.
 
-- A vhid tool refused, or `doctor` says `not ready`: the row that is not met names
-  the step. A driver extension is turned on only by the person at the Mac, under
-  System Settings > General > Login Items & Extensions.
-- `find` or `read` says a reader could not look: call `grants`. It names the app
-  macOS charges Accessibility and Screen Recording to - the terminal running Claude
-  Code, or whichever app started it. Tell the user to switch that app on under System
-  Settings > Privacy & Security; a grant switched on counts from the next call.
+- A tool that types, presses or moves the pointer refused, or `doctor` says `not ready`:
+  the row that is not met names the step. A driver extension is turned on only by the
+  person at the Mac, under System Settings > General > Login Items & Extensions.
+- `look` says a reader could not look: call `doctor`. Its last rows say whether
+  Accessibility and Screen Recording are granted and name the app macOS charges them to -
+  the terminal running Claude Code, or whichever app started it. Tell the user to switch
+  that app on under System Settings > Privacy & Security; a grant switched on counts from
+  the next call.
+- `look` refuses arguments that do not go together, naming them (`exact needs text, the
+  text to find`): change the call as it says.
 - A tool says an argument is not one it takes: the installed vhid is older than this
   skill, which comes from vhid's newest release. Tell the user; `brew upgrade --cask
   promptctl/tap/vhid` brings that release.
-- `find` matched nothing: it lists the nearest runs and how many edits off each is.
+- `look` matched nothing: it lists the nearest runs and how many edits off each is.
   A misread one edit away is still the thing you were looking for.
 
 You will be stuck at some point - a reader without its grant, a click refused - and
@@ -96,23 +104,27 @@ its step.
 ## Shape of a run
 
 ```
-eyes windows                         -> 4521  TextEdit  L0  ...  front: a save sheet on it
-eyes find {"text": "Save", "exact": true, "window": 4521}
-                                     -> 812,604	790,594,44,20	Save	AXButton
-vhid click {"x": 812, "y": 604}      -> clicked left once at (812, 604) after 1 motion report
-eyes find {"text": "Save", "exact": true, "window": 4521,
-           "until": "absent", "timeout": 5}
+look {}                              -> 1 display, main first. ...
+                                        1	main	0,0,1512,982	2x
+
+                                        6 windows, front to back. ... Frontmost: TextEdit (pid 512), its rows marked front. ...
+                                        4521	TextEdit	L0	412,180,620,440	front    a save sheet on it
+
+                                        (a scope line, then) 812,604	790,594,44,20	Save	AXButton
+click {"x": 812, "y": 604}           -> clicked left once at (812, 604) after 1 motion report
+look {"text": "Save", "exact": true, "window": 4521,
+      "until": "absent", "timeout": 5}
                                      -> absent after 2 reads in 0.6s: the sheet changed
-eyes read {"window": 4521}           -> the title bar reads notes.txt, no sheet: saved
+look {"window": 4521}                -> the title bar reads notes.txt, no sheet: saved
 ```
 
 The sheet going shows only that something changed: Cancel, or a "Replace?" sheet over
-it, makes Save go too. The `read` after it is the look that shows the file saved.
+it, makes Save go too. The look at the window after it is the look that shows the file saved.
 
 Not this:
 
 ```
-vhid click {"x": 812, "y": 604}      -> clicked left once at (812, 604) after 1 motion report
+click {"x": 812, "y": 604}           -> clicked left once at (812, 604) after 1 motion report
 "Clicked Save."                       (no look before, no look after:
                                       nobody knows what was pressed)
 ```
