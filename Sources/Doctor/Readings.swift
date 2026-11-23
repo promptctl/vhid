@@ -1,3 +1,6 @@
+import Helper
+import Time
+
 /// The readings `vhid doctor` takes of this Mac, as values.
 ///
 /// [LAW:effects-at-boundaries] Nothing in this file reads anything. These are the shapes a
@@ -39,11 +42,11 @@ public enum JobStanding: String, Sendable, Hashable, CaseIterable {
 /// daemon that holds it and will not answer, a daemon that answers and refuses this
 /// binary's signature, and a daemon that answers.
 public enum DaemonReading: Sendable, Hashable {
-    /// The daemon answered, and said which process holds the devices, if any.
+    /// The daemon answered, and said who holds the devices.
     ///
     /// An answer is also the proof that both devices are up: while they are down the
     /// daemon refuses the call with the reason, which reads as `devicesDown`.
-    case answered(holder: Int32?)
+    case answered(Holding)
     /// The daemon answered, admitting this vhid, and said its devices are not up and why -
     /// an unapproved driver extension, usually. It keeps trying, and serves once they are.
     case devicesDown(reason: String)
@@ -67,6 +70,9 @@ public enum DaemonReading: Sendable, Hashable {
     /// into the nearest of them: a reading this build cannot classify is shown as what it
     /// said. [LAW:no-silent-failure]
     case failed(reason: String)
+    /// The reading's limit had passed before the daemon could be asked, spent by what was
+    /// read before it, so it was not asked. Says nothing of the daemon. [LAW:no-silent-failure]
+    case unasked(Deadline.Exceeded)
 
     /// Whether a daemon is known to have started, and so to have had its chance to file
     /// Keyboard Setup Assistant's answer - which it does first, before it reaches the
@@ -82,7 +88,7 @@ public enum DaemonReading: Sendable, Hashable {
     public var daemonHasStarted: Bool {
         switch self {
         case .answered, .devicesDown, .refusedThisVhid: true
-        case .unreachable, .silent, .failed: false
+        case .unreachable, .silent, .failed, .unasked: false
         }
     }
 
@@ -95,7 +101,7 @@ public enum DaemonReading: Sendable, Hashable {
     public var someoneHoldsTheService: Bool {
         switch self {
         case .answered, .devicesDown, .refusedThisVhid, .silent: true
-        case .unreachable, .failed: false
+        case .unreachable, .failed, .unasked: false
         }
     }
 }

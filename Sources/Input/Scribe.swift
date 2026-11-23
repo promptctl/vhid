@@ -1,3 +1,4 @@
+import Time
 import Keystrokes
 
 /// Makes a planned run's changes, each at its time, and keeps the score a stopped run has to
@@ -16,22 +17,22 @@ import Keystrokes
 public struct Scribe {
     public let keyboard: any Keyboard
     /// What every key is timed on.
-    public let timeline: Timeline
+    public let clock: Clock
     /// Where every wait is handed once it ends, however it ends. [LAW:nothing-unseen]
     public let traced: @Sendable (Pause) -> Void
 
     /// When the run started, which every change's time is measured from.
-    private let start: Duration
+    private let start: Instant
     /// How far behind its plan this run is: every report that went out late, behind a slow
     /// acknowledgement of the one before or a sleep that woke late, moves every report
     /// after it by as much, so a hold or a settle is never shortened to make up the time.
     public private(set) var slip: Duration = .zero
 
-    public init(keyboard: any Keyboard, timeline: Timeline, traced: @escaping @Sendable (Pause) -> Void) {
+    public init(keyboard: any Keyboard, clock: Clock, traced: @escaping @Sendable (Pause) -> Void) {
         self.keyboard = keyboard
-        self.timeline = timeline
+        self.clock = clock
         self.traced = traced
-        start = timeline.now()
+        start = clock.now()
     }
 
     /// Characters and chords posted and acknowledged. "Posted and acknowledged", not
@@ -75,9 +76,9 @@ public struct Scribe {
     /// comes forward next, which is worse than what stopping prevents.
     private mutating func make(_ change: Cadence.Change, isolation: isolated (any Actor)? = #isolation) async throws {
         let due = start + change.at + slip
-        try await timeline.pause(until: due) { traced(Pause(kind: .keys(change.wait), length: $0)) }
+        try await clock.pause(until: due) { traced(Pause(kind: .keys(change.wait), length: $0)) }
         try Task.checkCancellation()
-        slip += max(timeline.now() - due, .zero)
+        slip += max(clock.now() - due, .zero)
         // Recorded between the cancellation check and the report, and cleared after the
         // character's last key-down comes back. The two failures are not the same thing and
         // must not report the same thing: a report that throws may still have reached the

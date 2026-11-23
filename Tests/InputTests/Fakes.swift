@@ -7,6 +7,7 @@ import TestClock
 import ScreenSpace
 import ScreenSpaceTesting
 import InputTesting
+import Time
 
 /// A keyboard that records what it was asked to do and refuses after a given number of
 /// calls, so a run can be stopped at any point inside a character.
@@ -168,7 +169,7 @@ final class FakeMouse: Mouse {
     var pointer: Pointer { pointer(on: ManualClock()) }
 
     /// That pointer timed on `clock`, for a test that reads the time back.
-    func pointer(on clock: ManualClock) -> Pointer { Pointer(mouse: self, cursor: cursor, clock: clock, randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in }) }
+    func pointer(on clock: ManualClock) -> Pointer { Pointer(mouse: self, cursor: cursor, clock: Clock(clock), randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in }) }
 
     /// A keyboard beside this mouse, posting into the same log under the same `refused`, so
     /// a run over both devices reads back as one sequence and can be refused at any report
@@ -215,7 +216,7 @@ final class CancellingKeyboard: Keyboard {
 extension Scribe {
     /// A scribe on `keyboard` timed on `clock`.
     static func on(_ keyboard: any Keyboard, clock: ManualClock = ManualClock()) -> Scribe {
-        Scribe(keyboard: keyboard, timeline: Timeline(clock), traced: { _ in })
+        Scribe(keyboard: keyboard, clock: Clock(clock), traced: { _ in })
     }
 
     /// Types `text`, a typist's run of it planned from seed 1.
@@ -228,7 +229,7 @@ extension Scribe {
 extension Typist {
     /// A typist on `keyboard` timed on `clock`, its timings drawn from `seed`.
     static func on(_ keyboard: any Keyboard, clock: ManualClock = ManualClock(), seed: UInt64 = 1, traced: @escaping @Sendable (Typist.Traced) -> Void = { _ in }) -> Typist {
-        Typist(keyboard: keyboard, clock: clock, randomness: RandomSource(seed: seed), traced: traced)
+        Typist(keyboard: keyboard, clock: Clock(clock), randomness: RandomSource(seed: seed), traced: traced)
     }
 }
 
@@ -262,7 +263,7 @@ final class SteadyGainMouse: Mouse {
         }
     }
 
-    var pointer: Pointer { Pointer(mouse: self, cursor: { self.position }, clock: ManualClock(), randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in }) }
+    var pointer: Pointer { Pointer(mouse: self, cursor: { self.position }, clock: Clock(ManualClock()), randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in }) }
 }
 
 

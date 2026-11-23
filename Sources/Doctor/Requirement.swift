@@ -367,6 +367,7 @@ public extension Requirement {
         case .unreachable: "nothing holds the service"
         case .silent: "the service is held, and nothing answered"
         case .failed: "the call failed"
+        case .unasked: "not asked"
         }
     }
 
@@ -401,6 +402,11 @@ public extension Requirement {
             The daemon's log for the same moment:
                 \(daemonLog(installation, last: "10m"))
             """
+        case .unasked(let exceeded):
+            """
+            The daemon was not asked: the reading's limit of \(exceeded.limit) had passed
+            \(exceeded.spent.milliseconds) ms in, on the rows above: run doctor again.
+            """
         }
     }
 }
@@ -421,7 +427,7 @@ public extension Requirement {
         case .refusedThisVhid: Requirement(row: .signature, reads: reads, step: refusedStep(installation))
         // [LAW:no-silent-failure] Unmet rather than met or dropped: nothing was read, so
         // nothing may be claimed, and the step names the row in the way.
-        case .unreachable, .silent, .failed: Requirement(row: .signature, reads: reads, waitsOn: .daemon)
+        case .unreachable, .silent, .failed, .unasked: Requirement(row: .signature, reads: reads, waitsOn: .daemon)
         }
     }
 
@@ -429,7 +435,7 @@ public extension Requirement {
         switch reading {
         case .answered, .devicesDown: "admitted"
         case .refusedThisVhid: "refused: vhidd ended this vhid's connection"
-        case .unreachable, .silent, .failed: "not asked"
+        case .unreachable, .silent, .failed, .unasked: "not asked"
         }
     }
 
@@ -459,23 +465,33 @@ public extension Requirement {
     static func devices(_ reading: DaemonReading) -> Requirement {
         let reads = devicesReads(reading)
         return switch reading {
-        case .answered(nil): Requirement(row: .devices, reads: reads, step: nil)
-        case .answered(let holder?): Requirement(row: .devices, reads: reads, step: heldStep(holder))
+        case .answered(.nobody): Requirement(row: .devices, reads: reads, step: nil)
+        case .answered(.client(let holder)): Requirement(row: .devices, reads: reads, step: heldStep(holder))
+        case .answered(.stuck): Requirement(row: .devices, reads: reads, step: stuckStep)
         // The daemon refused to say, and it refused on the signature: that row is what
         // stands in the way, not the daemon's.
         case .refusedThisVhid: Requirement(row: .devices, reads: reads, waitsOn: .signature)
-        case .devicesDown, .unreachable, .silent, .failed: Requirement(row: .devices, reads: reads, waitsOn: .daemon)
+        case .devicesDown, .unreachable, .silent, .failed, .unasked: Requirement(row: .devices, reads: reads, waitsOn: .daemon)
         }
     }
 
     private static func devicesReads(_ reading: DaemonReading) -> String {
         switch reading {
-        case .answered(nil): "free"
-        case .answered(let holder?): "held by pid \(holder)"
+        case .answered(.nobody): "free"
+        case .answered(.client(let holder)): "held by pid \(holder)"
+        case .answered(.stuck): "keys or buttons stuck"
         case .devicesDown: "not up"
-        case .refusedThisVhid, .unreachable, .silent, .failed: "not asked"
+        case .refusedThisVhid, .unreachable, .silent, .failed, .unasked: "not asked"
         }
     }
+
+    /// Not free: what a client left down stays down until vhidd's own release of it lands,
+    /// and a verb from here would act with it held.
+    private static let stuckStep = """
+        a client that went left keys or buttons down that vhidd could not
+        release, and vhidd releases them again while nobody holds the devices.
+        If this stays, the driver is not answering: see vhidd's log for why.
+        """
 
     private static func heldStep(_ holder: Int32) -> String {
         """

@@ -1,3 +1,4 @@
+import Time
 import ChildProcess
 import ArgumentParser
 import Dispatch
@@ -223,14 +224,14 @@ enum Tools {
 
     /// Where the cursor is, as the daemon reads it in the session in front.
     static let cursor: VerbTool = VerbTool(Help.cursor, readOnly: true, []) { _, installation in
-        try await CursorCommand.cursor(Devices.cursor(HelperConnection(installation: installation), on: DeviceQueue()))
+        try await CursorCommand.cursor(Devices.cursor(HelperConnection(installation: installation, clock: Vhid.clock), on: DeviceQueue()))
     }
 
     /// `vhid doctor` as a tool. A Mac that is not ready is an answer and not a failure of
     /// the call, so it comes back as what the verb prints, whose first line says it.
     static func doctor(grants: @escaping @Sendable () async throws -> String = { try await GrantsVerb.answer() }) -> VerbTool {
         VerbTool(Help.doctor, readOnly: true, []) { _, installation in
-            DoctorCommand.doctor(try await reading { Readiness.read(for: installation, stoppedBy: $0) },
+            DoctorCommand.doctor(try await reading(within: Command.limit, on: Vhid.clock) { Readiness.read(for: installation, by: $0, or: $1) },
                                  grants: try await DoctorCommand.grants(grants))
         }
     }

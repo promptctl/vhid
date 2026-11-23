@@ -3,6 +3,8 @@ import DriverExtension
 import Foundation
 import Helper
 import OwnThread
+import TestClock
+import Time
 import Testing
 import VirtualHID
 @testable import vhidd
@@ -66,7 +68,7 @@ import VirtualHID
         #expect(refusal(readiness) == "devices not up: \(DaemonError.closed)\nThe driver extension could not be read: systemextensionsctl list exited 1")
     }
 
-    /// The step named is the one for the driver as it reads when the act is refused, with
+    /// The step named is the one for the driver as it reads when the request is refused, with
     /// nothing told in between: a person who asked for the activation is told of the
     /// switch on their next call, and one who turned it on is told of no step, with the
     /// failure standing all the while.
@@ -98,9 +100,9 @@ import VirtualHID
         #expect(refusal(readiness) == (try naming(.disabled, after: .failed(DaemonError.closed))))
     }
 
-    /// The driver is read to refuse an act and for nothing else: what is done only on
+    /// The driver is read to refuse a request and for nothing else: what is done only on
     /// devices that are up - the sweep for keys held too long, a release - reads none,
-    /// and nor does an act that is served.
+    /// and nor does a request that is served.
     @Test func theDriverIsReadOnlyToRefuse() throws {
         var read = 0
         let readiness = Readiness(driver: { read += 1; return .awaitingApproval })
@@ -167,21 +169,28 @@ import VirtualHID
 
 /// A client refused while a tool that reads the driver never exits is still answered, at
 /// the tool's limit: with why the devices are not up, and that the driver could not be
-/// read, naming the tool and the limit. A suite of its own because it waits the limit out.
+/// read, naming the tool and the limit. The limit passes when the test moves the clock,
+/// once the tool is running.
 @Suite(.ownThread) struct StuckDriverReadTests {
-    @Test(.timeLimit(.minutes(1))) func aDriverReadThatNeverReturnsStillAnswersTheRefusedClient() throws {
+    @Test func aDriverReadThatNeverReturnsStillAnswersTheRefusedClient() throws {
+        let clock = ManualClock(), running = try Fifo(), ended = Latch()
         let readiness = Readiness(driver: {
-            _ = try Command("/bin/sleep", "600").run(by: .within(.milliseconds(200), or: .never))
+            _ = try Command("/bin/sh", "-c", "echo > \(running.path); exec sleep 600").run(by: .within(.milliseconds(200), on: Clock(clock)), or: .never)
             return .running
         })
         _ = readiness.begin()
         readiness.failed(DaemonError.closed)
-        let began = ContinuousClock.now
-        let refused = #expect(throws: Readiness.Refused.self) { try readiness.devices() }
-        #expect(ContinuousClock.now - began < .seconds(5))
+        nonisolated(unsafe) var answered: Result<Void, any Error>?
+        Thread.detachNewThread {
+            answered = Result { _ = try readiness.devices() }
+            ended.open()
+        }
+        try #require(running.said() != nil)
+        clock.advance(by: .milliseconds(200))
+        try #require(ended.wait("the refused client to be answered"))
+        let refused = #expect(throws: Readiness.Refused.self) { try answered?.get() }
         let said = try #require(refused?.description)
-        #expect(said.hasPrefix("devices not up: \(DaemonError.closed)\nThe driver extension could not be read: `sleep 600` had not ended "))
-        #expect(said.hasSuffix(" after it was started, at the limit of 0.2 seconds, and was given up on"))
+        #expect(said.hasPrefix("devices not up: \(DaemonError.closed)\nThe driver extension could not be read: `sh -c echo > \(running.path); exec sleep 600` had not ended 0.2 seconds after it was started, at the limit of 0.2 seconds, and was given up on"))
     }
 
     /// The reading is given up on before the client it is taken for stops listening, with

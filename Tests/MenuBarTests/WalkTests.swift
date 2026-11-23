@@ -7,7 +7,7 @@ import Testing
 /// The set-up walk over readings a test chooses: which page each Mac gets, and what the
 /// walk remembers of the person. [LAW:behavior-not-structure]
 @Suite struct WalkTests {
-    static func readiness(driver: DriverState, daemon: DaemonReading = .answered(holder: nil)) -> Readiness {
+    static func readiness(driver: DriverState, daemon: DaemonReading = .answered(.nobody)) -> Readiness {
         Readiness(installation: .development, driver: .success(driver), job: .success(.holdingTheService), daemon: daemon,
                   keyboardSetupAssistantAnswered: .success(true))
     }
@@ -35,7 +35,7 @@ import Testing
     /// Skipping moves to the next unmet row; skipping the last shows the summary with it
     /// set aside; revisiting brings it back.
     @Test func skippingAndRevisiting() {
-        let readiness = Self.readiness(driver: .awaitingApproval, daemon: .answered(holder: 7))
+        let readiness = Self.readiness(driver: .awaitingApproval, daemon: .answered(.client(pid: 7)))
         var walk = Walk()
         guard case .step(let first, 2) = walk.page(readiness) else { Issue.record("expected two steps"); return }
         #expect(first.row == .driverExtension)

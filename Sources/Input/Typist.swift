@@ -1,3 +1,4 @@
+import Time
 import KeyboardLayouts
 import Keystrokes
 
@@ -20,7 +21,7 @@ import Keystrokes
 public struct Typist {
     public let keyboard: any Keyboard
     /// What every key is timed on. [LAW:effects-at-boundaries]
-    public let timeline: Timeline
+    public let clock: Clock
     /// What every key's timing is drawn from: the devices' one source, so a verb's keys and
     /// moves draw again from the one seed on its record.
     public let randomness: RandomSource
@@ -39,10 +40,10 @@ public struct Typist {
         case ran(late: Duration, rollovers: Int, hesitations: [Duration])
     }
 
-    public init<C: Clock>(keyboard: any Keyboard, clock: C, randomness: RandomSource, cadence: Cadence = .typist,
-                          traced: @escaping @Sendable (Traced) -> Void) where C.Duration == Duration {
+    public init(keyboard: any Keyboard, clock: Clock, randomness: RandomSource, cadence: Cadence = .typist,
+                traced: @escaping @Sendable (Traced) -> Void) {
         self.keyboard = keyboard
-        timeline = Timeline(clock)
+        self.clock = clock
         self.randomness = randomness
         self.cadence = cadence
         self.traced = traced
@@ -50,7 +51,7 @@ public struct Typist {
 
     /// A scribe for one run, timed from now.
     private var scribe: Scribe {
-        Scribe(keyboard: keyboard, timeline: timeline, traced: { [traced] in traced(.paused($0)) })
+        Scribe(keyboard: keyboard, clock: clock, traced: { [traced] in traced(.paused($0)) })
     }
 
     /// Text proven typeable: every character has keys on the layout.

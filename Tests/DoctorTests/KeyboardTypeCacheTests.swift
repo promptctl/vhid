@@ -29,7 +29,7 @@ import Testing
     /// The KSA row a person would see for this reading, from the whole list.
     private func row(_ path: String) throws -> Requirement {
         let list = Readiness(installation: .development, driver: .success(.running), job: .success(.holdingTheService),
-                             daemon: .answered(holder: nil), keyboardSetupAssistantAnswered: Result { try answered(path) })
+                             daemon: .answered(.nobody), keyboardSetupAssistantAnswered: Result { try answered(path) })
         return try #require(list.requirements.first { $0.name == Requirement.Row.keyboardSetupAssistant.rawValue })
     }
 

@@ -1,5 +1,7 @@
 import Foundation
 import OwnThread
+import TestClock
+import Time
 import Testing
 @testable import Doctor
 @testable import Helper
@@ -15,6 +17,8 @@ import Testing
     enum Answer: Sendable {
         /// Admitted, and answers with this holder.
         case holder(Int32?)
+        /// Nobody holds them, and a release a client was owed failed.
+        case stuck
         /// Refuses the connection, as the daemon refuses a signature it does not admit.
         case refuseTheConnection
         /// Admitted, and never answers.
@@ -29,7 +33,7 @@ import Testing
         private let answer: Answer
         private let lock = NSLock()
         /// Replies withheld rather than dropped, so a dropped reply cannot pass as silence.
-        private var withheld: [(NSNumber?, Error?) -> Void] = []
+        private var withheld: [(NSNumber?, Bool, Error?) -> Void] = []
 
         init(_ answer: Answer) { self.answer = answer }
 
@@ -41,51 +45,63 @@ import Testing
             return true
         }
 
-        func status(reply: @escaping (NSNumber?, Error?) -> Void) {
+        func holding(reply: @escaping (NSNumber?, Bool, Error?) -> Void) {
             switch answer {
-            case .holder(let pid): reply(pid.map { NSNumber(value: $0) }, nil)
-            case .fail: reply(nil, NSError(domain: "fake", code: 7, userInfo: [NSLocalizedDescriptionKey: "refused by the fake"]))
-            case .devicesDown: reply(nil, NSError(domain: Installation.refusalDomain, code: Installation.devicesDownCode, userInfo: [NSLocalizedDescriptionKey: "devices not up: the driver is not activated"]))
-            case .never, .refuseTheConnection: lock.lock(); withheld.append(reply); lock.unlock()
+            case .holder(let pid): reply(pid.map { NSNumber(value: $0) }, false, nil)
+            case .stuck: reply(nil, true, nil)
+            case .fail: reply(nil, false, NSError(domain: "fake", code: 7, userInfo: [NSLocalizedDescriptionKey: "refused by the fake"]))
+            case .devicesDown: reply(nil, false, NSError(domain: Installation.refusalDomain, code: Installation.devicesDownCode, userInfo: [NSLocalizedDescriptionKey: "devices not up: the driver is not activated"]))
+            case .never, .refuseTheConnection: lock.lock(); withheld.append(reply); lock.unlock(); reached.open()
             }
         }
+
+        /// Opened when a status reply is withheld: the call has reached the far end.
+        let reached = Latch()
 
         func lastFailure(reply: @escaping (String?, Date?) -> Void) { Issue.record("doctor asked for the last failure"); reply(nil, nil) }
         func cursor(reply: @escaping (Double, Double, Error?) -> Void) { Issue.record("doctor read the cursor"); reply(0, 0, nil) }
         func layout(reply: @escaping ([NSNumber], Error?) -> Void) { Issue.record("doctor read the layout"); reply([], nil) }
 
         // A status call is all doctor sends; any device act reaching here is a failure.
-        func down(usage: UInt16, reply: @escaping (Error?) -> Void) { Issue.record("doctor pressed a key"); reply(nil) }
-        func releaseAll(reply: @escaping (Error?) -> Void) { Issue.record("doctor released keys"); reply(nil) }
-        func hold(usages: [UInt16], reply: @escaping (Error?) -> Void) { Issue.record("doctor held keys"); reply(nil) }
-        func buttonDown(_ button: UInt8, reply: @escaping (Error?) -> Void) { Issue.record("doctor pressed a button"); reply(nil) }
-        func releaseButtons(reply: @escaping (Error?) -> Void) { Issue.record("doctor released buttons"); reply(nil) }
-        func holdButtons(_ buttons: UInt32, reply: @escaping (Error?) -> Void) { Issue.record("doctor held buttons"); reply(nil) }
-        func move(x: Int8, y: Int8, reply: @escaping (Error?) -> Void) { Issue.record("doctor moved the pointer"); reply(nil) }
-        func scroll(vertical: Int8, horizontal: Int8, reply: @escaping (Error?) -> Void) { Issue.record("doctor scrolled"); reply(nil) }
+        func down(usage: UInt16, by deadline: UInt64, reply: @escaping (Error?) -> Void) { Issue.record("doctor pressed a key"); reply(nil) }
+        func releaseAll(by deadline: UInt64, reply: @escaping (Error?) -> Void) { Issue.record("doctor released keys"); reply(nil) }
+        func hold(usages: [UInt16], by deadline: UInt64, reply: @escaping (Error?) -> Void) { Issue.record("doctor held keys"); reply(nil) }
+        func buttonDown(_ button: UInt8, by deadline: UInt64, reply: @escaping (Error?) -> Void) { Issue.record("doctor pressed a button"); reply(nil) }
+        func releaseButtons(by deadline: UInt64, reply: @escaping (Error?) -> Void) { Issue.record("doctor released buttons"); reply(nil) }
+        func holdButtons(_ buttons: UInt32, by deadline: UInt64, reply: @escaping (Error?) -> Void) { Issue.record("doctor held buttons"); reply(nil) }
+        func move(x: Int8, y: Int8, by deadline: UInt64, reply: @escaping (Error?) -> Void) { Issue.record("doctor moved the pointer"); reply(nil) }
+        func scroll(vertical: Int8, horizontal: Int8, by deadline: UInt64, reply: @escaping (Error?) -> Void) { Issue.record("doctor scrolled"); reply(nil) }
         func leave(reply: @escaping (Error?) -> Void) { Issue.record("doctor left"); reply(nil) }
     }
 
     /// Reads a far end answering as told. The listener holds its delegate weakly, so both
     /// are held here until the reading is taken.
-    private func reading(_ answer: Answer, invalidated: Bool = false, replyTimeout: Duration = .seconds(20)) -> DaemonReading {
+    ///
+    /// On a test clock nothing moves, so a reading answered is never a silence however
+    /// slowly the far end answers.
+    private func reading(_ answer: Answer, invalidated: Bool = false, by deadline: Deadline = .within(.seconds(5), on: Clock(ManualClock()))) -> DaemonReading {
         let far = FarEnd(answer)
         let listener = NSXPCListener.anonymous()
         listener.delegate = far
         listener.resume()
         if invalidated { listener.invalidate() }
-        let helper = { HelperConnection(connection: NSXPCConnection(listenerEndpoint: listener.endpoint), service: "ai.promptctl.vhid.tests.far", replyTimeout: replyTimeout) }
-        let read = DaemonProbe.reading(helper)
+        let helper = { HelperConnection(connection: NSXPCConnection(listenerEndpoint: listener.endpoint), service: "ai.promptctl.vhid.tests.far", clock: deadline.clock, replyTimeout: .seconds(5)) }
+        let read = DaemonProbe.reading(by: deadline, helper)
         withExtendedLifetime((far, listener)) {}
         return read
     }
 
     @Test func aDaemonNobodyHoldsAnswersWithNoHolder() {
-        #expect(reading(.holder(nil)) == .answered(holder: nil))
+        #expect(reading(.holder(nil)) == .answered(.nobody))
     }
 
     @Test func aDaemonAnotherClientHoldsNamesItsPid() {
-        #expect(reading(.holder(41)) == .answered(holder: 41))
+        #expect(reading(.holder(41)) == .answered(.client(pid: 41)))
+    }
+
+    /// Devices with keys or buttons stuck are not free: the reading says so.
+    @Test func aDaemonWithKeysStuckSaysSo() {
+        #expect(reading(.stuck) == .answered(.stuck))
     }
 
     /// A refused connection is the signature, told apart from a service nobody holds.
@@ -98,9 +114,35 @@ import Testing
         guard case .unreachable = read else { Issue.record("read \(read)"); return }
     }
 
-    @Test func aDaemonThatNeverAnswersIsSilentAtTheDeadline() {
-        let read = reading(.never, replyTimeout: .milliseconds(200))
-        guard case .silent = read else { Issue.record("read \(read)"); return }
+    @Test func aDaemonThatNeverAnswersIsSilentAtTheDeadline() throws {
+        let clock = ManualClock(), far = FarEnd(.never), listener = NSXPCListener.anonymous(), ended = Latch()
+        listener.delegate = far
+        listener.resume()
+        let deadline = Deadline.within(.milliseconds(200), on: Clock(clock))
+        nonisolated(unsafe) var read: DaemonReading?
+        Thread.detachNewThread {
+            read = DaemonProbe.reading(by: deadline) { HelperConnection(connection: NSXPCConnection(listenerEndpoint: listener.endpoint), service: "ai.promptctl.vhid.tests.far", clock: Clock(clock), replyTimeout: .seconds(5)) }
+            ended.open()
+        }
+        far.reached.wait("the status call to reach the far end")
+        clock.advance(by: .milliseconds(200))
+        try #require(ended.wait("the reading to give up"))
+        guard case .silent = read else { Issue.record("read \(String(describing: read))"); return }
+        withExtendedLifetime((far, listener)) {}
+    }
+
+    /// A reading whose limit the rows before it spent asks the daemon nothing, and says so
+    /// with the limit and how far in it was: not a silence, which would send a person to a
+    /// daemon's log for an answer it was never asked for.
+    @Test func aReadingWhoseLimitHasPassedAsksNothing() {
+        let clock = ManualClock()
+        let deadline = Deadline.within(.seconds(30), on: Clock(clock))
+        clock.advance(by: .seconds(31))
+        let read = DaemonProbe.reading(by: deadline) {
+            Issue.record("a connection was made")
+            return HelperConnection(connection: NSXPCConnection(machServiceName: "ai.promptctl.vhid.tests.nobody"), service: "ai.promptctl.vhid.tests.nobody", clock: Clock(clock), replyTimeout: .seconds(5))
+        }
+        #expect(read == .unasked(Deadline.Exceeded(limit: .seconds(30), spent: .seconds(31))))
     }
 
     /// A daemon listening without its devices is read by its code, carrying why.
@@ -124,11 +166,12 @@ import Testing
         refusing.resume(); answering.resume()
         let endpoints = [refusing.endpoint, answering.endpoint]
         var asked = 0
-        let read = DaemonProbe.reading {
+        let clock = Clock(ManualClock())
+        let read = DaemonProbe.reading(by: .within(.seconds(5), on: clock)) {
             defer { asked += 1 }
-            return HelperConnection(connection: NSXPCConnection(listenerEndpoint: endpoints[asked]), service: "ai.promptctl.vhid.tests.far", replyTimeout: .seconds(20))
+            return HelperConnection(connection: NSXPCConnection(listenerEndpoint: endpoints[asked]), service: "ai.promptctl.vhid.tests.far", clock: clock, replyTimeout: .seconds(5))
         }
-        #expect(read == .answered(holder: nil))
+        #expect(read == .answered(.nobody))
         withExtendedLifetime((refusing, answering, no, yes)) {}
     }
 }

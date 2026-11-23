@@ -2,89 +2,50 @@ import Foundation
 import Installations
 import Keystrokes
 import OwnThread
+import TestClock
+import Time
 import Testing
 @testable import Helper
 @testable import vhidd
 
 /// The listener as a client meets it: the real `Listener` on an anonymous listener in this
 /// process, with a requirement this process satisfies, and devices of the test's own
-/// behind it. Every client is admitted; the first to act holds the devices, a second's
-/// act is refused while it does, and the first going away releases everything and frees
+/// behind it. Every client's connection is accepted; the first to send a command holds the
+/// devices, a second's command is refused while it does, and the first going away releases everything and frees
 /// them. A client that only asks who holds them takes nothing.
 /// [LAW:behavior-not-structure]
 @Suite(.ownThread) struct ListenerTests {
-    /// The devices served: remember what they were asked, and say when they were released.
-    private final class FakeDevices: NSObject, ServedDevices, @unchecked Sendable {
-        private let lock = NSLock()
-        private var usages: [UInt16] = []
-        private var reasons: [String] = []
-        private let released = DispatchSemaphore(value: 0)
-
-        var asked: [UInt16] {
-            lock.lock(); defer { lock.unlock() }
-            return usages
-        }
-
-        var releasedBecause: [String] {
-            lock.lock(); defer { lock.unlock() }
-            return reasons
-        }
-
-        func down(usage: UInt16, reply: @escaping (Error?) -> Void) {
-            lock.lock(); usages.append(usage); lock.unlock()
-            reply(nil)
-        }
-
-        func releaseAll(reply: @escaping (Error?) -> Void) { reply(nil) }
-        func hold(usages: [UInt16], reply: @escaping (Error?) -> Void) { reply(nil) }
-        func buttonDown(_ button: UInt8, reply: @escaping (Error?) -> Void) { reply(nil) }
-        func releaseButtons(reply: @escaping (Error?) -> Void) { reply(nil) }
-        func holdButtons(_ buttons: UInt32, reply: @escaping (Error?) -> Void) { reply(nil) }
-        func move(x: Int8, y: Int8, reply: @escaping (Error?) -> Void) { reply(nil) }
-        func scroll(vertical: Int8, horizontal: Int8, reply: @escaping (Error?) -> Void) { reply(nil) }
-
-        func releaseKeysHeldPastLimit() -> KeysLetGo? { nil }
-        func releaseEverything(because reason: String) {
-            lock.lock(); reasons.append(reason); lock.unlock()
-            released.signal()
-        }
-
-        /// Blocks until the release or ten seconds. Ten because the bound only ends a hang:
-        /// at two, CI missed the release on both attempts of run 36336822361
-        /// (vhid-ci-flake-80e).
-        func awaitRelease() -> Bool {
-            released.wait(timeout: .now() + .seconds(10)) == .success
-        }
-    }
-
     /// The far end as one thing a test holds: the listener holds its delegate weakly, so
     /// a delegate held by nothing is gone before the first connection.
     private struct Served {
         let listener: NSXPCListener
         let delegate: Listener
-        let devices: FakeDevices
+        let devices: RecordingDevices
+        /// The one clock its clients and its seats share, never moved: no request's deadline
+        /// passes here.
+        let clock: ManualClock
     }
 
-    private func serve(requiring requirement: String? = nil) throws -> Served {
-        let devices = FakeDevices()
-        let delegate = Listener(readiness: .serving(devices), callers: try CallerIdentity(requirement: try requirement ?? OwnProcess.requirement()), screen: FixedScreen())
+    private func serve(requiring requirement: String? = nil, releasing: Released = Released(keyboard: nil, mouse: nil)) throws -> Served {
+        let (devices, clock) = (RecordingDevices(releasing: releasing), ManualClock())
+        let delegate = Listener(readiness: .serving(devices), callers: try CallerIdentity(requirement: try requirement ?? OwnProcess.requirement()), screen: FixedScreen(), clock: Clock(clock))
         let listener = NSXPCListener.anonymous()
         listener.delegate = delegate
         listener.resume()
-        return Served(listener: listener, delegate: delegate, devices: devices)
+        return Served(listener: listener, delegate: delegate, devices: devices, clock: clock)
     }
 
     /// A client, with its connection alongside so the test can end it the way a client
     /// going away does.
     private func client(of served: Served) -> (helper: HelperConnection, connection: NSXPCConnection) {
         let connection = NSXPCConnection(listenerEndpoint: served.listener.endpoint)
-        return (HelperConnection(connection: connection, service: "ai.promptctl.vhid.tests.far", replyTimeout: .seconds(20)), connection)
+        return (HelperConnection(connection: connection, service: "ai.promptctl.vhid.tests.far", clock: Clock(served.clock), replyTimeout: .seconds(5)), connection)
     }
 
     /// Whether a fresh client pressing `usage` was served. A client refused as busy hears
     /// the daemon's own refusal; anything else it hears is not an answer to this, and is
     /// thrown.
-    private func admitted(_ served: Served, pressing usage: Usage) throws -> Bool {
+    private func isServed(_ served: Served, pressing usage: Usage) throws -> Bool {
         do {
             try client(of: served).helper.keyboard.down(usage)
             return true
@@ -99,41 +60,23 @@ import Testing
         let first = client(of: served)
         let keyboard = first.helper.keyboard
         try keyboard.down(.leftShift)
-        #expect(served.devices.asked == [Usage.leftShift.rawValue])
-        #expect(try admitted(served, pressing: .space) == false)
-        #expect(served.devices.asked == [Usage.leftShift.rawValue])
+        #expect(served.devices.done == ["down 225"])
+        #expect(try isServed(served, pressing: .space) == false)
+        #expect(served.devices.done == ["down 225"])
         withExtendedLifetime((served, first)) {}
     }
 
     /// The first client going away releases everything, and the devices are then another
-    /// client's. The release comes before the devices are let go, and the test can see
-    /// only the first of the two, so the next client's admission is asked for, a beat apart,
-    /// until it comes or ten seconds have passed - each ask itself bounded by the client's
-    /// own reply timeout.
-    @Test func aClientGoingAwayReleasesEverythingAndFreesTheDevices() async throws {
+    /// client's. The release and the free are one step under the devices' lock, so once
+    /// the release is in the log the next client is served on its first try.
+    @Test func aClientGoingAwayReleasesEverythingAndFreesTheDevices() throws {
         let served = try serve()
         let first = client(of: served)
-        let keyboard = first.helper.keyboard
-        try keyboard.down(.leftShift)
-        let left = ContinuousClock.now
+        try first.helper.keyboard.down(.leftShift)
         first.connection.invalidate()
-        let released = served.devices.awaitRelease()
-        // How long the release took and why, printed whether or not it passes: on CI this
-        // test has run for six seconds, and which of that is the release is the question
-        // vhid-ci-flake-80e is open on. [LAW:nothing-unseen]
-        let seen = "release after \(ContinuousClock.now - left), because \(served.devices.releasedBecause)"
-        print("ListenerTests: \(seen)")
-        #expect(released, "\(seen)")
-        #expect(served.devices.releasedBecause.first == "a client went away", "\(seen)")
-
-        let deadline = ContinuousClock.now + .seconds(10)
-        var next = try admitted(served, pressing: .space)
-        while !next, ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(50))
-            next = try admitted(served, pressing: .space)
-        }
-        #expect(next, "no client was admitted after the first went away")
-        #expect(served.devices.asked == [Usage.leftShift.rawValue, Usage.space.rawValue])
+        try #require(served.devices.await(["down 225", "a client went away"]))
+        #expect(try isServed(served, pressing: .space))
+        #expect(served.devices.done == ["down 225", "a client went away", "down 44"])
         withExtendedLifetime((served, first)) {}
     }
 
@@ -148,47 +91,46 @@ import Testing
         let (leaver, keyboard) = (first.helper, first.helper.keyboard)
         try keyboard.down(.leftShift)
         try leaver.leave()
-        #expect(served.devices.releasedBecause == ["a client left"])
+        #expect(served.devices.done == ["down 225", "a client left"])
 
         let second = client(of: served)
         let next = second.helper.keyboard
         try next.down(.space)
-        #expect(served.devices.asked == [Usage.leftShift.rawValue, Usage.space.rawValue])
+        #expect(served.devices.done == ["down 225", "a client left", "down 44"])
 
         #expect(throws: (any Error).self) { try keyboard.down(.tab) }
-        #expect(served.devices.asked == [Usage.leftShift.rawValue, Usage.space.rawValue])
+        #expect(served.devices.done == ["down 225", "a client left", "down 44"])
 
         first.connection.invalidate()
         // The ending runs on the connection's own queue, so it is waited for the only way
         // the far end shows it: the next thing the holder serves comes after it.
         try next.down(.tab)
-        #expect(served.devices.releasedBecause == ["a client left"], "the leaver's ending released the next client's keys")
+        #expect(served.devices.done == ["down 225", "a client left", "down 44", "down 43"], "the leaver's ending released the next client's keys")
         withExtendedLifetime((served, first, second)) {}
     }
 
     /// A client asking who holds the devices is answered with the holder's pid, and takes
-    /// nothing from it: the holder goes on acting, and a third client's act is still
-    /// refused as the holder's. Before anyone acts, nobody holds them.
-    @Test func statusAnswersTheHolderWithoutTakingTheDevices() throws {
+    /// nothing from it: the holder goes on sending, and a third client's command is still
+    /// refused as the holder's. Before anyone sends one, nobody holds them.
+    @Test func holdingAnswersTheHolderWithoutTakingTheDevices() throws {
         let served = try serve()
         let asker = client(of: served).helper
-        #expect(try asker.status() == nil)
+        #expect(try asker.holding(by: .within(.seconds(5), on: asker.clock)) == .nobody)
 
         let first = client(of: served)
         let keyboard = first.helper.keyboard
         try keyboard.down(.leftShift)
-        #expect(try asker.status() == getpid())
+        #expect(try asker.holding(by: .within(.seconds(5), on: asker.clock)) == .client(pid: getpid()))
 
         try keyboard.down(.space)
-        #expect(served.devices.asked == [Usage.leftShift.rawValue, Usage.space.rawValue])
-        #expect(try admitted(served, pressing: .tab) == false)
-        #expect(served.devices.releasedBecause.isEmpty)
+        #expect(try isServed(served, pressing: .tab) == false)
+        #expect(served.devices.done == ["down 225", "down 44"])
         withExtendedLifetime((served, first)) {}
     }
 
-    /// An act after `leave` is refused, and does not take the devices back: nobody holds
+    /// A command after `leave` is refused, and does not acquire the devices back: nobody holds
     /// them afterwards.
-    @Test func anActAfterLeavingTakesNothingBack() throws {
+    @Test func aCommandAfterLeavingAcquiresNothing() throws {
         let served = try serve()
         let first = client(of: served)
         let (leaver, keyboard) = (first.helper, first.helper.keyboard)
@@ -197,8 +139,23 @@ import Testing
         let refused = #expect(throws: HelperConnection.Refused.self) { try keyboard.down(.tab) }
         #expect(refused?.domain == Installation.refusalDomain)
         #expect(refused?.reason == "\(Seat.Ended())")
-        #expect(try leaver.status() == nil)
-        #expect(served.devices.asked == [Usage.leftShift.rawValue])
+        #expect(try leaver.holding(by: .within(.seconds(5), on: leaver.clock)) == .nobody)
+        #expect(served.devices.done == ["down 225", "a client left"])
+        withExtendedLifetime((served, first)) {}
+    }
+
+    /// A client whose keys vhidd could not release hears it when it leaves, in vhidd's
+    /// words, and the next to ask reads the devices as stuck: not free, though nobody
+    /// holds them.
+    @Test func aClientWhoseReleaseFailedHearsItAndTheDevicesReadStuck() throws {
+        let failed = Released(keyboard: "the driver did not answer", mouse: nil)
+        let served = try serve(releasing: failed)
+        let first = client(of: served)
+        try first.helper.keyboard.down(.leftShift)
+        let refused = #expect(throws: HelperConnection.Refused.self) { try first.helper.leave() }
+        #expect(refused?.reason == "\(Stuck(released: failed))")
+        let asker = client(of: served).helper
+        #expect(try asker.holding(by: .within(.seconds(5), on: asker.clock)) == .stuck)
         withExtendedLifetime((served, first)) {}
     }
 
@@ -208,7 +165,7 @@ import Testing
     @Test func aCallerOutsideTheRequirementHearsAnInterruptedConnection() throws {
         let served = try serve(requiring: #"identifier "ai.promptctl.vhid.tests.nobody""#)
         let asker = client(of: served).helper
-        let refused = #expect(throws: HelperConnection.Unreachable.self) { try asker.status() }
+        let refused = #expect(throws: HelperConnection.Unreachable.self) { try asker.holding(by: .within(.seconds(5), on: asker.clock)) }
         guard case .connection(let domain, let code, _) = refused?.cause else {
             Issue.record("refused for another cause: \(String(describing: refused))")
             return

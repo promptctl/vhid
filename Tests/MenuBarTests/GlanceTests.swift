@@ -21,7 +21,7 @@ import Testing
     /// Ready is doctor's ready, and every row is doctor's row in doctor's words between
     /// which copy this is and the daemon's last failure.
     @Test func aWorkingMacIsReadyAndShowsDoctorsRows() {
-        let readiness = Self.readiness(daemon: .answered(holder: nil))
+        let readiness = Self.readiness(daemon: .answered(.nobody))
         let glance = Glance(installation: .development, readiness: readiness, lastFailure: .success(nil), readAt: Self.at)
         #expect(glance.ready)
         #expect(glance.rows.map(\.mark) == [.about] + Array(repeating: .met, count: readiness.requirements.count) + [.met])
@@ -41,7 +41,7 @@ import Testing
 
     /// Who holds the devices is doctor's Devices row.
     @Test func theHolderIsNamed() {
-        let glance = Glance(installation: .development, readiness: Self.readiness(daemon: .answered(holder: 4242)),
+        let glance = Glance(installation: .development, readiness: Self.readiness(daemon: .answered(.client(pid: 4242))),
                             lastFailure: .success(nil), readAt: Self.at)
         #expect(glance.rows.contains { $0.title == "Devices: held by pid 4242" })
     }
@@ -50,7 +50,7 @@ import Testing
     /// of it the title has room for.
     @Test func aFailureRowCarriesItsWholeText() {
         let words = String(repeating: "the keyboard would not release ", count: 8) + "\nsecond line"
-        let glance = Glance(installation: .development, readiness: Self.readiness(daemon: .answered(holder: nil)),
+        let glance = Glance(installation: .development, readiness: Self.readiness(daemon: .answered(.nobody)),
                             lastFailure: .success(DaemonFailure(text: words, at: Self.at)), readAt: Self.at)
         let row = glance.rows.last!
         #expect(row.mark == .error)
@@ -62,7 +62,7 @@ import Testing
 
     /// The installed copy has no badge; any other names itself by its last word.
     @Test func onlyTheInstalledCopyGoesUnbadged() {
-        let readiness = Self.readiness(daemon: .answered(holder: nil))
+        let readiness = Self.readiness(daemon: .answered(.nobody))
         func badge(_ installation: Installation) -> String? {
             Glance(installation: installation, readiness: readiness, lastFailure: .success(nil), readAt: Self.at).badge
         }

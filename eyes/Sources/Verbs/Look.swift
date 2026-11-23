@@ -1,3 +1,4 @@
+import Time
 import AppKit
 import ArgumentParser
 import CoreGraphics
@@ -66,8 +67,8 @@ extension SourceKind: ExpressibleByArgument {
     @MainActor var reader: any Reader {
         switch self {
         case .tree: TreeReader(granted: Self.granted)
-        case .pixels: PixelReader(granted: Self.granted, hit: TreeReader.hit)
-        case .merged: MergedReader(TreeReader(granted: Self.granted), PixelReader(granted: Self.granted, hit: TreeReader.hit), locate: { try $0.bounds(on: $1) })
+        case .pixels: PixelReader(granted: Self.granted, hit: TreeReader.hit, clock: .suspending)
+        case .merged: MergedReader(TreeReader(granted: Self.granted), PixelReader(granted: Self.granted, hit: TreeReader.hit, clock: .suspending), locate: { try $0.bounds(on: $1) })
         }
     }
 

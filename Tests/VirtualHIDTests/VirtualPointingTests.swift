@@ -1,7 +1,9 @@
 import Foundation
 import Pointing
 import OwnThread
+import TestClock
 import Testing
+import Time
 @testable import VirtualHID
 
 /// A daemon that answers every request and, once the pointing device is initialized,
@@ -15,9 +17,13 @@ import Testing
     }
 }
 
-private func mouse(on fake: FakeDaemon, reportTimeout: Duration = .seconds(2)) throws -> VirtualPointing {
-    VirtualPointing(daemon: try DaemonConnection(fileDescriptor: fake.clientDescriptor), reportTimeout: reportTimeout)
+/// A mouse over `fake`, its waits on `clock`.
+private func mouse(on fake: FakeDaemon, _ clock: ManualClock) throws -> VirtualPointing {
+    VirtualPointing(daemon: try DaemonConnection(fileDescriptor: fake.clientDescriptor, clock: Clock(clock)))
 }
+
+/// A deadline nothing in the test reaches, on a clock nothing moves.
+private func unhurried(_ clock: ManualClock) -> Deadline { .within(.seconds(2), on: Clock(clock)) }
 
 /// The pointing reports the device actually put on the wire, in order.
 private func pointingReports(_ fake: FakeDaemon) -> [[UInt8]] {
@@ -29,22 +35,27 @@ private func pointingReports(_ fake: FakeDaemon) -> [[UInt8]] {
     /// the pointing device's own readiness: a daemon whose keyboard is ready has said
     /// nothing about its mouse.
     @Test func initializeCarriesNoPayloadAndWaitsForThePointingDevice() throws {
-        let fake = FakeDaemon(handling: daemonWhoseMouseComesUp)
-        let startup = try mouse(on: fake).start(within: .seconds(2))
+        let fake = FakeDaemon(handling: daemonWhoseMouseComesUp), clock = ManualClock()
+        try mouse(on: fake, clock).start(by: unhurried(clock))
         let sent = requestSent(fake.requestPayloads[0])
         #expect(sent.version == 7)
         #expect(sent.request == DaemonConnection.Request.pointingInitialize.rawValue)
         #expect(sent.bytes.isEmpty)
-        #expect(startup.ready < .seconds(2))
     }
 
-    @Test func aKeyboardThatIsReadyIsNotAMouseThatIsReady() {
+    @Test func aKeyboardThatIsReadyIsNotAMouseThatIsReady() throws {
         let fake = FakeDaemon { frame, fake in
             guard case .request(let id, _) = frame else { return }
             try fake.send(.response(id: id, payload: []))
             try fake.push([(.keyboardReady, true)])
         }
-        #expect(throws: DaemonError.notReady(awaiting: .pointingReady, said: [.keyboardReady: true])) { try mouse(on: fake).start(within: .milliseconds(200)) }
+        let clock = ManualClock()
+        let device = try mouse(on: fake, clock)
+        let starting = Future { try device.start(by: .within(.milliseconds(200), on: Clock(clock))) }
+        fake.awaitRequests(1)
+        try fake.settle()
+        clock.advance(by: .milliseconds(200))
+        #expect(throws: DaemonError.notReady(awaiting: .pointingReady, said: [.keyboardReady: true])) { try starting.get() }
     }
 }
 
@@ -66,15 +77,15 @@ private func pointingReports(_ fake: FakeDaemon) -> [[UInt8]] {
     /// Every report is the buttons down plus this report's motion, and motion carries the
     /// buttons: that is what makes a drag a down, moves, and a release.
     @Test func motionAndWheelCarryTheButtonsHeld() throws {
-        let fake = FakeDaemon(handling: daemonWhoseMouseComesUp)
-        let device = try mouse(on: fake)
-        try device.start(within: .seconds(2))
-        try device.down(.left)
-        try device.move(by: Move(x: Count(clamping: 10), y: Count(clamping: -2)))
-        try device.scroll(by: Scroll(vertical: Count(clamping: 3), horizontal: .zero))
+        let fake = FakeDaemon(handling: daemonWhoseMouseComesUp), clock = ManualClock()
+        let device = try mouse(on: fake, clock)
+        try device.start(by: unhurried(clock))
+        try device.down(.left, by: unhurried(clock))
+        try device.move(Move(x: Count(clamping: 10), y: Count(clamping: -2)), by: unhurried(clock))
+        try device.scroll(Scroll(vertical: Count(clamping: 3), horizontal: .zero), by: unhurried(clock))
         #expect(device.buttonsDown == [.left])
-        try device.releaseAll()
-        try device.move(by: Move(x: Count(clamping: 1), y: .zero))
+        try device.releaseAll(by: unhurried(clock))
+        try device.move(Move(x: Count(clamping: 1), y: .zero), by: unhurried(clock))
         #expect(device.buttonsDown.isEmpty)
         #expect(pointingReports(fake) == [
             [1, 0, 0, 0, 0, 0, 0, 0],
@@ -88,14 +99,14 @@ private func pointingReports(_ fake: FakeDaemon) -> [[UInt8]] {
     /// A hold replaces the buttons down: left and right held, then left alone, keeps the
     /// left drag going, and motion after it carries only the left.
     @Test func aHoldReplacesTheButtonsDown() throws {
-        let fake = FakeDaemon(handling: daemonWhoseMouseComesUp)
-        let device = try mouse(on: fake)
-        try device.start(within: .seconds(2))
-        try device.hold([.left, .right])
-        try device.hold([.left])
-        try device.hold([.left])
-        try device.move(by: Move(x: Count(clamping: 1), y: .zero))
-        try device.hold([])
+        let fake = FakeDaemon(handling: daemonWhoseMouseComesUp), clock = ManualClock()
+        let device = try mouse(on: fake, clock)
+        try device.start(by: unhurried(clock))
+        try device.hold([.left, .right], by: unhurried(clock))
+        try device.hold([.left], by: unhurried(clock))
+        try device.hold([.left], by: unhurried(clock))
+        try device.move(Move(x: Count(clamping: 1), y: .zero), by: unhurried(clock))
+        try device.hold([], by: unhurried(clock))
         #expect(device.buttonsDown.isEmpty)
         #expect(pointingReports(fake) == [
             [3, 0, 0, 0, 0, 0, 0, 0],
@@ -118,27 +129,30 @@ private func pointingReports(_ fake: FakeDaemon) -> [[UInt8]] {
             guard !releasing else { return }
             try fake.send(.response(id: id, payload: []))
         }
-        let device = try mouse(on: fake, reportTimeout: .milliseconds(200))
-        try device.down(.right)
-        #expect(throws: DaemonError.silent) { try device.releaseAll() }
+        let clock = ManualClock()
+        let device = try mouse(on: fake, clock)
+        try device.down(.right, by: unhurried(clock))
+        #expect(try givenUpOn(fake, clock, atRequest: 2) { try device.releaseAll(by: $0) } == silent())
         #expect(device.buttonsDown == [.right])
-        #expect(throws: DaemonError.silent) { try device.reset() }
+        #expect(try givenUpOn(fake, clock, atRequest: 3) { try device.reset(by: $0) } == silent())
         #expect(device.buttonsDown == [.right])
     }
 
-    @Test func aButtonIsRecordedDownEvenWhenItsReportFails() throws {
-        let fake = FakeDaemon { _, _ in }
-        let device = try mouse(on: fake, reportTimeout: .milliseconds(200))
-        #expect(throws: DaemonError.silent) { try device.down(.middle) }
+    /// A press the driver did not answer may have reached it, so the button is recorded as
+    /// one it may hold.
+    @Test func aButtonIsRecordedAsMaybeHeldWhenItsReportGoesUnanswered() throws {
+        let fake = FakeDaemon { _, _ in }, clock = ManualClock()
+        let device = try mouse(on: fake, clock)
+        #expect(try givenUpOn(fake, clock, atRequest: 1) { try device.down(.middle, by: $0) } == silent())
         #expect(device.buttonsDown == [.middle])
     }
 
     @Test func resetAsksTheDaemonToClearTheDeviceAndForgetsWhatWasHeld() throws {
-        let fake = FakeDaemon(handling: daemonWhoseMouseComesUp)
-        let device = try mouse(on: fake)
-        try device.start(within: .seconds(2))
-        try device.down(.left)
-        try device.reset()
+        let fake = FakeDaemon(handling: daemonWhoseMouseComesUp), clock = ManualClock()
+        let device = try mouse(on: fake, clock)
+        try device.start(by: unhurried(clock))
+        try device.down(.left, by: unhurried(clock))
+        try device.reset(by: unhurried(clock))
         #expect(device.buttonsDown.isEmpty)
         let sent = fake.requestPayloads.map(requestSent)
         #expect(sent.last?.request == DaemonConnection.Request.pointingReset.rawValue)

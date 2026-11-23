@@ -55,7 +55,7 @@ import Testing
         connection.remoteObjectInterface = .helper()
         connection.resume()
         let proxy = try #require(connection.remoteObjectProxyWithErrorHandler { _ in } as? HelperService)
-        proxy.releaseAll { _ in }
+        proxy.releaseAll(by: 0) { _ in }
         let token = try #require(reader.await())
         let identity = try CallerIdentity(requirement: try OwnProcess.requirement())
         try identity.check(auditToken: token)

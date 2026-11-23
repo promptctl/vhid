@@ -1,6 +1,7 @@
 import ChildProcess
 import DriverExtension
 import Foundation
+import Time
 import Synchronization
 import VirtualHID
 
@@ -66,7 +67,8 @@ enum DaemonProcess {
         /// The devices on a connection to a daemon that is running, or `DaemonError` when
         /// none answers. `whenLost` is told when that connection ends underneath them.
         var connect: (_ whenLost: @escaping @Sendable (DaemonError) -> Void) throws -> Device
-        /// The devices brought up on their connection, each within the limit.
+        /// The devices brought up on their connection, each within the limit from when it is
+        /// asked to come up.
         var bringUp: (Device, Duration) throws -> Startups
         /// The daemon started as this process's child.
         var launch: () throws -> pid_t
@@ -74,17 +76,21 @@ enum DaemonProcess {
         var say: (Said) -> Void
     }
 
-    /// The effects done for real. The daemon outlives any one connection on purpose, and
-    /// only `stop` ends it.
-    static var real: Effects<HID> {
+    /// The effects done for real, on `clock`. The daemon outlives any one connection on
+    /// purpose, and only `stop` ends it.
+    static func real(on clock: Clock) -> Effects<HID> {
         Effects(
             connect: { whenLost in
-                let daemon = try DaemonConnection(whenLost: whenLost)
+                let daemon = try DaemonConnection(clock: clock, whenLost: whenLost)
                 return HID(keyboard: VirtualKeyboard(daemon: daemon), mouse: VirtualPointing(daemon: daemon))
             },
-            bringUp: { Startups(keyboard: try $0.keyboard.start(within: $1), mouse: try $0.mouse.start(within: $1)) },
+            // [LAW:no-ambient-temporal-coupling] Each device's deadline is made as it is
+            // asked to come up, so the mouse is not charged for the keyboard's second.
+            bringUp: { hid, limit in
+                Startups(keyboard: try hid.keyboard.start(by: .within(limit, on: clock)), mouse: try hid.mouse.start(by: .within(limit, on: clock)))
+            },
             launch: { try spawn(executable, [], stdio: [:]) },
-            terminate: end,
+            terminate: { end($0, on: clock) },
             say: {
                 switch $0 {
                 case .happened(let what): log(what)
@@ -97,11 +103,11 @@ enum DaemonProcess {
     /// Stops a daemon this process started and reaps it, so it is gone - not a zombie, and
     /// not a dying daemon the next attempt connects to as somebody else's - when this
     /// returns. SIGTERM first, and SIGKILL for one still there after two seconds.
-    private static func end(_ pid: pid_t) {
+    private static func end(_ pid: pid_t, on clock: Clock) {
         kill(pid, SIGTERM)
         for _ in 0..<20 {
             if waitpid(pid, nil, WNOHANG) != 0 { return }
-            Thread.sleep(forTimeInterval: 0.1)
+            clock.pause(for: .milliseconds(100))
         }
         kill(pid, SIGKILL)
         waitpid(pid, nil, 0)
@@ -110,9 +116,10 @@ enum DaemonProcess {
 
 extension DaemonProcess.Effects {
     /// Brings the devices up: connects to the daemon, starting it when it is not there to
-    /// connect to, then starts each device on the connection. Each wait is given the whole
-    /// of `limit`: a socket that answers and a driver that reports a device ready are
-    /// different waits, so none is handed what another left.
+    /// connect to, then starts each device on the connection. The connection is made by
+    /// `deadline`, and each device is given the whole of its limit from when it is asked: a
+    /// socket that answers and a driver that reports a device ready are different waits, so
+    /// none is handed what another left.
     /// [LAW:no-ambient-temporal-coupling]
     ///
     /// [LAW:single-enforcer] The one unit that can leave a daemon running that vhidd
@@ -125,13 +132,13 @@ extension DaemonProcess.Effects {
     /// this failure's consequence, not a loss: told, it would stand in for the failure as
     /// the reason every client is refused with. So `whenLost` hears nothing from the
     /// moment the stop is decided. [LAW:no-silent-failure]
-    func reach(within limit: Duration, whenLost: @escaping @Sendable (DaemonError, DaemonProcess.Origin) -> Void) throws -> DaemonProcess.Reached<Device> {
+    func reach(by deadline: Deadline, pausing pause: (Duration) throws -> Void, whenLost: @escaping @Sendable (DaemonError, DaemonProcess.Origin) -> Void) throws -> DaemonProcess.Reached<Device> {
         let stopping = Mutex(false)
-        let (devices, origin) = try connection(by: .now + limit) { error, origin in
+        let (devices, origin) = try connection(by: deadline, pausing: pause) { error, origin in
             if !stopping.withLock({ $0 }) { whenLost(error, origin) }
         }
         do {
-            return DaemonProcess.Reached(devices: devices, daemon: origin, startup: try bringUp(devices, limit))
+            return DaemonProcess.Reached(devices: devices, daemon: origin, startup: try bringUp(devices, deadline.limit))
         } catch {
             stopping.withLock { $0 = true }
             stop(origin)
@@ -139,8 +146,9 @@ extension DaemonProcess.Effects {
         }
     }
 
-    /// A connection to the daemon and where the daemon came from.
-    private func connection(by deadline: ContinuousClock.Instant, whenLost: @escaping @Sendable (DaemonError, DaemonProcess.Origin) -> Void) throws -> (Device, DaemonProcess.Origin) {
+    /// A connection to the daemon and where the daemon came from. A daemon started here is
+    /// dialled again every tenth of a second, a `pause` apart, until `deadline`.
+    private func connection(by deadline: Deadline, pausing pause: (Duration) throws -> Void, whenLost: @escaping @Sendable (DaemonError, DaemonProcess.Origin) -> Void) throws -> (Device, DaemonProcess.Origin) {
         do {
             return (try connect { whenLost($0, .alreadyRunning) }, .alreadyRunning)
         } catch let unreachable as DaemonError {
@@ -153,8 +161,8 @@ extension DaemonProcess.Effects {
             do {
                 return (try connect { whenLost($0, origin) }, origin)
             } catch let unreachable as DaemonError {
-                guard ContinuousClock.now < deadline else { stop(origin); throw unreachable }
-                Thread.sleep(forTimeInterval: 0.1)
+                guard !deadline.expired else { stop(origin); throw unreachable }
+                try pause(.milliseconds(100))
             }
         }
     }
@@ -199,7 +207,7 @@ struct Backoff: Equatable {
 func waitOut<Found>(
     _ whole: Duration,
     lookingEvery look: Duration,
-    now: () -> ContinuousClock.Instant,
+    now: () -> Instant,
     pause: (Duration) throws -> Void,
     for find: () -> Found?
 ) rethrows -> (found: Found, after: Duration)? {
@@ -295,9 +303,12 @@ extension DaemonProcess.Effects {
     /// driver is read where each attempt ends, at its failure or at the loss of what it
     /// brought up, and a reading of it not on is what the waits from then are for: the
     /// driver is read every `look` of them until it reads on or the devices come up. Any
-    /// other wait is taken whole and reads nothing. A wait ends by `now`, so the time its
-    /// readings take is part of it: the next attempt starts no later than the wait the
+    /// other wait is taken whole and reads nothing. A wait ends by `clock`, so the time
+    /// its readings take is part of it: the next attempt starts no later than the wait the
     /// log gave and one reading.
+    ///
+    /// Each attempt's deadline is made as it starts, `limit` from then, and its redials
+    /// wait on `clock`. A wait between attempts is `pause`.
     ///
     /// Returns only by `pause` throwing, which the daemon's never does.
     func keepUp(
@@ -307,7 +318,7 @@ extension DaemonProcess.Effects {
         readiness: Readiness,
         serve: (DaemonProcess.Reached<Device>) -> any ServedDevices,
         driver: () -> DriverState?,
-        now: () -> ContinuousClock.Instant,
+        on clock: Clock,
         pause: (Duration) throws -> Void
     ) rethrows -> Never {
         var failures = 0
@@ -319,15 +330,15 @@ extension DaemonProcess.Effects {
         while true {
             let attempt = readiness.begin()
             do {
-                let reached = try reach(within: limit) { lost, _ in _ = readiness.lost(lost, in: attempt) }
+                let reached = try reach(by: .within(limit, on: clock), pausing: clock.pause) { lost, _ in _ = readiness.lost(lost, in: attempt) }
                 readiness.up(serve(reached))
                 say(.happened("serving"))
                 // Devices that came up did so on a driver that is on, whatever it read
                 // before them: a loss of these is not that driver turning on.
                 off = nil
-                let since = now()
+                let since = clock.now()
                 let why = readiness.whileUp()
-                failures = now() - since >= backoff.most ? 1 : failures + 1
+                failures = clock.now() - since >= backoff.most ? 1 : failures + 1
                 // Said before the stop, which waits on a daemon that takes its time to end.
                 say(.failed("the devices went down (\(why))"))
                 // Lost, so whatever the daemon held for vhidd went with the connection; a
@@ -346,7 +357,7 @@ extension DaemonProcess.Effects {
             say(.happened("bringing the devices up again in \(wait)"))
             // [LAW:dataflow-not-control-flow] Every wait is waited out the same way: one
             // with nothing to look for is a single look as long as itself, finding nothing.
-            if let on = try waitOut(wait, lookingEvery: off == nil ? wait : look, now: now, pause: pause, for: { off.flatMap { TurnedOn(from: $0, to: driver()) } }) {
+            if let on = try waitOut(wait, lookingEvery: off == nil ? wait : look, now: clock.now, pause: pause, for: { off.flatMap { TurnedOn(from: $0, to: driver()) } }) {
                 say(.happened("\(on.found), \(on.after) into a wait of \(wait); bringing the devices up now"))
                 failures = 0
                 off = nil

@@ -1,6 +1,7 @@
 import DriverExtension
 import Installations
 import Testing
+import Time
 
 @testable import Doctor
 
@@ -14,9 +15,10 @@ import Testing
 
     /// Every daemon reading, one of each.
     static let daemonReadings: [DaemonReading] = [
-        .answered(holder: nil), .answered(holder: 4242), .refusedThisVhid,
+        .answered(.nobody), .answered(.client(pid: 4242)), .answered(.stuck), .refusedThisVhid,
         .unreachable(reason: "NSCocoaErrorDomain 4099"), .silent(reason: "no answer in 5 seconds"),
         .failed(reason: "something new"), .devicesDown(reason: "devices not up: the driver is not activated"),
+        .unasked(Deadline.Exceeded(limit: .seconds(30), spent: .milliseconds(30_004))),
     ]
 
     // MARK: - the driver extension
@@ -130,7 +132,7 @@ import Testing
             let row = Requirement.daemon(reading, installation: Self.installation)
             let listening = switch reading {
             case .answered, .refusedThisVhid: true
-            case .devicesDown, .unreachable, .silent, .failed: false
+            case .devicesDown, .unreachable, .silent, .failed, .unasked: false
             }
             #expect(row.met == listening, "\(reading)")
         }
@@ -143,6 +145,7 @@ import Testing
             let step = try #require(Requirement.daemon(reading, installation: Self.installation).step)
             let said = switch reading {
             case .devicesDown(let reason), .unreachable(let reason), .silent(let reason), .failed(let reason): reason
+            case .unasked(let exceeded): "\(exceeded.limit) had passed"
             case .answered, .refusedThisVhid: ""
             }
             #expect(step.contains(said), "\(reading)")
@@ -150,6 +153,9 @@ import Testing
             // launchd row does, or the two readings disagree and a second look is the step.
             if case .unreachable = reading {
                 #expect(step.contains(Requirement.Row.launchdJob.rawValue))
+                #expect(step.contains("run doctor again"))
+            } else if case .unasked = reading {
+                // Nothing was asked, so no log holds an answer: a second look is the step.
                 #expect(step.contains("run doctor again"))
             } else {
                 #expect(step.contains("subsystem == \"com.example.doctor-test\""), "\(reading)")
@@ -166,7 +172,7 @@ import Testing
             let row = Requirement.signature(reading, installation: Self.installation)
             let answered = switch reading {
             case .answered, .devicesDown: true
-            case .refusedThisVhid, .unreachable, .silent, .failed: false
+            case .refusedThisVhid, .unreachable, .silent, .failed, .unasked: false
             }
             #expect(row.met == answered, "\(reading)")
         }
@@ -196,15 +202,24 @@ import Testing
 
     @Test func theDevicesRowIsMetOnlyWhenTheyAreFree() {
         for reading in Self.daemonReadings {
-            #expect(Requirement.devices(reading).met == (reading == .answered(holder: nil)), "\(reading)")
+            #expect(Requirement.devices(reading).met == (reading == .answered(.nobody)), "\(reading)")
         }
     }
 
     /// A holder is named by pid, with the one command that says which process it is.
     @Test func aHolderIsNamedByPid() throws {
-        let row = Requirement.devices(.answered(holder: 4242))
+        let row = Requirement.devices(.answered(.client(pid: 4242)))
         #expect(row.reads == "held by pid 4242")
         #expect(try #require(row.step).contains("ps -o command= -p 4242"))
+    }
+
+    /// Devices a client left down and vhidd could not release are not free, though nobody
+    /// holds them: a verb from here would act with them down.
+    @Test func stuckDevicesReadSoAndAreNotFree() throws {
+        let row = Requirement.devices(.answered(.stuck))
+        #expect(row.reads == "keys or buttons stuck")
+        #expect(!row.met)
+        #expect(try #require(row.step).contains("vhidd's log"))
     }
 
     /// A refused caller was told nothing about the devices, and what stands in its way is
@@ -230,7 +245,7 @@ import Testing
     /// With a daemon started, the filing has had its chance and failed, so the step sends
     /// the reader to the log it failed in - never to wait.
     @Test func anUnansweredAssistantAfterADaemonStartedSendsTheReaderToTheLog() throws {
-        let step = try #require(Requirement.keyboardSetupAssistant(answered: false, daemon: .answered(holder: nil), installation: Self.installation).step)
+        let step = try #require(Requirement.keyboardSetupAssistant(answered: false, daemon: .answered(.nobody), installation: Self.installation).step)
         #expect(step.contains("filing is what failed"))
         #expect(step.contains("subsystem == \"com.example.doctor-test\""))
         #expect(!step.contains("clears once"))
@@ -251,7 +266,7 @@ import Testing
         for reading in Self.daemonReadings {
             let proves = switch reading {
             case .answered, .devicesDown, .refusedThisVhid: true
-            case .unreachable, .silent, .failed: false
+            case .unreachable, .silent, .failed, .unasked: false
             }
             #expect(reading.daemonHasStarted == proves, "\(reading)")
         }
@@ -315,7 +330,7 @@ import Testing
     /// Ready means every row met, and one unmet row anywhere is enough to say not.
     @Test func readinessIsEveryRowMet() {
         let met = Requirement.driverExtension(.running)
-        let unmet = Requirement.devices(.answered(holder: 1))
+        let unmet = Requirement.devices(.answered(.client(pid: 1)))
         #expect(Readiness([met, met]).ready)
         #expect(!Readiness([met, unmet, met]).ready)
     }
@@ -341,7 +356,7 @@ import Testing
     /// A Mac where every reading is the working one is ready, and the list says so.
     @Test func aWorkingMacIsReady() {
         let list = Readiness(installation: Self.installation, driver: .success(.running), job: .success(.holdingTheService),
-                             daemon: .answered(holder: nil), keyboardSetupAssistantAnswered: .success(true))
+                             daemon: .answered(.nobody), keyboardSetupAssistantAnswered: .success(true))
         #expect(list.ready)
     }
 
@@ -349,7 +364,7 @@ import Testing
     @Test func aFailedReadingBecomesItsOwnRowUnread() {
         struct Failed: Error, CustomStringConvertible { var description: String { "no" } }
         let list = Readiness(installation: Self.installation, driver: .success(.running), job: .failure(Failed()),
-                             daemon: .answered(holder: nil), keyboardSetupAssistantAnswered: .success(true))
+                             daemon: .answered(.nobody), keyboardSetupAssistantAnswered: .success(true))
         #expect(!list.ready)
         #expect(list.requirements[1].reads == "could not be read: no")
     }
@@ -358,7 +373,7 @@ import Testing
     @Test func theListPrintsEveryRowAndIndentsEachStep() {
         let list = Readiness([
             Requirement.driverExtension(.running),
-            Requirement.devices(.answered(holder: 7)),
+            Requirement.devices(.answered(.client(pid: 7))),
         ]).description
         let lines = list.split(separator: "\n", omittingEmptySubsequences: false)
         #expect(lines.first == "Driver extension: running")

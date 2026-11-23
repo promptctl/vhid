@@ -27,10 +27,10 @@ func uninterrupted(_ call: () -> Int) -> Int {
     }
 }
 
-/// Every wait on a socket in this module is a poll with a deadline, so the calls
+/// Every wait on a socket in this module is a wait on a queue with a deadline, so the calls
 /// themselves must never wait: a blocking write hands over a frame whole, and one larger
-/// than the room the poll reported would wait for the rest with no deadline at all - under
-/// the lock, with every waiter behind it. [LAW:no-ambient-temporal-coupling]
+/// than the room the queue reported would wait for the rest with no deadline at all, with
+/// every frame behind it. [LAW:no-ambient-temporal-coupling]
 func neverBlock(_ descriptor: Int32) throws {
     let flags = fcntl(descriptor, F_GETFL)
     guard flags >= 0, fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) >= 0 else {

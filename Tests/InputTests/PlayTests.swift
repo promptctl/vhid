@@ -7,6 +7,7 @@ import Testing
 import ScreenSpace
 import ScreenSpaceTesting
 import InputTesting
+import Time
 
 /// A script parsed whole or refused whole, with the line that refused it named.
 @Suite struct PlayTests {
@@ -134,7 +135,7 @@ import InputTesting
             {"t_ms":1,"move":{"dx":5,"dy":0}}
             {"t_ms":10,"buttons":[]}
             """)
-        let played = try await Player(pointer: Pointer(mouse: mouse, cursor: fake.cursor, clock: clock, randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in }), keyboard: fake.keyboard, wall: { Self.epoch }, layout: { .vast }, lead: .zero).play(Schedule(play).placed(on: .vast))
+        let played = try await Player(pointer: Pointer(mouse: mouse, cursor: fake.cursor, clock: Clock(clock), randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in }), keyboard: fake.keyboard, wall: { Self.epoch }, layout: { .vast }, lead: .zero).play(Schedule(play).placed(on: .vast))
         #expect(played.startReports == 0)
         #expect(played.reports == [
             Played.Report(line: 2, scheduled: Self.epoch, sent: Self.epoch, acked: Self.epoch + 3000),
@@ -281,7 +282,7 @@ import InputTesting
         }
         lines.append(#"{"t_ms":400,"buttons":[]}"#)
         let play = try Play.parse(lines.joined(separator: "\n"))
-        let played = try await Player(pointer: Pointer(mouse: watched, cursor: fake.cursor, clock: ManualClock(), randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in }), keyboard: fake.keyboard, wall: { Self.epoch }, layout: { .vast }, lead: .zero).play(Schedule(play).placed(on: .vast))
+        let played = try await Player(pointer: Pointer(mouse: watched, cursor: fake.cursor, clock: Clock(ManualClock()), randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in }), keyboard: fake.keyboard, wall: { Self.epoch }, layout: { .vast }, lead: .zero).play(Schedule(play).placed(on: .vast))
         // Within half a point, which is where the pointer's loop stops: this mouse moves
         // whole points, and 410.5 is between two.
         let recorded = [ScreenPoint.at(130, 110), ScreenPoint.at(410.5, 230)]

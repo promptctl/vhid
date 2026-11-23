@@ -3,266 +3,325 @@ import Helper
 import Keystrokes
 import Pointing
 import Synchronization
+import TestClock
 import Testing
+import Time
 @testable import vhidd
 
 /// The devices as vhidd serves them, over recording devices of the test's own: what
-/// the wire may carry that the device cannot, and what a client leaving lets go of.
+/// the wire may carry that the device cannot, what a request that cannot acquire the lock
+/// in time does, and what a client leaving lets go of.
 @Suite struct DevicesTests {
     /// Holds keys the way the device does: noted before the request, which may throw
-    /// having reached the driver, and cleared only by a release that succeeds.
+    /// having reached the driver, and cleared only by a release that succeeds. A key-down
+    /// can be made to wait at `gate`, holding the devices' lock as a slow driver does.
     final class RecordingKeyboard: HeldKeyboard {
         private let recorded = Mutex<[String]>([])
         private let held = Mutex<Set<Usage>>([])
-        let refusesRelease: Bool
+        let refusesRelease: Mutex<Bool>
         let refusesDown: Bool
+        let gate: Gate?
 
-        init(refusesRelease: Bool = false, refusesDown: Bool = false) {
-            self.refusesRelease = refusesRelease
+        init(refusesRelease: Bool = false, refusesDown: Bool = false, gate: Gate? = nil) {
+            self.refusesRelease = Mutex(refusesRelease)
             self.refusesDown = refusesDown
+            self.gate = gate
         }
 
         var log: [String] { recorded.withLock { $0 } }
         var keysDown: Set<Usage> { held.withLock { $0 } }
 
-        func down(_ usage: Usage) throws {
+        func down(_ usage: Usage, by deadline: Deadline) throws {
             recorded.withLock { $0.append("down \(usage.rawValue)") }
             held.withLock { _ = $0.insert(usage) }
+            gate?.arrive()
             if refusesDown { throw Refused() }
         }
-        func releaseAll() throws {
+        func releaseAll(by deadline: Deadline) throws {
             recorded.withLock { $0.append("up") }
-            if refusesRelease { throw Refused() }
+            if refusesRelease.withLock({ $0 }) { throw Refused() }
             held.withLock { $0 = [] }
         }
-        func hold(_ keys: HeldKeys) throws {
+        func hold(_ keys: HeldKeys, by deadline: Deadline) throws {
             recorded.withLock { $0.append("hold \(keys.usages.map(\.rawValue).sorted())") }
             held.withLock { $0 = keys.usages }
         }
     }
 
-    final class RecordingMouse: PointingDevice {
+    final class RecordingMouse: HeldMouse {
         private let recorded = Mutex<[String]>([])
 
         var log: [String] { recorded.withLock { $0 } }
+        var buttonsDown: Set<Button> { [] }
 
-        func down(_ button: Button) throws { recorded.withLock { $0.append("down \(button.rawValue)") } }
-        func releaseAll() throws { recorded.withLock { $0.append("up") } }
-        func hold(_ buttons: Set<Button>) throws { recorded.withLock { $0.append("hold \(buttons.map(\.rawValue).sorted())") } }
-        func move(by delta: Move) throws { recorded.withLock { $0.append("move \(delta.x.value) \(delta.y.value)") } }
-        func scroll(by delta: Scroll) throws { recorded.withLock { $0.append("scroll \(delta.vertical.value) \(delta.horizontal.value)") } }
+        func down(_ button: Button, by deadline: Deadline) throws { recorded.withLock { $0.append("down \(button.rawValue)") } }
+        func releaseAll(by deadline: Deadline) throws { recorded.withLock { $0.append("up") } }
+        func hold(_ buttons: Set<Button>, by deadline: Deadline) throws { recorded.withLock { $0.append("hold \(buttons.map(\.rawValue).sorted())") } }
+        func move(_ delta: Move, by deadline: Deadline) throws { recorded.withLock { $0.append("move \(delta.x.value) \(delta.y.value)") } }
+        func scroll(_ delta: Scroll, by deadline: Deadline) throws { recorded.withLock { $0.append("scroll \(delta.vertical.value) \(delta.horizontal.value)") } }
     }
 
     struct Refused: Error {}
 
-    /// The reply, as the client gets it: nil, or the refusal.
-    private func answer(_ call: (@escaping (Error?) -> Void) -> Void) -> Error? {
-        var answered: Error?
-        call { answered = $0 }
-        return answered
+    /// What parsing a command threw, in the words a client reads.
+    private func refused(_ parse: () throws -> DeviceCommand) -> String? {
+        do {
+            _ = try parse()
+            return nil
+        } catch {
+            return refusal(error).localizedDescription
+        }
     }
 
     /// A button the device has no bit for, or a count the descriptor does not admit, is
-    /// refused by name and never reaches the device. [LAW:parse-dont-validate]
-    @Test func valuesTheDeviceCannotCarryAreRefusedBeforeItSeesThem() {
-        let mouse = RecordingMouse()
-        let devices = Devices(keyboard: RecordingKeyboard(), mouse: mouse)
-        #expect(answer { devices.buttonDown(0, reply: $0) }?.localizedDescription == "button 0 is not one of the 32 the device has a bit for")
-        #expect(answer { devices.buttonDown(33, reply: $0) }?.localizedDescription == "button 33 is not one of the 32 the device has a bit for")
-        #expect(answer { devices.move(x: -128, y: 0, reply: $0) }?.localizedDescription == "-128 is outside the -127 through 127 a report carries")
-        #expect(answer { devices.scroll(vertical: 1, horizontal: -128, reply: $0) }?.localizedDescription == "-128 is outside the -127 through 127 a report carries")
-        #expect(mouse.log.isEmpty)
-        let keyboard = RecordingKeyboard()
-        let typing = Devices(keyboard: keyboard, mouse: RecordingMouse())
-        #expect(answer { typing.down(usage: 3, reply: $0) }?.localizedDescription == "usage 3 is not one of the keys 4 through 231")
-        #expect(answer { typing.hold(usages: [0xE1, 0xE8], reply: $0) }?.localizedDescription == "usage 232 is not one of the keys 4 through 231")
-        #expect(keyboard.log.isEmpty)
-    }
-
-    /// What the device can carry reaches it as asked, and the reply is nil.
-    @Test func valuesTheDeviceCanCarryReachIt() {
-        let keyboard = RecordingKeyboard()
-        let mouse = RecordingMouse()
-        let devices = Devices(keyboard: keyboard, mouse: mouse)
-        #expect(answer { devices.down(usage: 0x04, reply: $0) } == nil)
-        #expect(answer { devices.buttonDown(3, reply: $0) } == nil)
-        #expect(answer { devices.move(x: 127, y: -127, reply: $0) } == nil)
-        #expect(answer { devices.scroll(vertical: 1, horizontal: -1, reply: $0) } == nil)
-        #expect(answer { devices.releaseButtons(reply: $0) } == nil)
-        #expect(answer { devices.releaseAll(reply: $0) } == nil)
-        #expect(keyboard.log == ["down 4", "up"])
-        #expect(mouse.log == ["down 3", "move 127 -127", "scroll 1 -1", "up"])
+    /// refused by name as the command is parsed off the wire, before any device sees it.
+    /// [LAW:parse-dont-validate]
+    @Test func valuesTheDeviceCannotCarryAreRefusedAsTheCommandIsParsed() {
+        #expect(refused { try .buttonDown(0) } == "button 0 is not one of the 32 the device has a bit for")
+        #expect(refused { try .buttonDown(33) } == "button 33 is not one of the 32 the device has a bit for")
+        #expect(refused { try .move(x: -128, y: 0) } == "-128 is outside the -127 through 127 a report carries")
+        #expect(refused { try .scroll(vertical: 1, horizontal: -128) } == "-128 is outside the -127 through 127 a report carries")
+        #expect(refused { try .down(usage: 3) } == "usage 3 is not one of the keys 4 through 231")
+        #expect(refused { try .hold(usages: [0xE1, 0xE8]) } == "usage 232 is not one of the keys 4 through 231")
+        #expect(refused { try .hold(usages: Array(0x04...0x24)) } == "33 keys are down, and one HID keyboard report carries 32")
     }
 
     /// A refusal crosses as the one error a client can decode, carrying the words.
-    @Test func aRefusalCrossesAsAnNSErrorCarryingItsDescription() throws {
-        let devices = Devices(keyboard: RecordingKeyboard(), mouse: RecordingMouse())
-        let error = try #require(answer { devices.buttonDown(0, reply: $0) }) as NSError
+    @Test func aRefusalCrossesAsAnNSErrorCarryingItsDescription() {
+        let error = refusal(NotOnTheDevice.button(0))
         #expect(error.domain == "ai.promptctl.vhid.vhidd.refusal")
         #expect(error.localizedDescription == "button 0 is not one of the 32 the device has a bit for")
     }
 
-    /// A client leaving has both devices released, the mouse whatever the keyboard said.
-    @Test func releasingEverythingReleasesBothDevicesWhateverTheKeyboardAnswers() {
-        let keyboard = RecordingKeyboard(refusesRelease: true)
-        let mouse = RecordingMouse()
-        Devices(keyboard: keyboard, mouse: mouse).releaseEverything(because: "the client went away")
-        #expect(keyboard.log == ["up"])
-        #expect(mouse.log == ["up"])
+    private func devices(_ keyboard: RecordingKeyboard = RecordingKeyboard(), _ mouse: RecordingMouse = RecordingMouse()) -> (Devices, ManualClock) {
+        let clock = ManualClock()
+        return (Devices(keyboard: keyboard, mouse: mouse, clock: Clock(clock), limit: .seconds(2)), clock)
     }
 
-    private func timed(_ keyboard: RecordingKeyboard = RecordingKeyboard(), _ mouse: RecordingMouse = RecordingMouse()) -> (Devices, HandClock) {
-        let clock = HandClock()
-        return (Devices(keyboard: keyboard, mouse: mouse, limit: .seconds(2), now: { clock.now }), clock)
+    /// A command with no seat to acquire the devices, by a deadline five seconds off.
+    private func perform(_ command: DeviceCommand, on devices: Devices, _ clock: ManualClock) throws {
+        try devices.perform(command, by: .within(.seconds(5), on: Clock(clock))) {}
+    }
+
+    /// What the device can carry reaches it as asked.
+    @Test func commandsReachTheDeviceAsAsked() throws {
+        let (keyboard, mouse) = (RecordingKeyboard(), RecordingMouse())
+        let (devices, clock) = devices(keyboard, mouse)
+        try perform(.down(.a), on: devices, clock)
+        try perform(.buttonDown(try #require(Button(rawValue: 3))), on: devices, clock)
+        try perform(try .move(x: 127, y: -127), on: devices, clock)
+        try perform(try .scroll(vertical: 1, horizontal: -1), on: devices, clock)
+        try perform(.releaseButtons, on: devices, clock)
+        try perform(.releaseKeys, on: devices, clock)
+        try perform(try .hold(usages: [0xE1, 0x04, 0x04]), on: devices, clock)
+        try perform(.holdButtons(0b101), on: devices, clock)
+        try perform(.holdButtons(1 << 31), on: devices, clock)
+        #expect(keyboard.log == ["down 4", "up", "hold [4, 225]"])
+        #expect(mouse.log == ["down 3", "move 127 -127", "scroll 1 -1", "up", "hold [1, 3]", "hold [32]"])
+    }
+
+    /// A request that cannot acquire the devices' lock before its deadline is refused for
+    /// it, having acquired nothing and sent nothing: the client was told it failed, so the
+    /// devices must not do it later. The first request blocks at a gate inside the fake
+    /// keyboard, holding the lock, while the clock passes the second one's deadline.
+    /// [LAW:no-ambient-temporal-coupling]
+    @Test func aRequestThatCannotAcquireTheLockBeforeItsDeadlineIsRefusedHavingDoneNothing() throws {
+        let gate = Gate()
+        let keyboard = RecordingKeyboard(gate: gate)
+        let (devices, clock) = devices(keyboard)
+        let ahead = Future { try devices.perform(.down(.a), by: .within(.seconds(5), on: Clock(clock))) {} }
+        try #require(gate.arrived.wait("the first request to hold the lock"))
+        let acquired = Mutex(false)
+        let late = Future { try devices.perform(.down(.b), by: .within(.seconds(1), on: Clock(clock))) { acquired.withLock { $0 = true } } }
+        clock.awaitBlocked(1)
+        clock.advance(by: .seconds(1))
+        #expect(throws: Deadline.Exceeded.self) { try late.get() }
+        gate.open()
+        try ahead.get()
+        #expect(!acquired.withLock { $0 })
+        #expect(keyboard.log == ["down 4"])
+    }
+
+    /// A command the seat may not perform, because another client holds the devices,
+    /// sends nothing.
+    @Test func aCommandTheSeatRefusesSendsNothing() {
+        let keyboard = RecordingKeyboard()
+        let (devices, clock) = devices(keyboard)
+        #expect(throws: Holder.Busy.self) { try devices.perform(.down(.a), by: .within(.seconds(5), on: Clock(clock))) { throw Holder.Busy(pid: 41) } }
+        #expect(keyboard.log.isEmpty)
+    }
+
+    /// A release lets go of both devices, the mouse whatever the keyboard said, and says
+    /// which would not; until a release lands the devices read as stuck.
+    @Test func aReleaseReleasesBothDevicesWhateverTheKeyboardAnswers() {
+        let (keyboard, mouse) = (RecordingKeyboard(refusesRelease: true), RecordingMouse())
+        let (devices, _) = devices(keyboard, mouse)
+        #expect(devices.releaseEverything(because: "the client went away") == Released(keyboard: "\(Refused())", mouse: nil))
+        #expect(keyboard.log == ["up"])
+        #expect(mouse.log == ["up"])
+        #expect(devices.isStuck)
+        keyboard.refusesRelease.withLock { $0 = false }
+        #expect(devices.releaseEverything(because: "vhidd is stopping") == Released(keyboard: nil, mouse: nil))
+        #expect(!devices.isStuck)
+    }
+
+    /// A release a seat no longer owes - its hold freed by a lost bring-up, say - releases
+    /// nothing and frees nothing.
+    @Test func aReleaseNoLongerOwedDoesNothing() {
+        let keyboard = RecordingKeyboard()
+        let (devices, _) = devices(keyboard)
+        var freed = false
+        #expect(devices.release(because: "a client left", when: { false }, then: { freed = true }) == nil)
+        #expect(!freed)
+        #expect(keyboard.log.isEmpty)
+    }
+
+    /// What a failed release left is released again by the sweep while nobody holds the
+    /// devices, one limit after the failure, and never while a client holds them.
+    @Test func whatAFailedReleaseLeftIsReleasedAgainWhileNobodyHoldsTheDevices() {
+        let keyboard = RecordingKeyboard(refusesRelease: true)
+        let (devices, clock) = devices(keyboard)
+        _ = devices.releaseEverything(because: "a client left")
+        keyboard.refusesRelease.withLock { $0 = false }
+        clock.advance(by: .milliseconds(1999))
+        #expect(devices.sweep(holding: { nil }) == nil)
+        clock.advance(by: .milliseconds(1))
+        if case .stuck = devices.sweep(holding: { 41 }) { Issue.record("re-released under a client that holds the devices") }
+        #expect(devices.isStuck)
+        #expect(devices.sweep(holding: { nil }) == .stuck(Released(keyboard: nil, mouse: nil)))
+        #expect(!devices.isStuck)
     }
 
     /// A key left down with no keyboard report after it is released once the limit passes,
     /// naming the usages, and not before.
-    @Test func aKeyHeldPastTheLimitIsReleased() {
+    @Test func aKeyHeldPastTheLimitIsReleased() throws {
         let keyboard = RecordingKeyboard()
-        let (devices, clock) = timed(keyboard)
-        _ = answer { devices.down(usage: 0xE3, reply: $0) }
-        _ = answer { devices.down(usage: 0x04, reply: $0) }
-        clock.advance(.milliseconds(1999))
-        #expect(devices.releaseKeysHeldPastLimit() == nil)
-        clock.advance(.milliseconds(1))
-        #expect(devices.releaseKeysHeldPastLimit() == KeysLetGo(usages: [0x04, 0xE3], limit: .seconds(2), failure: nil))
+        let (devices, clock) = devices(keyboard)
+        try perform(.down(.leftCommand), on: devices, clock)
+        try perform(.down(.a), on: devices, clock)
+        clock.advance(by: .milliseconds(1999))
+        #expect(devices.sweep(holding: { nil }) == nil)
+        clock.advance(by: .milliseconds(1))
+        #expect(devices.sweep(holding: { 7 }) == .keysPastLimit(KeysLetGo(usages: [0x04, 0xE3], limit: .seconds(2), failure: nil), by: 7))
         #expect(keyboard.log == ["down 227", "down 4", "up"])
-        clock.advance(.seconds(5))
-        #expect(devices.releaseKeysHeldPastLimit() == nil)
+        clock.advance(by: .seconds(5))
+        #expect(devices.sweep(holding: { nil }) == nil)
     }
 
     /// Chords one after another, each well inside the limit, are never cut, however long
     /// the stream runs; nothing down means nothing to release.
-    @Test func aSteadyStreamOfChordsIsNeverInterrupted() {
+    @Test func aSteadyStreamOfChordsIsNeverInterrupted() throws {
         let keyboard = RecordingKeyboard()
-        let (devices, clock) = timed(keyboard)
+        let (devices, clock) = devices(keyboard)
         for _ in 0..<20 {
-            _ = answer { devices.down(usage: 0xE1, reply: $0) }
-            clock.advance(.milliseconds(900))
-            #expect(devices.releaseKeysHeldPastLimit() == nil)
-            _ = answer { devices.down(usage: 0x05, reply: $0) }
-            clock.advance(.milliseconds(900))
-            #expect(devices.releaseKeysHeldPastLimit() == nil)
-            _ = answer { devices.releaseAll(reply: $0) }
-            clock.advance(.seconds(10))
-            #expect(devices.releaseKeysHeldPastLimit() == nil)
+            try perform(.down(.leftShift), on: devices, clock)
+            clock.advance(by: .milliseconds(900))
+            #expect(devices.sweep(holding: { nil }) == nil)
+            try perform(.down(.b), on: devices, clock)
+            clock.advance(by: .milliseconds(900))
+            #expect(devices.sweep(holding: { nil }) == nil)
+            try perform(.releaseKeys, on: devices, clock)
+            clock.advance(by: .seconds(10))
+            #expect(devices.sweep(holding: { nil }) == nil)
         }
         #expect(keyboard.log.count == 60)
     }
 
     /// A button held past the limit stays down: a replayed pointer script holds one across gaps.
-    @Test func aButtonHeldPastTheLimitIsNotReleased() {
+    @Test func aButtonHeldPastTheLimitIsNotReleased() throws {
         let mouse = RecordingMouse()
-        let (devices, clock) = timed(RecordingKeyboard(), mouse)
-        _ = answer { devices.buttonDown(1, reply: $0) }
-        clock.advance(.seconds(30))
-        #expect(devices.releaseKeysHeldPastLimit() == nil)
+        let (devices, clock) = devices(RecordingKeyboard(), mouse)
+        try perform(.buttonDown(.left), on: devices, clock)
+        clock.advance(by: .seconds(30))
+        #expect(devices.sweep(holding: { nil }) == nil)
         #expect(mouse.log == ["down 1"])
     }
 
-    /// A release the keyboard refused is reported and tried again one limit later.
-    @Test func aRefusedReleaseIsReportedAndRetriedAfterTheLimit() {
-        let (devices, clock) = timed(RecordingKeyboard(refusesRelease: true))
-        _ = answer { devices.down(usage: 0x04, reply: $0) }
-        clock.advance(.seconds(2))
-        #expect(devices.releaseKeysHeldPastLimit()?.failure != nil)
-        clock.advance(.milliseconds(250))
-        #expect(devices.releaseKeysHeldPastLimit() == nil)
-        clock.advance(.milliseconds(1750))
-        #expect(devices.releaseKeysHeldPastLimit()?.usages == [0x04])
+    /// A key release the keyboard refused is reported and tried again one limit later.
+    @Test func aRefusedReleaseIsReportedAndRetriedAfterTheLimit() throws {
+        let (devices, clock) = devices(RecordingKeyboard(refusesRelease: true))
+        try perform(.down(.a), on: devices, clock)
+        clock.advance(by: .seconds(2))
+        guard case .keysPastLimit(let first, _) = devices.sweep(holding: { nil }) else { Issue.record("nothing was let go"); return }
+        #expect(first.failure != nil)
+        clock.advance(by: .milliseconds(250))
+        #expect(devices.sweep(holding: { nil }) == nil)
+        clock.advance(by: .milliseconds(1750))
+        guard case .keysPastLimit(let again, _) = devices.sweep(holding: { nil }) else { Issue.record("nothing was let go again"); return }
+        #expect(again.usages == [0x04])
     }
 
     /// A key whose request threw after reaching the driver is still down on the device,
-    /// and the deadline releases it.
-    @Test func aKeyWhoseRequestThrewIsStillReleased() {
-        let (devices, clock) = timed(RecordingKeyboard(refusesDown: true))
-        #expect(answer { devices.down(usage: 0x04, reply: $0) } != nil)
-        clock.advance(.seconds(2))
-        #expect(devices.releaseKeysHeldPastLimit()?.usages == [0x04])
+    /// and the sweep releases it.
+    @Test func aKeyWhoseRequestThrewIsStillReleased() throws {
+        let (devices, clock) = devices(RecordingKeyboard(refusesDown: true))
+        #expect(throws: Refused.self) { try perform(.down(.a), on: devices, clock) }
+        clock.advance(by: .seconds(2))
+        #expect(devices.sweep(holding: { nil }) == .keysPastLimit(KeysLetGo(usages: [0x04], limit: .seconds(2), failure: nil), by: nil))
     }
 
     /// A modifier held through a drag the client paces over seconds is live: every pointer
     /// report counts, and the modifier stays down.
-    @Test func aModifierHeldThroughAPacedDragIsNotCut() {
-        let (devices, clock) = timed()
-        _ = answer { devices.down(usage: 0xE2, reply: $0) }
-        _ = answer { devices.buttonDown(1, reply: $0) }
+    @Test func aModifierHeldThroughAPacedDragIsNotCut() throws {
+        let (devices, clock) = devices()
+        try perform(.down(.leftOption), on: devices, clock)
+        try perform(.buttonDown(.left), on: devices, clock)
         for _ in 0..<30 {
-            clock.advance(.milliseconds(200))
-            _ = answer { devices.move(x: 5, y: 0, reply: $0) }
-            #expect(devices.releaseKeysHeldPastLimit() == nil)
+            clock.advance(by: .milliseconds(200))
+            try perform(try .move(x: 5, y: 0), on: devices, clock)
+            #expect(devices.sweep(holding: { nil }) == nil)
         }
-    }
-
-    /// The deadline releases the keys and leaves the devices with the client that held them,
-    /// and the log names that client and the keys.
-    @Test func theHolderStillBelongsToTheClientAfterwards() throws {
-        let (devices, clock) = timed()
-        let readiness = Readiness.serving(devices)
-        let holder = Holder()
-        // Kept alive, so the two identifiers cannot share a freed address.
-        let (first, second) = (HandClock(), HandClock())
-        let client = ObjectIdentifier(first)
-        let attempt = try readiness.devices().attempt
-        try holder.serve(client, by: 4242, on: attempt) { devices.down(usage: 0x04) { _ in } }
-        clock.advance(.seconds(3))
-        #expect(releaseKeysHeldPastLimit(readiness, holder) == "pid 4242 held 0x04 past 2.0 seconds with no report; released")
-        #expect(holder.pid(on: attempt) == 4242)
-        #expect(throws: Holder.Busy.self) { try holder.serve(ObjectIdentifier(second), by: 1, on: attempt) {} }
-        withExtendedLifetime((first, second)) {}
-    }
-
-    /// A held set crosses as the wire's usages, and a button set as its bit field, bit 0
-    /// for button 1.
-    @Test func heldSetsReachTheDevicesAsSets() {
-        let keyboard = RecordingKeyboard()
-        let mouse = RecordingMouse()
-        let devices = Devices(keyboard: keyboard, mouse: mouse)
-        #expect(answer { devices.hold(usages: [0xE1, 0x04, 0x04], reply: $0) } == nil)
-        #expect(answer { devices.hold(usages: [], reply: $0) } == nil)
-        #expect(answer { devices.holdButtons(0b101, reply: $0) } == nil)
-        #expect(answer { devices.holdButtons(1 << 31, reply: $0) } == nil)
-        #expect(keyboard.log == ["hold [4, 225]", "hold []"])
-        #expect(mouse.log == ["hold [1, 3]", "hold [32]"])
-    }
-
-    /// More keys than one report carries is refused by name, and the device never sees it.
-    @Test func aSetNoReportCarriesIsRefusedByName() {
-        let keyboard = RecordingKeyboard()
-        let devices = Devices(keyboard: keyboard, mouse: RecordingMouse())
-        let refusal = answer { devices.hold(usages: Array(0x04...0x24), reply: $0) }
-        #expect(refusal?.localizedDescription == "33 keys are down, and one HID keyboard report carries 32")
-        #expect(keyboard.log.isEmpty)
     }
 
     /// Repeating a held set is a report, so it keeps its keys past the limit; a player that
     /// stops repeating loses them.
-    @Test func aRepeatedHoldKeepsItsKeysPastTheLimit() {
-        let keyboard = RecordingKeyboard()
-        let (devices, clock) = timed(keyboard)
+    @Test func aRepeatedHoldKeepsItsKeysPastTheLimit() throws {
+        let (devices, clock) = devices()
         for _ in 0..<5 {
-            _ = answer { devices.hold(usages: [0xE1], reply: $0) }
-            clock.advance(.seconds(1))
-            #expect(devices.releaseKeysHeldPastLimit() == nil)
+            try perform(try .hold(usages: [0xE1]), on: devices, clock)
+            clock.advance(by: .seconds(1))
+            #expect(devices.sweep(holding: { nil }) == nil)
         }
-        clock.advance(.seconds(1))
-        #expect(devices.releaseKeysHeldPastLimit()?.usages == [0xE1])
+        clock.advance(by: .seconds(1))
+        #expect(devices.sweep(holding: { nil }) == .keysPastLimit(KeysLetGo(usages: [0xE1], limit: .seconds(2), failure: nil), by: nil))
+    }
+
+    /// The sweep releases the keys and leaves the devices with the client that held them,
+    /// and the log names that client and the keys.
+    @Test func theHolderStillBelongsToTheClientAfterwards() throws {
+        let (devices, clock) = devices()
+        let readiness = Readiness.serving(devices)
+        let holder = Holder()
+        // Kept alive, so the two identifiers cannot share a freed address.
+        let (first, second) = (NSObject(), NSObject())
+        let attempt = try readiness.devices().attempt
+        try devices.perform(.down(.a), by: .within(.seconds(5), on: Clock(clock))) { try holder.acquire(for: ObjectIdentifier(first), by: 4242, on: attempt) }
+        clock.advance(by: .seconds(3))
+        #expect(sweep(readiness, holder) == "pid 4242 held 0x04 past 2.0 seconds with no report; released")
+        #expect(holder.pid(on: attempt) == 4242)
+        #expect(throws: Holder.Busy.self) { try holder.acquire(for: ObjectIdentifier(second), by: 1, on: attempt) }
+        withExtendedLifetime((first, second)) {}
     }
 
     /// A client that leaves mid-hold has its keys and buttons released, however they came
     /// to be held.
     @Test func aClientLeavingMidHoldIsReleased() {
-        let keyboard = RecordingKeyboard()
-        let mouse = RecordingMouse()
+        let (keyboard, mouse) = (RecordingKeyboard(), RecordingMouse())
+        let (devices, clock) = devices(keyboard, mouse)
         let client = NSObject()
-        let seat = Seat(ObjectIdentifier(client), pid: 41, holder: Holder(), readiness: .serving(Devices(keyboard: keyboard, mouse: mouse)), screen: FixedScreen())
-        seat.hold(usages: [0xE1, 0x04]) { #expect($0 == nil) }
-        seat.holdButtons(1) { #expect($0 == nil) }
-        seat.end(because: "a client went away")
+        let seat = Seat(ObjectIdentifier(client), pid: 41, holder: Holder(), readiness: .serving(devices), screen: FixedScreen(), clock: Clock(clock))
+        let by = Deadline.within(.seconds(5), on: Clock(clock)).at.nanoseconds
+        seat.hold(usages: [0xE1, 0x04], by: by) { #expect($0 == nil) }
+        seat.holdButtons(1, by: by) { #expect($0 == nil) }
+        #expect(seat.end(because: "a client went away") == Released(keyboard: nil, mouse: nil))
         #expect(keyboard.log == ["hold [4, 225]", "up"])
         #expect(keyboard.keysDown.isEmpty)
         #expect(mouse.log == ["hold [1]", "up"])
         withExtendedLifetime(client) {}
     }
+}
+
+private extension Usage {
+    static let a = Usage(rawValue: 0x04)
+    static let b = Usage(rawValue: 0x05)
 }

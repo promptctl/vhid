@@ -1,3 +1,4 @@
+import Time
 import ArgumentParser
 import EyesVerbs
 import Foundation
@@ -37,6 +38,10 @@ struct Vhid: AsyncParsableCommand {
             ServiceCommand.self, DoctorCommand.self, ReadGrants.self,
         ])
 
+    /// The one clock this process measures and waits on, made once here at its root and
+    /// handed from each verb's entry to everything under it. [LAW:one-source-of-truth]
+    static let clock = Clock.suspending
+
     /// ArgumentParser's own `main`, run as one invocation: parsing argv is part of it, so
     /// a refused argument leaves a record too. [LAW:nothing-unseen]
     ///
@@ -55,14 +60,15 @@ struct Vhid: AsyncParsableCommand {
     static func main() async {
         let first = FirstSignal()
         let running = OSAllocatedUnfairLock<Task<Entry.Ran, any Error>?>(initialState: nil)
-        // Watched before the verb starts, so that no signal finds it under the default
+        // Monitor before the verb starts, so that no signal finds it under the default
         // disposition; one that lands before the verb exists cancels it as it is made.
-        // The cancel is handed to a thread of its own: a verb's cancel handler runs where
+        // The cancel is handed to a queue of its own: a verb's cancel handler runs where
         // the cancel is made, and one that blocked here would hold up the second signal.
+        let cancelling = DispatchQueue(label: "vhid.cancel")
         let watch = SignalWatch { number in
             guard first.take(number) else { die(by: number) }
             let task = running.withLock { $0 }
-            DispatchQueue.global().async { task?.cancel() }
+            cancelling.async { task?.cancel() }
         }
         let invocation = Task {
             try await $signals.withValue(first) { try await dispatched(_commandName) { try await Entry.commandLine(Self.self, nil) } }

@@ -1,4 +1,5 @@
 import Foundation
+import Time
 
 /// One connection to Karabiner-VirtualHIDDevice-Daemon over its Unix domain stream
 /// socket. Every failure names what the daemon did or did not say. [LAW:no-silent-failure]
@@ -20,8 +21,12 @@ import Foundation
 /// client that has said nothing for fifteen seconds, measured on this Mac. A connection
 /// read only while a request was in flight went quiet between calls and was found dead
 /// by the next write. So the reading is not part of asking; it is a lifecycle with its own
-/// owner, and asking is writing a request and waiting to be told the answer arrived.
-/// [LAW:no-ambient-temporal-coupling]
+/// owner, and asking is queuing a request for the one thread that writes and waiting to be
+/// told the answer arrived. [LAW:no-ambient-temporal-coupling]
+///
+/// **Every wait is on the process's clock**: the heartbeat, the patience, a stalled
+/// write and every request's wait for its answer, so a test that moves its clock wakes each
+/// of them and none waits out a real span.
 ///
 /// **One connection carries both devices.** The daemon keeps a keyboard and a pointing
 /// device per client connection and destroys both when the client hangs up, so a client
@@ -86,7 +91,7 @@ public final class DaemonConnection: Sendable {
     /// had said held. Every later request throws the
     /// same failure, so a caller that only ever asks can leave it be; a process that
     /// holds the connection open across long silences is the one that needs to hear.
-    public convenience init(whenLost: @escaping @Sendable (DaemonError) -> Void = { _ in }) throws {
+    public convenience init(clock: Clock, whenLost: @escaping @Sendable (DaemonError) -> Void = { _ in }) throws {
         guard FileManager.default.fileExists(atPath: Self.socketPath) else { throw DaemonError.noSocket(path: Self.socketPath) }
         let descriptor = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
         guard descriptor >= 0 else { throw DaemonError.socket("socket", errno) }
@@ -94,7 +99,7 @@ public final class DaemonConnection: Sendable {
         // failure that is really this side's own ordering. The descriptor has no owner
         // yet, so a refused connection closes it here and nowhere else.
         do { try Self.connect(descriptor) } catch { close(descriptor); throw error }
-        try self.init(fileDescriptor: descriptor, whenLost: whenLost)
+        try self.init(fileDescriptor: descriptor, clock: clock, whenLost: whenLost)
     }
 
     /// A connection over a descriptor someone else opened. This is the seam that makes
@@ -104,18 +109,21 @@ public final class DaemonConnection: Sendable {
     /// protocol and the pipe it runs over are two things, and only one of them needs root.
     ///
     /// The heartbeat interval and the patience are parameters so a test can watch a
-    /// heartbeat go out, or a silence be noticed, without waiting the daemon's seconds.
-    init(fileDescriptor: Int32, heartbeatEvery interval: Duration = DaemonConnection.heartbeatInterval, patience: Duration = DaemonConnection.patience, whenLost: @escaping @Sendable (DaemonError) -> Void = { _ in }) throws {
+    /// heartbeat go out, or a silence be noticed, at an interval of its own. `readingEnded`
+    /// is told when the reading thread has ended, so a test can say nothing was reported by
+    /// then, rather than by a sleep it hopes was long enough.
+    init(fileDescriptor: Int32, clock: Clock, heartbeatEvery interval: Duration = DaemonConnection.heartbeatInterval, patience: Duration = DaemonConnection.patience, whenLost: @escaping @Sendable (DaemonError) -> Void = { _ in }, readingEnded: @escaping @Sendable () -> Void = {}) throws {
         // The link owns the descriptor from this line, so an initializer that throws past
         // it still closes exactly once, when the link goes.
-        link = Link(socket: fileDescriptor, heartbeatEvery: interval, patience: patience, whenLost: whenLost)
+        link = Link(socket: fileDescriptor, clock: clock, heartbeatEvery: interval, patience: patience, whenLost: whenLost, readingEnded: readingEnded)
         try refuseSIGPIPE(fileDescriptor)
         try neverBlock(fileDescriptor)
-        link.startReading()
+        link.start()
     }
 
-    /// Hangs up. The reading thread sees the end of the stream, finishes, and lets go of
-    /// the link, which is when the descriptor closes. [LAW:single-enforcer]
+    /// Hangs up. The reading thread sees the end of the stream and the writing thread is
+    /// woken to find it; both finish and let go of the link, which is when the descriptor
+    /// closes. [LAW:single-enforcer]
     deinit {
         link.hangUp()
     }
@@ -137,17 +145,15 @@ public final class DaemonConnection: Sendable {
     /// The daemon's latest word on each status it has ever sent.
     var status: [Status: Bool] { link.currentStatus }
 
-    /// Sends a request and waits for the daemon's answer to it. Every request is answered,
-    /// including a posted report, so waiting on the answer is real flow control rather
-    /// than a sleep guessed at. [LAW:no-ambient-temporal-coupling]
-    func request(_ request: Request, _ payload: [UInt8] = [], by deadline: ContinuousClock.Instant) throws {
+    /// Sends a request and waits for the daemon's answer to it by `deadline`, answering when
+    /// the answer was read. Every request is answered, including a posted report, so waiting
+    /// on the answer is real flow control rather than a sleep guessed at.
+    /// [LAW:no-ambient-temporal-coupling] Unanswered, it throws how far it got and why, which
+    /// is what says whether the driver may have it.
+    @discardableResult
+    func request(_ request: Request, _ payload: [UInt8] = [], by deadline: Deadline) throws(Unanswered) -> Instant {
         let version = Self.clientProtocolVersion
-        let body = [UInt8(version & 0xff), UInt8(version >> 8), request.rawValue] + payload
-        let id = try link.send(body)
-        // On every way out, so an answer to a request nobody waits on any more is dropped
-        // at the door rather than kept for a collector that never comes.
-        defer { link.forget(id) }
-        try link.wait(by: deadline, until: { $0.requests[id] == true }, missed: { _ in .silent })
+        return try link.ask([UInt8(version & 0xff), UInt8(version >> 8), request.rawValue] + payload, by: deadline)
     }
 
     /// Waits until the daemon has said `status` holds, however long ago it said so. The
@@ -160,25 +166,22 @@ public final class DaemonConnection: Sendable {
     /// A deadline missed here is `.notReady` carrying the daemon's latest word on each
     /// status, never `.silent`: bring-up reaches this only after the daemon answered its
     /// request, so what it said, or that it said nothing about the driver, is the reason.
-    func wait(for status: Status, by deadline: ContinuousClock.Instant) throws {
-        try link.wait(by: deadline, until: { $0.status[status] == true }, missed: { .notReady(awaiting: status, said: $0.status) })
+    func wait(for status: Status, by deadline: Deadline) throws(DaemonError) {
+        try link.wait(for: status, by: deadline)
     }
 
     /// Brings one device up: sends its initialize request with `payload`, then waits for
-    /// the daemon's word that the device is `ready`, in at most `limit` altogether. Both
-    /// devices start this way and differ only in the three values, so the bringing up is
-    /// one function of them. [LAW:one-type-per-behavior]
-    func initialize(_ request: Request, _ payload: [UInt8], until ready: Status, within limit: Duration) throws -> Startup {
-        let began = ContinuousClock.now
-        let deadline = began + limit
-        try self.request(request, payload, by: deadline)
-        // Taken here because `request` returns on the daemon's answer to it. Timing the
-        // first frame of the readiness wait instead - as this did, and low-talker's spike
-        // before it - reports the first status push under a name that says the daemon had
-        // not spoken yet, when answering the request is exactly what it just did.
-        let answered = ContinuousClock.now
+    /// the daemon's word that the device is `ready`, by `deadline`. Both devices start this
+    /// way and differ only in the three values, so the bringing up is one function of them.
+    /// [LAW:one-type-per-behavior]
+    func initialize(_ request: Request, _ payload: [UInt8], until ready: Status, by deadline: Deadline) throws -> Startup {
+        // The instant the answer was read, and not the instant this thread woke to it, nor
+        // the first frame of the readiness wait - as this did, and low-talker's spike before
+        // it - which reports the first status push under a name that says the daemon had not
+        // spoken yet, when answering the request is exactly what it just did.
+        let answered = try self.request(request, payload, by: deadline)
         try wait(for: ready, by: deadline)
-        return Startup(answered: answered - began, ready: ContinuousClock.now - began)
+        return Startup(answered: answered - deadline.entered, ready: deadline.spent)
     }
 
     /// The daemon's status payload, decoded: pairs of (status, value). Pure, and separate
@@ -193,36 +196,60 @@ public final class DaemonConnection: Sendable {
     }
 }
 
-/// What the reading thread and the connection share: the socket, and everything the
-/// daemon has said that someone might be waiting on.
+/// What the reading thread, the writing thread and the askers share: the socket, what is
+/// waiting to be written, and everything the daemon has said that someone might be
+/// waiting on.
 ///
-/// Its own type rather than state on `DaemonConnection` so that the thread holds this and
+/// Its own type rather than state on `DaemonConnection` so that the threads hold this and
 /// not the connection: a thread holding the connection would keep it alive for as long as
 /// the daemon kept talking, and `deinit` would never come. The connection hangs up; the
-/// thread notices, ends, and lets go; the descriptor closes with the last holder.
+/// threads notice, end, and let go; the descriptor closes with the last holder.
 /// [LAW:no-shared-mutable-globals] One lock guards all of it, and every read and write of
-/// the fields below happens under it.
+/// the fields below happens under it, save the two only the reading thread touches.
+///
+/// [LAW:single-enforcer] One thread writes, and nothing else does. Frames go out in the
+/// order they were asked for, from one queue, and no lock is held across a write: a peer
+/// that stops draining stalls the writer and the frames behind it, and every asker still
+/// ends its wait by its own deadline.
 private final class Link: @unchecked Sendable {
     private let socket: Int32
+    private let clock: Clock
     private let heartbeatInterval: Duration
     private let patience: Duration
     private let whenLost: @Sendable (DaemonError) -> Void
+    private let readingEnded: @Sendable () -> Void
     private let guarded = NSCondition()
     private var nextRequestID: UInt64 = 1
-    /// Every request someone is still waiting on, and whether the daemon has answered it.
-    /// [LAW:one-source-of-truth] One table rather than a set of the asked and a set of
-    /// the answered: an id is here while a waiter wants it and nowhere once it does not.
-    var requests: [UInt64: Bool] = [:]
+
+    /// How far a request has got: queued, being written, written, or answered,
+    /// and when. [LAW:one-source-of-truth] One table rather than a set of the asked and a
+    /// set of the answered: an id is here while its asker waits on it and nowhere once it
+    /// does not, which is also what keeps a request whose asker has gone from being written.
+    private enum Progress: Equatable {
+        case waiting(Unanswered.Reach)
+        case answered(Instant)
+    }
+    private var requests: [UInt64: Progress] = [:]
+
+    /// A frame waiting for the writer, with the request it carries, if it carries one.
+    private struct Outgoing {
+        let bytes: [UInt8]
+        let request: (id: UInt64, deadline: Deadline)?
+    }
+    private var outbox: [Outgoing] = []
+
     var status: [DaemonConnection.Status: Bool] = [:]
-    /// When the daemon last sent a byte. Read and written by the reading thread alone, so
-    /// it needs no lock: nothing else has a reason to know.
+    /// When the daemon last sent a byte, and when the next heartbeat is due. Read and written
+    /// by the reading thread alone once it runs, so they need no lock: nothing else has a
+    /// reason to know. Set here, when the link is made, so a test that moves its clock
+    /// before the thread has started still moves it past them.
     ///
-    /// On the clock that stops with the Mac: the silence that says anything about the
-    /// daemon is silence while both were awake, and a clock that ran on through the lid
+    /// On the uptime clock, which stops with the Mac: the silence that says anything about
+    /// the daemon is silence while both were awake, and a clock that ran on through the lid
     /// being closed would find the daemon fifteen seconds gone the instant it opened.
-    /// Request deadlines stay on `ContinuousClock`; they are short and a caller's.
     /// [LAW:no-ambient-temporal-coupling]
-    private var lastHeard = SuspendingClock.now
+    private var lastHeard: Instant
+    private var heartbeatDue: Instant
     /// Set once, by whichever side ended the connection, and never cleared: every wait
     /// after it throws this, because the daemon cannot answer on a stream that is gone.
     private var failure: DaemonError?
@@ -230,11 +257,15 @@ private final class Link: @unchecked Sendable {
     /// as the daemon's doing.
     private var hungUp = false
 
-    init(socket: Int32, heartbeatEvery interval: Duration, patience: Duration, whenLost: @escaping @Sendable (DaemonError) -> Void) {
+    init(socket: Int32, clock: Clock, heartbeatEvery interval: Duration, patience: Duration, whenLost: @escaping @Sendable (DaemonError) -> Void, readingEnded: @escaping @Sendable () -> Void) {
         self.socket = socket
+        self.clock = clock
         heartbeatInterval = interval
         self.patience = patience
         self.whenLost = whenLost
+        self.readingEnded = readingEnded
+        lastHeard = clock.now()
+        heartbeatDue = lastHeard + interval
     }
 
     deinit {
@@ -248,64 +279,80 @@ private final class Link: @unchecked Sendable {
 
     // MARK: Asking
 
-    /// Writes a request frame and returns the id the answer will carry.
+    /// Queues a request frame for the writer and waits for its answer by `deadline`,
+    /// answering when the answer was read. Ends, in this order of precedence: answered, the
+    /// connection ended, or the deadline passed - an answer that arrived is an answer, even
+    /// on a stream that ended just after it. [LAW:no-silent-failure] Either of the others
+    /// says how far the request got.
     ///
-    /// A write that fails is the connection ending, and it ends here the way it ends on
-    /// the reading thread: recorded once, every waiter woken, the owner told.
-    /// [LAW:single-enforcer] A daemon that died between two frames is otherwise found
-    /// dead by whichever side wrote first, and only one of the two would have said so.
-    func send(_ body: [UInt8]) throws -> UInt64 {
-        guarded.lock()
-        if let failure { guarded.unlock(); throw failure }
+    /// A deadline that has passed before the request is queued writes nothing, and one that
+    /// passes while it is queued takes it out of the queue: the writer takes a request
+    /// only while its asker still waits on it and its deadline has not passed, under the
+    /// lock the asker decides under, so a request said to be unsent is never written.
+    func ask(_ body: [UInt8], by deadline: Deadline) throws(Unanswered) -> Instant {
+        guarded.lock(); defer { guarded.unlock() }
+        if let failure { throw Unanswered(reach: .unsent, cause: .connection(failure)) }
+        guard !deadline.expired else { throw Unanswered(reach: .unsent, cause: .deadline(deadline.exceeded)) }
         let id = nextRequestID
         nextRequestID += 1
-        do {
-            try write(Frame.request(id: id, payload: body).bytes)
-        } catch {
-            let theirs = record(loss: error)
-            guarded.unlock()
-            if theirs { whenLost(error) }
-            throw error
+        requests[id] = .waiting(.unsent)
+        // On every way out, so an answer to a request nobody waits on any more is dropped
+        // at the door rather than kept for a collector that never comes.
+        defer { requests[id] = nil }
+        outbox.append(Outgoing(bytes: Frame.request(id: id, payload: body).bytes, request: (id, deadline)))
+        guarded.broadcast()
+        while true {
+            // [LAW:no-defensive-null-guards] The entry is this call's from above to the
+            // `defer`, and nothing else removes it.
+            switch requests[id]! {
+            case .answered(let at):
+                return at
+            case .waiting(let reach):
+                if let failure { throw Unanswered(reach: reach, cause: .connection(failure)) }
+                if deadline.expired { throw Unanswered(reach: reach, cause: .deadline(deadline.exceeded)) }
+            }
+            _ = deadline.wait(on: guarded)
         }
-        requests[id] = false
-        guarded.unlock()
-        return id
     }
 
-    /// The request is nobody's concern any more, answered or not.
-    func forget(_ id: UInt64) {
-        guarded.lock(); defer { guarded.unlock() }
-        requests[id] = nil
-    }
-
-    /// Blocks until `satisfied` holds, the connection has failed, or the deadline passes,
-    /// in that order of precedence: an answer that arrived is an answer, even on a stream
-    /// that ended just after it. [LAW:no-silent-failure] A daemon that says nothing is a
-    /// named failure at the deadline, not a wait without end - named by `missed`, from what
-    /// the link had heard by then.
-    func wait(by deadline: ContinuousClock.Instant, until satisfied: (Link) -> Bool, missed: (Link) -> DaemonError) throws {
+    /// Blocks until the daemon's latest word is that `status` holds, the connection has
+    /// failed, or the deadline passes, in that order of precedence. A deadline missed is
+    /// `.notReady` with the daemon's latest word on each status.
+    func wait(for status: DaemonConnection.Status, by deadline: Deadline) throws(DaemonError) {
         guarded.lock(); defer { guarded.unlock() }
         while true {
-            if satisfied(self) { return }
+            if self.status[status] == true { return }
             if let failure { throw failure }
-            let remaining = deadline - ContinuousClock.now
-            guard remaining > .zero else { throw missed(self) }
-            guarded.wait(until: Date(timeIntervalSinceNow: remaining.seconds))
+            guard !deadline.expired else { throw .notReady(awaiting: status, said: self.status) }
+            _ = deadline.wait(on: guarded)
         }
     }
 
-    // MARK: Reading
+    /// Queues a frame no one waits on an answer to. Only ever called with the lock held.
+    private func enqueue(_ frame: Frame) {
+        outbox.append(Outgoing(bytes: frame.bytes, request: nil))
+        guarded.broadcast()
+    }
 
-    /// Reads until the stream ends, on a thread that holds this link and nothing else.
-    func startReading() {
+    // MARK: The threads
+
+    /// Starts the reader, which reads until the stream ends, and the writer, which writes
+    /// until the connection has ended. Each holds this link and nothing else.
+    func start() {
+        run("DaemonConnection.reader", readUntilTheEnd, then: readingEnded)
+        run("DaemonConnection.writer", writeUntilTheEnd)
+    }
+
+    private func run(_ name: String, _ body: @escaping () throws -> Void, then ended: @escaping @Sendable () -> Void = {}) {
         let thread = Thread { [self] in
             do {
-                try readUntilTheEnd()
+                try body()
             } catch {
                 lost(error as? DaemonError ?? DaemonError.malformed("\(error)"))
             }
+            ended()
         }
-        thread.name = "DaemonConnection.reader"
+        thread.name = name
         thread.stackSize = 1 << 20
         thread.start()
     }
@@ -314,39 +361,70 @@ private final class Link: @unchecked Sendable {
     /// or the end of the patience, whichever comes first, then do whichever came.
     /// [LAW:dataflow-not-control-flow]
     private func readUntilTheEnd() throws {
-        var heartbeatDue = SuspendingClock.now + heartbeatInterval
+        let queue = try watching(EVFILT_READ)
         while true {
-            let readable = try ready(POLLIN, by: min(heartbeatDue, lastHeard + patience))
-            if SuspendingClock.now >= heartbeatDue {
-                guarded.lock(); defer { guarded.unlock() }
-                try write(Frame.control(.heartbeat, payload: []).bytes)
+            let readable = try ready(queue, by: min(heartbeatDue, lastHeard + patience))
+            if clock.now() >= heartbeatDue {
+                guarded.lock()
+                enqueue(.control(.heartbeat, payload: []))
+                guarded.unlock()
                 heartbeatDue += heartbeatInterval
             }
             if readable {
-                try handle(try readFrame())
+                try handle(try readFrame(queue))
             }
-            guard SuspendingClock.now < lastHeard + patience else { throw DaemonError.silent }
+            guard clock.now() < lastHeard + patience else { throw DaemonError.silent }
+        }
+    }
+
+    /// Writes what is queued, in order, until the connection has ended. A request is marked
+    /// written once the last of it has gone.
+    private func writeUntilTheEnd() throws {
+        let queue = try watching(EVFILT_WRITE)
+        while let next = nextToWrite() {
+            try write(next.bytes, on: queue)
+            guard let id = next.request?.id else { continue }
+            guarded.lock()
+            if requests[id] == .waiting(.writing) { requests[id] = .waiting(.written) }
+            guarded.broadcast()
+            guarded.unlock()
+        }
+    }
+
+    /// The next frame to write, or nil once the connection has ended. A request is taken
+    /// only while its asker waits on it and before its deadline: one dequeued too late is
+    /// left unsent, then and for good.
+    private func nextToWrite() -> Outgoing? {
+        guarded.lock(); defer { guarded.unlock() }
+        while true {
+            if failure != nil || hungUp { return nil }
+            guard !outbox.isEmpty else { guarded.wait(); continue }
+            let next = outbox.removeFirst()
+            guard let request = next.request else { return next }
+            guard requests[request.id] == .waiting(.unsent), !request.deadline.expired else { continue }
+            requests[request.id] = .waiting(.writing)
+            return next
         }
     }
 
     /// What every frame means to this side: a pushed status is recorded and answered with
     /// an empty response, as pqrs's own client does; a health check is answered; a
-    /// response's status pairs are recorded and its id is kept for whoever asked.
+    /// response's status pairs are recorded and the request it answers is marked answered,
+    /// now, for whoever asked.
     private func handle(_ frame: Frame) throws {
         guarded.lock(); defer { guarded.unlock() }
         switch frame {
         case .control(.healthCheck, _):
-            try write(Frame.control(.healthCheckResponse, payload: []).bytes)
+            enqueue(.control(.healthCheckResponse, payload: []))
         case .control:
             break
         case .request(let id, let payload):
             try record(payload)
-            try write(Frame.response(id: id, payload: []).bytes)
+            enqueue(.response(id: id, payload: []))
         case .response(let id, let payload):
             try record(payload)
-            // Only a request still waited on: `nil` is not a key, so an answer to a
-            // forgotten one records nothing. [LAW:dataflow-not-control-flow]
-            requests[id] = requests[id].map { _ in true }
+            // Only a request still waited on: an answer to a forgotten one records nothing.
+            if requests[id] != nil { requests[id] = .answered(clock.now()) }
         }
         guarded.broadcast()
     }
@@ -377,10 +455,12 @@ private final class Link: @unchecked Sendable {
 
     // MARK: Ending
 
-    /// This side is done. The stream ends for the reader, which is how it stops.
+    /// This side is done. The stream ends for the reader, which is how it stops, and the
+    /// writer is woken to find it so.
     func hangUp() {
         guarded.lock()
         hungUp = true
+        guarded.broadcast()
         guarded.unlock()
         shutdown(socket, SHUT_RDWR)
     }
@@ -416,22 +496,18 @@ private final class Link: @unchecked Sendable {
 
     // MARK: The socket
 
-    private func readFrame() throws -> Frame {
-        let length = try Frame.bodyLength(header: read(4))
-        return try Frame.decode(body: read(length))
+    private func readFrame(_ queue: EventQueue) throws -> Frame {
+        let length = try Frame.bodyLength(header: read(4, on: queue))
+        return try Frame.decode(body: read(length, on: queue))
     }
 
-    /// Only ever called with the lock held: two writers interleaving would put half of
-    /// one frame inside another.
-    ///
-    /// Each chunk is waited for within the patience, like a read: a peer that stops
-    /// draining without hanging up fills the kernel's buffer and then takes every writer
-    /// - and, through the lock, every waiter - with it, and that is the same silence a
-    /// stalled read is.
-    private func write(_ bytes: [UInt8]) throws(DaemonError) {
+    /// Writes `bytes` whole, on the writing thread alone, each chunk waited for within the
+    /// patience, like a read: a peer that stops draining without hanging up fills the
+    /// kernel's buffer, and that is the same silence a stalled read is.
+    private func write(_ bytes: [UInt8], on queue: EventQueue) throws(DaemonError) {
         var offset = 0
         while offset < bytes.count {
-            guard try ready(POLLOUT, by: .now + patience) else { throw DaemonError.silent }
+            guard try ready(queue, by: clock.now() + patience) else { throw DaemonError.silent }
             let written = uninterrupted { bytes[offset...].withUnsafeBytes { Darwin.write(socket, $0.baseAddress, $0.count) } }
             // Room reported and gone again before the call: back to waiting for it.
             if written < 0, errno == EAGAIN { continue }
@@ -442,42 +518,40 @@ private final class Link: @unchecked Sendable {
 
     /// Reads exactly `count` bytes, each chunk waited for within the patience: a peer that
     /// stops mid-frame is as gone as one that stops between frames.
-    private func read(_ count: Int) throws -> [UInt8] {
+    private func read(_ count: Int, on queue: EventQueue) throws -> [UInt8] {
         var bytes = [UInt8](repeating: 0, count: count)
         var offset = 0
         while offset < count {
-            guard try ready(POLLIN, by: lastHeard + patience) else { throw DaemonError.silent }
+            guard try ready(queue, by: lastHeard + patience) else { throw DaemonError.silent }
             let got = uninterrupted { bytes[offset...].withUnsafeMutableBytes { Darwin.read(socket, $0.baseAddress, $0.count) } }
             if got < 0, errno == EAGAIN { continue }
             guard got > 0 else { throw got == 0 ? DaemonError.closed : DaemonError.socket("read", errno) }
             offset += got
-            lastHeard = SuspendingClock.now
+            lastHeard = clock.now()
         }
         return bytes
     }
 
-    /// Whether the socket is ready for `events` - something to read, or room to write - by
-    /// `deadline`. The one wait on the socket, so the end of the stream, an interrupted
-    /// call and a failed poll each have one reading. [LAW:single-enforcer]
-    private func ready(_ events: Int32, by deadline: SuspendingClock.Instant) throws(DaemonError) -> Bool {
-        while true {
-            var descriptor = pollfd(fd: socket, events: Int16(events), revents: 0)
-            let ready = poll(&descriptor, 1, max(0, (deadline - SuspendingClock.now).wholeMilliseconds))
-            // Around the loop rather than retried in place, so the time actually left is
-            // consulted again.
-            if ready < 0, errno == EINTR { continue }
-            guard ready >= 0 else { throw DaemonError.socket("poll", errno) }
-            return ready > 0
+    /// A queue of one thread's own that hears the socket ready for `filter`: something to
+    /// read, or room to write.
+    private func watching(_ filter: Int32) throws(DaemonError) -> EventQueue {
+        do {
+            let queue = try EventQueue()
+            try queue.watch(UInt(socket), filter, EV_ADD)
+            return queue
+        } catch {
+            throw .socket(error.call, error.code)
         }
     }
-}
 
-private extension Duration {
-    var seconds: TimeInterval {
-        TimeInterval(components.seconds) + TimeInterval(components.attoseconds) / 1e18
-    }
-
-    var wholeMilliseconds: Int32 {
-        Int32(clamping: components.seconds * 1_000 + components.attoseconds / 1_000_000_000_000_000)
+    /// Whether the socket is ready for what `queue` watches by `instant`. The one wait on
+    /// the socket, so the end of the stream, an interrupted call and a failed wait each
+    /// have one reading, and a test that moves its clock wakes it. [LAW:single-enforcer]
+    private func ready(_ queue: EventQueue, by instant: Instant) throws(DaemonError) -> Bool {
+        do {
+            return try !queue.events(by: .at(instant, on: clock), atMost: 1).isEmpty
+        } catch {
+            throw .socket(error.call, error.code)
+        }
     }
 }

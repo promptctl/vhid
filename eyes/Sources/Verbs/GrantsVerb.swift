@@ -1,3 +1,4 @@
+import Time
 import ArgumentParser
 import Foundation
 import Grants
@@ -49,7 +50,7 @@ public struct GrantsVerb: AsyncParsableCommand {
         guard let executable = Bundle.main.executableURL else {
             throw GrantReadingFailure("this process cannot name its own executable to start a reading")
         }
-        return try await GrantReading.taken(by: executable, [ReadGrants._commandName])
+        return try await GrantReading.taken(by: executable, [ReadGrants._commandName], on: .suspending)
     }
 
     /// The scope line and a row per grant: what the verb prints and what the MCP tool

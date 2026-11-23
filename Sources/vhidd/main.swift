@@ -1,3 +1,4 @@
+import Time
 import DriverExtension
 import Installations
 import Foundation
@@ -70,6 +71,9 @@ func logFailure(_ message: String) {
     lastFailure.record(message)
 }
 
+/// The one clock this process measures and waits on. [LAW:one-source-of-truth]
+let clock = Clock.suspending
+
 do {
     let callers = try CallerIdentity.sameSignerAsThisProcess()
     log("callers must satisfy: \(callers.text)")
@@ -104,10 +108,10 @@ do {
     // Listening comes first, and bringing the devices up after, on a thread of its own:
     // a client that calls while they are down is answered at once with the reason, from
     // `readiness`, rather than finding no service at all. [LAW:no-silent-failure]
-    let driver: @Sendable () throws -> DriverState = { try DriverState(DriverProbe.facts(by: .within(Readiness.driverReadLimit, or: .never))) }
+    let driver: @Sendable () throws -> DriverState = { try DriverState(DriverProbe.facts(by: .within(Readiness.driverReadLimit, on: clock), or: .never)) }
     let readiness = Readiness(driver: driver)
     let listener = NSXPCListener(machServiceName: installation.service)
-    let delegate = Listener(readiness: readiness, callers: callers, screen: FrontScreen.real(build))
+    let delegate = Listener(readiness: readiness, callers: callers, screen: FrontScreen.real(build), clock: clock)
     listener.delegate = delegate
     listener.resume()
     log("listening on \(installation.service)")
@@ -119,13 +123,13 @@ do {
     // much as one serving - and a daemon somebody else runs stays theirs.
     let termination = SignalWatch(on: [SIGTERM], answeringOn: .main) { _ in
         readiness.releaseEverything(because: "asked to stop")
-        children.stopAll(DaemonProcess.real)
+        children.stopAll(DaemonProcess.real(on: clock))
         log("asked to stop; exiting 0")
         exit(0)
     }
 
     Thread.detachNewThread {
-        children.tracking(DaemonProcess.real).keepUp(
+        children.tracking(DaemonProcess.real(on: clock)).keepUp(
             within: .seconds(10),
             backoff: Backoff(first: .seconds(2), most: .seconds(60)),
             lookingEvery: .seconds(2),
@@ -133,7 +137,7 @@ do {
             serve: { reached in
                 log("the keyboard is up: the driver's daemon answered in \(reached.startup.keyboard.answered), ready after \(reached.startup.keyboard.ready)")
                 log("the mouse is up: the driver's daemon answered in \(reached.startup.mouse.answered), ready after \(reached.startup.mouse.ready)")
-                let devices = Devices(keyboard: reached.devices.keyboard, mouse: reached.devices.mouse)
+                let devices = Devices(keyboard: reached.devices.keyboard, mouse: reached.devices.mouse, clock: clock)
                 // Whatever the daemon was holding for its last occupant - a vhidd that
                 // exited while the daemon lived on, or a hand-run session - is up before
                 // any client is served: the devices are handed over only after.
@@ -152,8 +156,8 @@ do {
                     return nil
                 }
             },
-            now: { .now },
-            pause: { Thread.sleep(forTimeInterval: Double($0.components.seconds) + Double($0.components.attoseconds) / 1e18) }
+            on: clock,
+            pause: clock.pause
         )
     }
 

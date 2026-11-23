@@ -25,7 +25,7 @@ import struct EyesVerbs.Verdict
         struct Unread: Error, CustomStringConvertible { var description: String { "the child exited 1" } }
         let grants = try await DoctorCommand.grants { throw Unread() }
         let readiness = Readiness(installation: .development, driver: .success(.running), job: .success(.holdingTheService),
-                                  daemon: .answered(holder: nil), keyboardSetupAssistantAnswered: .success(true))
+                                  daemon: .answered(.nobody), keyboardSetupAssistantAnswered: .success(true))
         #expect(DoctorCommand.doctor(readiness, grants: grants).hasSuffix(
             "\n\nWhether Screen Recording and Accessibility are granted is unknown: the child exited 1"))
     }

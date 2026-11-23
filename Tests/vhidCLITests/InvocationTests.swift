@@ -14,6 +14,7 @@ import Telemetry
 import TelemetryTesting
 import TestClock
 import Testing
+import Time
 @testable import vhid
 import ScreenSpace
 import ScreenSpaceTesting
@@ -32,13 +33,13 @@ import InputTesting
         listener.delegate = service
         listener.resume()
         defer { listener.invalidate() }
-        let helper = HelperConnection(connection: NSXPCConnection(listenerEndpoint: listener.endpoint), service: UnreachableTests.far, replyTimeout: .seconds(20))
+        let helper = HelperConnection(connection: NSXPCConnection(listenerEndpoint: listener.endpoint), service: UnreachableTests.far, clock: Clock(ManualClock()), replyTimeout: .seconds(5))
         return try await Devices.using(helper, body)
     }
 
     private static func scroll(vertical: Int, horizontal: Int, clock: ManualClock = ManualClock(), on devices: Devices) async throws -> String {
         try await ScrollCommand.scroll(at: .point(at), vertical: vertical, horizontal: horizontal, holding: .none,
-                                       with: Pointer(mouse: devices.mouse, cursor: { at }, clock: clock, randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: devices.trail.traced), devices.keyboard)
+                                       with: Pointer(mouse: devices.mouse, cursor: { at }, clock: Clock(clock), randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: devices.trail.traced), devices.keyboard)
     }
 
     private static func only(_ collected: Collected) throws -> [String: Any] {
@@ -123,7 +124,7 @@ import InputTesting
         _ = try await Self.mcp("type", into: collected) {
             try await Self.against { devices in
                 try await TypeCommand.type("Ab", on: VerbTests.us, into: .anywhere,
-                                           with: Typist(keyboard: devices.keyboard, clock: ManualClock(), randomness: RandomSource(seed: 1), traced: devices.trail.typed),
+                                           with: Typist(keyboard: devices.keyboard, clock: Clock(ManualClock()), randomness: RandomSource(seed: 1), traced: devices.trail.typed),
                                            front: { nil })
             }
         }
@@ -147,7 +148,7 @@ import InputTesting
         _ = try await Self.mcp("type", into: collected) {
             try await Self.against { devices in
                 try await TypeCommand.type(text, on: VerbTests.us, into: .anywhere,
-                                           with: Typist(keyboard: devices.keyboard, clock: ManualClock(), randomness: RandomSource(seed: 1), traced: devices.trail.typed),
+                                           with: Typist(keyboard: devices.keyboard, clock: Clock(ManualClock()), randomness: RandomSource(seed: 1), traced: devices.trail.typed),
                                            front: { nil })
             }
         }
@@ -540,38 +541,31 @@ import InputTesting
     /// running, the child with it, at once rather than at the command's limit, and the
     /// record says cancelled, names the command it ended, and how long it ran.
     ///
-    /// On a thread of its own, and timed from the cancel to the child's end: the test's
-    /// waits then queue behind no other test on the pool, and how long the child took to
-    /// start is the runner's load, not the claim. [LAW:no-ambient-temporal-coupling]
-    @Test(.ownThread, .timeLimit(.minutes(1))) func aReadingCancelledMidCommandIsRecordedAsCancelledAndLeavesNoChild() async throws {
-        let pidFile = FileManager.default.temporaryDirectory.appending(path: "vhid-reading-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: pidFile) }
+    /// The command's limit is on a test clock nothing moves, so a verb that ends at all was
+    /// ended by the cancel; the child says it is running through a `Fifo`.
+    @Test(.ownThread) func aReadingCancelledMidCommandIsRecordedAsCancelledAndLeavesNoChild() async throws {
+        let running = try Fifo(), clock = Clock(ManualClock())
         let collected = Collected()
         let begun = ContinuousClock.now
         let verb = Task {
             try await Self.cli("driver state", into: collected) {
-                try await reading { stop in
-                    Result { try Command("/bin/sh", "-c", "echo $$ > \(pidFile.path); exec sleep 600").run(by: .within(Command.limit, or: stop)) }
+                try await reading(within: Command.limit, on: clock) { deadline, stop in
+                    Result { try Command("/bin/sh", "-c", "echo $$ > \(running.path); exec sleep 600").run(by: deadline, or: stop) }
                 }
             }
         }
-        func pid() -> pid_t? { (try? String(contentsOf: pidFile, encoding: .utf8)).flatMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) } }
-        while pid() == nil { try await Task.sleep(for: .milliseconds(10)) }
-        let child = try #require(pid())
-        // The clock the command's deadline is kept on.
-        let cancelled = SuspendingClock.now
+        let child = try #require(running.said().flatMap { pid_t($0) })
         verb.cancel()
-        while kill(child, 0) == 0 { try await Task.sleep(for: .milliseconds(10)) }
-        #expect(errno == ESRCH)
-        #expect(SuspendingClock.now - cancelled < Command.limit / 3)
         await #expect(throws: CancellationError.self) { try await verb.value }
+        // Collected before the cancel was thrown: nothing is left to collect it afterwards.
+        #expect(kill(child, 0) == -1 && errno == ESRCH)
         let took = ContinuousClock.now - begun
         let record = try Self.only(collected)
         #expect(record["event"] as? String == "driver state")
         #expect(record["outcome"] as? String == "cancelled")
         #expect(try #require(record["duration_ms"] as? Double) <= took / .milliseconds(1))
         let stopped = try #require((record["attributes"] as? [String: Any])?["stopped"] as? [String])
-        #expect(stopped == ["sh -c echo $$ > \(pidFile.path); exec sleep 600"])
+        #expect(stopped == ["sh -c echo $$ > \(running.path); exec sleep 600"])
     }
 
     /// `doctor` prints its own report and exits 1 with nothing more to say.

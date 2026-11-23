@@ -1,3 +1,4 @@
+import Time
 import ChildProcess
 import DriverExtension
 import Installations
@@ -13,8 +14,8 @@ import Installations
 public enum LaunchdProbe {
     /// Where launchd stands on the job under this installation's label, asked now and
     /// read by `deadline`.
-    public static func standing(of installation: Installation, by deadline: Command.Deadline) throws -> JobStanding {
-        try standing(from: Command("/bin/launchctl", "print", "system/\(installation.launchdLabel)").run(by: deadline), installation: installation)
+    public static func standing(of installation: Installation, by deadline: Deadline, or stop: Command.Stop) throws -> JobStanding {
+        try standing(from: Command("/bin/launchctl", "print", "system/\(installation.launchdLabel)").run(by: deadline, or: stop), installation: installation)
     }
 
     /// What launchd said, read.

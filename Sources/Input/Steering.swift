@@ -1,3 +1,4 @@
+import Time
 import Foundation
 import Pointing
 import ScreenSpace
@@ -105,7 +106,7 @@ extension Pointer {
     /// from `start` and heading for `toward`, which is a point the script visits, so the
     /// cursor stays where the recording went.
     ///
-    /// `timeline` paces the bursts and the wait after them, so a test runs it on a clock of
+    /// `clock` paces the bursts and the wait after them, so a test runs it on a clock of
     /// its own. [LAW:effects-at-boundaries]
     func calibrate(_ calibration: Calibration, from start: Placed<ScreenPoint>) async throws -> Steering {
         let away = hypot(calibration.toward.x - start.value.x, calibration.toward.y - start.value.y)
@@ -136,9 +137,9 @@ extension Pointer {
         for _ in 0..<times {
             try Task.checkCancellation()
             try await mouse.move(by: step)
-            try await timeline.sleep(timeline.now() + interval)
+            try await clock.sleep(until: clock.now() + interval)
         }
-        try await timeline.sleep(timeline.now() + Self.settle)
+        try await clock.sleep(until: clock.now() + Self.settle)
         let after = try await cursor()
         return hypot(after.x - before.x, after.y - before.y)
     }

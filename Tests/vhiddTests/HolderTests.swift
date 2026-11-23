@@ -11,49 +11,46 @@ import Testing
     private var first: ObjectIdentifier { ObjectIdentifier(one) }
     private var second: ObjectIdentifier { ObjectIdentifier(other) }
 
-    /// The first act claims the devices; a second client's act is refused naming the
-    /// holder and never runs, and the holder's next act is served without a new claim.
-    @Test func aSecondClientsActIsRefusedNamingTheHolder() throws {
+    /// The first client acquires the devices; a second client is refused naming the
+    /// holder, and the holder acquiring them again keeps them its own.
+    @Test func aSecondClientIsRefusedNamingTheHolder() throws {
         let holder = Holder()
         #expect(holder.pid(on: 1) == nil)
-        var served: [String] = []
-        try holder.serve(first, by: 41, on: 1) { served.append("first") }
-        let refusal = #expect(throws: Holder.Busy.self) { try holder.serve(second, by: 42, on: 1) { served.append("second") } }
+        try holder.acquire(for: first, by: 41, on: 1)
+        let refusal = #expect(throws: Holder.Busy.self) { try holder.acquire(for: second, by: 42, on: 1) }
         #expect(refusal?.pid == 41)
-        try holder.serve(first, by: 41, on: 1) { served.append("first again") }
-        #expect(served == ["first", "first again"])
+        try holder.acquire(for: first, by: 41, on: 1)
         #expect(holder.pid(on: 1) == 41)
+        #expect(holder.holds(first, on: 1))
+        #expect(!holder.holds(second, on: 1))
     }
 
-    @Test func freeingRunsTheReleaseAndFreesTheDevicesForTheNextClaim() throws {
+    @Test func freeingFreesTheDevicesForTheNextClient() throws {
         let holder = Holder()
-        try holder.serve(first, by: 41, on: 1) {}
-        var released = false
-        holder.free(first) { released = true }
-        #expect(released)
-        try holder.serve(second, by: 42, on: 1) {}
+        try holder.acquire(for: first, by: 41, on: 1)
+        holder.free(first, on: 1)
+        #expect(holder.pid(on: 1) == nil)
+        try holder.acquire(for: second, by: 42, on: 1)
     }
 
     /// A refused connection never held the devices, and a connection that left no longer
-    /// does. Either one ending must neither free the devices from under the holder nor
-    /// release the holder's keys and buttons.
-    @Test func freeingByOneThatDoesNotHoldItChangesNothingAndReleasesNothing() throws {
+    /// does: either one ending leaves the holder holding.
+    @Test func freeingByOneThatDoesNotHoldThemChangesNothing() throws {
         let holder = Holder()
-        try holder.serve(first, by: 41, on: 1) {}
-        var released = false
-        holder.free(second) { released = true }
-        #expect(!released)
-        let refusal = #expect(throws: Holder.Busy.self) { try holder.serve(second, by: 42, on: 1) {} }
+        try holder.acquire(for: first, by: 41, on: 1)
+        holder.free(second, on: 1)
+        let refusal = #expect(throws: Holder.Busy.self) { try holder.acquire(for: second, by: 42, on: 1) }
         #expect(refusal?.pid == 41)
     }
 
-    @Test func onlyTheHolderIsServed() throws {
+    /// A free is judged against the bring-up it names: the holder of the devices up now is
+    /// not freed by a free of the devices an earlier bring-up had.
+    @Test func aFreeOfAnEarlierBringUpLeavesTheCurrentHoldAlone() throws {
         let holder = Holder()
-        try holder.serve(first, by: 41, on: 1) {}
-        var served: [String] = []
-        #expect(holder.whileHolding(first) { served.append("first") })
-        #expect(!holder.whileHolding(second) { served.append("second") })
-        #expect(served == ["first"])
+        try holder.acquire(for: first, by: 41, on: 2)
+        holder.free(first, on: 1)
+        #expect(holder.pid(on: 2) == 41)
+        #expect(holder.holds(first, on: 2))
     }
 
     /// What a refused client reads is the refusal as the reply carries it, so that is
@@ -66,10 +63,10 @@ import Testing
     /// next client is not refused over them.
     @Test func aHoldOnLostDevicesDoesNotRefuseTheNextClient() throws {
         let holder = Holder()
-        let (a, b) = (NSObject(), NSObject())
-        try holder.serve(ObjectIdentifier(a), by: 41, on: 1) {}
-        try holder.serve(ObjectIdentifier(b), by: 42, on: 2) {}
+        try holder.acquire(for: first, by: 41, on: 1)
+        try holder.acquire(for: second, by: 42, on: 2)
         #expect(holder.pid(on: 2) == 42)
         #expect(holder.pid(on: 3) == nil)
+        #expect(!holder.holds(first, on: 1))
     }
 }

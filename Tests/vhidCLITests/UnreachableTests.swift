@@ -6,6 +6,7 @@ import Pointing
 import TestClock
 import Testing
 @testable import Helper
+import Time
 @testable import vhid
 import ScreenSpace
 import ScreenSpaceTesting
@@ -44,16 +45,16 @@ import InputTesting
             reply(refuse ? refusal : nil)
         }
 
-        func down(usage: UInt16, reply: @escaping (Error?) -> Void) { respond(reply) }
-        func releaseAll(reply: @escaping (Error?) -> Void) { respond(reply) }
-        func hold(usages: [UInt16], reply: @escaping (Error?) -> Void) { respond(reply) }
-        func buttonDown(_ button: UInt8, reply: @escaping (Error?) -> Void) { respond(reply) }
-        func releaseButtons(reply: @escaping (Error?) -> Void) { respond(reply) }
-        func holdButtons(_ buttons: UInt32, reply: @escaping (Error?) -> Void) { respond(reply) }
-        func move(x: Int8, y: Int8, reply: @escaping (Error?) -> Void) { respond(reply) }
-        func scroll(vertical: Int8, horizontal: Int8, reply: @escaping (Error?) -> Void) { respond(reply) }
+        func down(usage: UInt16, by deadline: UInt64, reply: @escaping (Error?) -> Void) { respond(reply) }
+        func releaseAll(by deadline: UInt64, reply: @escaping (Error?) -> Void) { respond(reply) }
+        func hold(usages: [UInt16], by deadline: UInt64, reply: @escaping (Error?) -> Void) { respond(reply) }
+        func buttonDown(_ button: UInt8, by deadline: UInt64, reply: @escaping (Error?) -> Void) { respond(reply) }
+        func releaseButtons(by deadline: UInt64, reply: @escaping (Error?) -> Void) { respond(reply) }
+        func holdButtons(_ buttons: UInt32, by deadline: UInt64, reply: @escaping (Error?) -> Void) { respond(reply) }
+        func move(x: Int8, y: Int8, by deadline: UInt64, reply: @escaping (Error?) -> Void) { respond(reply) }
+        func scroll(vertical: Int8, horizontal: Int8, by deadline: UInt64, reply: @escaping (Error?) -> Void) { respond(reply) }
         func leave(reply: @escaping (Error?) -> Void) { respond(reply) }
-        func status(reply: @escaping (NSNumber?, Error?) -> Void) { respond { reply(nil, $0) } }
+        func holding(reply: @escaping (NSNumber?, Bool, Error?) -> Void) { respond { reply(nil, false, $0) } }
         func lastFailure(reply: @escaping (String?, Date?) -> Void) { reply(nil, nil) }
         func cursor(reply: @escaping (Double, Double, Error?) -> Void) { respond { reply(0, 0, $0) } }
         func layout(reply: @escaping ([NSNumber], Error?) -> Void) { reply([1, 0, 0, 1920, 1080, 1].map { NSNumber(value: $0) }, nil) }
@@ -76,7 +77,7 @@ import InputTesting
         let at = ScreenPoint.at(5, 5)
         let typed = await failure(against: far) { try await TypeCommand.type("ab", on: VerbTests.us, into: .anywhere, with: $0.typist, front: $0.front) }
         let clicked = await failure(against: far) {
-            try await ClickCommand.click(at: .point(at), button: .left, times: .single, holding: .none, with: Pointer(mouse: $0.mouse, cursor: { at }, clock: ManualClock(), randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in }), $0.keyboard)
+            try await ClickCommand.click(at: .point(at), button: .left, times: .single, holding: .none, with: Pointer(mouse: $0.mouse, cursor: { at }, clock: Clock(ManualClock()), randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in }), $0.keyboard)
         }
         return (typed, clicked)
     }
@@ -89,7 +90,7 @@ import InputTesting
         listener.delegate = service
         listener.resume()
         defer { listener.invalidate() }
-        let helper = HelperConnection(connection: NSXPCConnection(listenerEndpoint: listener.endpoint), service: Self.far, replyTimeout: .seconds(20))
+        let helper = HelperConnection(connection: NSXPCConnection(listenerEndpoint: listener.endpoint), service: Self.far, clock: Clock(ManualClock()), replyTimeout: .seconds(5))
         return await failure { try await Devices.using(helper, verb) }
     }
 
@@ -109,11 +110,11 @@ import InputTesting
     /// the deadline.
     @Test func aServiceNobodyHoldsIsNamedAndNoKeyIsClaimedHeld() async {
         let unreachable = "no launchd job answers \(Self.far) (NSCocoaErrorDomain 4099): vhidd is not installed or not loaded"
-        func helper() -> HelperConnection { HelperConnection(connection: Unanswered(), service: Self.far, replyTimeout: .seconds(20)) }
+        func helper() -> HelperConnection { HelperConnection(connection: Unanswered(), service: Self.far, clock: Clock(ManualClock()), replyTimeout: .seconds(5)) }
         let at = ScreenPoint.at(5, 5)
         let typed = await Self.failure { try await Devices.using(helper()) { try await TypeCommand.type("ab", on: VerbTests.us, into: .anywhere, with: $0.typist, front: $0.front) } }
         let clicked = await Self.failure {
-            try await Devices.using(helper()) { try await ClickCommand.click(at: .point(at), button: .left, times: .single, holding: .none, with: Pointer(mouse: $0.mouse, cursor: { at }, clock: ManualClock(), randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in }), $0.keyboard) }
+            try await Devices.using(helper()) { try await ClickCommand.click(at: .point(at), button: .left, times: .single, holding: .none, with: Pointer(mouse: $0.mouse, cursor: { at }, clock: Clock(ManualClock()), randomness: RandomSource(seed: 1), hand: .macOSDefault, traced: { _ in }), $0.keyboard) }
         }
         #expect(typed == "\(unreachable). 0 of 2 characters had been posted and acknowledged before this, and the rest were not sent")
         #expect(clicked == unreachable)
@@ -162,16 +163,16 @@ private final class Unanswered: NSXPCConnection, HelperService, @unchecked Senda
 
     override func resume() {}
 
-    func down(usage: UInt16, reply: @escaping (Error?) -> Void) {}
-    func releaseAll(reply: @escaping (Error?) -> Void) {}
-    func hold(usages: [UInt16], reply: @escaping (Error?) -> Void) {}
-    func buttonDown(_ button: UInt8, reply: @escaping (Error?) -> Void) {}
-    func releaseButtons(reply: @escaping (Error?) -> Void) {}
-    func holdButtons(_ buttons: UInt32, reply: @escaping (Error?) -> Void) {}
-    func move(x: Int8, y: Int8, reply: @escaping (Error?) -> Void) {}
-    func scroll(vertical: Int8, horizontal: Int8, reply: @escaping (Error?) -> Void) {}
+    func down(usage: UInt16, by deadline: UInt64, reply: @escaping (Error?) -> Void) {}
+    func releaseAll(by deadline: UInt64, reply: @escaping (Error?) -> Void) {}
+    func hold(usages: [UInt16], by deadline: UInt64, reply: @escaping (Error?) -> Void) {}
+    func buttonDown(_ button: UInt8, by deadline: UInt64, reply: @escaping (Error?) -> Void) {}
+    func releaseButtons(by deadline: UInt64, reply: @escaping (Error?) -> Void) {}
+    func holdButtons(_ buttons: UInt32, by deadline: UInt64, reply: @escaping (Error?) -> Void) {}
+    func move(x: Int8, y: Int8, by deadline: UInt64, reply: @escaping (Error?) -> Void) {}
+    func scroll(vertical: Int8, horizontal: Int8, by deadline: UInt64, reply: @escaping (Error?) -> Void) {}
     func leave(reply: @escaping (Error?) -> Void) {}
-    func status(reply: @escaping (NSNumber?, Error?) -> Void) {}
+    func holding(reply: @escaping (NSNumber?, Bool, Error?) -> Void) {}
     func lastFailure(reply: @escaping (String?, Date?) -> Void) {}
     func cursor(reply: @escaping (Double, Double, Error?) -> Void) {}
     func layout(reply: @escaping ([NSNumber], Error?) -> Void) {}

@@ -4,7 +4,9 @@ import Grants
 import Telemetry
 import TelemetryTesting
 import OwnThread
+import TestClock
 import Testing
+import Time
 
 @Suite(.eventsKept, .ownThread) struct GrantsTests {
     /// The session-start hook reads a reading's verdict by its exit status alone, so its arms
@@ -45,26 +47,29 @@ import Testing
     /// A reading is the child's printed line; a child that fails or prints nonsense is said.
     @Test func aReadingIsTakenFromAChildProcess() async throws {
         let echo = URL(fileURLWithPath: "/bin/echo")
-        #expect(try await GrantReading.taken(by: echo, ["screenRecording=false accessibility=true"])
+        #expect(try await GrantReading.taken(by: echo, ["screenRecording=false accessibility=true"], on: Clock(ManualClock()))
             == GrantReading { $0 == .accessibility })
         await #expect(throws: GrantReadingFailure("unreadable grants line \"nonsense\"")) {
-            try await GrantReading.taken(by: echo, ["nonsense"])
+            try await GrantReading.taken(by: echo, ["nonsense"], on: Clock(ManualClock()))
         }
         await #expect(throws: GrantReadingFailure("/usr/bin/false exited 1")) {
-            try await GrantReading.taken(by: URL(fileURLWithPath: "/usr/bin/false"), [])
+            try await GrantReading.taken(by: URL(fileURLWithPath: "/usr/bin/false"), [], on: Clock(ManualClock()))
         }
-        // Given up on at its deadline as every command is, and said as `Command` says it.
-        let stuck = await #expect(throws: GrantReadingFailure.self) {
-            try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/sleep"), ["5"], within: .milliseconds(200))
+    }
+
+    /// A child given up on at its deadline as every command is, and said as `Command` says
+    /// it: a child that never ends, and one whose grandchild holds the pipe past its exit.
+    @Test(arguments: ["exec sleep 600", "sleep 600"])
+    func aChildStillRunningAtTheLimitIsGivenUpOn(script: String) async throws {
+        let clock = ManualClock(), started = try Fifo()
+        let reading = Task {
+            try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/sh"), ["-c", "echo > \"$0\"; \(script)", started.path], within: .milliseconds(200), on: Clock(clock))
         }
-        #expect(stuck?.description.hasPrefix("`sleep 5` had not ended") == true)
-        #expect(stuck?.description.hasSuffix("at the limit of 0.2 seconds, and was given up on") == true)
-        // A grandchild holding the pipe does not hold the call past its deadline.
-        let start = ContinuousClock.now
-        await #expect(throws: GrantReadingFailure.self) {
-            try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/sh"), ["-c", "sleep 5"], within: .milliseconds(200))
-        }
-        #expect(ContinuousClock.now - start < .seconds(2))
+        try #require(started.said() != nil)
+        clock.advance(by: .milliseconds(200))
+        let stuck = await #expect(throws: GrantReadingFailure.self) { try await reading.value }
+        #expect(stuck?.description.hasPrefix("`sh -c echo > \"$0\"; \(script)") == true)
+        #expect(stuck?.description.hasSuffix("had not ended 0.2 seconds after it was started, at the limit of 0.2 seconds, and was given up on") == true)
     }
 
     /// A reading withdrawn while its child runs is a cancellation, recorded as one, and its
@@ -73,24 +78,15 @@ import Testing
         let events = Collected()
         // The child says it is running through a FIFO, which this side's open blocks on
         // until the child opens it to write: the cancel lands while the child runs.
-        let started = FileManager.default.temporaryDirectory.appending(path: "grants-started-\(UUID().uuidString)")
-        try #require(mkfifo(started.path, 0o600) == 0)
-        defer { try? FileManager.default.removeItem(at: started) }
+        let started = try Fifo()
         let reading = Task {
             try await Telemetry.$export.withValue(events.export) {
-                try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/sh"), ["-c", "echo > \"$0\"; exec sleep 5", started.path])
+                try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/sh"), ["-c", "echo > \"$0\"; exec sleep 5", started.path], on: Clock(ManualClock()))
             }
         }
-        await withCheckedContinuation { running in
-            DispatchQueue.global().async {
-                _ = FileHandle(forReadingAtPath: started.path)?.readDataToEndOfFile()
-                running.resume()
-            }
-        }
-        let start = ContinuousClock.now
+        try #require(started.said() != nil)
         reading.cancel()
         await #expect(throws: CancellationError.self) { try await reading.value }
-        #expect(ContinuousClock.now - start < .seconds(2))
         #expect(events.all.map(\.outcome) == [.cancelled])
     }
 
@@ -101,7 +97,7 @@ import Testing
         #expect(GrantReading { _ in true }.exitStatus == 0)
         #expect(lacking.exitStatus == GrantReading.lacking)
         let sh = URL(fileURLWithPath: "/bin/sh")
-        #expect(try await GrantReading.taken(by: sh, ["-c", "echo \(lacking.line); exit \(GrantReading.lacking)"]) == lacking)
+        #expect(try await GrantReading.taken(by: sh, ["-c", "echo \(lacking.line); exit \(GrantReading.lacking)"], on: Clock(ManualClock())) == lacking)
     }
 
     /// The child reads nothing of this process's stdin, and a child that says more than a
@@ -109,9 +105,9 @@ import Testing
     @Test func theChildNeitherSharesStdinNorStallsOnAFullPipe() async throws {
         let sh = URL(fileURLWithPath: "/bin/sh")
         await #expect(throws: GrantReadingFailure("unreadable grants line \"\"")) {
-            try await GrantReading.taken(by: sh, ["-c", "cat"])
+            try await GrantReading.taken(by: sh, ["-c", "cat"], on: Clock(ManualClock()))
         }
-        #expect(try await GrantReading.taken(by: sh, ["-c", "head -c 200000 /dev/zero >&2; echo screenRecording=true accessibility=true"])
+        #expect(try await GrantReading.taken(by: sh, ["-c", "head -c 200000 /dev/zero >&2; echo screenRecording=true accessibility=true"], on: Clock(ManualClock()))
             == GrantReading { _ in true })
     }
 }
@@ -238,8 +234,8 @@ struct GrantMappingTests {
 @Test func eachChildReadingIsAnEvent() async throws {
     let events = Collected()
     try await Telemetry.$export.withValue(events.export) {
-        _ = try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/echo"), ["screenRecording=true accessibility=true"])
-        _ = try? await GrantReading.taken(by: URL(fileURLWithPath: "/usr/bin/false"), [])
+        _ = try await GrantReading.taken(by: URL(fileURLWithPath: "/bin/echo"), ["screenRecording=true accessibility=true"], on: Clock(ManualClock()))
+        _ = try? await GrantReading.taken(by: URL(fileURLWithPath: "/usr/bin/false"), [], on: Clock(ManualClock()))
     }
     #expect(events.all.map(\.event) == ["grant_child", "grant_child"])
     #expect(events.all.map(\.outcome) == [.ok, .failed])
