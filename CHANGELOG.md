@@ -4,6 +4,8 @@ Each release's section is its GitHub Release notes, which keep line breaks, so e
 
 ## [Unreleased]
 
+## [0.7.0]
+
 - `vhid mcp` is the one MCP server: it serves `look`, which reads the screen, beside `type`, `press`, `gesture`, `click`, `move`, `scroll`, `drag`, `play`, `cursor` and `doctor`. `eyes mcp` is gone, and with it the tools `windows`, `displays`, `find`, `read`, `hit` and `grants`, which `look` and `doctor` answer. The Claude Code plugin runs `vhid mcp` alone. A client that was set up with `eyes mcp` by hand drops it: `claude mcp remove eyes`.
 - `look` with no `text` answers what is on screen in one call: the displays, the windows front to back, and the text in the place with the point `click` takes for each run. When the place cannot be read, the displays and windows are still there, and the text's place says why: `No text was read: …`. With `text`, it finds the text as `find` did, `near`, `until` and `timeout` included; with `x` and `y`, it says what a click there would land on, as `hit` did. `vhid look` is the same on the command line.
 - `look` asks nothing of the daemon, so it waits behind no `click` or `type`: only the acts take turns with one another, and only theirs record `queued_ms`. It reads with the driver extension off.
@@ -99,7 +101,8 @@ The first release: a virtual keyboard and mouse that macOS sees as hardware, dri
 - One signed, notarized pkg installs both CLIs, the root daemon that owns the devices, the menu bar item, the `vhid record` tap, an uninstaller, and the pinned Karabiner-DriverKit-VirtualHIDDevice package.
 - After installing, turn on `org.pqrs.Karabiner-DriverKit-VirtualHIDDevice` under System Settings > General > Login Items & Extensions > Driver Extensions; no installer can do this for you. `vhid doctor` prints `ready` once everything vhid needs is met.
 
-[Unreleased]: https://github.com/promptctl/vhid/compare/v0.6.0...master
+[Unreleased]: https://github.com/promptctl/vhid/compare/v0.7.0...master
+[0.7.0]: https://github.com/promptctl/vhid/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/promptctl/vhid/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/promptctl/vhid/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/promptctl/vhid/compare/v0.4.0...v0.4.1
